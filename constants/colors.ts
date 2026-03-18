@@ -1,0 +1,15 @@
+export const COLORS = {
+  background: '#000000',
+  card: '#FFFFFF',
+  cardDark: '#141414',
+  accent: '#00D4AA',
+  accentDim: 'rgba(0, 212, 170, 0.18)',
+  text: '#000000',
+  textWhite: '#FFFFFF',
+  textMuted: '#888888',
+  textDim: 'rgba(255, 255, 255, 0.55)',
+  border: 'rgba(255, 255, 255, 0.10)',
+  tabBar: '#FFFFFF',
+  tabActive: '#000000',
+  tabInactive: '#AAAAAA',
+} as const
