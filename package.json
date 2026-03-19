@@ -9,11 +9,13 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.99.3",
     "expo": "~55.0.6",
     "expo-constants": "~55.0.7",
     "expo-linking": "~55.0.7",
     "expo-router": "~55.0.5",
+    "expo-secure-store": "~55.0.9",
     "expo-status-bar": "~55.0.4",
     "lucide-react-native": "^0.577.0",
     "react": "19.2.0",
@@ -23,6 +25,7 @@
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.3",
+    "react-native-url-polyfill": "^3.0.0",
     "react-native-web": "^0.21.0"
   },
   "devDependencies": {

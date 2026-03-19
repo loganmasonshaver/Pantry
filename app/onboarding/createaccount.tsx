@@ -8,10 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Eye, EyeOff } from 'lucide-react-native'
+import { useAuth } from '../../context/AuthContext'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -19,16 +21,37 @@ const CARD = '#1A1A1A'
 
 export default function CreateAccountScreen() {
   const router = useRouter()
+  const { signUp } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const handleCreateAccount = async () => {
+    if (!name || !email || !password) {
+      Alert.alert('Error', 'Please fill in all fields')
+      return
+    }
+    if (password.length < 6) {
+      Alert.alert('Error', 'Password must be at least 6 characters')
+      return
+    }
+    try {
+      setLoading(true)
+      await signUp(email, password)
+      router.replace({ pathname: '/onboarding', params: { step: '7' } })
+    } catch (error: any) {
+      Alert.alert('Sign Up Failed', error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const goNext = () => router.replace({ pathname: '/onboarding', params: { step: '7' } })
 
   return (
     <SafeAreaView style={s.safe}>
-      {/* Progress bar */}
       <View style={s.progressTrack}>
         <View style={[s.progressFill, { width: '85%' }]} />
       </View>
@@ -83,21 +106,17 @@ export default function CreateAccountScreen() {
             </View>
           </View>
 
-          {/* OR divider */}
           <View style={s.orRow}>
             <View style={s.orLine} />
             <Text style={s.orText}>or</Text>
             <View style={s.orLine} />
           </View>
 
-          {/* TODO: integrate real Apple/Google auth before shipping */}
-          {/* Apple */}
           <TouchableOpacity style={s.socialBtn} onPress={goNext} activeOpacity={0.8}>
             <Text style={s.appleIcon}>{'\uF8FF'}</Text>
             <Text style={s.socialBtnText}>Continue with Apple</Text>
           </TouchableOpacity>
 
-          {/* Google */}
           <TouchableOpacity style={[s.socialBtn, { marginTop: 10 }]} onPress={goNext} activeOpacity={0.8}>
             <Text style={s.googleG}>G</Text>
             <Text style={s.socialBtnText}>
@@ -114,8 +133,8 @@ export default function CreateAccountScreen() {
       </KeyboardAvoidingView>
 
       <View style={s.bottom}>
-        <TouchableOpacity style={s.pill} onPress={goNext} activeOpacity={0.85}>
-          <Text style={s.pillText}>Continue</Text>
+        <TouchableOpacity style={s.pill} onPress={handleCreateAccount} activeOpacity={0.85} disabled={loading}>
+          <Text style={s.pillText}>{loading ? 'Creating account...' : 'Continue'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.backLink} onPress={() => router.back()} activeOpacity={0.7}>
           <Text style={s.backLinkText}>Back</Text>

@@ -8,10 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react-native'
+import { useAuth } from '../../context/AuthContext'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -19,9 +21,27 @@ const CARD = '#1A1A1A'
 
 export default function SignInScreen() {
   const router = useRouter()
+  const { signIn } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const handleSignIn = async () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please fill in all fields')
+      return
+    }
+    try {
+      setLoading(true)
+      await signIn(email, password)
+      router.replace('/(tabs)')
+    } catch (error: any) {
+      Alert.alert('Sign In Failed', error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <SafeAreaView style={s.safe}>
@@ -75,8 +95,8 @@ export default function SignInScreen() {
       </KeyboardAvoidingView>
 
       <View style={s.bottom}>
-        <TouchableOpacity style={s.pill} activeOpacity={0.85}>
-          <Text style={s.pillText}>Sign In</Text>
+        <TouchableOpacity style={s.pill} activeOpacity={0.85} onPress={handleSignIn} disabled={loading}>
+          <Text style={s.pillText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={s.switchLink}
