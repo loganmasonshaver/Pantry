@@ -8,7 +8,8 @@ import {
   Dimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Bell, Clock, RefreshCw } from 'lucide-react-native'
+import { useRouter } from 'expo-router'
+import { Clock, RefreshCw, Utensils } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { MOCK_USER, MOCK_MACROS, MOCK_MEALS } from '@/constants/mock'
 
@@ -32,12 +33,15 @@ function ProgressBar({ progress, color }: ProgressBarProps) {
 type Meal = (typeof MOCK_MEALS)[number]
 
 function MealCard({ meal }: { meal: Meal }) {
+  const router = useRouter()
   return (
-    <TouchableOpacity style={styles.mealCard} activeOpacity={0.75}>
+    <TouchableOpacity style={styles.mealCard} activeOpacity={0.75} onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id } })}>
       {meal.image ? (
         <Image source={{ uri: meal.image }} style={styles.mealImage} />
       ) : (
-        <View style={styles.mealImagePlaceholder} />
+        <View style={styles.mealImagePlaceholder}>
+          <Utensils size={24} stroke="#666666" strokeWidth={1.5} />
+        </View>
       )}
       <View style={styles.mealInfo}>
         <Text style={styles.mealName}>{meal.name}</Text>
@@ -75,16 +79,14 @@ export default function HomeScreen() {
         {/* ── Header ── */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
-            <Image source={{ uri: MOCK_USER.avatar }} style={styles.avatar} />
+            <View style={styles.avatar}>
+              <Text style={styles.avatarInitial}>{MOCK_USER.name.charAt(0)}</Text>
+            </View>
             <View>
               <Text style={styles.hiText}>Hi {MOCK_USER.name}</Text>
               <Text style={styles.greetText}>{MOCK_USER.greeting},</Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.bellWrapper} activeOpacity={0.7}>
-            <Bell size={20} stroke={COLORS.textWhite} strokeWidth={1.8} />
-            <View style={styles.bellDot} />
-          </TouchableOpacity>
         </View>
 
         {/* ── Daily Macros card ── */}
@@ -168,6 +170,15 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
+    backgroundColor: '#2A2A2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    letterSpacing: -0.2,
   },
   hiText: {
     fontSize: 20,
@@ -180,37 +191,16 @@ const styles = StyleSheet.create({
     color: COLORS.textDim,
     marginTop: 1,
   },
-  bellWrapper: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bellDot: {
-    position: 'absolute',
-    top: 8,
-    right: 9,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.accent,
-    borderWidth: 1.5,
-    borderColor: COLORS.background,
-  },
-
   // Macro card
   macroCard: {
     marginHorizontal: 20,
     marginBottom: 24,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.cardDark,
-    padding: 16,
-    gap: 10,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#1A1A1A',
+    padding: 18,
+    gap: 12,
   },
   macroRow: {
     flexDirection: 'row',
@@ -252,15 +242,15 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     minHeight: 500,
-    paddingTop: 28,
-    paddingHorizontal: 20,
-    paddingBottom: 28,
+    paddingTop: 32,
+    paddingHorizontal: 24,
+    paddingBottom: 36,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 18,
+    marginBottom: 20,
   },
   sectionTitle: {
     fontSize: 20,
@@ -276,18 +266,18 @@ const styles = StyleSheet.create({
 
   // Meal list
   mealList: {
-    gap: 12,
-    marginBottom: 24,
+    gap: 14,
+    marginBottom: 28,
   },
   mealCard: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#F0F0F0',
+    borderColor: '#EBEBEB',
     backgroundColor: COLORS.card,
-    padding: 14,
-    gap: 14,
+    padding: 16,
+    gap: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
@@ -304,11 +294,13 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 12,
-    backgroundColor: '#F0F0F0',
+    backgroundColor: '#2C2C2C',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   mealInfo: {
     flex: 1,
-    gap: 5,
+    gap: 6,
   },
   mealName: {
     fontSize: 16,

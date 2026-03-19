@@ -3,7 +3,7 @@ import { View, StyleSheet } from 'react-native'
 import { COLORS } from '@/constants/colors'
 import {
   Home,
-  Package,
+  Refrigerator,
   Bookmark,
   ShoppingCart,
   User,
@@ -15,13 +15,13 @@ type TabIconProps = {
   size?: number
 }
 
-function TabIcon({ Icon, focused, size = 22 }: TabIconProps) {
+function TabIcon({ Icon, focused, size = 20 }: TabIconProps) {
   return (
     <View style={[styles.iconWrapper, focused && styles.iconWrapperActive]}>
       <Icon
         size={size}
         stroke={focused ? COLORS.textWhite : COLORS.tabInactive}
-        strokeWidth={focused ? 2.2 : 1.8}
+        strokeWidth={1.8}
       />
     </View>
   )
@@ -34,6 +34,8 @@ export default function TabLayout() {
         headerShown: false,
         tabBarShowLabel: false,
         tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: '#FFFFFF',
+        tabBarInactiveTintColor: '#AAAAAA',
       }}
     >
       <Tabs.Screen
@@ -48,7 +50,7 @@ export default function TabLayout() {
         name="pantry"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={Package} focused={focused} />
+            <TabIcon Icon={Refrigerator} focused={focused} />
           ),
         }}
       />
@@ -82,7 +84,7 @@ export default function TabLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: COLORS.tabBar,
+    backgroundColor: '#000000',
     borderTopWidth: 0,
     elevation: 0,
     height: 80,
