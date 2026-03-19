@@ -8,10 +8,13 @@ import {
   StyleSheet,
   Dimensions,
   PanResponder,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Settings, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useRouter } from 'expo-router'
 
 const { width } = Dimensions.get('window')
 
@@ -333,8 +336,28 @@ function SettingsRow({
 const CURRENT_WEIGHT = 182
 
 export default function ProfileScreen() {
+  const router = useRouter()
   const [darkMode, setDarkMode] = useState(true)
   const [displayWeight, setDisplayWeight] = useState(CURRENT_WEIGHT)
+
+  const signOut = () => {
+    Alert.alert('Sign Out?', undefined, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Sign Out',
+        style: 'destructive',
+        onPress: async () => {
+          await AsyncStorage.removeItem('onboarding_complete')
+          router.replace('/onboarding')
+        },
+      },
+    ])
+  }
+
+  const resetOnboarding = async () => {
+    await AsyncStorage.removeItem('onboarding_complete')
+    router.replace('/onboarding')
+  }
 
   const handleWeightChange = (w: number | null) => {
     setDisplayWeight(w ?? CURRENT_WEIGHT)
@@ -442,8 +465,12 @@ export default function ProfileScreen() {
         </View>
 
         {/* ── Sign out ── */}
-        <TouchableOpacity style={styles.signOut} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.signOut} onPress={signOut} activeOpacity={0.7}>
           <Text style={styles.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.resetOnboarding} onPress={resetOnboarding} activeOpacity={0.7}>
+          <Text style={styles.resetOnboardingText}>Reset Onboarding</Text>
         </TouchableOpacity>
 
       </ScrollView>
@@ -673,5 +700,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#EF4444',
+  },
+
+  resetOnboarding: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  resetOnboardingText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '400',
   },
 })

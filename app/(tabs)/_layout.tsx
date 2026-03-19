@@ -3,7 +3,7 @@ import { View, StyleSheet } from 'react-native'
 import { COLORS } from '@/constants/colors'
 import {
   Home,
-  Refrigerator,
+  UtensilsCrossed,
   Bookmark,
   ShoppingCart,
   User,
@@ -50,7 +50,7 @@ export default function TabLayout() {
         name="pantry"
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={Refrigerator} focused={focused} />
+            <TabIcon Icon={UtensilsCrossed} focused={focused} />
           ),
         }}
       />
