@@ -26,7 +26,7 @@ function RootLayoutNav() {
       if (session && value === 'true') {
         router.replace('/(tabs)')
       } else if (session && value !== 'true') {
-        router.replace('/onboarding')
+        router.replace({ pathname: '/onboarding', params: { step: '7' } })
       } else {
         router.replace('/onboarding')
       }
