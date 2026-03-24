@@ -14,7 +14,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.pantry.app"
+      "bundleIdentifier": "com.pantry.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Pantry needs camera access to scan barcodes and food items."
+      }
     },
     "web": {
       "bundler": "metro",
@@ -22,7 +25,20 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pantry needs access to your photos to scan grocery receipts.",
+          "cameraPermission": "Pantry needs access to your camera to scan grocery receipts."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Pantry needs camera access to scan barcodes."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

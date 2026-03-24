@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import {
   View,
   Text,
@@ -8,35 +8,37 @@ import {
   StyleSheet,
   Dimensions,
   Animated,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useFocusEffect } from 'expo-router'
 import { Bookmark, Search, X, Utensils, Clock } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
 
 const { width } = Dimensions.get('window')
 const CARD_WIDTH = (width - 20 * 2 - 12) / 2
 
-// ── Types & mock data ──────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────
 
 type SavedMeal = {
   id: string
   name: string
-  prepTime: number
-  calories: number
-  protein: number
+  prep_time: number | null
+  calories: number | null
+  protein: number | null
   tags: string[]
 }
 
-const INITIAL_MEALS: SavedMeal[] = [
-  { id: '1', name: 'Steak & Rice Bowl',    prepTime: 15, calories: 550, protein: 45, tags: ['High Protein'] },
-  { id: '2', name: 'Salmon & Quinoa',       prepTime: 18, calories: 490, protein: 44, tags: ['High Protein', 'Low Carb'] },
-  { id: '3', name: 'Chicken Pesto Pasta',   prepTime: 20, calories: 620, protein: 52, tags: ['High Protein'] },
-  { id: '4', name: 'Greek Yogurt Bowl',     prepTime: 5,  calories: 320, protein: 28, tags: ['Quick', 'Breakfast'] },
-  { id: '5', name: 'Tuna Avocado Wrap',     prepTime: 10, calories: 410, protein: 38, tags: ['Quick', 'Low Carb'] },
-  { id: '6', name: 'Egg & Veggie Scramble', prepTime: 12, calories: 380, protein: 32, tags: ['Quick', 'Breakfast'] },
-]
+function deriveTags(meal: { protein: number | null; prep_time: number | null }): string[] {
+  const tags: string[] = []
+  if (meal.protein && meal.protein >= 30) tags.push('High Protein')
+  if (meal.prep_time && meal.prep_time <= 10) tags.push('Quick')
+  return tags
+}
 
-const FILTERS = ['All', 'High Protein', 'Quick', 'Low Carb', 'Breakfast']
+const FILTERS = ['All', 'High Protein', 'Quick']
 
 // ── Meal card ──────────────────────────────────────────────────────────
 
@@ -48,15 +50,17 @@ function MealCard({ meal, onUnsave }: { meal: SavedMeal; onUnsave: () => void })
       </View>
       <View style={styles.cardBody}>
         <Text style={styles.cardName} numberOfLines={2}>{meal.name}</Text>
-        <View style={styles.cardMeta}>
-          <Clock size={11} stroke={COLORS.textMuted} strokeWidth={1.8} />
-          <Text style={styles.cardMetaText}>{meal.prepTime} min</Text>
-        </View>
+        {meal.prep_time != null && (
+          <View style={styles.cardMeta}>
+            <Clock size={11} stroke={COLORS.textMuted} strokeWidth={1.8} />
+            <Text style={styles.cardMetaText}>{meal.prep_time} min</Text>
+          </View>
+        )}
         <View style={styles.cardFooter}>
           <View style={styles.cardMacros}>
-            <Text style={styles.cardMacroText}>{meal.calories} kcal</Text>
-            <Text style={styles.cardMacroDot}>·</Text>
-            <Text style={styles.cardMacroText}>{meal.protein}g pro</Text>
+            {meal.calories != null && <Text style={styles.cardMacroText}>{meal.calories} kcal</Text>}
+            {meal.calories != null && meal.protein != null && <Text style={styles.cardMacroDot}>·</Text>}
+            {meal.protein != null && <Text style={styles.cardMacroText}>{meal.protein}g pro</Text>}
           </View>
           <TouchableOpacity onPress={onUnsave} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Bookmark size={16} stroke="#4ADE80" fill="#4ADE80" strokeWidth={1.5} />
@@ -70,13 +74,33 @@ function MealCard({ meal, onUnsave }: { meal: SavedMeal; onUnsave: () => void })
 // ── Screen ─────────────────────────────────────────────────────────────
 
 export default function SavedScreen() {
-  const [meals, setMeals] = useState<SavedMeal[]>(INITIAL_MEALS)
+  const { user } = useAuth()
+  const [meals, setMeals] = useState<SavedMeal[]>([])
+  const [loading, setLoading] = useState(true)
   const [activeFilter, setActiveFilter] = useState('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [removed, setRemoved] = useState<{ meal: SavedMeal; index: number } | null>(null)
 
   const toastOpacity = useRef(new Animated.Value(0)).current
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const fetchMeals = useCallback(async () => {
+    if (!user) { setLoading(false); return }
+    setLoading(true)
+    const { data, error } = await supabase
+      .from('saved_meals')
+      .select('id, name, prep_time, calories, protein')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+    if (!error && data) {
+      setMeals(data.map(row => ({ ...row, tags: deriveTags(row) })))
+    }
+    setLoading(false)
+  }, [user])
+
+  useFocusEffect(useCallback(() => {
+    fetchMeals()
+  }, [fetchMeals]))
 
   const showToast = () => {
     toastOpacity.setValue(0)
@@ -94,7 +118,9 @@ export default function SavedScreen() {
     timerRef.current = setTimeout(dismissToast, 4000)
   }
 
-  const unsave = (id: string) => {
+  const unsave = async (id: string) => {
+    const { error } = await supabase.from('saved_meals').delete().eq('id', id)
+    if (error) return
     setMeals(prev => {
       const index = prev.findIndex(m => m.id === id)
       const meal = prev[index]
@@ -105,9 +131,18 @@ export default function SavedScreen() {
     })
   }
 
-  const undo = () => {
-    if (!removed) return
+  const undo = async () => {
+    if (!removed || !user) return
     if (timerRef.current) clearTimeout(timerRef.current)
+    // Re-insert the removed meal
+    await supabase.from('saved_meals').insert({
+      id: removed.meal.id,
+      user_id: user.id,
+      name: removed.meal.name,
+      prep_time: removed.meal.prep_time,
+      calories: removed.meal.calories,
+      protein: removed.meal.protein,
+    })
     setMeals(prev => {
       const next = [...prev]
       next.splice(removed.index, 0, removed.meal)
@@ -122,7 +157,7 @@ export default function SavedScreen() {
     return matchesFilter && matchesSearch
   })
 
-  const isEmpty = filtered.length === 0
+  const isEmpty = !loading && filtered.length === 0
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -172,13 +207,17 @@ export default function SavedScreen() {
         ))}
       </ScrollView>
 
-      {isEmpty ? (
+      {loading ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator color={COLORS.textWhite} />
+        </View>
+      ) : isEmpty ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyCircle}>
             <Bookmark size={32} stroke="#4ADE80" strokeWidth={1.8} />
           </View>
           <Text style={styles.emptyTitle}>No saved meals yet</Text>
-          <Text style={styles.emptySub}>Tap the bookmark on any meal to save it</Text>
+          <Text style={styles.emptySub}>Save a meal from the Home screen to see it here</Text>
         </View>
       ) : (
         <ScrollView

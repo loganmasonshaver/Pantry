@@ -8,10 +8,13 @@ import {
   StyleSheet,
   Animated,
   TextInput,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, ScanLine, Check, Plus } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -100,15 +103,18 @@ function CameraPreview() {
 type Props = {
   visible: boolean
   onClose: () => void
+  onItemsAdded?: () => void
 }
 
-export default function PantryScanModal({ visible, onClose }: Props) {
+export default function PantryScanModal({ visible, onClose, onItemsAdded }: Props) {
+  const { user } = useAuth()
   const [step, setStep] = useState(1)
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
   const [showDone, setShowDone] = useState(false)
   const [customLabel, setCustomLabel] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>(MOCK_DETECTED)
+  const [saving, setSaving] = useState(false)
 
   const pulseScale   = useRef(new Animated.Value(1)).current
   const pulseOpacity = useRef(new Animated.Value(0.4)).current
@@ -408,10 +414,32 @@ export default function PantryScanModal({ visible, onClose }: Props) {
               <View style={{ height: 8 }} />
             </ScrollView>
             <View style={styles.actions}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={handleClose} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>
-                  Add {checkedCount} Ingredient{checkedCount !== 1 ? 's' : ''}
-                </Text>
+              <TouchableOpacity
+                style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
+                disabled={saving}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  if (!user) { handleClose(); return }
+                  const selected = detectedItems.filter(i => i.checked)
+                  if (selected.length === 0) { handleClose(); return }
+                  setSaving(true)
+                  await supabase.from('pantry_items').insert(
+                    selected.map(item => ({
+                      user_id: user.id,
+                      name: item.name,
+                      category: item.category,
+                      in_stock: true,
+                    }))
+                  )
+                  setSaving(false)
+                  onItemsAdded?.()
+                  handleClose()
+                }}
+              >
+                {saving
+                  ? <ActivityIndicator color="#000000" />
+                  : <Text style={styles.primaryBtnText}>Add {checkedCount} Ingredient{checkedCount !== 1 ? 's' : ''}</Text>
+                }
               </TouchableOpacity>
             </View>
           </View>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   View,
   Text,
@@ -6,10 +6,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
+  Modal,
+  TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { Trash2, Check } from 'lucide-react-native'
+import { router, useFocusEffect } from 'expo-router'
+import { Trash2, Check, Plus, X } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import { useAuth } from '@/context/AuthContext'
+import { supabase } from '@/lib/supabase'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -21,28 +26,13 @@ type GroceryItem = {
   checked: boolean
 }
 
-// ── Mock data ──────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────
 
-const INITIAL_ITEMS: GroceryItem[] = [
-  { id: 'g1', name: 'Broccoli florets', meal: 'Steak & Rice Bowl',  category: 'Produce',        checked: false },
-  { id: 'g2', name: 'Lemon',            meal: 'Salmon & Quinoa',    category: 'Produce',        checked: false },
-  { id: 'g3', name: 'Soy sauce',        meal: 'Steak & Rice Bowl',  category: 'Condiments',     checked: false },
-  { id: 'g4', name: 'Quinoa',           meal: 'Salmon & Quinoa',    category: 'Pantry Staples', checked: false },
-]
-
-const CATEGORIES = ['Produce', 'Condiments', 'Pantry Staples']
-
-const MEAL_PILLS = ['Steak & Rice Bowl', 'Salmon & Quinoa']
+const PRESET_CATEGORIES = ['Produce', 'Meat & Fish', 'Dairy', 'Pantry Staples', 'Condiments', 'Frozen', 'Other']
 
 // ── Grocery item row ───────────────────────────────────────────────────
 
-function GroceryRow({
-  item,
-  onToggle,
-}: {
-  item: GroceryItem
-  onToggle: () => void
-}) {
+function GroceryRow({ item, onToggle }: { item: GroceryItem; onToggle: () => void }) {
   return (
     <TouchableOpacity style={styles.row} onPress={onToggle} activeOpacity={0.7}>
       <View style={[styles.checkbox, item.checked && styles.checkboxChecked]}>
@@ -52,7 +42,7 @@ function GroceryRow({
         <Text style={[styles.itemName, item.checked && styles.itemNameChecked]}>
           {item.name}
         </Text>
-        <Text style={styles.itemMeal}>{item.meal}</Text>
+        {item.meal ? <Text style={styles.itemMeal}>{item.meal}</Text> : null}
       </View>
     </TouchableOpacity>
   )
@@ -61,20 +51,50 @@ function GroceryRow({
 // ── Screen ─────────────────────────────────────────────────────────────
 
 export default function GroceryScreen() {
-  const [items, setItems] = useState<GroceryItem[]>(INITIAL_ITEMS)
+  const { user } = useAuth()
+  const [items, setItems] = useState<GroceryItem[]>([])
   const [showToast, setShowToast] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addMeal, setAddMeal] = useState('')
+  const [addCategory, setAddCategory] = useState('Produce')
+  const [addSaving, setAddSaving] = useState(false)
   const toastOpacity = useRef(new Animated.Value(0)).current
 
-  const toggle = (id: string) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, checked: !i.checked } : i))
+  const fetchItems = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('grocery_items')
+      .select('id, name, meal, category, checked')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true })
+    if (data) setItems(data)
+  }, [user?.id])
+
+  useFocusEffect(useCallback(() => {
+    fetchItems()
+  }, [fetchItems]))
+
+  const toggle = async (id: string) => {
+    const item = items.find(i => i.id === id)
+    if (!item) return
+    const next = !item.checked
+    setItems(prev => prev.map(i => i.id === id ? { ...i, checked: next } : i))
+    await supabase.from('grocery_items').update({ checked: next }).eq('id', id)
   }
 
-  const clearChecked = () => {
+  const clearChecked = async () => {
+    const ids = items.filter(i => i.checked).map(i => i.id)
+    if (!ids.length) return
     setItems(prev => prev.filter(i => !i.checked))
+    await supabase.from('grocery_items').delete().in('id', ids)
   }
 
-  const addToPantry = () => {
+  const addToPantry = async () => {
+    const ids = items.filter(i => i.checked).map(i => i.id)
+    if (!ids.length) return
     setItems(prev => prev.filter(i => !i.checked))
+    await supabase.from('grocery_items').delete().in('id', ids)
     setShowToast(true)
     Animated.sequence([
       Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
@@ -83,16 +103,48 @@ export default function GroceryScreen() {
     ]).start(() => setShowToast(false))
   }
 
-  const checkedCount = items.filter(i => i.checked).length
-  const canAddToPantry = checkedCount > 0
-  const isEmpty = items.length === 0
+  const openAddModal = () => {
+    setAddName('')
+    setAddMeal('')
+    setAddCategory('Produce')
+    setShowAddModal(true)
+  }
 
-  const grouped = CATEGORIES.map(cat => ({
+  const saveItem = async () => {
+    const name = addName.trim()
+    if (!name || !user) return
+    setAddSaving(true)
+    const { data, error } = await supabase
+      .from('grocery_items')
+      .insert({
+        user_id: user.id,
+        name,
+        meal: addMeal.trim(),
+        category: addCategory,
+        checked: false,
+      })
+      .select('id, name, meal, category, checked')
+      .single()
+    setAddSaving(false)
+    if (!error && data) {
+      setItems(prev => [...prev, data])
+      setShowAddModal(false)
+    }
+  }
+
+  const checkedCount = items.filter(i => i.checked).length
+  const isEmpty = items.length === 0
+  const uniqueMeals = [...new Set(items.map(i => i.meal).filter(Boolean))]
+
+  // Derive categories from actual items, preserving preset order
+  const activeCategories = PRESET_CATEGORIES.filter(cat => items.some(i => i.category === cat))
+  const otherCategories = [...new Set(items.map(i => i.category))].filter(c => !PRESET_CATEGORIES.includes(c))
+  const categories = [...activeCategories, ...otherCategories]
+
+  const grouped = categories.map(cat => ({
     category: cat,
     items: items.filter(i => i.category === cat),
   })).filter(g => g.items.length > 0)
-
-  const uniqueMeals = [...new Set(items.map(i => i.meal))]
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -108,27 +160,32 @@ export default function GroceryScreen() {
         <View>
           <Text style={styles.headerTitle}>Grocery List</Text>
           <Text style={styles.headerSub}>
-            {items.length} item{items.length !== 1 ? 's' : ''} from {uniqueMeals.length} meal{uniqueMeals.length !== 1 ? 's' : ''}
+            {items.length} item{items.length !== 1 ? 's' : ''}
+            {uniqueMeals.length > 0 ? ` from ${uniqueMeals.length} meal${uniqueMeals.length !== 1 ? 's' : ''}` : ''}
           </Text>
         </View>
-        <TouchableOpacity
-          style={[styles.trashBtn, !checkedCount && styles.trashBtnDisabled]}
-          onPress={clearChecked}
-          activeOpacity={0.7}
-          disabled={checkedCount === 0}
-        >
-          <Trash2 size={18} stroke={checkedCount ? '#EF4444' : COLORS.textMuted} strokeWidth={1.8} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.iconBtn, !checkedCount && styles.iconBtnDisabled]}
+            onPress={clearChecked}
+            activeOpacity={0.7}
+            disabled={checkedCount === 0}
+          >
+            <Trash2 size={18} stroke={checkedCount ? '#EF4444' : COLORS.textMuted} strokeWidth={1.8} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn} onPress={openAddModal} activeOpacity={0.7}>
+            <Plus size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {isEmpty ? (
-        /* ── Empty state ── */
         <View style={styles.emptyState}>
           <View style={styles.emptyCircle}>
             <Check size={32} stroke="#4ADE80" strokeWidth={2} />
           </View>
           <Text style={styles.emptyTitle}>You're all stocked up</Text>
-          <Text style={styles.emptySub}>All ingredients are in your pantry</Text>
+          <Text style={styles.emptySub}>Tap + to add items to your list</Text>
         </View>
       ) : (
         <>
@@ -138,16 +195,18 @@ export default function GroceryScreen() {
             showsVerticalScrollIndicator={false}
           >
             {/* ── Meal source card ── */}
-            <View style={styles.sourceCard}>
-              <Text style={styles.sourceLabel}>From your meals</Text>
-              <View style={styles.mealPills}>
-                {uniqueMeals.map(meal => (
-                  <View key={meal} style={styles.mealPill}>
-                    <Text style={styles.mealPillText}>{meal}</Text>
-                  </View>
-                ))}
+            {uniqueMeals.length > 0 && (
+              <View style={styles.sourceCard}>
+                <Text style={styles.sourceLabel}>From your meals</Text>
+                <View style={styles.mealPills}>
+                  {uniqueMeals.map(meal => (
+                    <View key={meal} style={styles.mealPill}>
+                      <Text style={styles.mealPillText}>{meal}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
-            </View>
+            )}
 
             {/* ── Grouped items ── */}
             {grouped.map(group => (
@@ -168,19 +227,86 @@ export default function GroceryScreen() {
           {/* ── Bottom action ── */}
           <View style={styles.bottomBar}>
             <TouchableOpacity
-              style={[styles.addBtn, !canAddToPantry && styles.addBtnDisabled]}
-              activeOpacity={canAddToPantry ? 0.85 : 1}
-              disabled={!canAddToPantry}
+              style={[styles.addBtn, !checkedCount && styles.addBtnDisabled]}
+              activeOpacity={checkedCount ? 0.85 : 1}
+              disabled={!checkedCount}
               onPress={addToPantry}
             >
-              <Text style={[styles.addBtnText, !canAddToPantry && styles.addBtnTextDisabled]}>
-                Add to Pantry{canAddToPantry ? ` (${checkedCount})` : ''}
+              <Text style={[styles.addBtnText, !checkedCount && styles.addBtnTextDisabled]}>
+                Add to Pantry{checkedCount ? ` (${checkedCount})` : ''}
               </Text>
             </TouchableOpacity>
             <Text style={styles.addBtnSub}>Checked items will be added to your pantry</Text>
+            <TouchableOpacity
+              style={styles.deliveryBtn}
+              activeOpacity={0.85}
+              onPress={() => router.push('/delivery-webview')}
+            >
+              <Text style={styles.deliveryBtnText}>Order for Delivery</Text>
+            </TouchableOpacity>
           </View>
         </>
       )}
+
+      {/* ── Add Item Modal ── */}
+      <Modal visible={showAddModal} transparent animationType="slide">
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowAddModal(false)}>
+          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Item</Text>
+              <TouchableOpacity onPress={() => setShowAddModal(false)} activeOpacity={0.7}>
+                <X size={18} stroke={COLORS.textMuted} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Item name (e.g. Broccoli)"
+              placeholderTextColor={COLORS.textMuted}
+              value={addName}
+              onChangeText={setAddName}
+              autoFocus
+            />
+
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Meal (optional)"
+              placeholderTextColor={COLORS.textMuted}
+              value={addMeal}
+              onChangeText={setAddMeal}
+            />
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.categoryScroll}
+              contentContainerStyle={styles.categoryScrollContent}
+            >
+              {PRESET_CATEGORIES.map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  style={[styles.catChip, addCategory === cat && styles.catChipActive]}
+                  onPress={() => setAddCategory(cat)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.catChipText, addCategory === cat && styles.catChipTextActive]}>
+                    {cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.modalConfirm, (!addName.trim() || addSaving) && { opacity: 0.5 }]}
+              activeOpacity={0.8}
+              onPress={saveItem}
+              disabled={!addName.trim() || addSaving}
+            >
+              <Text style={styles.modalConfirmText}>{addSaving ? 'Adding...' : 'Add to List'}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   )
 }
@@ -188,7 +314,6 @@ export default function GroceryScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
 
-  // Toast
   toast: {
     position: 'absolute',
     top: 60,
@@ -199,13 +324,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     zIndex: 100,
   },
-  toastText: {
-    color: '#4ADE80',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  toastText: { color: '#4ADE80', fontSize: 14, fontWeight: '600' },
 
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -214,36 +334,22 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    letterSpacing: -0.5,
-  },
-  headerSub: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    marginTop: 3,
-    fontWeight: '400',
-  },
-  trashBtn: {
+  headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  headerSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 3, fontWeight: '400' },
+  headerActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  iconBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 4,
   },
-  trashBtnDisabled: {
-    opacity: 0.4,
-  },
+  iconBtnDisabled: { opacity: 0.4 },
 
-  // Scroll
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 16 },
 
-  // Source card
   sourceCard: {
     backgroundColor: '#1A1A1A',
     borderRadius: 16,
@@ -258,24 +364,15 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  mealPills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  mealPills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   mealPill: {
     backgroundColor: '#2A2A2A',
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  mealPillText: {
-    fontSize: 13,
-    color: COLORS.textWhite,
-    fontWeight: '500',
-  },
+  mealPillText: { fontSize: 13, color: COLORS.textWhite, fontWeight: '500' },
 
-  // Groups
   group: { marginBottom: 24 },
   groupLabel: {
     fontSize: 11,
@@ -286,18 +383,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     marginLeft: 4,
   },
-  groupCard: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    marginLeft: 56,
-  },
+  groupCard: { backgroundColor: '#111111', borderRadius: 16, overflow: 'hidden' },
+  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginLeft: 56 },
 
-  // Rows
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -314,27 +402,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: {
-    backgroundColor: '#4ADE80',
-    borderColor: '#4ADE80',
-  },
+  checkboxChecked: { backgroundColor: '#4ADE80', borderColor: '#4ADE80' },
   rowContent: { flex: 1, gap: 3 },
-  itemName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.textWhite,
-  },
-  itemNameChecked: {
-    textDecorationLine: 'line-through',
-    color: COLORS.textMuted,
-  },
-  itemMeal: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    fontWeight: '400',
-  },
+  itemName: { fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
+  itemNameChecked: { textDecorationLine: 'line-through', color: COLORS.textMuted },
+  itemMeal: { fontSize: 12, color: COLORS.textMuted, fontWeight: '400' },
 
-  // Bottom bar
   bottomBar: {
     paddingHorizontal: 20,
     paddingTop: 12,
@@ -351,24 +424,20 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     alignItems: 'center',
   },
-  addBtnDisabled: {
-    backgroundColor: '#1A1A1A',
+  addBtnDisabled: { backgroundColor: '#1A1A1A' },
+  addBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
+  addBtnTextDisabled: { color: COLORS.textMuted },
+  addBtnSub: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
+  deliveryBtn: {
+    borderWidth: 1.5,
+    borderColor: '#00C9A7',
+    borderRadius: 30,
+    paddingVertical: 16,
+    alignSelf: 'stretch',
+    alignItems: 'center',
   },
-  addBtnText: {
-    color: '#000000',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  addBtnTextDisabled: {
-    color: COLORS.textMuted,
-  },
-  addBtnSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-  },
+  deliveryBtnText: { color: '#00C9A7', fontSize: 15, fontWeight: '700' },
 
-  // Empty state
   emptyState: {
     flex: 1,
     alignItems: 'center',
@@ -387,16 +456,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 4,
   },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '800',
+  emptyTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
+  emptySub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20 },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: '#1A1A1A',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    gap: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  modalTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite },
+  modalInput: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
     color: COLORS.textWhite,
-    letterSpacing: -0.3,
   },
-  emptySub: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
+  categoryScroll: { marginHorizontal: -4 },
+  categoryScrollContent: { paddingHorizontal: 4, gap: 8, flexDirection: 'row' },
+  catChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#2A2A2A',
   },
+  catChipActive: { backgroundColor: 'rgba(74,222,128,0.15)' },
+  catChipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  catChipTextActive: { color: '#4ADE80' },
+  modalConfirm: {
+    backgroundColor: COLORS.textWhite,
+    borderRadius: 30,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  modalConfirmText: { fontSize: 15, fontWeight: '700', color: '#000000' },
 })

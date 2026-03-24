@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { Eye, EyeOff } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
+import { trackAccountCreated } from '../../lib/analytics'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -39,8 +40,9 @@ export default function CreateAccountScreen() {
     }
     try {
       setLoading(true)
-      await signUp(email, password)
-      router.replace({ pathname: '/onboarding', params: { step: '7' } })
+      await signUp(email, password, { full_name: name })
+      trackAccountCreated('email')
+      router.replace({ pathname: '/onboarding', params: { step: '8' } })
     } catch (error: any) {
       Alert.alert('Sign Up Failed', error.message)
     } finally {
@@ -48,7 +50,7 @@ export default function CreateAccountScreen() {
     }
   }
 
-  const goNext = () => router.replace({ pathname: '/onboarding', params: { step: '7' } })
+  const goNext = () => router.replace({ pathname: '/onboarding', params: { step: '8' } })
 
   return (
     <SafeAreaView style={s.safe}>

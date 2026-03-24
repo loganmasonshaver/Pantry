@@ -1,16 +1,22 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Bookmark, Utensils } from 'lucide-react-native'
+import { ChevronLeft, Utensils } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
-import { MOCK_MEAL_DETAILS } from '@/constants/mock'
+import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
+import { GeneratedMeal } from '../../lib/meals'
+import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
+import { useRevenueCat } from '../../context/RevenueCatContext'
+import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackUpgradePromptShown } from '../../lib/analytics'
 
 type PortionMode = 'Visual' | 'Grams'
 
@@ -24,12 +30,50 @@ function renderStepText(step: string) {
 }
 
 export default function MealDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const { id, mealData } = useLocalSearchParams<{ id: string; mealData?: string }>()
   const router = useRouter()
+  const { user } = useAuth()
+  const { isPremium } = useRevenueCat()
+  const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [portionMode, setPortionMode] = useState<PortionMode>('Visual')
+  const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
 
-  const meal = MOCK_MEAL_DETAILS[id ?? '']
+  const addToGrocery = async (ingredientName: string) => {
+    if (!user || addedToGrocery.has(ingredientName)) return
+    setAddedToGrocery(prev => new Set(prev).add(ingredientName))
+    await supabase.from('grocery_items').insert({
+      user_id: user.id,
+      name: ingredientName,
+      meal: meal?.name ?? '',
+      category: 'Other',
+      checked: false,
+    })
+  }
+
+  let meal: MealDetail | null = null
+  if (mealData) {
+    try {
+      const generated: GeneratedMeal = JSON.parse(mealData)
+      meal = {
+        ...generated,
+        ingredients: generated.ingredients.map((ing, i) => ({
+          id: String(i),
+          visual: ing.visual,
+          grams: ing.grams,
+          name: ing.name,
+          inPantry: true,
+        })),
+      }
+    } catch {
+      meal = MOCK_MEAL_DETAILS[id ?? ''] ?? null
+    }
+  } else {
+    meal = MOCK_MEAL_DETAILS[id ?? ''] ?? null
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (meal) trackMealViewed(meal.name) }, [mealData, id])
 
   if (!meal) {
     return (
@@ -41,6 +85,52 @@ export default function MealDetailScreen() {
 
   const showProteinWarning = meal.protein < 30
 
+  async function handleSave() {
+    if (!user) {
+      Alert.alert('Sign in required', 'Please sign in to save meals.')
+      return
+    }
+    if (saved) return
+
+    if (!isPremium) {
+      const { count } = await supabase
+        .from('saved_meals')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .then(r => ({ count: r.count ?? 0 }))
+      if (count >= 5) {
+        trackUpgradePromptShown('meal_save_limit')
+        trackMealSaveBlocked()
+        Alert.alert(
+          'Upgrade to Premium',
+          'Free accounts can save up to 5 meals. Upgrade for unlimited saves.',
+          [{ text: 'Not now', style: 'cancel' }, { text: 'Upgrade', onPress: () => router.push('/onboarding') }]
+        )
+        return
+      }
+    }
+
+    setSaving(true)
+    const { error } = await supabase.rpc('insert_saved_meal', {
+      p_user_id: user.id,
+      p_name: meal!.name,
+      p_calories: meal!.calories,
+      p_protein: meal!.protein,
+      p_carbs: meal!.carbs,
+      p_fat: meal!.fat,
+      p_prep_time: meal!.prepTime ?? null,
+      p_ingredients: meal!.ingredients,
+      p_steps: meal!.steps,
+    })
+    setSaving(false)
+    if (error) {
+      Alert.alert('Error', error.message)
+    } else {
+      setSaved(true)
+      trackMealSaved(meal!.name, meal!.calories, meal!.protein)
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       {/* ── Header ── */}
@@ -49,14 +139,7 @@ export default function MealDetailScreen() {
           <ChevronLeft size={24} stroke={COLORS.textWhite} strokeWidth={2} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{meal.name}</Text>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => setSaved(s => !s)} activeOpacity={0.7}>
-          <Bookmark
-            size={22}
-            stroke={saved ? COLORS.accent : COLORS.textWhite}
-            fill={saved ? COLORS.accent : 'none'}
-            strokeWidth={1.8}
-          />
-        </TouchableOpacity>
+        <View style={styles.headerBtn} />
       </View>
 
       <ScrollView
@@ -123,7 +206,11 @@ export default function MealDetailScreen() {
                     <Text style={styles.ingredientName}>{ing.name}</Text>
                   </View>
                   {!ing.inPantry && (
-                    <Text style={styles.addToGrocery}>+ Add to grocery list</Text>
+                    <TouchableOpacity onPress={() => addToGrocery(ing.name)} activeOpacity={0.7}>
+                      <Text style={[styles.addToGrocery, addedToGrocery.has(ing.name) && styles.addToGroceryDone]}>
+                        {addedToGrocery.has(ing.name) ? '✓ Added' : '+ Add to grocery list'}
+                      </Text>
+                    </TouchableOpacity>
                   )}
                 </View>
               </View>
@@ -149,8 +236,15 @@ export default function MealDetailScreen() {
 
       {/* ── Fixed bottom button ── */}
       <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.saveButton} activeOpacity={0.85} onPress={() => setSaved(true)}>
-          <Text style={styles.saveButtonText}>Save Meal</Text>
+        <TouchableOpacity
+          style={[styles.saveButton, (saved || saving) && styles.saveButtonDone]}
+          activeOpacity={0.85}
+          onPress={handleSave}
+          disabled={saved || saving}
+        >
+          <Text style={styles.saveButtonText}>
+            {saving ? 'Saving…' : saved ? 'Saved' : 'Save Meal'}
+          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -348,6 +442,9 @@ const styles = StyleSheet.create({
     color: COLORS.accent,
     fontWeight: '500',
   },
+  addToGroceryDone: {
+    color: COLORS.textMuted,
+  },
 
   // Steps
   stepList: {
@@ -400,6 +497,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 8,
+  },
+  saveButtonDone: {
+    opacity: 0.5,
   },
   saveButtonText: {
     color: '#000000',

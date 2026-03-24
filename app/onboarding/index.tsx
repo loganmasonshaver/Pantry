@@ -18,6 +18,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import { useRevenueCat } from '../../context/RevenueCatContext'
+import { PACKAGE_TYPE } from 'react-native-purchases'
+import { trackOnboardingStep, trackPaywallViewed, trackSubscriptionPurchased } from '../../lib/analytics'
+import { DISLIKE_CHIPS } from '../food-preferences'
 
 const { width } = Dimensions.get('window')
 const TEAL = '#4ADE80'
@@ -25,7 +29,7 @@ const MUTED = '#888888'
 const CARD = '#1A1A1A'
 
 const PROGRESS: Record<number, number> = {
-  2: 14, 3: 28, 4: 42, 5: 57, 6: 71, 7: 85,
+  2: 12, 3: 25, 4: 37, 5: 50, 6: 62, 7: 75, 8: 87,
 }
 
 type OnboardingData = {
@@ -39,11 +43,14 @@ type OnboardingData = {
   prep: string
   diet: string[]
   cookingSkill: string
+  foodDislikes: string[]
+  foodDislikesText: string
 }
 
 const DEFAULT_DATA: OnboardingData = {
   goal: '', calories: '', protein: '', ft: '', inches: '', weight: '',
   meals: '3', prep: '30 min', diet: ['None'], cookingSkill: '',
+  foodDislikes: [], foodDislikesText: '',
 }
 
 function ProgressBar({ pct }: { pct: number }) {
@@ -272,6 +279,75 @@ function S6CookingSkill({ value, onChange, onNext, onBack }: { value: string; on
   )
 }
 
+function S7FoodPreferences({
+  dislikes,
+  customText,
+  onDislikes,
+  onCustomText,
+  onNext,
+  onBack,
+}: {
+  dislikes: string[]
+  customText: string
+  onDislikes: (v: string[]) => void
+  onCustomText: (v: string) => void
+  onNext: () => void
+  onBack: () => void
+}) {
+  const TEAL_OB = '#4ADE80'
+
+  const toggleChip = (chip: string) => {
+    onDislikes(
+      dislikes.includes(chip)
+        ? dislikes.filter(c => c !== chip)
+        : [...dislikes, chip]
+    )
+  }
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <ProgressBar pct={PROGRESS[7]} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Text style={s.title}>Any foods to avoid?</Text>
+          <Text style={s.subtitle}>We'll never suggest meals with these ingredients</Text>
+          <View style={s.dietGrid}>
+            {DISLIKE_CHIPS.map(chip => {
+              const active = dislikes.includes(chip)
+              return (
+                <TouchableOpacity
+                  key={chip}
+                  style={[s.dietPill, active && s.dietPillActive]}
+                  onPress={() => toggleChip(chip)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[s.dietPillText, active && s.dietPillTextActive]}>{chip}</Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+          <Text style={s.prefSection}>Anything else?</Text>
+          <View style={s.inputCard}>
+            <TextInput
+              style={[s.input, { fontSize: 16 }]}
+              placeholder="e.g. Mushrooms, Cilantro"
+              placeholderTextColor="#888888"
+              value={customText}
+              onChangeText={onCustomText}
+              autoCapitalize="words"
+              returnKeyType="done"
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+      <View style={s.bottomActions}>
+        <PillButton label="Continue" onPress={onNext} />
+        <TouchableOpacity style={s.textLink} onPress={onBack} activeOpacity={0.7}><Text style={s.textLinkText}>Back</Text></TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  )
+}
+
 const FEATURES = [
   'Unlimited AI meal suggestions daily',
   'Log meals with AI photo scan',
@@ -282,13 +358,46 @@ const FEATURES = [
 ]
 
 function S7Paywall({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
-  const [plan, setPlan] = useState<'monthly' | 'annual'>('annual')
+  const [plan, setPlan] = useState<'monthly' | 'annual' | 'lifetime'>('annual')
+  const [purchasing, setPurchasing] = useState(false)
+  const { packages, purchasePackage, restorePurchases } = useRevenueCat()
+
+  useEffect(() => { trackPaywallViewed('onboarding') }, [])
+
+  const monthlyPkg  = packages.find(p => p.packageType === PACKAGE_TYPE.MONTHLY)
+  const annualPkg   = packages.find(p => p.packageType === PACKAGE_TYPE.ANNUAL)
+  const lifetimePkg = packages.find(p => p.packageType === PACKAGE_TYPE.LIFETIME)
+
+  const selectedPkg = plan === 'monthly' ? monthlyPkg : plan === 'annual' ? annualPkg : lifetimePkg
+
+  const monthlyPrice  = monthlyPkg?.product.priceString  ?? '$7.99'
+  const annualPrice   = annualPkg?.product.priceString   ?? '$49.99'
+  const lifetimePrice = lifetimePkg?.product.priceString ?? '$99.99'
+
+  const isLifetime = plan === 'lifetime'
+  const ctaLabel = purchasing
+    ? 'Processing...'
+    : isLifetime ? 'Buy Lifetime Access' : 'Start Free Trial'
+
+  const handlePurchase = async () => {
+    if (!selectedPkg) { onNext(); return }
+    setPurchasing(true)
+    await purchasePackage(selectedPkg)
+    setPurchasing(false)
+    const planType = plan === 'lifetime' ? 'lifetime' : 'monthly'
+    trackSubscriptionPurchased(planType, selectedPkg.product.price)
+    onNext()
+  }
+
   return (
     <SafeAreaView style={s.safe}>
-      <ProgressBar pct={PROGRESS[7]} />
+      <ProgressBar pct={PROGRESS[8]} />
       <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
         <Text style={s.paywallTitle}>Start eating smarter</Text>
-        <Text style={s.paywallSub}>7 days free, then $9.99/month</Text>
+        <Text style={s.paywallSub}>
+          {isLifetime ? 'One-time payment, forever' : `7 days free, then ${monthlyPrice}/mo`}
+        </Text>
+
         <View style={s.featureList}>
           {FEATURES.map(f => (
             <View key={f} style={s.featureRow}>
@@ -297,25 +406,63 @@ function S7Paywall({ onNext, onBack }: { onNext: () => void; onBack: () => void 
             </View>
           ))}
         </View>
-        <View style={s.planRow}>
-          <TouchableOpacity style={[s.planCard, plan === 'monthly' && s.planCardActive]} onPress={() => setPlan('monthly')} activeOpacity={0.8}>
-            <Text style={s.planLabel}>Monthly</Text>
-            <Text style={s.planPrice}>$9.99/mo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.planCard, plan === 'annual' && s.planCardActive]} onPress={() => setPlan('annual')} activeOpacity={0.8}>
-            <View style={s.planBadgeRow}>
-              <Text style={s.planLabel}>Annual</Text>
-              <View style={s.planBadge}><Text style={s.planBadgeText}>Save 50%</Text></View>
+
+        {/* ── Plan cards ── */}
+        <View style={s.planCol}>
+          <TouchableOpacity
+            style={[s.planCard, plan === 'monthly' && s.planCardActive]}
+            onPress={() => setPlan('monthly')}
+            activeOpacity={0.8}
+          >
+            <View style={s.planCardLeft}>
+              <Text style={s.planLabel}>Monthly</Text>
+              <Text style={s.planSub}>Billed monthly</Text>
             </View>
-            <Text style={s.planPrice}>$59.99/yr</Text>
+            <Text style={s.planPrice}>{monthlyPrice}<Text style={s.planPriceSub}>/mo</Text></Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[s.planCard, plan === 'annual' && s.planCardActive]}
+            onPress={() => setPlan('annual')}
+            activeOpacity={0.8}
+          >
+            <View style={s.planCardLeft}>
+              <View style={s.planBadgeRow}>
+                <Text style={s.planLabel}>Annual</Text>
+                <View style={s.planBadge}><Text style={s.planBadgeText}>Best value</Text></View>
+              </View>
+              <Text style={s.planSub}>Billed once a year</Text>
+            </View>
+            <Text style={s.planPrice}>{annualPrice}<Text style={s.planPriceSub}>/yr</Text></Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[s.planCard, plan === 'lifetime' && s.planCardActive]}
+            onPress={() => setPlan('lifetime')}
+            activeOpacity={0.8}
+          >
+            <View style={s.planCardLeft}>
+              <View style={s.planBadgeRow}>
+                <Text style={s.planLabel}>Lifetime</Text>
+                <View style={[s.planBadge, { backgroundColor: 'rgba(74,222,128,0.2)' }]}>
+                  <Text style={[s.planBadgeText, { color: '#4ADE80' }]}>One-time</Text>
+                </View>
+              </View>
+              <Text style={s.planSub}>Pay once, own forever</Text>
+            </View>
+            <Text style={s.planPrice}>{lifetimePrice}</Text>
           </TouchableOpacity>
         </View>
-        <Text style={s.trialLimits}>Trial includes 2 daily suggestions and 5 photo scans</Text>
-        <Text style={s.legal}>Free for 7 days. Cancel anytime.</Text>
+
+        {!isLifetime && <Text style={s.legal}>Free for 7 days. Cancel anytime.</Text>}
+
         <View style={s.paywallActions}>
-          <PillButton label="Start Free Trial" onPress={onNext} />
+          <PillButton label={ctaLabel} onPress={handlePurchase} />
           <TouchableOpacity style={s.textLink} onPress={onNext} activeOpacity={0.7}>
             <Text style={s.textLinkText}>Continue with limited free access</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.textLink} onPress={restorePurchases} activeOpacity={0.7}>
+            <Text style={[s.textLinkText, { fontSize: 12 }]}>Restore purchases</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -361,6 +508,7 @@ export default function Onboarding() {
   }
 
   const navigate = (newStep: number) => {
+    trackOnboardingStep(newStep)
     Animated.timing(fadeAnim, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => {
       setStep(newStep)
       Animated.timing(fadeAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start()
@@ -385,6 +533,12 @@ export default function Onboarding() {
         const heightCm = Math.round((parseInt(finalData.ft || '0') * 12 + parseInt(finalData.inches || '0')) * 2.54)
         const weightKg = Math.round(parseFloat(finalData.weight || '0') * 0.453592 * 10) / 10
 
+        const customDislikes = finalData.foodDislikesText
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+        const allDislikes = [...(finalData.foodDislikes || []), ...customDislikes]
+
         const { error } = await supabase.from('profiles').update({
           calorie_goal: parseInt(finalData.calories) || null,
           protein_goal: parseInt(finalData.protein) || null,
@@ -395,6 +549,8 @@ export default function Onboarding() {
           cooking_skill: finalData.cookingSkill || null,
           max_prep_minutes: prepToMinutes(finalData.prep),
           last_active: new Date().toISOString().split('T')[0],
+          food_dislikes: allDislikes,
+          food_prefs_banner_dismissed: allDislikes.length > 0,
         }).eq('id', user.id)
 
         if (error) {
@@ -417,9 +573,17 @@ export default function Onboarding() {
     3: <S3Numbers calories={data.calories} protein={data.protein} onCalories={update('calories')} onProtein={update('protein')} onNext={next} onBack={back} />,
     4: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
     5: <S5Preferences meals={data.meals} prep={data.prep} diet={data.diet} onMeals={update('meals')} onPrep={update('prep')} onDiet={update('diet')} onNext={next} onBack={back} />,
-    6: <S6CookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={() => router.push('/onboarding/createaccount')} onBack={back} />,
-    7: <S7Paywall onNext={next} onBack={back} />,
-    8: <S8Complete onFinish={finish} />,
+    6: <S6CookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
+    7: <S7FoodPreferences
+        dislikes={data.foodDislikes}
+        customText={data.foodDislikesText}
+        onDislikes={update('foodDislikes')}
+        onCustomText={update('foodDislikesText')}
+        onNext={() => router.push('/onboarding/createaccount')}
+        onBack={back}
+      />,
+    8: <S7Paywall onNext={next} onBack={back} />,
+    9: <S8Complete onFinish={finish} />,
   }
 
   return (
