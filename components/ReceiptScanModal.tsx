@@ -101,7 +101,7 @@ type Props = {
 
 export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Props) {
   const { user } = useAuth()
-  const [step, setStep] = useState<'pick' | 'scanning' | 'review' | 'saving'>('pick')
+  const [step, setStep] = useState<'pick' | 'scanning' | 'visualReview' | 'review' | 'saving'>('pick')
   const [imageUri, setImageUri] = useState<string | null>(null)
   const [items, setItems] = useState<ParsedItem[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -180,11 +180,15 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
         return
       }
       setItems(parsed)
-      setStep('review')
+      setStep('visualReview')
     } catch (e: any) {
       setError('Failed to read receipt. Make sure the image is clear and well-lit.')
       setStep('pick')
     }
+  }
+
+  const removeItem = (id: string) => {
+    setItems(prev => prev.filter(i => i.id !== id))
   }
 
   const toggleItem = (id: string) => {
@@ -287,6 +291,55 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
               AI is extracting your grocery items
             </Text>
             <ActivityIndicator color="#4ADE80" style={{ marginTop: 20 }} />
+          </View>
+        )}
+
+        {/* ── Visual review step ── */}
+        {step === 'visualReview' && (
+          <View style={styles.step}>
+            <View style={styles.topBar}>
+              <Text style={styles.topTitle}>Items Found</Text>
+              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ flex: 1 }}>
+              {imageUri && (
+                <View style={styles.visualImageWrap}>
+                  <Image source={{ uri: imageUri }} style={styles.visualImage} resizeMode="cover" />
+                  <View style={styles.visualOverlay} />
+                </View>
+              )}
+
+              <Text style={styles.visualSubtitle}>
+                {items.length} item{items.length !== 1 ? 's' : ''} detected — tap X to remove any
+              </Text>
+
+              <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.chipContainer}>
+                {items.map(item => (
+                  <View key={item.id} style={styles.chip}>
+                    <Text style={styles.chipText}>{item.name}</Text>
+                    <TouchableOpacity onPress={() => removeItem(item.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <X size={14} stroke={COLORS.textMuted} strokeWidth={2} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
+
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={() => setStep('review')}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.primaryBtnText}>Review & Categorize</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={handleClose} activeOpacity={0.85}>
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -498,6 +551,50 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(74,222,128,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  // Visual review
+  visualImageWrap: {
+    height: 180,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  visualImage: {
+    width: '100%',
+    height: '100%',
+  },
+  visualOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  visualSubtitle: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    marginBottom: 14,
+  },
+  chipContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingBottom: 16,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingLeft: 14,
+    paddingRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.25)',
+  },
+  chipText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.textWhite,
   },
 
   // Review

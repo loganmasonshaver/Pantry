@@ -94,7 +94,12 @@ Respond ONLY with a JSON array, no markdown, no explanation:
     })
 
     const data = await response.json()
-    const text = data.choices[0].message.content || "[]"
+    if (data.error) {
+      return new Response(JSON.stringify({ error: data.error.message || JSON.stringify(data.error) }), {
+        status: 500, headers: { "Content-Type": "application/json" },
+      })
+    }
+    const text = data.choices?.[0]?.message?.content || "[]"
     const clean = text.replace(/```json|```/g, "").trim()
     const meals = JSON.parse(clean)
 

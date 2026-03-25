@@ -70,7 +70,12 @@ Return ONLY the raw JSON array, no markdown, no explanation.`,
     })
 
     const data = await response.json()
-    const text = data.choices[0]?.message?.content?.trim() ?? "[]"
+    if (data.error) {
+      return new Response(JSON.stringify({ error: data.error.message || JSON.stringify(data.error) }), {
+        status: 500, headers: { "Content-Type": "application/json" },
+      })
+    }
+    const text = data.choices?.[0]?.message?.content?.trim() ?? "[]"
     const clean = text.replace(/```json|```/g, "").trim()
     const items = JSON.parse(clean)
 

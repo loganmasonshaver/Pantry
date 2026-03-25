@@ -9,8 +9,11 @@ import {
   Animated,
   TextInput,
   ActivityIndicator,
+  Image,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import * as ImagePicker from 'expo-image-picker'
 import { X, ScanLine, Check, Plus } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
@@ -21,6 +24,8 @@ import { useAuth } from '@/context/AuthContext'
 type PhotoEntry = {
   id: string
   label: string
+  uri?: string
+  base64?: string
 }
 
 type DetectedItem = {
@@ -28,6 +33,12 @@ type DetectedItem = {
   name: string
   category: string
   checked: boolean
+  zone: string
+}
+
+type ZoneGroup = {
+  zone: string
+  items: DetectedItem[]
 }
 
 // ── Mock detected ingredients ──────────────────────────────────────────
@@ -76,12 +87,16 @@ function ProgressDots({ total, active }: { total: number; active: number }) {
   )
 }
 
-function PhotoThumbnail({ label }: { label: string }) {
+function PhotoThumbnail({ label, uri }: { label: string; uri?: string }) {
   return (
     <View style={styles.thumbnail}>
-      <View style={styles.thumbnailImg}>
-        <ScanLine size={16} stroke="#4ADE80" strokeWidth={1.5} />
-      </View>
+      {uri ? (
+        <Image source={{ uri }} style={styles.thumbnailImg} resizeMode="cover" />
+      ) : (
+        <View style={styles.thumbnailImg}>
+          <ScanLine size={16} stroke="#4ADE80" strokeWidth={1.5} />
+        </View>
+      )}
       <View style={styles.thumbnailCheck}>
         <Check size={8} stroke="#000" strokeWidth={3} />
       </View>
@@ -113,13 +128,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [showDone, setShowDone] = useState(false)
   const [customLabel, setCustomLabel] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
-  const [detectedItems, setDetectedItems] = useState<DetectedItem[]>(MOCK_DETECTED)
+  const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
+  const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
 
   const pulseScale   = useRef(new Animated.Value(1)).current
   const pulseOpacity = useRef(new Animated.Value(0.4)).current
 
-  // Loading animation + 3s auto-reveal
+  // Loading animation + actual AI scan
   useEffect(() => {
     if (step !== 5) return
     const loop = Animated.loop(
@@ -135,8 +151,48 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       ])
     )
     loop.start()
-    const timer = setTimeout(() => setShowDone(true), 3000)
-    return () => { loop.stop(); clearTimeout(timer) }
+
+    const scanPhotos = async () => {
+      const base64Images = photos.filter(p => p.base64).map(p => p.base64!)
+      if (base64Images.length === 0) {
+        setShowDone(true)
+        return
+      }
+      try {
+        const { data, error } = await supabase.functions.invoke('scan-pantry', {
+          body: { images: base64Images },
+        })
+        if (error) throw error
+        const result = data as { layout: string; zones: { zone: string; items: { name: string; category: string }[] }[] }
+        let itemIndex = 0
+        const allItems: DetectedItem[] = []
+        const zoneGroups: ZoneGroup[] = []
+
+        for (const zoneData of (result.zones || [])) {
+          const zoneItems: DetectedItem[] = zoneData.items.map((item: any) => {
+            const detected: DetectedItem = {
+              id: `d${itemIndex++}`,
+              name: item.name,
+              category: RESULT_CATEGORIES.includes(item.category) ? item.category : 'Other',
+              checked: true,
+              zone: zoneData.zone,
+            }
+            return detected
+          })
+          allItems.push(...zoneItems)
+          zoneGroups.push({ zone: zoneData.zone, items: zoneItems })
+        }
+
+        setDetectedItems(allItems)
+        setZones(zoneGroups)
+      } catch (e: any) {
+        Alert.alert('Scan failed', e.message || 'Failed to analyze photos')
+      }
+      setShowDone(true)
+    }
+    scanPhotos()
+
+    return () => { loop.stop() }
   }, [step])
 
   const handleClose = () => {
@@ -145,17 +201,49 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     setShowDone(false)
     setCustomLabel('')
     setShowCustomInput(false)
-    setDetectedItems(MOCK_DETECTED)
+    setDetectedItems([])
+    setZones([])
     onClose()
   }
 
-  const takePhoto = (label: string, next: number) => {
-    setPhotos(prev => [...prev, { id: String(Date.now()), label }])
+  const takePhoto = async (label: string, next: number) => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync()
+    if (status !== 'granted') {
+      Alert.alert('Camera permission needed', 'Please allow camera access in Settings.')
+      return
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      base64: true,
+    })
+    if (!result.canceled && result.assets[0]) {
+      setPhotos(prev => [...prev, {
+        id: String(Date.now()),
+        label,
+        uri: result.assets[0].uri,
+        base64: result.assets[0].base64 ?? undefined,
+      }])
+    }
     setStep(next)
   }
 
-  const addExtraPhoto = (label: string) => {
-    setPhotos(prev => [...prev, { id: String(Date.now()), label }])
+  const addExtraPhoto = async (label: string) => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync()
+    if (status !== 'granted') return
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      base64: true,
+    })
+    if (!result.canceled && result.assets[0]) {
+      setPhotos(prev => [...prev, {
+        id: String(Date.now()),
+        label,
+        uri: result.assets[0].uri,
+        base64: result.assets[0].base64 ?? undefined,
+      }])
+    }
   }
 
   const toggleItem = (id: string) => {
@@ -211,7 +299,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
             </View>
             {photos.length > 0 && (
               <View style={styles.photoRow}>
-                {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} />)}
+                {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
               </View>
             )}
             <CameraPreview />
@@ -241,7 +329,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
             </View>
             {photos.length > 0 && (
               <View style={styles.photoRow}>
-                {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} />)}
+                {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
               </View>
             )}
             <CameraPreview />
@@ -274,7 +362,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
               <Text style={[styles.subtitle, { marginBottom: 20 }]}>Add any other storage areas in your kitchen</Text>
               {photos.length > 0 && (
                 <View style={[styles.photoRow, { marginBottom: 20 }]}>
-                  {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} />)}
+                  {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
                 </View>
               )}
               <View style={styles.extraGrid}>
@@ -370,12 +458,99 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
             {showDone && (
               <TouchableOpacity
                 style={[styles.primaryBtn, { marginTop: 44, width: 220 }]}
-                onPress={() => setStep(6)}
+                onPress={() => setStep(55)}
                 activeOpacity={0.85}
               >
                 <Text style={styles.primaryBtnText}>View Results</Text>
               </TouchableOpacity>
             )}
+          </View>
+        )}
+
+        {/* ── Step 5.5: Zone-based visual review ── */}
+        {step === 55 && (
+          <View style={styles.step}>
+            <View style={styles.topBar}>
+              <Text style={styles.topTitle}>Detected Items</Text>
+              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+              {/* Photo */}
+              {photos.length > 0 && photos[photos.length - 1]?.uri && (
+                <View style={styles.zoneImageWrap}>
+                  <Image
+                    source={{ uri: photos[photos.length - 1].uri }}
+                    style={styles.zoneImage}
+                    resizeMode="cover"
+                  />
+                </View>
+              )}
+
+              <Text style={[styles.subtitle, { marginTop: 12, marginBottom: 16 }]}>
+                {detectedItems.length} item{detectedItems.length !== 1 ? 's' : ''} detected — tap X to remove
+              </Text>
+
+              {/* Zone sections */}
+              {zones.map(zoneGroup => {
+                const liveItems = zoneGroup.items.filter(i => detectedItems.some(d => d.id === i.id))
+                if (liveItems.length === 0) return null
+                return (
+                  <View key={zoneGroup.zone} style={styles.zoneSection}>
+                    <Text style={styles.zoneLabel}>{zoneGroup.zone}</Text>
+                    <View style={styles.zoneChipWrap}>
+                      {liveItems.map(item => (
+                        <View key={item.id} style={styles.zoneChip}>
+                          <Text style={styles.zoneChipText}>{item.name}</Text>
+                          <TouchableOpacity
+                            onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          >
+                            <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                )
+              })}
+              <View style={{ height: 8 }} />
+            </ScrollView>
+
+            <View style={styles.actions}>
+              <TouchableOpacity
+                style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
+                disabled={saving}
+                activeOpacity={0.85}
+                onPress={async () => {
+                  if (!user) return
+                  const selected = detectedItems.filter(i => i.checked)
+                  if (selected.length === 0) { handleClose(); return }
+                  setSaving(true)
+                  const rows = selected.map(item => ({
+                    user_id: user.id,
+                    name: item.name,
+                    category: item.category,
+                    in_stock: true,
+                  }))
+                  const { error } = await supabase.from('pantry_items').insert(rows)
+                  setSaving(false)
+                  if (error) {
+                    Alert.alert('Save failed', error.message)
+                    return
+                  }
+                  onItemsAdded?.()
+                  handleClose()
+                }}
+              >
+                {saving
+                  ? <ActivityIndicator color="#000000" />
+                  : <Text style={styles.primaryBtnText}>Add {detectedItems.length} Item{detectedItems.length !== 1 ? 's' : ''} to Pantry</Text>
+                }
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
@@ -719,5 +894,58 @@ const styles = StyleSheet.create({
   checkboxChecked: {
     backgroundColor: '#4ADE80',
     borderColor: '#4ADE80',
+  },
+
+  // Zone-based visual review
+  zoneImageWrap: {
+    height: 500,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.15)',
+  },
+  zoneImage: {
+    width: '100%',
+    height: '100%',
+  },
+  zoneSection: {
+    marginBottom: 18,
+  },
+  zoneLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#4ADE80',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  zoneChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  zoneChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingLeft: 14,
+    paddingRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  zoneChipText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.textWhite,
+  },
+  topTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    flex: 1,
   },
 })
