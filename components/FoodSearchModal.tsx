@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import {
   View,
@@ -12,7 +12,7 @@ import {
   Alert,
   Image,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { X, Search, ScanBarcode, ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
@@ -27,6 +27,8 @@ import {
   FoodDetail,
   FoodServing,
 } from '@/lib/fatsecret'
+import { getFoodKey, getOverride, MacroOverride } from '@/hooks/useMacroOverrides'
+import MacroEditModal from '@/components/MacroEditModal'
 
 type Tab = 'search' | 'scan'
 type Step = 'browse' | 'detail'
@@ -37,6 +39,12 @@ type Props = {
   defaultSlot: string
   onClose: () => void
   onLogged: () => void
+  // Edit mode — pre-load a logged entry for editing
+  editLogId?: string
+  initialFoodId?: string
+  initialServingId?: string
+  initialQuantity?: number
+  initialSlot?: string
 }
 
 // ── Macro description parser ─────────────────────────────────────────────
@@ -51,7 +59,8 @@ function quickMacros(desc: string) {
   return { cal, prot, carb, fat, per }
 }
 
-export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged }: Props) {
+export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot }: Props) {
+  const insets = useSafeAreaInsets()
   const [tab, setTab] = useState<Tab>('search')
   const [step, setStep] = useState<Step>('browse')
 
@@ -73,7 +82,36 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [selectedSlot, setSelectedSlot] = useState(defaultSlot)
   const [saving, setSaving] = useState(false)
 
+  // Portion quantity
+  const [quantity, setQuantity] = useState('1')
+
+  // Override state
+  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null)
+  const [activeOverride, setActiveOverride] = useState<MacroOverride | null>(null)
+  const [macroEditVisible, setMacroEditVisible] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Pre-load food when opening in edit mode
+  useEffect(() => {
+    if (!visible || !editLogId || !initialFoodId) return
+    setDetailLoading(true)
+    setStep('detail')
+    if (initialSlot) setSelectedSlot(initialSlot)
+    if (initialQuantity) setQuantity(String(initialQuantity))
+    getFoodById(initialFoodId)
+      .then(food => {
+        setSelectedFood(food)
+        const serving = initialServingId
+          ? food.servings.find(s => s.serving_id === initialServingId) ?? food.servings[0]
+          : food.servings[0]
+        setSelectedServing(serving ?? null)
+        loadOverride(food.food_id)
+      })
+      .catch(() => Alert.alert('Error', 'Could not load food details.'))
+      .finally(() => setDetailLoading(false))
+  }, [visible, editLogId])
 
   const reset = () => {
     scanningRef.current = false
@@ -88,6 +126,10 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     setSelectedServing(null)
     setSelectedSlot(defaultSlot)
     setSaving(false)
+    setQuantity('1')
+    setScannedBarcode(null)
+    setActiveOverride(null)
+    setMacroEditVisible(false)
   }
 
   const handleClose = () => { reset(); onClose() }
@@ -111,13 +153,24 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     searchTimeout.current = setTimeout(() => doSearch(text), 500)
   }
 
+  const loadOverride = async (foodId: string, barcode?: string) => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    setCurrentUserId(user.id)
+    const key = getFoodKey(barcode ? { barcode } : { foodId })
+    const override = await getOverride(user.id, key)
+    setActiveOverride(override)
+  }
+
   const openDetail = async (foodId: string) => {
     setDetailLoading(true)
     setStep('detail')
+    setScannedBarcode(null)
     try {
       const food = await getFoodById(foodId)
       setSelectedFood(food)
       setSelectedServing(food.servings[0] ?? null)
+      await loadOverride(food.food_id)
     } catch {
       Alert.alert('Error', 'Could not load food details.')
       setStep('browse')
@@ -142,7 +195,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       }
       setSelectedFood(food)
       setSelectedServing(food.servings[0] ?? null)
+      setScannedBarcode(data)
       setStep('detail')
+      await loadOverride(food.food_id, data)
     } catch {
       Alert.alert('Scan failed', 'Could not look up this barcode.')
       scanningRef.current = false
@@ -159,18 +214,39 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       const { data: { user: authUser } } = await supabase.auth.getUser()
       const uid = authUser?.id
       if (!uid) { Alert.alert('Error', 'Not signed in. Please restart the app.'); return }
-      const macros = parseMacros(selectedServing)
+      const parsed = parseMacros(selectedServing)
+      const qty = Math.max(0.1, parseFloat(quantity) || 1)
+      const base = activeOverride
+        ? { calories: activeOverride.calories, protein: activeOverride.protein }
+        : { calories: parsed.calories, protein: parsed.protein }
+      const macros = {
+        calories: Math.round(base.calories * qty),
+        protein: Math.round(base.protein * qty),
+      }
       const today = new Date().toISOString().split('T')[0]
-      const { error } = await supabase.from('meal_logs').insert({
-        user_id: uid,
-        meal_name: selectedFood.food_name,
-        calories: macros.calories,
-        protein: macros.protein,
-        slot: selectedSlot,
-        logged_at: today,
-      })
+      let error: any
+      if (editLogId) {
+        ;({ error } = await supabase.from('meal_logs').update({
+          calories: macros.calories,
+          protein: macros.protein,
+          serving_id: selectedServing.serving_id,
+          quantity: qty,
+        }).eq('id', editLogId))
+      } else {
+        ;({ error } = await supabase.from('meal_logs').insert({
+          user_id: uid,
+          meal_name: selectedFood.food_name,
+          calories: macros.calories,
+          protein: macros.protein,
+          slot: selectedSlot,
+          logged_at: today,
+          food_id: selectedFood.food_id,
+          serving_id: selectedServing.serving_id,
+          quantity: qty,
+        }))
+      }
       if (error) { Alert.alert('Error', error.message); return }
-      trackMealLogged(selectedSlot, macros.calories, macros.protein)
+      if (!editLogId) trackMealLogged(selectedSlot, macros.calories, macros.protein)
       onLogged()
       handleClose()
     } catch (e: any) {
@@ -188,7 +264,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         {/* ── Detail view ── */}
         {step === 'detail' && (
           <View style={styles.step}>
-            <View style={styles.topBar}>
+            <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
               <TouchableOpacity style={styles.backBtn} onPress={() => { setStep('browse'); setSelectedFood(null) }} activeOpacity={0.7}>
                 <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
@@ -234,24 +310,61 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                   </View>
                 )}
 
+                {/* Quantity input */}
+                <View style={styles.quantityRow}>
+                  <Text style={styles.quantityLabel}>Quantity</Text>
+                  <View style={styles.quantityInputWrap}>
+                    <TextInput
+                      style={styles.quantityInput}
+                      value={quantity}
+                      onChangeText={setQuantity}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                    <Text style={styles.quantityUnit}>× serving</Text>
+                  </View>
+                </View>
+
                 {/* Macro grid */}
                 {selectedServing && (() => {
-                  const m = parseMacros(selectedServing)
+                  const parsed = parseMacros(selectedServing)
+                  const qty = Math.max(0.1, parseFloat(quantity) || 1)
+                  const base = activeOverride
+                    ? { calories: activeOverride.calories, protein: activeOverride.protein, carbs: activeOverride.carbs, fat: activeOverride.fat }
+                    : parsed
+                  const m = {
+                    calories: Math.round(base.calories * qty),
+                    protein: Math.round(base.protein * qty),
+                    carbs: Math.round(base.carbs * qty),
+                    fat: Math.round(base.fat * qty),
+                  }
                   return (
-                    <View style={styles.macroGrid}>
-                      {[
-                        { label: 'Calories', value: m.calories, unit: 'kcal', color: '#FFFFFF' },
-                        { label: 'Protein',  value: m.protein,  unit: 'g',    color: '#4ADE80' },
-                        { label: 'Carbs',    value: m.carbs,    unit: 'g',    color: '#F59E0B' },
-                        { label: 'Fat',      value: m.fat,      unit: 'g',    color: '#60A5FA' },
-                      ].map(macro => (
-                        <View key={macro.label} style={styles.macroCell}>
-                          <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
-                          <Text style={styles.macroCellLabel}>{macro.label}</Text>
-                          <Text style={styles.macroCellValue}>{macro.value}<Text style={styles.macroCellUnit}>{macro.unit}</Text></Text>
-                        </View>
-                      ))}
-                    </View>
+                    <>
+                      <View style={styles.macroGrid}>
+                        {[
+                          { label: 'Calories', value: m.calories, unit: 'kcal', color: '#FFFFFF' },
+                          { label: 'Protein',  value: m.protein,  unit: 'g',    color: '#4ADE80' },
+                          { label: 'Carbs',    value: m.carbs,    unit: 'g',    color: '#F59E0B' },
+                          { label: 'Fat',      value: m.fat,      unit: 'g',    color: '#60A5FA' },
+                        ].map(macro => (
+                          <View key={macro.label} style={styles.macroCell}>
+                            <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
+                            <Text style={styles.macroCellLabel}>{macro.label}</Text>
+                            <Text style={styles.macroCellValue}>{macro.value}<Text style={styles.macroCellUnit}>{macro.unit}</Text></Text>
+                          </View>
+                        ))}
+                      </View>
+                      <TouchableOpacity
+                        style={styles.fixLink}
+                        onPress={() => setMacroEditVisible(true)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.fixLinkText}>
+                          {activeOverride ? 'Custom values applied · Edit →' : 'Something off? Fix it →'}
+                        </Text>
+                      </TouchableOpacity>
+                    </>
                   )
                 })()}
 
@@ -290,7 +403,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                 >
                   {saving
                     ? <ActivityIndicator color="#000000" />
-                    : <Text style={styles.logBtnText}>Log to {selectedSlot}</Text>
+                    : <Text style={styles.logBtnText}>{editLogId ? 'Update Log' : `Log to ${selectedSlot}`}</Text>
                   }
                 </TouchableOpacity>
 
@@ -303,7 +416,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         {/* ── Browse view ── */}
         {step === 'browse' && (
           <View style={styles.step}>
-            <View style={styles.topBar}>
+            <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
               <Text style={styles.topTitle}>Search Food</Text>
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
@@ -433,13 +546,40 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
       </SafeAreaView>
       </GestureHandlerRootView>
+
+      {/* Macro override editor */}
+      {macroEditVisible && selectedFood && currentUserId && selectedServing && (() => {
+        const parsed = parseMacros(selectedServing)
+        const key = getFoodKey(scannedBarcode ? { barcode: scannedBarcode } : { foodId: selectedFood.food_id })
+        return (
+          <MacroEditModal
+            visible
+            onClose={() => setMacroEditVisible(false)}
+            foodKey={key}
+            foodName={selectedFood.food_name}
+            userId={currentUserId}
+            originalCalories={parsed.calories}
+            originalProtein={parsed.protein}
+            originalCarbs={parsed.carbs}
+            originalFat={parsed.fat}
+            onSaved={async (overrideActive) => {
+              if (overrideActive) {
+                const override = await getOverride(currentUserId, key)
+                setActiveOverride(override)
+              } else {
+                setActiveOverride(null)
+              }
+            }}
+          />
+        )
+      })()}
     </Modal>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000000' },
-  step: { flex: 1, paddingTop: 8 },
+  step: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
 
   topBar: {
@@ -629,6 +769,54 @@ const styles = StyleSheet.create({
   attributionLogo: { width: 100, height: 20 },
   attributionSmall: { alignItems: 'center', paddingVertical: 16 },
   attributionLogoSmall: { width: 90, height: 18, opacity: 0.6 },
+
+  quantityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  quantityLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    letterSpacing: 0.4,
+  },
+  quantityInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#111111',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  quantityInput: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    minWidth: 36,
+    textAlign: 'center',
+    padding: 0,
+  },
+  quantityUnit: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+  },
+
+  fixLink: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  fixLinkText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textDecorationLine: 'underline',
+  },
 
   logBtn: {
     backgroundColor: COLORS.textWhite,

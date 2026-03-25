@@ -14,7 +14,7 @@ Follow this process:
    - Expo Router for navigation
    - Supabase for any data storage
    - OpenAI GPT-4o for anything AI-related
-   - RevenueCat for anything subscription-gated
+   - Superwall for anything subscription-gated
 4. Update any related files (navigation, types, constants)
 5. Do not ask me to run terminal commands manually — handle them yourself
 6. Summarize what was added and any files changed

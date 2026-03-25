@@ -21,10 +21,6 @@ import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { trackMealLogged } from '@/lib/analytics'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({ apiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY })
-
 // ── Types ────────────────────────────────────────────────────────────────
 
 type MacroEstimate = {
@@ -41,60 +37,19 @@ type Step = 'input' | 'analyzing' | 'review'
 // ── GPT helpers ──────────────────────────────────────────────────────────
 
 async function estimateFromText(description: string): Promise<MacroEstimate> {
-  const res = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    max_tokens: 200,
-    messages: [
-      {
-        role: 'user',
-        content: `Estimate the macros for this meal: "${description}"
-Return ONLY a JSON object with these fields:
-{ "name": string, "calories": number, "protein": number, "carbs": number, "fat": number }
-- name: a clean short meal name (e.g. "Scrambled Eggs & Toast")
-- calories: total kcal (integer)
-- protein: grams (integer)
-- carbs: grams (integer)
-- fat: grams (integer)
-Be realistic. No explanation, just JSON.`,
-      },
-    ],
+  const { data, error } = await supabase.functions.invoke('estimate-meal-macros', {
+    body: { mode: 'describe', description },
   })
-  const text = res.choices[0]?.message?.content?.trim() ?? '{}'
-  const cleaned = text.replace(/^```(?:json)?/, '').replace(/```$/, '').trim()
-  return JSON.parse(cleaned)
+  if (error) throw error
+  return data as MacroEstimate
 }
 
 async function estimateFromPhoto(base64: string): Promise<MacroEstimate> {
-  const res = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 200,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'high' },
-          },
-          {
-            type: 'text',
-            text: `Estimate the macros for the meal in this photo.
-Return ONLY a JSON object with these fields:
-{ "name": string, "calories": number, "protein": number, "carbs": number, "fat": number }
-- name: a clean short meal name (e.g. "Grilled Chicken & Rice")
-- calories: total kcal (integer)
-- protein: grams (integer)
-- carbs: grams (integer)
-- fat: grams (integer)
-Be realistic. No explanation, just JSON.`,
-          },
-        ],
-      },
-    ],
+  const { data, error } = await supabase.functions.invoke('estimate-meal-macros', {
+    body: { mode: 'photo', base64 },
   })
-  const text = res.choices[0]?.message?.content?.trim() ?? '{}'
-  const cleaned = text.replace(/^```(?:json)?/, '').replace(/```$/, '').trim()
-  return JSON.parse(cleaned)
+  if (error) throw error
+  return data as MacroEstimate
 }
 
 // ── Props ────────────────────────────────────────────────────────────────

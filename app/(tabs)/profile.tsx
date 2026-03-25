@@ -460,6 +460,7 @@ type Profile = {
   meals_per_day: number | null
   max_prep_minutes: number | null
   weight_kg: number | null
+  target_weight_kg: number | null
   dietary_restrictions: string[] | null
 }
 
@@ -517,6 +518,9 @@ export default function ProfileScreen() {
   const [mealLogDates, setMealLogDates] = useState<string[]>([])
   const [mealLogCount, setMealLogCount] = useState(0)
   const [savedCount, setSavedCount] = useState(0)
+  const [weeklyCalories, setWeeklyCalories] = useState(0)
+  const [weeklyProtein, setWeeklyProtein] = useState(0)
+  const [weeklyDays, setWeeklyDays] = useState(0)
 
   const fetchWeightLogs = useCallback(async () => {
     if (!user) return
@@ -539,7 +543,7 @@ export default function ProfileScreen() {
     // Profile goals + starting weight
     supabase
       .from('profiles')
-      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, dietary_restrictions')
+      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -569,6 +573,21 @@ export default function ProfileScreen() {
         setMealLogCount(dates.length)
       })
 
+    // Weekly nutrition summary
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+    supabase
+      .from('meal_logs')
+      .select('calories, protein, logged_at')
+      .eq('user_id', user.id)
+      .gte('logged_at', sevenDaysAgo)
+      .then(({ data }) => {
+        if (data?.length) {
+          setWeeklyCalories(data.reduce((sum, r) => sum + (r.calories ?? 0), 0))
+          setWeeklyProtein(data.reduce((sum, r) => sum + (r.protein ?? 0), 0))
+          setWeeklyDays(new Set(data.map(r => r.logged_at)).size)
+        }
+      })
+
     // Weight logs — chart
     fetchWeightLogs()
   }, [user?.id])
@@ -594,6 +613,33 @@ export default function ProfileScreen() {
   const startWeightLbs = weightLogs.length > 1
     ? Math.round(weightLogs[0].weight_kg * 2.20462)
     : currentWeightLbs
+  const targetWeightLbs = profile?.target_weight_kg
+    ? Math.round(profile.target_weight_kg * 2.20462)
+    : null
+
+  const weightProgressPct = (() => {
+    if (!targetWeightLbs || !startWeightLbs || startWeightLbs === targetWeightLbs) return 0
+    const total = Math.abs(targetWeightLbs - startWeightLbs)
+    const done = Math.abs((currentWeightLbs ?? startWeightLbs) - startWeightLbs)
+    return Math.min(1, done / total)
+  })()
+
+  const editTargetWeight = () => {
+    Alert.prompt(
+      'Weight Goal',
+      'Enter your target weight in lbs',
+      async (input) => {
+        const lbs = parseFloat(input)
+        if (isNaN(lbs) || lbs <= 0) return
+        const kg = Math.round((lbs / 2.20462) * 10) / 10
+        await supabase.from('profiles').update({ target_weight_kg: kg }).eq('id', user!.id)
+        setProfile(p => p ? { ...p, target_weight_kg: kg } : p)
+      },
+      'plain-text',
+      targetWeightLbs ? `${targetWeightLbs}` : '',
+      'numeric'
+    )
+  }
 
   const handleWeightChange = (w: number | null) => {
     setDisplayWeight(w ?? currentWeightLbs)
@@ -763,6 +809,11 @@ export default function ProfileScreen() {
             label="Max Prep Time"
             value={profile?.max_prep_minutes ? `${profile.max_prep_minutes} min` : '—'}
             onPress={() => openGoalEdit('max_prep_minutes', 'Max Prep Time', 'min', profile?.max_prep_minutes ?? null)}
+          />
+          <GoalRow
+            label="Weight Goal"
+            value={targetWeightLbs !== null ? `${targetWeightLbs} lbs` : 'Set goal'}
+            onPress={editTargetWeight}
             isLast
           />
         </View>
@@ -786,6 +837,16 @@ export default function ProfileScreen() {
               Now  {currentWeightLbs !== null ? `${currentWeightLbs} lbs` : '—'}
             </Text>
           </View>
+          {targetWeightLbs !== null && (
+            <View style={styles.goalProgressWrap}>
+              <View style={styles.goalProgressBar}>
+                <View style={[styles.goalProgressFill, { width: `${Math.round(weightProgressPct * 100)}%` as any }]} />
+              </View>
+              <Text style={styles.goalProgressLabel}>
+                Goal: {targetWeightLbs} lbs{weightProgressPct >= 1 ? ' 🎉' : ` · ${Math.round(weightProgressPct * 100)}% there`}
+              </Text>
+            </View>
+          )}
         </View>
         <TouchableOpacity style={styles.teaLink} onPress={logWeight} activeOpacity={0.7}>
           <Text style={styles.teaLinkText}>+ Log Weight</Text>
@@ -802,6 +863,32 @@ export default function ProfileScreen() {
             ))}
           </View>
           <Text style={styles.streakSub}>{activeDaysCount} of last 7 days active</Text>
+        </View>
+
+        {/* ── This Week ── */}
+        <Text style={styles.sectionTitle}>This Week</Text>
+        <View style={styles.card}>
+          <View style={styles.weekRow}>
+            <View style={styles.weekStat}>
+              <Text style={styles.weekStatValue}>{weeklyCalories.toLocaleString()}</Text>
+              <Text style={styles.weekStatLabel}>Calories</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.weekStat}>
+              <Text style={styles.weekStatValue}>{weeklyProtein}g</Text>
+              <Text style={styles.weekStatLabel}>Protein</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.weekStat}>
+              <Text style={styles.weekStatValue}>{weeklyDays}/7</Text>
+              <Text style={styles.weekStatLabel}>Days Logged</Text>
+            </View>
+          </View>
+          <Text style={styles.weekAvgLabel}>
+            {weeklyDays > 0
+              ? `Avg ${Math.round(weeklyCalories / weeklyDays).toLocaleString()} kcal · ${Math.round(weeklyProtein / weeklyDays)}g protein per day`
+              : 'Log meals this week to see your summary'}
+          </Text>
         </View>
 
         {/* ── Subscription ── */}
@@ -1088,6 +1175,57 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     fontWeight: '400',
+  },
+
+  // Weight goal progress bar
+  goalProgressWrap: {
+    marginTop: 12,
+    gap: 6,
+  },
+  goalProgressBar: {
+    height: 6,
+    backgroundColor: '#2A2A2A',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  goalProgressFill: {
+    height: '100%',
+    backgroundColor: '#4ADE80',
+    borderRadius: 3,
+  },
+  goalProgressLabel: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+
+  // Weekly summary
+  weekRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  weekStat: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  weekStatValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+  },
+  weekStatLabel: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  weekAvgLabel: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingTop: 12,
   },
 
   // Diet chips

@@ -18,8 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame } from 'lucide-react-native'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
-import { useRevenueCat } from '../../context/RevenueCatContext'
-import { PACKAGE_TYPE } from 'react-native-purchases'
+import { useSuperwall } from 'expo-superwall'
 import { trackOnboardingStep, trackPaywallViewed, trackSubscriptionPurchased } from '../../lib/analytics'
 import { DISLIKE_CHIPS } from '../food-preferences'
 
@@ -358,114 +357,26 @@ const FEATURES = [
 ]
 
 function S7Paywall({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
-  const [plan, setPlan] = useState<'monthly' | 'annual' | 'lifetime'>('annual')
-  const [purchasing, setPurchasing] = useState(false)
-  const { packages, purchasePackage, restorePurchases } = useRevenueCat()
+  const { registerPlacement } = useSuperwall()
 
   useEffect(() => { trackPaywallViewed('onboarding') }, [])
 
-  const monthlyPkg  = packages.find(p => p.packageType === PACKAGE_TYPE.MONTHLY)
-  const annualPkg   = packages.find(p => p.packageType === PACKAGE_TYPE.ANNUAL)
-  const lifetimePkg = packages.find(p => p.packageType === PACKAGE_TYPE.LIFETIME)
-
-  const selectedPkg = plan === 'monthly' ? monthlyPkg : plan === 'annual' ? annualPkg : lifetimePkg
-
-  const monthlyPrice  = monthlyPkg?.product.priceString  ?? '$7.99'
-  const annualPrice   = annualPkg?.product.priceString   ?? '$49.99'
-  const lifetimePrice = lifetimePkg?.product.priceString ?? '$99.99'
-
-  const isLifetime = plan === 'lifetime'
-  const ctaLabel = purchasing
-    ? 'Processing...'
-    : isLifetime ? 'Buy Lifetime Access' : 'Start Free Trial'
-
-  const handlePurchase = async () => {
-    if (!selectedPkg) { onNext(); return }
-    setPurchasing(true)
-    await purchasePackage(selectedPkg)
-    setPurchasing(false)
-    const planType = plan === 'lifetime' ? 'lifetime' : 'monthly'
-    trackSubscriptionPurchased(planType, selectedPkg.product.price)
-    onNext()
-  }
+  useEffect(() => {
+    const present = async () => {
+      await registerPlacement('onboarding_paywall')
+      onNext()
+    }
+    present()
+  }, [])
 
   return (
     <SafeAreaView style={s.safe}>
       <ProgressBar pct={PROGRESS[8]} />
-      <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
-        <Text style={s.paywallTitle}>Start eating smarter</Text>
-        <Text style={s.paywallSub}>
-          {isLifetime ? 'One-time payment, forever' : `7 days free, then ${monthlyPrice}/mo`}
-        </Text>
-
-        <View style={s.featureList}>
-          {FEATURES.map(f => (
-            <View key={f} style={s.featureRow}>
-              <View style={s.featureCheck}><Check size={12} stroke="#000000" strokeWidth={3} /></View>
-              <Text style={s.featureText}>{f}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* ── Plan cards ── */}
-        <View style={s.planCol}>
-          <TouchableOpacity
-            style={[s.planCard, plan === 'monthly' && s.planCardActive]}
-            onPress={() => setPlan('monthly')}
-            activeOpacity={0.8}
-          >
-            <View style={s.planCardLeft}>
-              <Text style={s.planLabel}>Monthly</Text>
-              <Text style={s.planSub}>Billed monthly</Text>
-            </View>
-            <Text style={s.planPrice}>{monthlyPrice}<Text style={s.planPriceSub}>/mo</Text></Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[s.planCard, plan === 'annual' && s.planCardActive]}
-            onPress={() => setPlan('annual')}
-            activeOpacity={0.8}
-          >
-            <View style={s.planCardLeft}>
-              <View style={s.planBadgeRow}>
-                <Text style={s.planLabel}>Annual</Text>
-                <View style={s.planBadge}><Text style={s.planBadgeText}>Best value</Text></View>
-              </View>
-              <Text style={s.planSub}>Billed once a year</Text>
-            </View>
-            <Text style={s.planPrice}>{annualPrice}<Text style={s.planPriceSub}>/yr</Text></Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[s.planCard, plan === 'lifetime' && s.planCardActive]}
-            onPress={() => setPlan('lifetime')}
-            activeOpacity={0.8}
-          >
-            <View style={s.planCardLeft}>
-              <View style={s.planBadgeRow}>
-                <Text style={s.planLabel}>Lifetime</Text>
-                <View style={[s.planBadge, { backgroundColor: 'rgba(74,222,128,0.2)' }]}>
-                  <Text style={[s.planBadgeText, { color: '#4ADE80' }]}>One-time</Text>
-                </View>
-              </View>
-              <Text style={s.planSub}>Pay once, own forever</Text>
-            </View>
-            <Text style={s.planPrice}>{lifetimePrice}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {!isLifetime && <Text style={s.legal}>Free for 7 days. Cancel anytime.</Text>}
-
-        <View style={s.paywallActions}>
-          <PillButton label={ctaLabel} onPress={handlePurchase} />
-          <TouchableOpacity style={s.textLink} onPress={onNext} activeOpacity={0.7}>
-            <Text style={s.textLinkText}>Continue with limited free access</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.textLink} onPress={restorePurchases} activeOpacity={0.7}>
-            <Text style={[s.textLinkText, { fontSize: 12 }]}>Restore purchases</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+      <View style={s.centerFlex}>
+        <TouchableOpacity style={s.textLink} onPress={onNext} activeOpacity={0.7}>
+          <Text style={s.textLinkText}>Continue with limited free access</Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   )
 }

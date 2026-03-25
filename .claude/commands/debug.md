@@ -10,7 +10,7 @@ A bug or error has occurred in the Pantry app: $ARGUMENTS
 Before reading any files or suggesting fixes, answer these questions from the error description:
 
 1. **What is the exact failure?** Error message, wrong behavior, or silent failure?
-2. **Where does it originate?** UI layer, Supabase call, API (FatSecret/OpenAI/RevenueCat), auth state, or React state?
+2. **Where does it originate?** UI layer, Supabase call, API (FatSecret/OpenAI/Superwall), auth state, or React state?
 3. **Is it consistent or intermittent?** Intermittent = timing/async issue. Consistent = logic bug.
 4. **What changed right before this broke?** New code, new package, env variable, or Supabase migration?
 
@@ -48,6 +48,6 @@ List ALL plausible causes before picking one. Rank them by likelihood.
 - Expo Router file-based navigation
 - Supabase (auth + database) — auth inside Modals often returns null, use `supabase.auth.getUser()` directly
 - OpenAI GPT-4o / GPT-4o-mini
-- RevenueCat for subscriptions
+- Superwall for subscriptions
 - FatSecret API (OAuth 1.0, free tier — `food.find_id_for_barcode` NOT available, use Open Food Facts → FatSecret search)
 - expo-camera CameraView for barcode scanning — barcode fires multiple times before state updates, use useRef guard

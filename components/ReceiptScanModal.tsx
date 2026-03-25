@@ -17,10 +17,6 @@ import { X, Check, Receipt, Camera, ImageIcon } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import OpenAI from 'openai'
-
-const openai = new OpenAI({ apiKey: process.env.EXPO_PUBLIC_OPENAI_API_KEY })
-
 // ── Types ────────────────────────────────────────────────────────────────
 
 type ParsedItem = {
@@ -32,48 +28,64 @@ type ParsedItem = {
 
 const CATEGORIES = ['Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantry Staples', 'Other']
 
-// ── GPT-4o vision call ───────────────────────────────────────────────────
+// ── Brand normalization ──────────────────────────────────────────────────
+
+// Common grocery brand name patterns to strip from ingredient names.
+// Matches leading brand words followed by a space + actual ingredient.
+const BRAND_PATTERNS: RegExp[] = [
+  // Major national brands
+  /^(Kraft|Heinz|Nestlé|Nestle|Kellogg'?s?|General Mills|Pepperidge Farm|Pepperidge|Dole|Del Monte|Hunt'?s?|Libby'?s?|Progresso|Campbell'?s?|Swanson|Birds Eye|Green Giant|Pillsbury|Betty Crocker|Duncan Hines|Quaker|Cheerios|Tropicana|Minute Maid|Simply|Welch'?s?|Ocean Spray|Smucker'?s?|Jif|Skippy|Peter Pan|Planters|Blue Diamond|Horizon|Organic Valley|Tillamook|Cabot|Land O'? ?Lakes?|Kerrygold|Daisy|Breakstone'?s?|Knorr|Lipton|McCormick|Lawry'?s?|Morton|Diamond Crystal|Arm & Hammer|Arm and Hammer|Bob'?s? Red Mill|King Arthur|Gold Medal|Hodgson Mill|Argo|Domino|C&H|Imperial|Dixie Crystals|Rumford|Clabber Girl|Davis|Fleischmann'?s?|Red Star|Hodgson|Barilla|Ronzoni|Mueller'?s?|De Cecco|Dreamfields|Classico|Prego|Ragu|Newman'?s? Own|Annie'?s?|Amy'?s?|Eden|365|Simple Truth|Private Selection|Signature Select|Great Value|Good & Gather|Sprouts|Market Pantry|Archer Farms)\s+/i,
+  // Store brand prefixes
+  /^(Trader Joe'?s?|Whole Foods|Costco|Kirkland|President'?s? Choice|PC|Store Brand|Generic|House Brand|Our Brand)\s+/i,
+  // Organic / descriptor prefixes that aren't the ingredient
+  /^(Organic|Natural|All Natural|Non-GMO|Free Range|Grass[- ]Fed|Pasture[- ]Raised|Cage[- ]Free|Wild[- ]Caught|Farm[- ]Fresh)\s+/i,
+]
+
+/**
+ * Strips leading brand names and descriptor prefixes from an ingredient name,
+ * then title-cases the result.
+ */
+function normalizeIngredientName(raw: string): string {
+  let name = raw.trim()
+
+  // Remove trailing parenthetical size/weight info: "Chicken Breast (2 lbs)" → "Chicken Breast"
+  name = name.replace(/\s*\(.*?\)\s*$/, '').trim()
+
+  // Remove leading item codes or numbers: "1234 Whole Milk" → "Whole Milk"
+  name = name.replace(/^\d[\d\s\-#]*\s+/, '')
+
+  // Apply brand pattern stripping iteratively (some items have stacked prefixes)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const pattern of BRAND_PATTERNS) {
+      const stripped = name.replace(pattern, '')
+      if (stripped !== name) {
+        name = stripped.trim()
+        changed = true
+      }
+    }
+  }
+
+  // Title-case the result (e.g. "whole milk" → "Whole Milk")
+  name = name
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase())
+
+  return name
+}
+
+// ── Receipt parsing via Edge Function ─────────────────────────────────────
 
 async function parseReceiptImage(base64: string): Promise<ParsedItem[]> {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
-    max_tokens: 1000,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'high' },
-          },
-          {
-            type: 'text',
-            text: `This is a grocery receipt. Extract every food or grocery item purchased.
-For each item, return a JSON array with objects: { "name": string, "category": string }
-Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
-- Protein: meat, fish, eggs, beans, tofu
-- Carbs: bread, pasta, rice, cereals, flour
-- Produce: fruits, vegetables, herbs
-- Condiments: sauces, oils, spices, dressings
-- Dairy: milk, cheese, yogurt, butter
-- Pantry Staples: canned goods, broth, baking items
-- Other: anything else that doesn't fit
-
-Only include actual food/grocery items. Skip non-food items, fees, taxes, and totals.
-Clean up item names (remove codes, weights, brand prefixes where possible).
-Return ONLY the raw JSON array, no markdown, no explanation.`,
-          },
-        ],
-      },
-    ],
+  const { data, error } = await supabase.functions.invoke('parse-receipt', {
+    body: { base64 },
   })
-
-  const text = response.choices[0]?.message?.content?.trim() ?? '[]'
-  const cleaned = text.replace(/^```(?:json)?/, '').replace(/```$/, '').trim()
-  const parsed = JSON.parse(cleaned) as { name: string; category: string }[]
+  if (error) throw error
+  const parsed = data as { name: string; category: string }[]
   return parsed.map((item, i) => ({
     id: String(i),
-    name: item.name,
+    name: normalizeIngredientName(item.name),
     category: CATEGORIES.includes(item.category) ? item.category : 'Other',
     checked: true,
   }))

@@ -15,7 +15,8 @@ import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
-import { useRevenueCat } from '../../context/RevenueCatContext'
+import { usePremium } from '../../context/SuperwallContext'
+import { useSuperwall } from 'expo-superwall'
 import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackUpgradePromptShown } from '../../lib/analytics'
 
 type PortionMode = 'Visual' | 'Grams'
@@ -33,7 +34,8 @@ export default function MealDetailScreen() {
   const { id, mealData } = useLocalSearchParams<{ id: string; mealData?: string }>()
   const router = useRouter()
   const { user } = useAuth()
-  const { isPremium } = useRevenueCat()
+  const { isPremium } = usePremium()
+  const { registerPlacement } = useSuperwall()
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [portionMode, setPortionMode] = useState<PortionMode>('Visual')
@@ -104,7 +106,12 @@ export default function MealDetailScreen() {
         Alert.alert(
           'Upgrade to Premium',
           'Free accounts can save up to 5 meals. Upgrade for unlimited saves.',
-          [{ text: 'Not now', style: 'cancel' }, { text: 'Upgrade', onPress: () => router.push('/onboarding') }]
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Upgrade', onPress: () => {
+              registerPlacement('meal_save_limit')
+            }},
+          ]
         )
         return
       }

@@ -6,7 +6,8 @@ import { DarkTheme, ThemeProvider } from '@react-navigation/native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AuthProvider, useAuth } from '../context/AuthContext'
-import { RevenueCatProvider } from '../context/RevenueCatContext'
+import { SuperwallProvider } from 'expo-superwall'
+import { SuperwallContextProvider } from '../context/SuperwallContext'
 
 const AppTheme = {
   ...DarkTheme,
@@ -57,9 +58,13 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={AppTheme}>
         <AuthProvider>
-          <RevenueCatProvider>
-            <RootLayoutNav />
-          </RevenueCatProvider>
+          <SuperwallProvider
+            apiKeys={{ ios: process.env.EXPO_PUBLIC_SUPERWALL_API_KEY! }}
+          >
+            <SuperwallContextProvider>
+              <RootLayoutNav />
+            </SuperwallContextProvider>
+          </SuperwallProvider>
         </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

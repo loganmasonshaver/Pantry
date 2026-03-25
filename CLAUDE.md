@@ -17,48 +17,12 @@ Do this after each task — not just at session end — so progress is saved if 
 
 ## App Context
 - React Native + Expo, iOS only
-- Supabase, OpenAI GPT-4o, RevenueCat, PostHog
+- Supabase, OpenAI GPT-4o, Superwall, PostHog
 - Pure black (#000000) background, white cards
 - 7 screens total — Profile/Stats is currently in progress
 - Freemium: free tier (1 suggestion/day, 5 saved meals) + $7.99/month premium
 
 ---
-
-## Stack
-- **Framework:** React Native 0.83 + Expo SDK 55
-- **Navigation:** Expo Router (file-based, stack + tabs)
-- **Auth + DB:** Supabase (`lib/supabase.ts`)
-- **AI:** OpenAI GPT-4o-mini via `lib/meals.ts` + `lib/useMealSuggestions.ts`
-- **Payments:** RevenueCat (subscription gating)
-- **Language:** TypeScript
-
-## Project Structure
-```
-app/
-  _layout.tsx              # Root stack, auth redirect logic
-  (tabs)/
-    _layout.tsx            # Tab bar
-    index.tsx              # Home — macro card, meal suggestions, food log
-    grocery.tsx            # Grocery list
-    saved.tsx              # Saved meals
-    pantry.tsx             # Pantry items
-    profile.tsx            # Profile, weight chart, settings
-  onboarding/
-    index.tsx              # Multi-step onboarding (steps 1–9)
-    signin.tsx
-    createaccount.tsx
-  meal/[id].tsx            # Meal detail
-  food-preferences.tsx     # Food dislikes editor (chip-based)
-  delivery-webview.tsx     # In-app WebView for Instacart
-lib/
-  supabase.ts
-  meals.ts                 # generateMeals() — GPT-4o prompt
-  useMealSuggestions.ts    # Hook: fetches profile + pantry, calls generateMeals
-context/
-  AuthContext.tsx
-constants/
-  colors.ts                # COLORS object — single source of truth for theme
-```
 
 ## Design Conventions
 - Background: `#000000` (pure black)

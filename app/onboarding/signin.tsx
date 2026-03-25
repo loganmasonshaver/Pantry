@@ -21,7 +21,7 @@ const CARD = '#1A1A1A'
 
 export default function SignInScreen() {
   const router = useRouter()
-  const { signIn } = useAuth()
+  const { signIn, signInWithApple, signInWithGoogle } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -91,6 +91,38 @@ export default function SignInScreen() {
           <TouchableOpacity style={s.forgotLink} activeOpacity={0.7}>
             <Text style={s.forgotText}>Forgot password?</Text>
           </TouchableOpacity>
+
+          <View style={s.orRow}>
+            <View style={s.orLine} />
+            <Text style={s.orText}>or</Text>
+            <View style={s.orLine} />
+          </View>
+
+          <TouchableOpacity style={s.socialBtn} onPress={async () => {
+            try {
+              setLoading(true)
+              await signInWithApple()
+              router.replace('/(tabs)')
+            } catch (e: any) {
+              if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Apple Sign-In Failed', e.message)
+            } finally { setLoading(false) }
+          }} activeOpacity={0.8}>
+            <Text style={s.appleIcon}>{'\uF8FF'}</Text>
+            <Text style={s.socialBtnText}>Continue with Apple</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[s.socialBtn, { marginTop: 10 }]} onPress={async () => {
+            try {
+              setLoading(true)
+              await signInWithGoogle()
+              router.replace('/(tabs)')
+            } catch (e: any) {
+              if (e.code !== '12501') Alert.alert('Google Sign-In Failed', e.message)
+            } finally { setLoading(false) }
+          }} activeOpacity={0.8}>
+            <Text style={s.googleG}>G</Text>
+            <Text style={s.socialBtnText}>Continue with Google</Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -139,6 +171,23 @@ const s = StyleSheet.create({
 
   forgotLink: { alignItems: 'center', marginTop: 24 },
   forgotText: { fontSize: 14, color: TEAL, fontWeight: '600' },
+
+  orRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 20 },
+  orLine: { flex: 1, height: 1, backgroundColor: '#2A2A2A' },
+  orText: { fontSize: 13, color: MUTED, fontWeight: '500' },
+
+  socialBtn: {
+    backgroundColor: CARD,
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  appleIcon: { fontSize: 20, color: '#FFFFFF', width: 22, textAlign: 'center' },
+  googleG: { fontSize: 16, fontWeight: '800', color: '#4285F4', width: 22, textAlign: 'center' },
+  socialBtnText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
 
   bottom: { paddingHorizontal: 24, paddingBottom: 20, paddingTop: 8, gap: 4 },
   pill: {

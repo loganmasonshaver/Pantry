@@ -21,10 +21,12 @@ import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, 
 import { Swipeable } from 'react-native-gesture-handler'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '../../context/AuthContext'
-import { useRevenueCat } from '../../context/RevenueCatContext'
+import { usePremium } from '../../context/SuperwallContext'
+import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated, trackMealRegenerated, trackUpgradePromptShown } from '../../lib/analytics'
 import AILogModal from '../../components/AILogModal'
 import FoodSearchModal from '../../components/FoodSearchModal'
+import EditPortionModal from '../../components/EditPortionModal'
 import { useFocusEffect } from 'expo-router'
 import { useMealSuggestions } from '../../lib/useMealSuggestions'
 import { GeneratedMeal } from '../../lib/meals'
@@ -43,6 +45,9 @@ type LogEntry = {
   calories: number
   protein: number
   Icon: React.ElementType
+  food_id: string | null
+  serving_id: string | null
+  quantity: number
 }
 
 type MealSlot = {
@@ -210,12 +215,14 @@ function SlotCard({
   expanded,
   onToggle,
   onDeleteEntry,
+  onEditEntry,
   onRemoveSlot,
 }: {
   slot: MealSlot
   expanded: boolean
   onToggle: () => void
   onDeleteEntry: (entryId: string) => void
+  onEditEntry: (entry: LogEntry) => void
   onRemoveSlot: () => void
 }) {
   const router = useRouter()
@@ -261,7 +268,7 @@ function SlotCard({
                 )}
                 overshootRight={false}
               >
-                <TouchableOpacity style={styles.logCard} activeOpacity={0.7}>
+                <TouchableOpacity style={styles.logCard} activeOpacity={0.7} onPress={() => onEditEntry(entry)}>
                   <View style={styles.logIconCircle}>
                     <entry.Icon size={12} stroke="#888888" strokeWidth={1.8} />
                   </View>
@@ -291,8 +298,9 @@ function SlotCard({
 export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
-  const { isPremium } = useRevenueCat()
-  const { meals, loading, error, regenerate } = useMealSuggestions(user?.id)
+  const { isPremium } = usePremium()
+  const { registerPlacement } = useSuperwall()
+  const { meals, loading, error, regenerate } = useMealSuggestions(user?.id, isPremium)
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
   const [showIntroPopup, setShowIntroPopup] = useState(false)
@@ -378,7 +386,7 @@ export default function HomeScreen() {
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('meal_logs')
-      .select('id, meal_name, calories, protein, slot, created_at')
+      .select('id, meal_name, calories, protein, slot, created_at, food_id, serving_id, quantity')
       .eq('user_id', user.id)
       .eq('logged_at', today)
       .order('created_at', { ascending: true })
@@ -398,6 +406,9 @@ export default function HomeScreen() {
         calories: row.calories ?? 0,
         protein: row.protein ?? 0,
         Icon: iconForSlot(label),
+        food_id: row.food_id ?? null,
+        serving_id: row.serving_id ?? null,
+        quantity: row.quantity ?? 1,
       })
     }
 
@@ -445,6 +456,15 @@ export default function HomeScreen() {
   }
 
   const [ratings, setRatings] = useState<Record<string, 1 | -1>>({})
+  const [editEntry, setEditEntry] = useState<LogEntry | null>(null)
+
+  const handleEntryUpdated = (logId: string, calories: number, protein: number) => {
+    setSlots(prev => prev.map(s => ({
+      ...s,
+      entries: s.entries.map(e => e.id === logId ? { ...e, calories, protein } : e),
+    })))
+  }
+
   const [showAILogModal, setShowAILogModal] = useState(false)
   const [showFoodSearchModal, setShowFoodSearchModal] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -597,7 +617,12 @@ export default function HomeScreen() {
                         Alert.alert(
                           'Upgrade to Premium',
                           'Free accounts get 1 set of suggestions per day. Upgrade for unlimited regeneration.',
-                          [{ text: 'Not now', style: 'cancel' }, { text: 'Upgrade', onPress: () => router.push('/onboarding') }]
+                          [
+                            { text: 'Not now', style: 'cancel' },
+                            { text: 'Upgrade', onPress: () => {
+                              registerPlacement('regen_limit')
+                            }},
+                          ]
                         )
                         return
                       }
@@ -641,6 +666,7 @@ export default function HomeScreen() {
               expanded={expandedSlots.has(slot.id)}
               onToggle={() => toggleSlot(slot.id)}
               onDeleteEntry={(entryId) => deleteEntry(slot.id, entryId)}
+              onEditEntry={(entry) => setEditEntry(entry)}
               onRemoveSlot={() => removeSlot(slot.id)}
             />
           ))}
@@ -764,6 +790,37 @@ export default function HomeScreen() {
         onClose={() => setShowFoodSearchModal(false)}
         onLogged={fetchTodayLogs}
       />
+
+      {/* ── Edit portion — reuse FoodSearchModal in edit mode ── */}
+      {editEntry && editEntry.food_id && (
+        <FoodSearchModal
+          visible={!!editEntry}
+          slots={slots.map(s => s.label)}
+          defaultSlot={editEntry.name}
+          onClose={() => { setEditEntry(null); fetchTodayLogs() }}
+          onLogged={() => { setEditEntry(null); fetchTodayLogs() }}
+          editLogId={editEntry.id}
+          initialFoodId={editEntry.food_id ?? undefined}
+          initialServingId={editEntry.serving_id ?? undefined}
+          initialQuantity={editEntry.quantity}
+          initialSlot={slots.find(s => s.entries.some(e => e.id === editEntry.id))?.label}
+        />
+      )}
+      {/* Fallback for AI-logged entries (no food_id) */}
+      {editEntry && !editEntry.food_id && (
+        <EditPortionModal
+          visible={!!editEntry}
+          onClose={() => setEditEntry(null)}
+          logId={editEntry.id}
+          logName={editEntry.name}
+          foodId={null}
+          initialServingId={null}
+          initialQuantity={editEntry.quantity}
+          currentCalories={editEntry.calories}
+          currentProtein={editEntry.protein}
+          onUpdated={handleEntryUpdated}
+        />
+      )}
 
       {/* ── Food intro one-time popup ── */}
       <Modal visible={showIntroPopup} transparent animationType="fade">
@@ -981,4 +1038,5 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontWeight: '500',
   },
+
 })

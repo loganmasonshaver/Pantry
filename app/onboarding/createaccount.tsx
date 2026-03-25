@@ -22,7 +22,7 @@ const CARD = '#1A1A1A'
 
 export default function CreateAccountScreen() {
   const router = useRouter()
-  const { signUp } = useAuth()
+  const { signUp, signInWithApple, signInWithGoogle } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -50,7 +50,35 @@ export default function CreateAccountScreen() {
     }
   }
 
-  const goNext = () => router.replace({ pathname: '/onboarding', params: { step: '8' } })
+  const handleAppleSignIn = async () => {
+    try {
+      setLoading(true)
+      await signInWithApple()
+      trackAccountCreated('apple')
+      router.replace({ pathname: '/onboarding', params: { step: '8' } })
+    } catch (e: any) {
+      if (e.code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Apple Sign-In Failed', e.message)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setLoading(true)
+      await signInWithGoogle()
+      trackAccountCreated('google')
+      router.replace({ pathname: '/onboarding', params: { step: '8' } })
+    } catch (e: any) {
+      if (e.code !== '12501') { // SIGN_IN_CANCELLED
+        Alert.alert('Google Sign-In Failed', e.message)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <SafeAreaView style={s.safe}>
@@ -114,12 +142,12 @@ export default function CreateAccountScreen() {
             <View style={s.orLine} />
           </View>
 
-          <TouchableOpacity style={s.socialBtn} onPress={goNext} activeOpacity={0.8}>
+          <TouchableOpacity style={s.socialBtn} onPress={handleAppleSignIn} activeOpacity={0.8}>
             <Text style={s.appleIcon}>{'\uF8FF'}</Text>
             <Text style={s.socialBtnText}>Continue with Apple</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[s.socialBtn, { marginTop: 10 }]} onPress={goNext} activeOpacity={0.8}>
+          <TouchableOpacity style={[s.socialBtn, { marginTop: 10 }]} onPress={handleGoogleSignIn} activeOpacity={0.8}>
             <Text style={s.googleG}>G</Text>
             <Text style={s.socialBtnText}>
               {'Continue with '}
