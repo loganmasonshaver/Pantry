@@ -13,14 +13,19 @@ import {
   Animated,
   KeyboardAvoidingView,
   Platform,
+  Dimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
-import { X, Camera, FileText, ImageIcon, ChevronRight } from 'lucide-react-native'
+import * as ImageManipulator from 'expo-image-manipulator'
+import { X, Camera, FileText, ImageIcon, ChevronRight, Zap } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { trackMealLogged } from '@/lib/analytics'
+
+const { width: SCREEN_W } = Dimensions.get('window')
 // ── Types ────────────────────────────────────────────────────────────────
 
 type MacroEstimate = {
@@ -31,7 +36,7 @@ type MacroEstimate = {
   fat: number
 }
 
-type InputMode = 'describe' | 'photo'
+type ScanMode = 'food' | 'describe'
 type Step = 'input' | 'analyzing' | 'review'
 
 // ── GPT helpers ──────────────────────────────────────────────────────────
@@ -67,10 +72,13 @@ type Props = {
 export default function AILogModal({ visible, slots, defaultSlot, onClose, onLogged }: Props) {
   const { user } = useAuth()
   const [step, setStep] = useState<Step>('input')
-  const [mode, setMode] = useState<InputMode>('describe')
+  const [scanMode, setScanMode] = useState<ScanMode>('food')
   const [description, setDescription] = useState('')
   const [imageUri, setImageUri] = useState<string | null>(null)
   const [imageBase64, setImageBase64] = useState<string | null>(null)
+  const [flashOn, setFlashOn] = useState(false)
+  const cameraRef = useRef<CameraView>(null)
+  const [permission, requestPermission] = useCameraPermissions()
 
   // Review state
   const [mealName, setMealName] = useState('')
@@ -80,6 +88,8 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
   const [fat, setFat] = useState('')
   const [selectedSlot, setSelectedSlot] = useState(defaultSlot)
   const [saving, setSaving] = useState(false)
+  const [lastEditedMacro, setLastEditedMacro] = useState<'protein' | 'carbs' | 'fat' | null>(null)
+  const originalMacros = useRef<{ calories: number; protein: number; carbs: number; fat: number } | null>(null)
 
   // Pulse animation for analyzing step
   const pulseScale = useRef(new Animated.Value(1)).current
@@ -109,7 +119,6 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
 
   const reset = () => {
     setStep('input')
-    setMode('describe')
     setDescription('')
     setImageUri(null)
     setImageBase64(null)
@@ -123,20 +132,28 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
 
   const handleClose = () => { reset(); onClose() }
 
-  const launchCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync()
-    if (status !== 'granted') {
-      Alert.alert('Camera permission needed', 'Please allow camera access in Settings.')
-      return
+  // Request camera permission on mount
+  useEffect(() => {
+    if (visible && !permission?.granted) {
+      requestPermission()
     }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      base64: true,
-    })
-    if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri)
-      setImageBase64(result.assets[0].base64 ?? null)
+  }, [visible])
+
+  const capturePhoto = async () => {
+    if (!cameraRef.current) return
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 })
+      if (photo) {
+        const fixed = await ImageManipulator.manipulateAsync(
+          photo.uri,
+          [],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        )
+        setImageUri(fixed.uri)
+        setImageBase64(fixed.base64 ?? null)
+      }
+    } catch (e) {
+      Alert.alert('Capture failed', 'Could not take photo.')
     }
   }
 
@@ -158,20 +175,28 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
   }
 
   const analyze = async () => {
-    if (mode === 'describe' && !description.trim()) return
-    if (mode === 'photo' && !imageBase64) return
+    const hasText = description.trim().length > 0
+    const hasPhoto = !!imageBase64
+    if (!hasText && !hasPhoto) return
 
     setStep('analyzing')
     try {
-      const estimate = mode === 'describe'
-        ? await estimateFromText(description.trim())
-        : await estimateFromPhoto(imageBase64!)
+      // Prefer photo if available, fall back to text
+      const estimate = hasPhoto
+        ? await estimateFromPhoto(imageBase64!)
+        : await estimateFromText(description.trim())
 
       setMealName(estimate.name)
       setCalories(String(estimate.calories))
       setProtein(String(estimate.protein))
       setCarbs(String(estimate.carbs))
       setFat(String(estimate.fat))
+      originalMacros.current = {
+        calories: estimate.calories,
+        protein: estimate.protein,
+        carbs: estimate.carbs,
+        fat: estimate.fat,
+      }
       setStep('review')
     } catch {
       Alert.alert('Analysis failed', 'Could not estimate macros. Try again with a clearer description.')
@@ -200,7 +225,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     handleClose()
   }
 
-  const canAnalyze = mode === 'describe' ? description.trim().length > 0 : !!imageUri
+  const canAnalyze = !!imageUri || description.trim().length > 0
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
@@ -210,94 +235,111 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
           {/* ── Input step ── */}
           {step === 'input' && (
             <View style={styles.step}>
-              <View style={styles.topBar}>
-                <Text style={styles.topTitle}>Log with AI</Text>
-                <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                  <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-                </TouchableOpacity>
-              </View>
 
-              {/* Mode toggle */}
-              <View style={styles.modeToggle}>
-                <TouchableOpacity
-                  style={[styles.modeOption, mode === 'describe' && styles.modeOptionActive]}
-                  onPress={() => setMode('describe')}
-                  activeOpacity={0.8}
-                >
-                  <FileText size={15} stroke={mode === 'describe' ? '#000' : COLORS.textMuted} strokeWidth={2} />
-                  <Text style={[styles.modeOptionText, mode === 'describe' && styles.modeOptionTextActive]}>
-                    Describe
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modeOption, mode === 'photo' && styles.modeOptionActive]}
-                  onPress={() => setMode('photo')}
-                  activeOpacity={0.8}
-                >
-                  <Camera size={15} stroke={mode === 'photo' ? '#000' : COLORS.textMuted} strokeWidth={2} />
-                  <Text style={[styles.modeOptionText, mode === 'photo' && styles.modeOptionTextActive]}>
-                    Photo
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Describe mode */}
-              {mode === 'describe' && (
-                <View style={styles.describeArea}>
-                  <Text style={styles.inputLabel}>What did you eat?</Text>
-                  <TextInput
-                    style={styles.describeInput}
-                    placeholder={"e.g. 2 scrambled eggs, toast with butter,\nand a coffee with oat milk"}
-                    placeholderTextColor={COLORS.textMuted}
-                    value={description}
-                    onChangeText={setDescription}
-                    multiline
-                    autoFocus
-                    returnKeyType="done"
-                    blurOnSubmit
-                  />
-                  <Text style={styles.inputHint}>Be as specific as you like — portions, ingredients, cooking method.</Text>
-                </View>
-              )}
-
-              {/* Photo mode */}
-              {mode === 'photo' && (
-                <View style={styles.photoArea}>
-                  {imageUri ? (
-                    <TouchableOpacity style={styles.photoPreviewWrap} onPress={launchCamera} activeOpacity={0.9}>
-                      <Image source={{ uri: imageUri }} style={styles.photoPreview} resizeMode="cover" />
-                      <View style={styles.photoRetakeOverlay}>
-                        <Text style={styles.photoRetakeText}>Tap to retake</Text>
-                      </View>
-                    </TouchableOpacity>
+              {/* Inline camera viewfinder */}
+              {!imageUri && (
+                <View style={styles.cameraContainer}>
+                  {permission?.granted ? (
+                    <CameraView
+                      ref={cameraRef}
+                      style={styles.camera}
+                      facing="back"
+                    />
                   ) : (
-                    <View style={styles.photoPlaceholder}>
-                      <Camera size={40} stroke="#333333" strokeWidth={1.5} />
-                      <Text style={styles.photoPlaceholderText}>Photo of your meal</Text>
+                    <View style={[styles.camera, { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }]}>
+                      <Text style={{ color: COLORS.textMuted }}>Camera permission required</Text>
                     </View>
                   )}
-                  <View style={styles.photoButtons}>
-                    <TouchableOpacity style={styles.photoBtn} onPress={launchCamera} activeOpacity={0.85}>
-                      <Camera size={17} stroke={COLORS.textWhite} strokeWidth={2} />
-                      <Text style={styles.photoBtnText}>Camera</Text>
+
+                  {/* Corner brackets */}
+                  <View style={[styles.bracket, styles.bracketTL]} />
+                  <View style={[styles.bracket, styles.bracketTR]} />
+                  <View style={[styles.bracket, styles.bracketBL]} />
+                  <View style={[styles.bracket, styles.bracketBR]} />
+
+                  {/* Top bar overlay */}
+                  <View style={styles.cameraTopBar}>
+                    <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                      <X size={20} stroke="#FFFFFF" strokeWidth={2} />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.photoBtn} onPress={launchLibrary} activeOpacity={0.85}>
-                      <ImageIcon size={17} stroke={COLORS.textWhite} strokeWidth={2} />
-                      <Text style={styles.photoBtnText}>Library</Text>
-                    </TouchableOpacity>
+                    <Text style={styles.cameraTitle}>Pantry</Text>
+                    <View style={{ width: 36 }} />
                   </View>
                 </View>
               )}
 
-              <TouchableOpacity
-                style={[styles.analyzeBtn, !canAnalyze && { opacity: 0.4 }]}
-                onPress={analyze}
-                activeOpacity={0.85}
-                disabled={!canAnalyze}
-              >
-                <Text style={styles.analyzeBtnText}>Estimate Macros</Text>
-                <ChevronRight size={18} stroke="#000" strokeWidth={2.5} />
-              </TouchableOpacity>
+              {/* Captured photo preview + describe */}
+              {imageUri && (
+                <View style={{ flex: 1 }}>
+                  <View style={[styles.cameraContainer, { flex: 3 }]}>
+                    <Image source={{ uri: imageUri }} style={styles.camera} resizeMode="cover" />
+                    <View style={styles.cameraTopBar}>
+                      <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                        <X size={20} stroke="#FFFFFF" strokeWidth={2} />
+                      </TouchableOpacity>
+                      <Text style={styles.cameraTitle}>Pantry</Text>
+                      <View style={{ width: 36 }} />
+                    </View>
+                    <TouchableOpacity style={styles.retakeBadge} onPress={() => { setImageUri(null); setImageBase64(null) }} activeOpacity={0.8}>
+                      <Text style={styles.retakeBadgeText}>Retake</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.capturedDescribeArea}>
+                    <Text style={styles.describeOrText}>Add details (optional)</Text>
+                    <TextInput
+                      style={styles.describeInputCompact}
+                      placeholder="e.g. grilled, with rice, extra sauce..."
+                      placeholderTextColor={COLORS.textMuted}
+                      value={description}
+                      onChangeText={setDescription}
+                      multiline
+                      returnKeyType="done"
+                      blurOnSubmit
+                    />
+                  </View>
+                </View>
+              )}
+
+              {/* Bottom controls */}
+              <View style={styles.cameraBottom}>
+                {/* Shutter + Gallery — when camera is live */}
+                {!imageUri && (
+                  <>
+                    <View style={styles.modeTabs}>
+                      <TouchableOpacity style={[styles.modeTab, styles.modeTabActive]} activeOpacity={0.8}>
+                        <Camera size={18} stroke="#000" strokeWidth={2} />
+                        <Text style={[styles.modeTabText, styles.modeTabTextActive]}>Scan Food</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.modeTab} onPress={launchLibrary} activeOpacity={0.8}>
+                        <ImageIcon size={18} stroke={COLORS.textMuted} strokeWidth={2} />
+                        <Text style={styles.modeTabText}>Gallery</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.shutterRow}>
+                      <TouchableOpacity style={styles.flashBtn} onPress={() => setFlashOn(f => !f)} activeOpacity={0.7}>
+                        <Zap size={20} stroke={flashOn ? '#FFD700' : COLORS.textMuted} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.shutterBtn} onPress={capturePhoto} activeOpacity={0.85}>
+                        <View style={styles.shutterInner} />
+                      </TouchableOpacity>
+                      <View style={{ width: 44 }} />
+                    </View>
+                  </>
+                )}
+
+                {/* Estimate button — after capture */}
+                {imageUri && (
+                  <TouchableOpacity
+                    style={[styles.analyzeBtn, !canAnalyze && { opacity: 0.4 }]}
+                    onPress={analyze}
+                    activeOpacity={0.85}
+                    disabled={!canAnalyze}
+                  >
+                    <Text style={styles.analyzeBtnText}>Estimate Macros</Text>
+                    <ChevronRight size={18} stroke="#000000" strokeWidth={2.5} />
+                  </TouchableOpacity>
+                )}
+              </View>
             </View>
           )}
 
@@ -312,7 +354,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
               </View>
               <Text style={styles.analyzingTitle}>Estimating macros...</Text>
               <Text style={styles.analyzingSub}>
-                {mode === 'photo' ? 'AI is analyzing your meal photo' : 'AI is calculating your macros'}
+                {imageUri ? 'AI is analyzing your meal photo' : 'AI is calculating your macros'}
               </Text>
             </View>
           )}
@@ -345,11 +387,21 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                 {/* Macro grid */}
                 <View style={styles.macroGrid}>
                   {[
-                    { label: 'Calories', value: calories, onChange: setCalories, unit: 'kcal', color: '#FFFFFF' },
-                    { label: 'Protein', value: protein, onChange: setProtein, unit: 'g', color: '#4ADE80' },
-                    { label: 'Carbs', value: carbs, onChange: setCarbs, unit: 'g', color: '#F59E0B' },
-                    { label: 'Fat', value: fat, onChange: setFat, unit: 'g', color: '#60A5FA' },
-                  ].map(m => (
+                    { label: 'Calories', value: calories, onChange: setCalories, unit: 'kcal', color: '#FFFFFF', onBlur: () => {
+                      const orig = originalMacros.current
+                      if (!orig || orig.calories === 0) return
+                      const newCal = parseInt(calories) || 0
+                      if (newCal > 0 && newCal !== orig.calories) {
+                        const ratio = newCal / orig.calories
+                        setProtein(String(Math.round(orig.protein * ratio)))
+                        setCarbs(String(Math.round(orig.carbs * ratio)))
+                        setFat(String(Math.round(orig.fat * ratio)))
+                      }
+                    }},
+                    { label: 'Protein', key: 'protein' as const, value: protein, onChange: (v: string) => { setProtein(v); setLastEditedMacro('protein') }, unit: 'g', color: '#4ADE80' },
+                    { label: 'Carbs', key: 'carbs' as const, value: carbs, onChange: (v: string) => { setCarbs(v); setLastEditedMacro('carbs') }, unit: 'g', color: '#F59E0B' },
+                    { label: 'Fat', key: 'fat' as const, value: fat, onChange: (v: string) => { setFat(v); setLastEditedMacro('fat') }, unit: 'g', color: '#60A5FA' },
+                  ].map((m: any) => (
                     <View key={m.label} style={styles.macroCell}>
                       <View style={[styles.macroDot, { backgroundColor: m.color }]} />
                       <Text style={styles.macroCellLabel}>{m.label}</Text>
@@ -358,6 +410,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                           style={styles.macroCellInput}
                           value={m.value}
                           onChangeText={m.onChange}
+                          onBlur={m.onBlur}
                           keyboardType="numeric"
                           placeholderTextColor={COLORS.textMuted}
                           placeholder="0"
@@ -367,6 +420,63 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                     </View>
                   ))}
                 </View>
+
+                {/* Macro mismatch warning with suggestion for last edited macro */}
+                {(() => {
+                  const p = parseInt(protein) || 0
+                  const c = parseInt(carbs) || 0
+                  const f = parseInt(fat) || 0
+                  const cal = parseInt(calories) || 0
+                  const macroCals = p * 4 + c * 4 + f * 9
+                  const diff = Math.abs(macroCals - cal)
+                  if (cal === 0 && macroCals > 0) {
+                    return (
+                      <View style={styles.mismatchBanner}>
+                        <Text style={styles.mismatchText}>
+                          Calories are 0 but macros add up to {macroCals} kcal. Set calories or clear macros.
+                        </Text>
+                      </View>
+                    )
+                  }
+                  if (cal > 0 && diff > 50 && lastEditedMacro) {
+                    let sugLabel = lastEditedMacro
+                    let sugValue = 0
+                    let sugUnit = 'g'
+                    let onApply = () => {}
+                    if (lastEditedMacro === 'protein') {
+                      sugValue = Math.max(0, Math.round((cal - (c * 4 + f * 9)) / 4))
+                      onApply = () => { setProtein(String(sugValue)); setLastEditedMacro(null) }
+                    } else if (lastEditedMacro === 'carbs') {
+                      sugValue = Math.max(0, Math.round((cal - (p * 4 + f * 9)) / 4))
+                      onApply = () => { setCarbs(String(sugValue)); setLastEditedMacro(null) }
+                    } else if (lastEditedMacro === 'fat') {
+                      sugValue = Math.max(0, Math.round((cal - (p * 4 + c * 4)) / 9))
+                      onApply = () => { setFat(String(sugValue)); setLastEditedMacro(null) }
+                    }
+                    return (
+                      <View style={styles.mismatchBanner}>
+                        <Text style={styles.mismatchText}>
+                          Macros add up to {macroCals} kcal ({macroCals > cal ? '+' : ''}{macroCals - cal} off).
+                        </Text>
+                        <TouchableOpacity style={styles.mismatchSuggest} onPress={onApply} activeOpacity={0.7}>
+                          <Text style={styles.mismatchSuggestText}>
+                            Set {sugLabel} to {sugValue}{sugUnit} to match →
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )
+                  }
+                  if (cal > 0 && diff > 50 && !lastEditedMacro) {
+                    return (
+                      <View style={styles.mismatchBanner}>
+                        <Text style={styles.mismatchText}>
+                          Macros add up to {macroCals} kcal ({macroCals > cal ? '+' : ''}{macroCals - cal} off). Adjust a macro to match.
+                        </Text>
+                      </View>
+                    )
+                  }
+                  return null
+                })()}
 
                 {/* Slot picker */}
                 <Text style={styles.slotLabel}>Add to meal</Text>
@@ -388,10 +498,22 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                 </ScrollView>
 
                 <TouchableOpacity
-                  style={[styles.analyzeBtn, (!mealName.trim() || saving) && { opacity: 0.5 }]}
+                  style={[styles.analyzeBtn, (!mealName.trim() || saving || (() => {
+                    const p = parseInt(protein) || 0, c = parseInt(carbs) || 0, f = parseInt(fat) || 0, cal = parseInt(calories) || 0
+                    const macroCals = p * 4 + c * 4 + f * 9
+                    if (cal === 0 && macroCals > 0) return true
+                    if (cal > 0 && Math.abs(macroCals - cal) > 50) return true
+                    return false
+                  })()) && { opacity: 0.5 }]}
                   onPress={saveLog}
                   activeOpacity={0.85}
-                  disabled={!mealName.trim() || saving}
+                  disabled={!mealName.trim() || saving || (() => {
+                    const p = parseInt(protein) || 0, c = parseInt(carbs) || 0, f = parseInt(fat) || 0, cal = parseInt(calories) || 0
+                    const macroCals = p * 4 + c * 4 + f * 9
+                    if (cal === 0 && macroCals > 0) return true
+                    if (cal > 0 && Math.abs(macroCals - cal) > 50) return true
+                    return false
+                  })()}
                 >
                   {saving
                     ? <ActivityIndicator color="#000000" />
@@ -399,9 +521,22 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   }
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.backLink} onPress={() => setStep('input')} activeOpacity={0.7}>
-                  <Text style={styles.backLinkText}>← Re-analyze</Text>
-                </TouchableOpacity>
+                <View style={styles.reviewBottomLinks}>
+                  <TouchableOpacity onPress={() => {
+                    if (originalMacros.current) {
+                      setCalories(String(originalMacros.current.calories))
+                      setProtein(String(originalMacros.current.protein))
+                      setCarbs(String(originalMacros.current.carbs))
+                      setFat(String(originalMacros.current.fat))
+                      setLastEditedMacro(null)
+                    }
+                  }} activeOpacity={0.7}>
+                    <Text style={styles.backLinkText}>Reset macros</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => setStep('input')} activeOpacity={0.7}>
+                    <Text style={styles.backLinkText}>← Re-analyze</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </ScrollView>
           )}
@@ -444,6 +579,150 @@ const styles = StyleSheet.create({
   },
 
   // Mode toggle
+  // Camera inline view
+  cameraContainer: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  camera: {
+    flex: 1,
+  },
+  cameraTopBar: {
+    position: 'absolute',
+    top: 12,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  cameraCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  bracket: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderColor: 'rgba(255,255,255,0.6)',
+    borderWidth: 3,
+  },
+  bracketTL: { top: '20%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  bracketTR: { top: '20%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  bracketBL: { bottom: '20%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '20%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  retakeBadge: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+  },
+  retakeBadgeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  cameraBottom: {
+    paddingTop: 12,
+    paddingBottom: 4,
+    gap: 16,
+  },
+  modeTabs: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  modeTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  modeTabActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+  modeTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  modeTabTextActive: {
+    color: '#000000',
+  },
+  shutterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  flashBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#FFFFFF',
+  },
+  describeFullArea: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  capturedDescribeArea: {
+    flex: 1,
+    paddingHorizontal: 4,
+    paddingTop: 12,
+    gap: 6,
+  },
+  describeInputCompact: {
+    backgroundColor: '#111111',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: COLORS.textWhite,
+    lineHeight: 20,
+    minHeight: 44,
+    maxHeight: 60,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  describeOrText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted, marginBottom: 4 },
   modeToggle: {
     flexDirection: 'row',
     backgroundColor: '#111111',
@@ -465,7 +744,7 @@ const styles = StyleSheet.create({
   modeOptionTextActive: { color: '#000000' },
 
   // Describe
-  describeArea: { flex: 1, gap: 12 },
+  describeArea: { gap: 6, marginTop: 12 },
   inputLabel: { fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
   describeInput: {
     backgroundColor: '#111111',
@@ -474,7 +753,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textWhite,
     lineHeight: 22,
-    minHeight: 120,
+    minHeight: 60,
+    maxHeight: 80,
     textAlignVertical: 'top',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.06)',
@@ -578,6 +858,41 @@ const styles = StyleSheet.create({
   reviewFieldLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.5, marginBottom: 6 },
   reviewFieldInput: { fontSize: 16, fontWeight: '600', color: COLORS.textWhite, padding: 0 },
 
+  calCard: {
+    backgroundColor: '#111111',
+    borderRadius: 14,
+    padding: 14,
+    gap: 6,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  mismatchBanner: {
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderRadius: 10,
+    padding: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  mismatchText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#EF4444',
+    lineHeight: 17,
+  },
+  mismatchSuggest: {
+    marginTop: 6,
+    backgroundColor: 'rgba(74,222,128,0.15)',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  mismatchSuggestText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4ADE80',
+  },
   macroGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -614,6 +929,7 @@ const styles = StyleSheet.create({
   slotChipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
   slotChipTextActive: { color: '#000000' },
 
+  reviewBottomLinks: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 16 },
   backLink: { alignItems: 'center', paddingVertical: 16 },
   backLinkText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
 })

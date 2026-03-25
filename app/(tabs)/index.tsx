@@ -217,6 +217,7 @@ function SlotCard({
   onDeleteEntry,
   onEditEntry,
   onRemoveSlot,
+  onLog,
 }: {
   slot: MealSlot
   expanded: boolean
@@ -224,6 +225,7 @@ function SlotCard({
   onDeleteEntry: (entryId: string) => void
   onEditEntry: (entry: LogEntry) => void
   onRemoveSlot: () => void
+  onLog: () => void
 }) {
   const router = useRouter()
   const [pendingDelete, setPendingDelete] = useState(false)
@@ -289,6 +291,10 @@ function SlotCard({
       {expanded && slot.entries.length === 0 && (
         <View style={styles.slotEmpty}>
           <Text style={styles.slotEmptyText}>Nothing logged yet</Text>
+          <TouchableOpacity style={styles.slotLogBtn} onPress={onLog} activeOpacity={0.7}>
+            <Plus size={14} stroke="#4ADE80" strokeWidth={2} />
+            <Text style={styles.slotLogBtnText}>Log</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -645,19 +651,11 @@ export default function HomeScreen() {
         <View style={styles.logSection}>
           <View style={styles.logHeader}>
             <Text style={styles.logTitle}>Today's Log</Text>
-            <TouchableOpacity style={styles.logPillBtn} activeOpacity={0.7} onPress={() => setShowAILogModal(true)}>
-              <ScanLine size={18} stroke={COLORS.textWhite} strokeWidth={1.8} />
-              <Text style={styles.logPillBtnText}>Log with AI</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logPillBtn} activeOpacity={0.7} onPress={() => setShowFoodSearchModal(true)}>
-              <Utensils size={18} stroke={COLORS.textWhite} strokeWidth={1.8} />
-              <Text style={styles.logPillBtnText}>Search</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logPillBtn} onPress={openLogModal} activeOpacity={0.7}>
-              <Pencil size={18} stroke={COLORS.textWhite} strokeWidth={1.8} />
-              <Text style={styles.logPillBtnText}>Manual</Text>
-            </TouchableOpacity>
           </View>
+          <TouchableOpacity style={styles.aiEstimateBtn} activeOpacity={0.85} onPress={() => setShowAILogModal(true)}>
+            <ScanLine size={20} stroke="#000000" strokeWidth={2} />
+            <Text style={styles.aiEstimateBtnText}>Estimate with AI</Text>
+          </TouchableOpacity>
 
           {slots.map(slot => (
             <SlotCard
@@ -668,6 +666,7 @@ export default function HomeScreen() {
               onDeleteEntry={(entryId) => deleteEntry(slot.id, entryId)}
               onEditEntry={(entry) => setEditEntry(entry)}
               onRemoveSlot={() => removeSlot(slot.id)}
+              onLog={() => setShowFoodSearchModal(true)}
             />
           ))}
 
@@ -938,10 +937,25 @@ const styles = StyleSheet.create({
   loadingText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
   errorText: { fontSize: 14, color: '#EF4444', textAlign: 'center' },
   logSection: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 40, gap: 10 },
-  logHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  logHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  aiEstimateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#4ADE80',
+    borderRadius: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  aiEstimateBtnText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000000',
+  },
   logTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.4 },
-  logPillBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 24, paddingVertical: 12, paddingHorizontal: 20 },
-  logPillBtnText: { fontSize: 15, fontWeight: '700', color: COLORS.textWhite },
+  logPillBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 12 },
+  logPillBtnText: { fontSize: 12, fontWeight: '600', color: COLORS.textWhite },
   slotCard: { backgroundColor: '#1A1A1A', borderRadius: 12, borderWidth: 1, borderColor: '#2A2A2A', overflow: 'hidden' },
   slotHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 14 },
   slotLabel: { fontSize: 15, fontWeight: '700', color: COLORS.textWhite },
@@ -952,8 +966,10 @@ const styles = StyleSheet.create({
   slotCancelText: { fontSize: 13, fontWeight: '500', color: COLORS.textMuted },
   slotEntries: { paddingHorizontal: 12, paddingBottom: 12 },
   slotDivider: { height: 1, backgroundColor: '#2A2A2A', marginVertical: 4 },
-  slotEmpty: { paddingHorizontal: 14, paddingBottom: 12 },
+  slotEmpty: { paddingHorizontal: 14, paddingBottom: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   slotEmptyText: { fontSize: 12, color: COLORS.textMuted },
+  slotLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,222,128,0.1)', borderRadius: 14, paddingVertical: 6, paddingHorizontal: 12 },
+  slotLogBtnText: { fontSize: 12, fontWeight: '600', color: '#4ADE80' },
   deleteAction: { width: 80, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
   logCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 0, gap: 10, backgroundColor: '#1A1A1A' },
   logIconCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
