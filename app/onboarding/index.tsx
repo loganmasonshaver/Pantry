@@ -44,12 +44,17 @@ type OnboardingData = {
   cookingSkill: string
   foodDislikes: string[]
   foodDislikesText: string
+  age: string
+  gender: string
+  activityLevel: string
+  fitnessGoal: string
 }
 
 const DEFAULT_DATA: OnboardingData = {
   goal: '', calories: '', protein: '', ft: '', inches: '', weight: '',
   meals: '3', prep: '30 min', diet: ['None'], cookingSkill: '',
   foodDislikes: [], foodDislikesText: '',
+  age: '', gender: '', activityLevel: '', fitnessGoal: '',
 }
 
 function ProgressBar({ pct }: { pct: number }) {
@@ -60,9 +65,9 @@ function ProgressBar({ pct }: { pct: number }) {
   )
 }
 
-function PillButton({ label, onPress, variant = 'white' }: { label: string; onPress: () => void; variant?: 'white' | 'dark' }) {
+function PillButton({ label, onPress, variant = 'white', disabled }: { label: string; onPress: () => void; variant?: 'white' | 'dark'; disabled?: boolean }) {
   return (
-    <TouchableOpacity style={[s.pill, variant === 'dark' && s.pillDark]} onPress={onPress} activeOpacity={0.85}>
+    <TouchableOpacity style={[s.pill, variant === 'dark' && s.pillDark, disabled && { opacity: 0.4 }]} onPress={onPress} activeOpacity={0.85} disabled={disabled}>
       <Text style={[s.pillText, variant === 'dark' && s.pillTextDark]}>{label}</Text>
     </TouchableOpacity>
   )
@@ -121,7 +126,150 @@ function S2Goal({ value, onChange, onNext, onBack }: { value: string; onChange: 
   )
 }
 
-function S3Numbers({ calories, protein, onCalories, onProtein, onNext, onBack }: { calories: string; protein: string; onCalories: (v: string) => void; onProtein: (v: string) => void; onNext: () => void; onBack: () => void }) {
+const ACTIVITY_OPTIONS = [
+  { key: 'sedentary', label: 'Sedentary', sub: 'Desk job, little exercise', mult: 1.2 },
+  { key: 'light', label: 'Lightly Active', sub: 'Light exercise 1-3x/week', mult: 1.375 },
+  { key: 'moderate', label: 'Moderately Active', sub: 'Exercise 3-5x/week', mult: 1.55 },
+  { key: 'very', label: 'Very Active', sub: 'Hard exercise 6-7x/week', mult: 1.725 },
+  { key: 'athlete', label: 'Athlete', sub: '2x/day or physical job', mult: 1.9 },
+]
+
+const FITNESS_GOAL_OPTIONS = [
+  { key: 'lose', label: 'Lose Weight', adj: -500 },
+  { key: 'maintain', label: 'Maintain', adj: 0 },
+  { key: 'gain', label: 'Gain Muscle', adj: 300 },
+]
+
+function calculateGoals(age: number, gender: string, heightCm: number, weightKg: number, activityLevel: string, fitnessGoal: string) {
+  // Mifflin-St Jeor BMR
+  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161)
+  const activity = ACTIVITY_OPTIONS.find(a => a.key === activityLevel)
+  const tdee = bmr * (activity?.mult ?? 1.55)
+  const goalAdj = FITNESS_GOAL_OPTIONS.find(g => g.key === fitnessGoal)?.adj ?? 0
+  const calories = Math.round(tdee + goalAdj)
+  const weightLbs = weightKg / 0.453592
+  const protein = Math.round(fitnessGoal === 'gain' ? weightLbs * 1.0 : weightLbs * 0.8)
+  return { calories, protein }
+}
+
+function S3Numbers({
+  calories, protein, onCalories, onProtein, onNext, onBack,
+  age, gender, activityLevel, fitnessGoal, ft, inches, weight,
+  onAge, onGender, onActivityLevel, onFitnessGoal,
+}: {
+  calories: string; protein: string; onCalories: (v: string) => void; onProtein: (v: string) => void
+  onNext: () => void; onBack: () => void
+  age: string; gender: string; activityLevel: string; fitnessGoal: string
+  ft: string; inches: string; weight: string
+  onAge: (v: string) => void; onGender: (v: string) => void
+  onActivityLevel: (v: string) => void; onFitnessGoal: (v: string) => void
+}) {
+  const [showCalc, setShowCalc] = useState(false)
+  const [calcResult, setCalcResult] = useState<{ calories: number; protein: number } | null>(null)
+
+  const canCalculate = age && gender && activityLevel && fitnessGoal && ft && weight
+
+  const handleCalculate = () => {
+    const heightCm = (parseInt(ft || '0') * 12 + parseInt(inches || '0')) * 2.54
+    const weightKg = parseFloat(weight || '0') * 0.453592
+    const result = calculateGoals(parseInt(age), gender, heightCm, weightKg, activityLevel, fitnessGoal)
+    setCalcResult(result)
+  }
+
+  const applyResult = () => {
+    if (calcResult) {
+      onCalories(String(calcResult.calories))
+      onProtein(String(calcResult.protein))
+      setShowCalc(false)
+    }
+  }
+
+  if (showCalc && !calcResult) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <ProgressBar pct={PROGRESS[3]} />
+        <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
+          <Text style={s.title}>Calculate your goals</Text>
+          <Text style={s.subtitle}>We'll use science to find your ideal targets</Text>
+
+          <View style={s.inputCard}>
+            <Text style={s.inputLabel}>Age</Text>
+            <TextInput style={s.input} placeholder="25" placeholderTextColor={MUTED} keyboardType="number-pad" value={age} onChangeText={onAge} />
+          </View>
+
+          <Text style={s.prefSection}>Gender</Text>
+          <View style={s.pillRow}>
+            {['male', 'female'].map(g => (
+              <TouchableOpacity key={g} style={[s.prefPill, gender === g && s.prefPillActive]} onPress={() => onGender(g)} activeOpacity={0.8}>
+                <Text style={[s.prefPillText, gender === g && s.prefPillTextActive]}>{g === 'male' ? 'Male' : 'Female'}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={s.prefSection}>Activity Level</Text>
+          <View style={s.cardList}>
+            {ACTIVITY_OPTIONS.map(a => (
+              <TouchableOpacity key={a.key} style={[s.selectCard, activityLevel === a.key && s.selectCardActive]} onPress={() => onActivityLevel(a.key)} activeOpacity={0.8}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.selectCardLabel}>{a.label}</Text>
+                  <Text style={s.selectCardSub}>{a.sub}</Text>
+                </View>
+                {activityLevel === a.key && <View style={s.checkCircle}><Check size={13} stroke="#000" strokeWidth={3} /></View>}
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={s.prefSection}>Fitness Goal</Text>
+          <View style={s.pillRow}>
+            {FITNESS_GOAL_OPTIONS.map(g => (
+              <TouchableOpacity key={g.key} style={[s.prefPill, fitnessGoal === g.key && s.prefPillActive]} onPress={() => onFitnessGoal(g.key)} activeOpacity={0.8}>
+                <Text style={[s.prefPillText, fitnessGoal === g.key && s.prefPillTextActive]}>{g.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {!ft && !weight && (
+            <Text style={[s.subtitle, { marginTop: 20, color: '#FF6B6B' }]}>
+              Go back to step 4 to enter your height and weight first
+            </Text>
+          )}
+        </ScrollView>
+        <View style={s.bottomActions}>
+          <PillButton label="Calculate" onPress={handleCalculate} disabled={!canCalculate} />
+          <TouchableOpacity style={s.textLink} onPress={() => setShowCalc(false)} activeOpacity={0.7}>
+            <Text style={s.textLinkText}>Back to manual entry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
+  if (showCalc && calcResult) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <ProgressBar pct={PROGRESS[3]} />
+        <View style={s.centerFlex}>
+          <Text style={s.paywallTitle}>Your recommended goals</Text>
+          <Text style={[s.subtitle, { textAlign: 'center', marginBottom: 32 }]}>Based on your profile using the Mifflin-St Jeor formula</Text>
+          <View style={[s.inputCard, { width: '100%', marginBottom: 16 }]}>
+            <Text style={s.inputLabel}>Daily Calories</Text>
+            <Text style={[s.input, { paddingVertical: 4 }]}>{calcResult.calories.toLocaleString()} kcal</Text>
+          </View>
+          <View style={[s.inputCard, { width: '100%', marginBottom: 16 }]}>
+            <Text style={s.inputLabel}>Daily Protein</Text>
+            <Text style={[s.input, { paddingVertical: 4 }]}>{calcResult.protein}g</Text>
+          </View>
+        </View>
+        <View style={s.bottomActions}>
+          <PillButton label="Use these goals" onPress={applyResult} />
+          <TouchableOpacity style={s.textLink} onPress={() => setCalcResult(null)} activeOpacity={0.7}>
+            <Text style={s.textLinkText}>Recalculate</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    )
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <ProgressBar pct={PROGRESS[3]} />
@@ -139,7 +287,7 @@ function S3Numbers({ calories, protein, onCalories, onProtein, onNext, onBack }:
               <TextInput style={s.input} placeholder="180g" placeholderTextColor={MUTED} keyboardType="number-pad" value={protein} onChangeText={onProtein} />
             </View>
           </View>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => { onCalories('2400'); onProtein('180') }}>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setShowCalc(true)}>
             <Text style={s.calcLink}>Not sure? Calculate for me</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -462,6 +610,10 @@ export default function Onboarding() {
           last_active: new Date().toISOString().split('T')[0],
           food_dislikes: allDislikes,
           food_prefs_banner_dismissed: allDislikes.length > 0,
+          age: parseInt(finalData.age) || null,
+          gender: finalData.gender || null,
+          activity_level: finalData.activityLevel || null,
+          fitness_goal: finalData.fitnessGoal || null,
         }).eq('id', user.id)
 
         if (error) {
@@ -481,8 +633,16 @@ export default function Onboarding() {
   const screens: Record<number, React.ReactNode> = {
     1: <S1Welcome onNext={next} onSignIn={() => router.push('/onboarding/signin')} />,
     2: <S2Goal value={data.goal} onChange={update('goal')} onNext={next} onBack={back} />,
-    3: <S3Numbers calories={data.calories} protein={data.protein} onCalories={update('calories')} onProtein={update('protein')} onNext={next} onBack={back} />,
-    4: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
+    3: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
+    4: <S3Numbers
+          calories={data.calories} protein={data.protein}
+          onCalories={update('calories')} onProtein={update('protein')}
+          age={data.age} gender={data.gender} activityLevel={data.activityLevel} fitnessGoal={data.fitnessGoal}
+          ft={data.ft} inches={data.inches} weight={data.weight}
+          onAge={update('age')} onGender={update('gender')}
+          onActivityLevel={update('activityLevel')} onFitnessGoal={update('fitnessGoal')}
+          onNext={next} onBack={back}
+        />,
     5: <S5Preferences meals={data.meals} prep={data.prep} diet={data.diet} onMeals={update('meals')} onPrep={update('prep')} onDiet={update('diet')} onNext={next} onBack={back} />,
     6: <S6CookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
     7: <S7FoodPreferences

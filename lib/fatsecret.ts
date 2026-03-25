@@ -1,8 +1,4 @@
-import CryptoJS from 'crypto-js'
-
-const BASE_URL = 'https://platform.fatsecret.com/rest/server.api'
-const CONSUMER_KEY = process.env.EXPO_PUBLIC_FATSECRET_KEY ?? ''
-const CONSUMER_SECRET = process.env.EXPO_PUBLIC_FATSECRET_SECRET ?? ''
+import { supabase } from './supabase'
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -28,78 +24,23 @@ export type FoodSearchResult = {
   food_id: string
   food_name: string
   brand_name?: string
-  food_description: string // e.g. "Per 100g - Calories: 52kcal | Fat: 0.17g | Carbs: 13.81g | Protein: 0.26g"
+  food_description: string
 }
 
-// ── OAuth 1.0 HMAC-SHA1 signing ──────────────────────────────────────────
+// ── API calls via Edge Function ──────────────────────────────────────────
 
-function percentEncode(str: string): string {
-  return encodeURIComponent(str)
-    .replace(/!/g, '%21')
-    .replace(/'/g, '%27')
-    .replace(/\(/g, '%28')
-    .replace(/\)/g, '%29')
-    .replace(/\*/g, '%2A')
-}
-
-function generateNonce(): string {
-  return Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2)
-}
-
-function buildSignedUrl(method: 'GET', params: Record<string, string>): string {
-  const oauthParams: Record<string, string> = {
-    oauth_consumer_key: CONSUMER_KEY,
-    oauth_nonce: generateNonce(),
-    oauth_signature_method: 'HMAC-SHA1',
-    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
-    oauth_version: '1.0',
-    format: 'json',
-    ...params,
-  }
-
-  // Sort all params alphabetically and percent-encode keys + values
-  const sortedKeys = Object.keys(oauthParams).sort()
-  const paramString = sortedKeys
-    .map(k => `${percentEncode(k)}=${percentEncode(oauthParams[k])}`)
-    .join('&')
-
-  // Build signature base string
-  const signatureBase = [
-    method,
-    percentEncode(BASE_URL),
-    percentEncode(paramString),
-  ].join('&')
-
-  // Sign with HMAC-SHA1 — signing key is consumerSecret& (empty token secret)
-  const signingKey = `${percentEncode(CONSUMER_SECRET)}&`
-  const signature = CryptoJS.HmacSHA1(signatureBase, signingKey)
-  const signatureB64 = CryptoJS.enc.Base64.stringify(signature)
-
-  oauthParams['oauth_signature'] = signatureB64
-
-  // Build final URL
-  const queryString = Object.keys(oauthParams)
-    .sort()
-    .map(k => `${percentEncode(k)}=${percentEncode(oauthParams[k])}`)
-    .join('&')
-
-  return `${BASE_URL}?${queryString}`
-}
-
-async function apiFetch<T>(params: Record<string, string>): Promise<T> {
-  const url = buildSignedUrl('GET', params)
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`FatSecret API error: ${res.status}`)
-  const json = await res.json()
-  if (json.error) throw new Error(json.error.message ?? 'FatSecret error')
-  return json as T
+async function apiFetch<T>(method: string, params: Record<string, string>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke('fatsecret-proxy', {
+    body: { method, params },
+  })
+  if (error) throw error
+  return data as T
 }
 
 // ── Public API functions ─────────────────────────────────────────────────
 
 export async function searchFoods(query: string, page = 0): Promise<FoodSearchResult[]> {
-  const data = await apiFetch<any>({
-    method: 'foods.search',
+  const data = await apiFetch<any>('foods.search', {
     search_expression: query,
     page_number: String(page),
     max_results: '20',
@@ -107,7 +48,6 @@ export async function searchFoods(query: string, page = 0): Promise<FoodSearchRe
 
   const foods = data?.foods?.food
   if (!foods) return []
-  // API returns object (single result) or array
   return (Array.isArray(foods) ? foods : [foods]).map((f: any) => ({
     food_id: f.food_id,
     food_name: f.food_name,
@@ -117,8 +57,7 @@ export async function searchFoods(query: string, page = 0): Promise<FoodSearchRe
 }
 
 export async function getFoodById(foodId: string): Promise<FoodDetail> {
-  const data = await apiFetch<any>({
-    method: 'food.get',
+  const data = await apiFetch<any>('food.get', {
     food_id: foodId,
   })
 
@@ -146,8 +85,6 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
 }
 
 // ── Barcode lookup via Open Food Facts (free, no auth) ────────────────────
-// food.find_id_for_barcode is a FatSecret Premier paid method.
-// Instead: resolve product name from Open Food Facts, then search FatSecret.
 
 async function productNameFromBarcode(barcode: string): Promise<string | null> {
   try {

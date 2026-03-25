@@ -6,6 +6,7 @@ import { DarkTheme, ThemeProvider } from '@react-navigation/native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AuthProvider, useAuth } from '../context/AuthContext'
+import { useNotifications } from '../hooks/useNotifications'
 import { SuperwallProvider } from 'expo-superwall'
 import { SuperwallContextProvider } from '../context/SuperwallContext'
 
@@ -20,6 +21,7 @@ const AppTheme = {
 function RootLayoutNav() {
   const { session, loading } = useAuth()
   const [checking, setChecking] = useState(true)
+  useNotifications(session?.user?.id ?? null)
 
   useEffect(() => {
     if (loading) return
