@@ -13,10 +13,11 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from 'expo-router'
-import { Bookmark, Search, X, Utensils, Clock } from 'lucide-react-native'
+import { Bookmark, Search, X, Utensils, Clock, Plus } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import RecipeFormModal from '@/components/RecipeFormModal'
 
 const { width } = Dimensions.get('window')
 const CARD_WIDTH = (width - 20 * 2 - 12) / 2
@@ -29,6 +30,11 @@ type SavedMeal = {
   prep_time: number | null
   calories: number | null
   protein: number | null
+  carbs: number | null
+  fat: number | null
+  ingredients: any[] | null
+  steps: string[] | null
+  is_user_created: boolean
   tags: string[]
   image?: string | null
 }
@@ -40,13 +46,18 @@ function deriveTags(meal: { protein: number | null; prep_time: number | null }):
   return tags
 }
 
-const FILTERS = ['All', 'High Protein', 'Quick']
+const FILTERS = ['All', 'High Protein', 'Quick', 'My Recipes']
 
 // ── Meal card ──────────────────────────────────────────────────────────
 
-function MealCard({ meal, onUnsave }: { meal: SavedMeal; onUnsave: () => void }) {
+function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () => void; onEdit?: () => void }) {
   return (
-    <View style={styles.card}>
+    <TouchableOpacity style={styles.card} activeOpacity={0.9} onLongPress={meal.is_user_created ? onEdit : undefined}>
+      {meal.is_user_created && (
+        <View style={styles.myRecipeBadge}>
+          <Text style={styles.myRecipeBadgeText}>My Recipe</Text>
+        </View>
+      )}
       {meal.image ? (
         <Image source={{ uri: meal.image }} style={styles.cardImageReal} resizeMode="cover" />
       ) : (
@@ -73,7 +84,7 @@ function MealCard({ meal, onUnsave }: { meal: SavedMeal; onUnsave: () => void })
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   )
 }
 
@@ -86,6 +97,8 @@ export default function SavedScreen() {
   const [activeFilter, setActiveFilter] = useState('All')
   const [searchQuery, setSearchQuery] = useState('')
   const [removed, setRemoved] = useState<{ meal: SavedMeal; index: number } | null>(null)
+  const [showRecipeForm, setShowRecipeForm] = useState(false)
+  const [editingMeal, setEditingMeal] = useState<SavedMeal | null>(null)
 
   const toastOpacity = useRef(new Animated.Value(0)).current
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -95,11 +108,11 @@ export default function SavedScreen() {
     setLoading(true)
     const { data, error } = await supabase
       .from('saved_meals')
-      .select('id, name, prep_time, calories, protein')
+      .select('id, name, prep_time, calories, protein, carbs, fat, ingredients, steps, is_user_created')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (!error && data) {
-      const mealsWithTags = data.map(row => ({ ...row, tags: deriveTags(row), image: null as string | null }))
+      const mealsWithTags = data.map(row => ({ ...row, tags: deriveTags(row), image: null as string | null, is_user_created: row.is_user_created ?? false }))
       setMeals(mealsWithTags)
       // Fetch cached images in background
       mealsWithTags.forEach(async (meal, i) => {
@@ -174,7 +187,11 @@ export default function SavedScreen() {
   }
 
   const filtered = meals.filter(m => {
-    const matchesFilter = activeFilter === 'All' || m.tags.includes(activeFilter)
+    const matchesFilter = activeFilter === 'All'
+      ? true
+      : activeFilter === 'My Recipes'
+        ? m.is_user_created
+        : m.tags.includes(activeFilter)
     const matchesSearch = m.name.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesFilter && matchesSearch
   })
@@ -185,10 +202,15 @@ export default function SavedScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header ── */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Saved Meals</Text>
-        <Text style={styles.headerSub}>
-          {meals.length} meal{meals.length !== 1 ? 's' : ''} saved
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Saved Meals</Text>
+          <Text style={styles.headerSub}>
+            {meals.length} meal{meals.length !== 1 ? 's' : ''} saved
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.createBtn} onPress={() => { setEditingMeal(null); setShowRecipeForm(true) }} activeOpacity={0.7}>
+          <Plus size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+        </TouchableOpacity>
       </View>
 
       {/* ── Search ── */}
@@ -248,7 +270,7 @@ export default function SavedScreen() {
           showsVerticalScrollIndicator={false}
         >
           {filtered.map(meal => (
-            <MealCard key={meal.id} meal={meal} onUnsave={() => unsave(meal.id)} />
+            <MealCard key={meal.id} meal={meal} onUnsave={() => unsave(meal.id)} onEdit={() => { setEditingMeal(meal); setShowRecipeForm(true) }} />
           ))}
           {filtered.length % 2 !== 0 && <View style={{ width: CARD_WIDTH }} />}
         </ScrollView>
@@ -263,6 +285,12 @@ export default function SavedScreen() {
           </TouchableOpacity>
         </Animated.View>
       )}
+      <RecipeFormModal
+        visible={showRecipeForm}
+        onClose={() => { setShowRecipeForm(false); setEditingMeal(null) }}
+        onSaved={() => { setShowRecipeForm(false); setEditingMeal(null); fetchMeals() }}
+        editMeal={editingMeal}
+      />
     </SafeAreaView>
   )
 }
@@ -298,6 +326,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 28,
@@ -420,5 +450,30 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 20,
+  },
+
+  createBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  myRecipeBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    backgroundColor: 'rgba(74,222,128,0.15)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    zIndex: 1,
+  },
+  myRecipeBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#4ADE80',
+    letterSpacing: 0.3,
   },
 })
