@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const replicateToken = Deno.env.get("REPLICATE_API_TOKEN")
@@ -18,6 +19,10 @@ const corsHeaders = {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
+
+  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
+  const { allowed } = rateLimit(ip, 20, 60000)
+  if (!allowed) return rateLimitResponse()
 
   try {
     const { mealName, ingredients = [] } = await req.json()

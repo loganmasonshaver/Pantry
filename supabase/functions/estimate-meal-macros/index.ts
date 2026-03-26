@@ -1,4 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 
@@ -11,6 +12,10 @@ Deno.serve(async (req: Request) => {
       },
     })
   }
+
+  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
+  const { allowed } = rateLimit(ip, 15, 60000)
+  if (!allowed) return rateLimitResponse()
 
   try {
     const { mode, description, base64 } = await req.json()
