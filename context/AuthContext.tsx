@@ -5,12 +5,12 @@ import { identifyUser, resetUser } from '../lib/analytics';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
-import * as Crypto from 'expo-crypto';
 
 type AuthContextType = {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  appleSignInAvailable: boolean;
   signUp: (email: string, password: string, metadata?: Record<string, string>) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signInWithApple: () => Promise<void>;
@@ -24,6 +24,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [appleSignInAvailable, setAppleSignInAvailable] = useState(false);
+
+  useEffect(() => {
+    AppleAuthentication.isAvailableAsync().then(setAppleSignInAvailable);
+  }, []);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -82,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    const redirectUrl = AuthSession.makeRedirectUri({ scheme: 'pantry' });
+    const redirectUrl = 'pantry://callback';
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -92,17 +97,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     if (error || !data.url) throw error || new Error('No OAuth URL');
     const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-    if (result.type !== 'success') throw new Error('Google sign-in cancelled');
+    if (result.type !== 'success') throw { code: '12501', message: 'Google sign-in cancelled' };
     const url = new URL(result.url);
     const params = new URLSearchParams(url.hash.substring(1));
     const accessToken = params.get('access_token');
     const refreshToken = params.get('refresh_token');
     if (!accessToken || !refreshToken) throw new Error('Missing tokens from OAuth');
-    const { error: sessionError } = await supabase.auth.setSession({
+    const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
       access_token: accessToken,
       refresh_token: refreshToken,
     });
     if (sessionError) throw sessionError;
+
+    // Save full_name + avatar_url from Google profile to user metadata
+    const meta = sessionData.user?.user_metadata;
+    if (meta) {
+      const fullName = meta.full_name || meta.name || '';
+      const avatarUrl = meta.avatar_url || meta.picture || '';
+      if (fullName || avatarUrl) {
+        await supabase.auth.updateUser({
+          data: {
+            ...(fullName ? { full_name: fullName } : {}),
+            ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+          },
+        });
+      }
+    }
   };
 
   const signOut = async () => {
@@ -111,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, loading, signUp, signIn, signInWithApple, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ session, user, loading, appleSignInAvailable, signUp, signIn, signInWithApple, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );

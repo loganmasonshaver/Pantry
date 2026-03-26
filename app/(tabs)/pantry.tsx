@@ -12,11 +12,12 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from 'expo-router'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Beef, Wheat, Leaf, Droplets, Milk, Package } from 'lucide-react-native'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { STORE_CATEGORIES, autoCategoryMatches } from '@/lib/categories'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 
@@ -38,15 +39,26 @@ type Category = {
 
 // ── Category config ────────────────────────────────────────────────────
 
-const CATEGORY_CONFIG: { name: string; id: string; icon: React.ElementType; iconColor: string }[] = [
-  { id: 'protein',    name: 'Protein',        icon: Beef,     iconColor: '#FF6B6B' },
-  { id: 'carbs',      name: 'Carbs',          icon: Wheat,    iconColor: '#F5A623' },
-  { id: 'produce',    name: 'Produce',        icon: Leaf,     iconColor: '#4ADE80' },
-  { id: 'condiments', name: 'Condiments',     icon: Droplets, iconColor: '#60A5FA' },
-  { id: 'dairy',      name: 'Dairy',          icon: Milk,     iconColor: '#E2E8F0' },
-  { id: 'staples',    name: 'Pantry Staples', icon: Package,  iconColor: '#C084FC' },
-  { id: 'other',      name: 'Other',          icon: Package,  iconColor: '#888888' },
-]
+const CATEGORY_COLORS: Record<string, string> = {
+  'Produce': '#4ADE80',
+  'Bakery': '#F5A623',
+  'Meat & Fish': '#FF6B6B',
+  'Dairy & Eggs': '#E2E8F0',
+  'Frozen': '#60A5FA',
+  'Grains & Pasta': '#F5A623',
+  'Canned & Jarred': '#C084FC',
+  'Snacks': '#FFB020',
+  'Condiments & Sauces': '#60A5FA',
+  'Beverages': '#00C9A7',
+  'Other': '#888888',
+}
+
+const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
+  id: name.toLowerCase().replace(/[^a-z]/g, ''),
+  name,
+  icon: Package,
+  iconColor: CATEGORY_COLORS[name] ?? '#888888',
+}))
 
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
@@ -143,8 +155,8 @@ export default function PantryScreen() {
   const [showReceiptModal, setShowReceiptModal] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [newIngredientName, setNewIngredientName] = useState('')
-  const [selectedCategoryId, setSelectedCategoryId] = useState('protein')
   const [addSaving, setAddSaving] = useState(false)
+  const [disambigChoices, setDisambigChoices] = useState<string[]>([])
 
   const fetchItems = useCallback(async () => {
     if (!user) return
@@ -221,14 +233,24 @@ export default function PantryScreen() {
     await supabase.from('pantry_items').delete().eq('id', ingredientId)
   }
 
-  const addIngredient = async () => {
+  const addIngredient = async (overrideCategory?: string) => {
     const name = newIngredientName.trim()
     if (!name || !user) return
+
+    if (!overrideCategory) {
+      const matches = autoCategoryMatches(name)
+      if (matches.length > 1) {
+        setDisambigChoices(matches)
+        return
+      }
+    }
+
+    const category = overrideCategory || autoCategoryMatches(name)[0] || 'Other'
     setAddSaving(true)
-    const catConfig = categoryConfigById[selectedCategoryId] ?? CATEGORY_CONFIG[0]
+    setDisambigChoices([])
     const { data, error } = await supabase
       .from('pantry_items')
-      .insert({ user_id: user.id, name, category: catConfig.name, in_stock: true })
+      .insert({ user_id: user.id, name, category, in_stock: true })
       .select('id, name, category, in_stock')
       .single()
     setAddSaving(false)
@@ -236,11 +258,12 @@ export default function PantryScreen() {
 
     const newIng: Ingredient = { id: data.id, name: data.name, inStock: data.in_stock }
     setCategories(prev => {
-      const existing = prev.find(c => c.id === selectedCategoryId)
+      const existing = prev.find(c => c.name === category)
       if (existing) {
-        return prev.map(c => c.id === selectedCategoryId ? { ...c, ingredients: [...c.ingredients, newIng] } : c)
+        return prev.map(c => c.name === category ? { ...c, ingredients: [...c.ingredients, newIng] } : c)
       }
-      return [...prev, { ...catConfig, ingredients: [newIng] }]
+      const cfg = categoryConfigByName[category] ?? { id: category.toLowerCase(), name: category, icon: Package, iconColor: '#888888' }
+      return [...prev, { ...cfg, ingredients: [newIng] }]
     })
     setNewIngredientName('')
     setShowAddModal(false)
@@ -265,22 +288,23 @@ export default function PantryScreen() {
       {/* ── Header ── */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Pantry</Text>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => setShowAddModal(true)} activeOpacity={0.7}>
-          <Plus size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+        <TouchableOpacity style={styles.manualEntryBtn} onPress={() => setShowAddModal(true)} activeOpacity={0.7}>
+          <Plus size={14} stroke={COLORS.textMuted} strokeWidth={2} />
+          <Text style={styles.manualEntryText}>Manual Entry</Text>
         </TouchableOpacity>
       </View>
 
       {/* ── Scan cards row ── */}
       <View style={styles.scanRow}>
         <TouchableOpacity
-          style={[styles.scanCard, { flex: 1.4 }]}
+          style={[styles.scanCard, { flex: 1 }]}
           onPress={() => setShowScanModal(true)}
           activeOpacity={0.85}
         >
           <View style={styles.scanCardBadge}>
             <Text style={styles.scanCardBadgeText}>AI</Text>
           </View>
-          <ScanLine size={28} stroke="#4ADE80" strokeWidth={1.6} />
+          <ScanLine size={32} stroke="#4ADE80" strokeWidth={1.6} />
           <Text style={styles.scanCardTitle}>Scan Pantry</Text>
           <Text style={styles.scanCardSub}>Point at fridge or shelf</Text>
         </TouchableOpacity>
@@ -293,7 +317,7 @@ export default function PantryScreen() {
           <View style={styles.scanCardBadge}>
             <Text style={styles.scanCardBadgeText}>AI</Text>
           </View>
-          <ScanLine size={28} stroke="#60A5FA" strokeWidth={1.6} />
+          <ScanLine size={32} stroke="#60A5FA" strokeWidth={1.6} />
           <Text style={styles.scanCardTitle}>Scan Receipt</Text>
           <Text style={styles.scanCardSub}>Add from grocery run</Text>
         </TouchableOpacity>
@@ -381,49 +405,45 @@ export default function PantryScreen() {
                 placeholder="Ingredient name"
                 placeholderTextColor={COLORS.textMuted}
                 value={newIngredientName}
-                onChangeText={setNewIngredientName}
+                onChangeText={(t) => { setNewIngredientName(t); setDisambigChoices([]) }}
                 autoFocus
               />
 
-              <Text style={styles.pickerLabel}>Category</Text>
-              <View style={styles.categoryPicker}>
-                {CATEGORY_CONFIG.filter(c => c.id !== 'other').map(cat => (
+              {disambigChoices.length > 0 ? (
+                <View style={{ gap: 8 }}>
+                  <Text style={styles.pickerLabel}>Which section?</Text>
+                  <View style={styles.categoryPicker}>
+                    {disambigChoices.map(cat => (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[styles.categoryChip, styles.categoryChipActive]}
+                        onPress={() => addIngredient(cat)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.categoryChipText, styles.categoryChipTextActive]}>{cat}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.modalActions}>
                   <TouchableOpacity
-                    key={cat.id}
-                    style={[
-                      styles.categoryChip,
-                      selectedCategoryId === cat.id && styles.categoryChipActive,
-                    ]}
-                    onPress={() => setSelectedCategoryId(cat.id)}
+                    style={styles.cancelBtn}
+                    onPress={() => { setNewIngredientName(''); setDisambigChoices([]); setShowAddModal(false) }}
                     activeOpacity={0.7}
                   >
-                    <Text style={[
-                      styles.categoryChipText,
-                      selectedCategoryId === cat.id && styles.categoryChipTextActive,
-                    ]}>
-                      {cat.name}
-                    </Text>
+                    <Text style={styles.cancelBtnText}>Cancel</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.cancelBtn}
-                  onPress={() => { setNewIngredientName(''); setShowAddModal(false) }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.addBtn, (!newIngredientName.trim() || addSaving) && { opacity: 0.5 }]}
-                  onPress={addIngredient}
-                  activeOpacity={0.85}
-                  disabled={!newIngredientName.trim() || addSaving}
+                  <TouchableOpacity
+                    style={[styles.addBtn, (!newIngredientName.trim() || addSaving) && { opacity: 0.5 }]}
+                    onPress={() => addIngredient()}
+                    activeOpacity={0.85}
+                    disabled={!newIngredientName.trim() || addSaving}
                 >
                   <Text style={styles.addBtnText}>{addSaving ? 'Adding...' : 'Add'}</Text>
                 </TouchableOpacity>
               </View>
+              )}
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -444,13 +464,19 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1A1A1A',
+  manualEntryBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 5,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  manualEntryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
   },
 
   scanRow: {
@@ -462,12 +488,12 @@ const styles = StyleSheet.create({
   scanCard: {
     backgroundColor: '#111111',
     borderRadius: 16,
-    paddingVertical: 18,
+    paddingVertical: 22,
     paddingHorizontal: 14,
     alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    gap: 10,
+    borderWidth: 1.5,
+    borderColor: 'rgba(74,222,128,0.15)',
   },
   scanCardBadge: {
     position: 'absolute',

@@ -9,6 +9,7 @@ import {
   LayoutAnimation,
   Platform,
   UIManager,
+  Image,
   Modal,
   TextInput,
   ActivityIndicator,
@@ -153,6 +154,21 @@ function MacroCard({
   )
 }
 
+function ShimmerBox({ style }: { style: any }) {
+  const shimmer = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmer, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(shimmer, { toValue: 0, duration: 1000, useNativeDriver: true }),
+      ])
+    ).start()
+  }, [])
+  return (
+    <Animated.View style={[style, { opacity: shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] }) }]} />
+  )
+}
+
 function MealCard({
   meal,
   rating,
@@ -169,9 +185,11 @@ function MealCard({
       activeOpacity={0.75}
       onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
     >
-      <View style={styles.mealImagePlaceholder}>
-        <Utensils size={24} stroke="#666666" strokeWidth={1.5} />
-      </View>
+      {meal.image ? (
+        <Image source={{ uri: meal.image }} style={styles.mealImageReal} resizeMode="cover" />
+      ) : (
+        <ShimmerBox style={styles.mealImagePlaceholder} />
+      )}
       <View style={styles.mealInfo}>
         <Text style={styles.mealName}>{meal.name}</Text>
         <View style={styles.mealMeta}>
@@ -306,7 +324,8 @@ export default function HomeScreen() {
   const router = useRouter()
   const { isPremium } = usePremium()
   const { registerPlacement } = useSuperwall()
-  const { meals, loading, error, regenerate } = useMealSuggestions(user?.id, isPremium)
+  const [mealMode, setMealMode] = useState<'cookNow' | 'mealPlan'>('cookNow')
+  const { meals, loading, error, regenerate } = useMealSuggestions(user?.id, isPremium, mealMode)
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
   const [showIntroPopup, setShowIntroPopup] = useState(false)
@@ -590,10 +609,33 @@ export default function HomeScreen() {
 
           {mealsExpanded && (
             <>
+              {/* Mode toggle */}
+              <View style={styles.mealModeToggle}>
+                <TouchableOpacity
+                  style={[styles.mealModeBtn, mealMode === 'cookNow' && styles.mealModeBtnActive]}
+                  onPress={() => setMealMode('cookNow')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.mealModeBtnText, mealMode === 'cookNow' && styles.mealModeBtnTextActive]}>Cook Now</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.mealModeBtn, mealMode === 'mealPlan' && styles.mealModeBtnActive]}
+                  onPress={() => setMealMode('mealPlan')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.mealModeBtnText, mealMode === 'mealPlan' && styles.mealModeBtnTextActive]}>Meal Plan</Text>
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.mealModeSub}>
+                {mealMode === 'cookNow' ? 'Only uses ingredients in your pantry' : 'May include items you need to buy'}
+              </Text>
+
               {loading ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator color="#4ADE80" size="large" />
-                  <Text style={styles.loadingText}>Generating meals from your pantry...</Text>
+                  <Text style={styles.loadingText}>
+                    {mealMode === 'cookNow' ? 'Finding meals from your pantry...' : 'Planning meals for the week...'}
+                  </Text>
                 </View>
               ) : error ? (
                 <View style={styles.loadingContainer}>
@@ -918,6 +960,7 @@ const styles = StyleSheet.create({
   mealsCollapsedSub: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   mealList: { gap: 14, marginBottom: 28 },
   mealCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, borderColor: '#EBEBEB', backgroundColor: COLORS.card, padding: 16, gap: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  mealImageReal: { width: 72, height: 72, borderRadius: 12 },
   mealImagePlaceholder: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#2C2C2C', alignItems: 'center', justifyContent: 'center' },
   mealInfo: { flex: 1, gap: 6 },
   ratingBtns: { flexDirection: 'column', gap: 8, alignItems: 'center' },
@@ -933,6 +976,38 @@ const styles = StyleSheet.create({
   macroDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: COLORS.textMuted },
   regenButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: COLORS.background, borderRadius: 16, paddingVertical: 18 },
   regenText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
+
+  mealModeToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#111111',
+    borderRadius: 14,
+    padding: 3,
+    marginHorizontal: 16,
+    marginBottom: 6,
+  },
+  mealModeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 11,
+    alignItems: 'center',
+  },
+  mealModeBtnActive: {
+    backgroundColor: '#FFFFFF',
+  },
+  mealModeBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  mealModeBtnTextActive: {
+    color: '#000000',
+  },
+  mealModeSub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
   loadingContainer: { alignItems: 'center', paddingVertical: 40, gap: 16 },
   loadingText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
   errorText: { fontSize: 14, color: '#EF4444', textAlign: 'center' },

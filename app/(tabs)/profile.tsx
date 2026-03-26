@@ -454,6 +454,37 @@ function SettingsRow({
 
 const DIET_OPTIONS = ['None', 'Vegetarian', 'Dairy-free', 'Gluten-free', 'Nut-free']
 
+const ACTIVITY_OPTIONS = [
+  { key: 'sedentary', label: 'Sedentary', sub: 'Desk job, little exercise', mult: 1.2 },
+  { key: 'light', label: 'Lightly Active', sub: 'Light exercise 1-3x/week', mult: 1.375 },
+  { key: 'moderate', label: 'Moderately Active', sub: 'Exercise 3-5x/week', mult: 1.55 },
+  { key: 'very', label: 'Very Active', sub: 'Hard exercise 6-7x/week', mult: 1.725 },
+  { key: 'athlete', label: 'Athlete', sub: '2x/day or physical job', mult: 1.9 },
+]
+
+const FITNESS_GOAL_OPTIONS = [
+  { key: 'lose', label: 'Lose Weight' },
+  { key: 'maintain', label: 'Maintain' },
+  { key: 'gain', label: 'Gain Muscle' },
+]
+
+const ACTIVITY_MULTIPLIERS: Record<string, number> = {
+  sedentary: 1.2, light: 1.375, moderate: 1.55, very: 1.725, athlete: 1.9,
+}
+const GOAL_ADJUSTMENTS: Record<string, number> = {
+  lose: -500, maintain: 0, gain: 300,
+}
+
+function calculateGoals(age: number, gender: string, heightCm: number, weightKg: number, activityLevel: string, fitnessGoal: string) {
+  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161)
+  const tdee = bmr * (ACTIVITY_MULTIPLIERS[activityLevel] ?? 1.55)
+  const calories = Math.round(tdee + (GOAL_ADJUSTMENTS[fitnessGoal] ?? 0))
+  const weightLbs = weightKg / 0.453592
+  const proteinPerLb = fitnessGoal === 'lose' ? 1.2 : fitnessGoal === 'maintain' ? 1.0 : 0.8
+  const protein = Math.round(weightLbs * proteinPerLb)
+  return { calories, protein }
+}
+
 type Profile = {
   calorie_goal: number | null
   protein_goal: number | null
@@ -462,6 +493,11 @@ type Profile = {
   weight_kg: number | null
   target_weight_kg: number | null
   dietary_restrictions: string[] | null
+  age: number | null
+  gender: string | null
+  height_cm: number | null
+  activity_level: string | null
+  fitness_goal: string | null
 }
 
 export default function ProfileScreen() {
@@ -513,6 +549,19 @@ export default function ProfileScreen() {
     setProfile(p => p ? { ...p, dietary_restrictions: dietDraft } : p)
     setShowDietModal(false)
   }
+  // Calculator modal
+  const [animatingGoals, setAnimatingGoals] = useState(false)
+  const [displayCalories, setDisplayCalories] = useState<number | null>(null)
+  const [displayProtein, setDisplayProtein] = useState<number | null>(null)
+  const [showCalcModal, setShowCalcModal] = useState(false)
+  const [calcAge, setCalcAge] = useState('')
+  const [calcGender, setCalcGender] = useState('')
+  const [calcFt, setCalcFt] = useState('')
+  const [calcIn, setCalcIn] = useState('')
+  const [calcWeight, setCalcWeight] = useState('')
+  const [calcActivity, setCalcActivity] = useState('')
+  const [calcGoal, setCalcGoal] = useState('')
+
   const [displayWeight, setDisplayWeight] = useState<number | null>(null)
   const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([])
   const [mealLogDates, setMealLogDates] = useState<string[]>([])
@@ -543,7 +592,7 @@ export default function ProfileScreen() {
     // Profile goals + starting weight
     supabase
       .from('profiles')
-      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions')
+      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions, age, gender, height_cm, activity_level, fitness_goal')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -639,6 +688,75 @@ export default function ProfileScreen() {
       targetWeightLbs ? `${targetWeightLbs}` : '',
       'numeric'
     )
+  }
+
+  const handleRecalculate = () => {
+    // Always open modal pre-filled with existing data so user can review/update
+    setCalcAge(profile?.age ? String(profile.age) : '')
+    setCalcGender(profile?.gender ?? '')
+    const heightCm = profile?.height_cm ?? 0
+    const totalInches = Math.round(heightCm / 2.54)
+    setCalcFt(heightCm ? String(Math.floor(totalInches / 12)) : '')
+    setCalcIn(heightCm ? String(totalInches % 12) : '')
+    const weightLbs = profile?.weight_kg ? Math.round(profile.weight_kg * 2.20462) : null
+    setCalcWeight(weightLbs ? String(weightLbs) : '')
+    setCalcActivity(profile?.activity_level ?? '')
+    setCalcGoal(profile?.fitness_goal ?? '')
+    setShowCalcModal(true)
+  }
+
+  const submitCalcModal = async () => {
+    const age = parseInt(calcAge)
+    const ft = parseInt(calcFt)
+    const inches = parseInt(calcIn || '0')
+    const weightLbs = parseFloat(calcWeight)
+    if (!age || !calcGender || !ft || !weightLbs || !calcActivity || !calcGoal) {
+      Alert.alert('Missing Info', 'Please fill in all fields.')
+      return
+    }
+    const heightCm = Math.round((ft * 12 + inches) * 2.54)
+    const weightKg = weightLbs * 0.453592
+    const result = calculateGoals(age, calcGender, heightCm, weightKg, calcActivity, calcGoal)
+    // Save profile fields + goals
+    await supabase.from('profiles').update({
+      age, gender: calcGender, height_cm: heightCm, weight_kg: weightKg,
+      activity_level: calcActivity, fitness_goal: calcGoal,
+      calorie_goal: result.calories, protein_goal: result.protein,
+    }).eq('id', user!.id)
+    setShowCalcModal(false)
+
+    // Animate numbers counting up
+    const startCal = profile?.calorie_goal ?? 0
+    const startPro = profile?.protein_goal ?? 0
+    const endCal = result.calories
+    const endPro = result.protein
+    setAnimatingGoals(true)
+    setDisplayCalories(startCal)
+    setDisplayProtein(startPro)
+
+    const duration = 800
+    const steps = 30
+    const interval = duration / steps
+    let step = 0
+    const timer = setInterval(() => {
+      step++
+      const t = step / steps
+      // Ease out cubic
+      const ease = 1 - Math.pow(1 - t, 3)
+      setDisplayCalories(Math.round(startCal + (endCal - startCal) * ease))
+      setDisplayProtein(Math.round(startPro + (endPro - startPro) * ease))
+      if (step >= steps) {
+        clearInterval(timer)
+        setProfile(p => p ? {
+          ...p, age, gender: calcGender, height_cm: heightCm, weight_kg: weightKg,
+          activity_level: calcActivity, fitness_goal: calcGoal,
+          calorie_goal: endCal, protein_goal: endPro,
+        } : p)
+        setAnimatingGoals(false)
+        setDisplayCalories(null)
+        setDisplayProtein(null)
+      }
+    }, interval)
   }
 
   const handleWeightChange = (w: number | null) => {
@@ -756,6 +874,82 @@ export default function ProfileScreen() {
           </View>
         </Modal>
 
+        {/* ── Calculator Modal ── */}
+        <Modal visible={showCalcModal} transparent animationType="slide" onRequestClose={() => setShowCalcModal(false)}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
+            <View style={[styles.modalCard, { maxHeight: '85%' }]}>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <Text style={[styles.modalTitle, { marginBottom: 4 }]}>Calculate your goals</Text>
+                <Text style={{ fontSize: 13, color: COLORS.textMuted, marginBottom: 16 }}>We'll use your info to find ideal targets</Text>
+
+                {/* Age + Gender */}
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calcLabel}>Age</Text>
+                    <TextInput style={styles.calcInput} placeholder="25" placeholderTextColor={COLORS.textMuted} keyboardType="number-pad" value={calcAge} onChangeText={setCalcAge} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calcLabel}>Gender</Text>
+                    <View style={{ flexDirection: 'row', gap: 6 }}>
+                      {['male', 'female'].map(g => (
+                        <TouchableOpacity key={g} style={[styles.calcPill, calcGender === g && styles.calcPillActive]} onPress={() => setCalcGender(g)} activeOpacity={0.7}>
+                          <Text style={[styles.calcPillText, calcGender === g && styles.calcPillTextActive]}>{g === 'male' ? 'Male' : 'Female'}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                {/* Height + Weight */}
+                <View style={{ flexDirection: 'row', gap: 10, marginBottom: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calcLabel}>Height (ft)</Text>
+                    <TextInput style={styles.calcInput} placeholder="5" placeholderTextColor={COLORS.textMuted} keyboardType="number-pad" value={calcFt} onChangeText={setCalcFt} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calcLabel}>Height (in)</Text>
+                    <TextInput style={styles.calcInput} placeholder="10" placeholderTextColor={COLORS.textMuted} keyboardType="number-pad" value={calcIn} onChangeText={setCalcIn} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.calcLabel}>Weight (lbs)</Text>
+                    <TextInput style={styles.calcInput} placeholder="170" placeholderTextColor={COLORS.textMuted} keyboardType="number-pad" value={calcWeight} onChangeText={setCalcWeight} />
+                  </View>
+                </View>
+
+                {/* Activity Level */}
+                <Text style={styles.calcLabel}>Activity Level</Text>
+                <View style={{ gap: 6, marginBottom: 12 }}>
+                  {ACTIVITY_OPTIONS.map(opt => (
+                    <TouchableOpacity key={opt.key} style={[styles.calcOption, calcActivity === opt.key && styles.calcOptionActive]} onPress={() => setCalcActivity(opt.key)} activeOpacity={0.7}>
+                      <Text style={[styles.calcOptionText, calcActivity === opt.key && styles.calcOptionTextActive]}>{opt.label}</Text>
+                      <Text style={{ fontSize: 11, color: COLORS.textMuted }}>{opt.sub}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Fitness Goal */}
+                <Text style={styles.calcLabel}>Fitness Goal</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+                  {FITNESS_GOAL_OPTIONS.map(opt => (
+                    <TouchableOpacity key={opt.key} style={[styles.calcPill, { flex: 1 }, calcGoal === opt.key && styles.calcPillActive]} onPress={() => setCalcGoal(opt.key)} activeOpacity={0.7}>
+                      <Text style={[styles.calcPillText, { textAlign: 'center' }, calcGoal === opt.key && styles.calcPillTextActive]}>{opt.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => setShowCalcModal(false)} activeOpacity={0.7}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modalSave} onPress={submitCalcModal} activeOpacity={0.85}>
+                  <Text style={styles.modalSaveText}>Calculate</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
         {/* ── Edit Goal Modal ── */}
         <Modal visible={!!editGoal} transparent animationType="fade" onRequestClose={() => setEditGoal(null)}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
@@ -792,12 +986,16 @@ export default function ProfileScreen() {
         <View style={styles.card}>
           <GoalRow
             label="Daily Calories"
-            value={profile?.calorie_goal ? `${profile.calorie_goal.toLocaleString()} kcal` : '—'}
+            value={animatingGoals && displayCalories !== null
+              ? `${displayCalories.toLocaleString()} kcal`
+              : profile?.calorie_goal ? `${profile.calorie_goal.toLocaleString()} kcal` : '—'}
             onPress={() => openGoalEdit('calorie_goal', 'Daily Calories', 'kcal', profile?.calorie_goal ?? null)}
           />
           <GoalRow
             label="Protein Goal"
-            value={profile?.protein_goal ? `${profile.protein_goal}g` : '—'}
+            value={animatingGoals && displayProtein !== null
+              ? `${displayProtein}g`
+              : profile?.protein_goal ? `${profile.protein_goal}g` : '—'}
             onPress={() => openGoalEdit('protein_goal', 'Protein Goal', 'g', profile?.protein_goal ?? null)}
           />
           <GoalRow
@@ -817,6 +1015,9 @@ export default function ProfileScreen() {
             isLast
           />
         </View>
+        <TouchableOpacity onPress={handleRecalculate} activeOpacity={0.7} style={{ alignItems: 'center', marginTop: 8, marginBottom: 8 }}>
+          <Text style={{ fontSize: 14, color: '#4ADE80', fontWeight: '600' }}>Not sure? Recalculate for me</Text>
+        </TouchableOpacity>
 
         {/* ── Weight ── */}
         <Text style={styles.sectionTitle}>Weight</Text>
@@ -1325,5 +1526,57 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     color: '#000000',
+  },
+
+  // Calculator modal
+  calcLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginBottom: 6,
+  },
+  calcInput: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: COLORS.textWhite,
+  },
+  calcPill: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  calcPillActive: {
+    backgroundColor: '#4ADE80',
+  },
+  calcPillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  calcPillTextActive: {
+    color: '#000000',
+  },
+  calcOption: {
+    backgroundColor: '#2A2A2A',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  calcOptionActive: {
+    backgroundColor: 'rgba(74,222,128,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.4)',
+  },
+  calcOptionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textWhite,
+  },
+  calcOptionTextActive: {
+    color: '#4ADE80',
   },
 })

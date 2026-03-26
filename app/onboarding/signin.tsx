@@ -21,7 +21,7 @@ const CARD = '#1A1A1A'
 
 export default function SignInScreen() {
   const router = useRouter()
-  const { signIn, signInWithApple, signInWithGoogle } = useAuth()
+  const { signIn, signInWithApple, signInWithGoogle, appleSignInAvailable } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -98,18 +98,20 @@ export default function SignInScreen() {
             <View style={s.orLine} />
           </View>
 
-          <TouchableOpacity style={s.socialBtn} onPress={async () => {
-            try {
-              setLoading(true)
-              await signInWithApple()
-              router.replace('/(tabs)')
-            } catch (e: any) {
-              if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Apple Sign-In Failed', e.message)
-            } finally { setLoading(false) }
-          }} activeOpacity={0.8}>
-            <Text style={s.appleIcon}>{'\uF8FF'}</Text>
-            <Text style={s.socialBtnText}>Continue with Apple</Text>
-          </TouchableOpacity>
+          {appleSignInAvailable && (
+            <TouchableOpacity style={s.socialBtn} onPress={async () => {
+              try {
+                setLoading(true)
+                await signInWithApple()
+                router.replace('/(tabs)')
+              } catch (e: any) {
+                if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Apple Sign-In Failed', e.message)
+              } finally { setLoading(false) }
+            }} activeOpacity={0.8}>
+              <Text style={s.appleIcon}>{'\uF8FF'}</Text>
+              <Text style={s.socialBtnText}>Continue with Apple</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={[s.socialBtn, { marginTop: 10 }]} onPress={async () => {
             try {

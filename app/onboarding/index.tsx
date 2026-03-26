@@ -148,7 +148,8 @@ function calculateGoals(age: number, gender: string, heightCm: number, weightKg:
   const goalAdj = FITNESS_GOAL_OPTIONS.find(g => g.key === fitnessGoal)?.adj ?? 0
   const calories = Math.round(tdee + goalAdj)
   const weightLbs = weightKg / 0.453592
-  const protein = Math.round(fitnessGoal === 'gain' ? weightLbs * 1.0 : weightLbs * 0.8)
+  const proteinPerLb = fitnessGoal === 'lose' ? 1.2 : fitnessGoal === 'maintain' ? 1.0 : 0.8
+  const protein = Math.round(weightLbs * proteinPerLb)
   return { calories, protein }
 }
 

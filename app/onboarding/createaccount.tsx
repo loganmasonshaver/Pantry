@@ -22,7 +22,7 @@ const CARD = '#1A1A1A'
 
 export default function CreateAccountScreen() {
   const router = useRouter()
-  const { signUp, signInWithApple, signInWithGoogle } = useAuth()
+  const { signUp, signInWithApple, signInWithGoogle, appleSignInAvailable } = useAuth()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -142,10 +142,12 @@ export default function CreateAccountScreen() {
             <View style={s.orLine} />
           </View>
 
-          <TouchableOpacity style={s.socialBtn} onPress={handleAppleSignIn} activeOpacity={0.8}>
-            <Text style={s.appleIcon}>{'\uF8FF'}</Text>
-            <Text style={s.socialBtnText}>Continue with Apple</Text>
-          </TouchableOpacity>
+          {appleSignInAvailable && (
+            <TouchableOpacity style={s.socialBtn} onPress={handleAppleSignIn} activeOpacity={0.8}>
+              <Text style={s.appleIcon}>{'\uF8FF'}</Text>
+              <Text style={s.socialBtnText}>Continue with Apple</Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity style={[s.socialBtn, { marginTop: 10 }]} onPress={handleGoogleSignIn} activeOpacity={0.8}>
             <Text style={s.googleG}>G</Text>

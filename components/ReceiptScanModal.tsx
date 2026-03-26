@@ -10,10 +10,16 @@ import {
   Image,
   ActivityIndicator,
   Animated,
+  Dimensions,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
-import { X, Check, Receipt, Camera, ImageIcon } from 'lucide-react-native'
+import * as ImageManipulator from 'expo-image-manipulator'
+import { X, Check, Receipt, Camera, ImageIcon, Zap, Plus } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -101,10 +107,16 @@ type Props = {
 
 export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Props) {
   const { user } = useAuth()
-  const [step, setStep] = useState<'pick' | 'scanning' | 'visualReview' | 'review' | 'saving'>('pick')
+  const [step, setStep] = useState<'pick' | 'scanning' | 'visualReview' | 'saving'>('pick')
   const [imageUri, setImageUri] = useState<string | null>(null)
   const [items, setItems] = useState<ParsedItem[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [addItemText, setAddItemText] = useState('')
+
+  // Camera
+  const cameraRef = useRef<CameraView>(null)
+  const [permission, requestPermission] = useCameraPermissions()
+  const [flashOn, setFlashOn] = useState(false)
 
   const pulseScale = useRef(new Animated.Value(1)).current
   const pulseOpacity = useRef(new Animated.Value(0.4)).current
@@ -127,27 +139,37 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     return () => loop.stop()
   }, [step])
 
+  // Request camera permission when modal opens
+  useEffect(() => {
+    if (visible && !permission?.granted) {
+      requestPermission()
+    }
+  }, [visible])
+
   const handleClose = () => {
     setStep('pick')
     setImageUri(null)
     setItems([])
     setError(null)
+    setFlashOn(false)
+    setAddItemText('')
     onClose()
   }
 
-  const launchCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync()
-    if (status !== 'granted') {
-      Alert.alert('Camera permission needed', 'Please allow camera access in Settings.')
-      return
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      base64: true,
-    })
-    if (!result.canceled && result.assets[0]) {
-      await processImage(result.assets[0].uri, result.assets[0].base64 ?? null)
+  const capturePhoto = async () => {
+    if (!cameraRef.current) return
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 })
+      if (photo) {
+        const fixed = await ImageManipulator.manipulateAsync(
+          photo.uri,
+          [],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        )
+        await processImage(fixed.uri, fixed.base64 ?? null)
+      }
+    } catch (e) {
+      Alert.alert('Capture failed', 'Could not take photo.')
     }
   }
 
@@ -209,7 +231,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     const { error } = await supabase.from('pantry_items').insert(rows)
     if (error) {
       Alert.alert('Save failed', error.message)
-      setStep('review')
+      setStep('visualReview')
       return
     }
     onItemsAdded?.()
@@ -227,41 +249,67 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
 
-        {/* ── Pick step ── */}
+        {/* ── Pick step: inline camera ── */}
         {step === 'pick' && (
           <View style={styles.step}>
-            <View style={styles.topBar}>
-              <Text style={styles.topTitle}>Scan Receipt</Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
+            {/* Camera viewfinder */}
+            <View style={styles.cameraContainer}>
+              {permission?.granted ? (
+                <CameraView
+                  ref={cameraRef}
+                  style={styles.camera}
+                  facing="back"
+                  enableTorch={flashOn}
+                />
+              ) : (
+                <View style={[styles.camera, { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }]}>
+                  <Text style={{ color: COLORS.textMuted }}>Camera permission required</Text>
+                </View>
+              )}
 
-            <View style={styles.heroArea}>
-              <View style={styles.heroIcon}>
-                <Receipt size={48} stroke="#4ADE80" strokeWidth={1.4} />
+              {/* Corner brackets */}
+              <View style={[styles.bracket, styles.bracketTL]} />
+              <View style={[styles.bracket, styles.bracketTR]} />
+              <View style={[styles.bracket, styles.bracketBL]} />
+              <View style={[styles.bracket, styles.bracketBR]} />
+
+              {/* Top bar overlay */}
+              <View style={styles.cameraTopBar}>
+                <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                  <X size={20} stroke="#FFFFFF" strokeWidth={2} />
+                </TouchableOpacity>
+                <Text style={styles.cameraTitle}>Scan Receipt</Text>
+                <View style={{ width: 36 }} />
               </View>
-              <Text style={styles.heroTitle}>Photograph your receipt</Text>
-              <Text style={styles.heroSub}>
-                AI reads your grocery receipt and automatically adds everything to your pantry
-              </Text>
             </View>
 
             {error && (
-              <View style={styles.errorBanner}>
+              <View style={[styles.errorBanner, { marginTop: 8 }]}>
                 <Text style={styles.errorText}>{error}</Text>
               </View>
             )}
 
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={launchCamera} activeOpacity={0.85}>
-                <Camera size={18} stroke="#000000" strokeWidth={2} />
-                <Text style={styles.primaryBtnText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={launchLibrary} activeOpacity={0.85}>
-                <ImageIcon size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-                <Text style={styles.secondaryBtnText}>Choose from Library</Text>
-              </TouchableOpacity>
+            {/* Bottom controls */}
+            <View style={styles.cameraBottom}>
+              <View style={styles.modeTabs}>
+                <TouchableOpacity style={[styles.modeTab, styles.modeTabActive]} activeOpacity={0.8}>
+                  <Camera size={18} stroke="#000" strokeWidth={2} />
+                  <Text style={[styles.modeTabText, styles.modeTabTextActive]}>Scan Receipt</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.modeTab} onPress={launchLibrary} activeOpacity={0.8}>
+                  <ImageIcon size={18} stroke={COLORS.textMuted} strokeWidth={2} />
+                  <Text style={styles.modeTabText}>Gallery</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.shutterRow}>
+                <TouchableOpacity style={styles.flashBtn} onPress={() => setFlashOn(f => !f)} activeOpacity={0.7}>
+                  <Zap size={20} stroke={flashOn ? '#FFD700' : COLORS.textMuted} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.shutterBtn} onPress={capturePhoto} activeOpacity={0.85}>
+                  <View style={styles.shutterInner} />
+                </TouchableOpacity>
+                <View style={{ width: 44 }} />
+              </View>
             </View>
           </View>
         )}
@@ -296,7 +344,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
 
         {/* ── Visual review step ── */}
         {step === 'visualReview' && (
-          <View style={styles.step}>
+          <KeyboardAvoidingView style={styles.step} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={styles.topBar}>
               <Text style={styles.topTitle}>Items Found</Text>
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
@@ -316,7 +364,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
                 {items.length} item{items.length !== 1 ? 's' : ''} detected — tap X to remove any
               </Text>
 
-              <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.chipContainer}>
+              <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.chipContainer}>
                 {items.map(item => (
                   <View key={item.id} style={styles.chip}>
                     <Text style={styles.chipText}>{item.name}</Text>
@@ -326,64 +374,37 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
                   </View>
                 ))}
               </ScrollView>
+
+              <View style={styles.addItemRow}>
+                <TextInput
+                  style={styles.addItemInput}
+                  placeholder="Add missing item..."
+                  placeholderTextColor={COLORS.textMuted}
+                  value={addItemText}
+                  onChangeText={setAddItemText}
+                  onSubmitEditing={() => {
+                    const name = addItemText.trim()
+                    if (!name) return
+                    setItems(prev => [...prev, { id: String(Date.now()), name, category: 'Other', checked: true }])
+                    setAddItemText('')
+                  }}
+                  returnKeyType="done"
+                />
+                <TouchableOpacity
+                  style={[styles.addItemBtn, !addItemText.trim() && { opacity: 0.4 }]}
+                  disabled={!addItemText.trim()}
+                  onPress={() => {
+                    const name = addItemText.trim()
+                    if (!name) return
+                    setItems(prev => [...prev, { id: String(Date.now()), name, category: 'Other', checked: true }])
+                    setAddItemText('')
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Plus size={18} stroke="#000" strokeWidth={2.5} />
+                </TouchableOpacity>
+              </View>
             </View>
-
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={styles.primaryBtn}
-                onPress={() => setStep('review')}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.primaryBtnText}>Review & Categorize</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={handleClose} activeOpacity={0.85}>
-                <Text style={styles.secondaryBtnText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {/* ── Review step ── */}
-        {(step === 'review' || step === 'saving') && (
-          <View style={styles.step}>
-            <View style={styles.topBar}>
-              <Text style={styles.topTitle}>Review Items</Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.reviewSub}>
-              Found {items.length} item{items.length !== 1 ? 's' : ''} — deselect anything you already have
-            </Text>
-
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {grouped.map(group => (
-                <View key={group.category} style={styles.resultGroup}>
-                  <Text style={styles.resultGroupLabel}>{group.category}</Text>
-                  <View style={styles.resultCard}>
-                    {group.items.map((item, i) => (
-                      <View key={item.id}>
-                        {i > 0 && <View style={styles.resultDivider} />}
-                        <TouchableOpacity
-                          style={styles.resultRow}
-                          onPress={() => toggleItem(item.id)}
-                          activeOpacity={0.7}
-                        >
-                          <Text style={[styles.resultName, !item.checked && styles.resultNameUnchecked]}>
-                            {item.name}
-                          </Text>
-                          <View style={[styles.checkbox, item.checked && styles.checkboxChecked]}>
-                            {item.checked && <Check size={11} stroke="#000" strokeWidth={2.5} />}
-                          </View>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              ))}
-              <View style={{ height: 8 }} />
-            </ScrollView>
 
             <View style={styles.actions}>
               <TouchableOpacity
@@ -394,12 +415,16 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
               >
                 {step === 'saving'
                   ? <ActivityIndicator color="#000000" />
-                  : <Text style={styles.primaryBtnText}>Add {checkedCount} Item{checkedCount !== 1 ? 's' : ''} to Pantry</Text>
+                  : <Text style={styles.primaryBtnText}>Add {items.length} Item{items.length !== 1 ? 's' : ''} to Pantry</Text>
                 }
               </TouchableOpacity>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={handleClose} activeOpacity={0.85}>
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         )}
+
 
       </SafeAreaView>
     </Modal>
@@ -415,6 +440,113 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   centered: { alignItems: 'center', justifyContent: 'center' },
+
+  // Inline camera
+  cameraContainer: {
+    flex: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  camera: {
+    flex: 1,
+  },
+  cameraTopBar: {
+    position: 'absolute',
+    top: 12,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  cameraCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cameraTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  bracket: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderColor: 'rgba(255,255,255,0.6)',
+    borderWidth: 3,
+  },
+  bracketTL: { top: '20%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  bracketTR: { top: '20%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  bracketBL: { bottom: '20%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '20%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  cameraBottom: {
+    paddingTop: 12,
+    paddingBottom: 4,
+    gap: 16,
+  },
+  modeTabs: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  modeTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2A',
+  },
+  modeTabActive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+  modeTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  modeTabTextActive: {
+    color: '#000000',
+  },
+  shutterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  flashBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#FFFFFF',
+  },
 
   topBar: {
     flexDirection: 'row',
@@ -442,23 +574,6 @@ const styles = StyleSheet.create({
     right: 0,
   },
 
-  heroArea: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingBottom: 24,
-  },
-  heroIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 28,
-    backgroundColor: '#111111',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.2)',
-  },
   heroTitle: {
     fontSize: 22,
     fontWeight: '800',
@@ -595,6 +710,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: COLORS.textWhite,
+  },
+  addItemRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  addItemInput: {
+    flex: 1,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    fontSize: 14,
+    color: COLORS.textWhite,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  addItemBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#4ADE80',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Review

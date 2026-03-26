@@ -9,6 +9,7 @@ import {
   Dimensions,
   Animated,
   ActivityIndicator,
+  Image,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect } from 'expo-router'
@@ -29,6 +30,7 @@ type SavedMeal = {
   calories: number | null
   protein: number | null
   tags: string[]
+  image?: string | null
 }
 
 function deriveTags(meal: { protein: number | null; prep_time: number | null }): string[] {
@@ -45,9 +47,13 @@ const FILTERS = ['All', 'High Protein', 'Quick']
 function MealCard({ meal, onUnsave }: { meal: SavedMeal; onUnsave: () => void }) {
   return (
     <View style={styles.card}>
-      <View style={styles.cardImage}>
-        <Utensils size={24} stroke="#555555" strokeWidth={1.5} />
-      </View>
+      {meal.image ? (
+        <Image source={{ uri: meal.image }} style={styles.cardImageReal} resizeMode="cover" />
+      ) : (
+        <View style={styles.cardImage}>
+          <Utensils size={24} stroke="#555555" strokeWidth={1.5} />
+        </View>
+      )}
       <View style={styles.cardBody}>
         <Text style={styles.cardName} numberOfLines={2}>{meal.name}</Text>
         {meal.prep_time != null && (
@@ -93,7 +99,23 @@ export default function SavedScreen() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (!error && data) {
-      setMeals(data.map(row => ({ ...row, tags: deriveTags(row) })))
+      const mealsWithTags = data.map(row => ({ ...row, tags: deriveTags(row), image: null as string | null }))
+      setMeals(mealsWithTags)
+      // Fetch cached images in background
+      mealsWithTags.forEach(async (meal, i) => {
+        try {
+          const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
+            body: { mealName: meal.name },
+          })
+          if (imgData?.image) {
+            setMeals(prev => {
+              const updated = [...prev]
+              if (updated[i]) updated[i] = { ...updated[i], image: imgData.image }
+              return updated
+            })
+          }
+        } catch {}
+      })
     }
     setLoading(false)
   }, [user])
@@ -338,6 +360,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+  },
+  cardImageReal: {
+    height: 110,
+    width: '100%',
   },
   cardImage: {
     height: 110,

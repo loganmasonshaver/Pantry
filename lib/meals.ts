@@ -24,6 +24,7 @@ export async function generateMeals({
   foodDislikes = [],
   dislikedMeals = [],
   likedMeals = [],
+  mode = 'cookNow',
 }: {
   ingredients: string[]
   calorieGoal: number
@@ -35,6 +36,7 @@ export async function generateMeals({
   foodDislikes?: string[]
   dislikedMeals?: string[]
   likedMeals?: string[]
+  mode?: 'cookNow' | 'mealPlan'
 }): Promise<GeneratedMeal[]> {
   const { data, error } = await supabase.functions.invoke('generate-meals', {
     body: {
@@ -48,6 +50,7 @@ export async function generateMeals({
       foodDislikes,
       dislikedMeals,
       likedMeals,
+      mode,
     },
   })
 

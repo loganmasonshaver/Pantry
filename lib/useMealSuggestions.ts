@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
 
-const CACHE_KEY = 'pantry_daily_meals'
+const CACHE_KEY_PREFIX = 'pantry_daily_meals'
 
 type CachedMeals = { date: string; meals: GeneratedMeal[] }
 
@@ -11,10 +11,21 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export function useMealSuggestions(userId: string | undefined, isPremium: boolean) {
+export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow') {
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const fetchImage = async (name: string, ingredientNames: string[] = []): Promise<string | null> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { data } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames } })
+        if (data?.image) return data.image
+      } catch {}
+      await new Promise(r => setTimeout(r, 3000))
+    }
+    return null
+  }
 
   const generate = async () => {
     if (!userId) return
@@ -30,6 +41,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         .from('pantry_items')
         .select('name')
         .eq('user_id', userId)
+        .eq('in_stock', true)
 
       const ingredients = pantryItems?.map(i => i.name) || []
 
@@ -54,10 +66,32 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         foodDislikes: profile?.food_dislikes || [],
         dislikedMeals,
         likedMeals,
+        mode,
       })
 
       // Cache today's meals for free-tier daily limit
-      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ date: todayStr(), meals: generated }))
+      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated }))
+
+      // Fetch images one at a time with retry
+      const mealsToImage = [...generated]
+      ;(async () => {
+        for (let i = 0; i < mealsToImage.length; i++) {
+          if (mealsToImage[i].image) continue
+          const meal = mealsToImage[i]
+          const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+          const image = await fetchImage(meal.name, ingNames)
+          if (image) {
+            mealsToImage[i] = { ...mealsToImage[i], image }
+            setMeals(prev => {
+              const updated = [...prev]
+              updated[i] = { ...updated[i], image }
+              return updated
+            })
+            await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage }))
+          }
+          await new Promise(r => setTimeout(r, 5000))
+        }
+      })()
 
       return generated
     } catch (err: any) {
@@ -73,12 +107,33 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     try {
       // Free users: serve cached meals if already generated today
       if (!isPremium && !forceGenerate) {
-        const raw = await AsyncStorage.getItem(CACHE_KEY)
+        const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
           if (cached.date === todayStr() && cached.meals.length > 0) {
             setMeals(cached.meals)
             setLoading(false)
+            // Fetch any missing images for cached meals
+            const cachedMeals = [...cached.meals]
+            if (cachedMeals.some(m => !m.image)) {
+              ;(async () => {
+                for (let i = 0; i < cachedMeals.length; i++) {
+                  if (cachedMeals[i].image) continue
+                  const ingNames = cachedMeals[i].ingredients?.map((ing: any) => ing.name) ?? []
+                  const image = await fetchImage(cachedMeals[i].name, ingNames)
+                  if (image) {
+                    cachedMeals[i] = { ...cachedMeals[i], image }
+                    setMeals(prev => {
+                      const updated = [...prev]
+                      updated[i] = { ...updated[i], image }
+                      return updated
+                    })
+                    await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
+                  }
+                  await new Promise(r => setTimeout(r, 5000))
+                }
+              })()
+            }
             return
           }
         }
@@ -96,7 +151,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
   useEffect(() => {
     if (userId) fetchAndGenerate()
-  }, [userId, isPremium])
+  }, [userId, isPremium, mode])
 
   return { meals, loading, error, regenerate: () => fetchAndGenerate(true) }
 }

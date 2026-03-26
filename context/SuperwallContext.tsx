@@ -13,6 +13,19 @@ const SuperwallContext = createContext<SuperwallContextType>({
 })
 
 export function SuperwallContextProvider({ children }: { children: React.ReactNode }) {
+  // In dev, always premium — skip all Superwall checks
+  if (__DEV__) {
+    return (
+      <SuperwallContext.Provider value={{ isPremium: true, loading: false }}>
+        {children}
+      </SuperwallContext.Provider>
+    )
+  }
+
+  return <SuperwallContextProviderProd>{children}</SuperwallContextProviderProd>
+}
+
+function SuperwallContextProviderProd({ children }: { children: React.ReactNode }) {
   const [isPremium, setIsPremium] = useState(false)
   const [loading, setLoading] = useState(true)
   const { subscriptionStatus } = useSuperwall()

@@ -11,13 +11,18 @@ import {
   ActivityIndicator,
   Image,
   Alert,
+  Dimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
-import { X, ScanLine, Check, Plus } from 'lucide-react-native'
+import * as ImageManipulator from 'expo-image-manipulator'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+
+const { width: SCREEN_W } = Dimensions.get('window')
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -105,14 +110,6 @@ function PhotoThumbnail({ label, uri }: { label: string; uri?: string }) {
   )
 }
 
-function CameraPreview() {
-  return (
-    <View style={styles.cameraPreview}>
-      <ScanLine size={48} stroke="#4ADE80" strokeWidth={1.5} />
-    </View>
-  )
-}
-
 // ── Main modal ─────────────────────────────────────────────────────────
 
 type Props = {
@@ -131,6 +128,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
+
+  // Camera
+  const cameraRef = useRef<CameraView>(null)
+  const [permission, requestPermission] = useCameraPermissions()
+  const [flashOn, setFlashOn] = useState(false)
 
   const pulseScale   = useRef(new Animated.Value(1)).current
   const pulseOpacity = useRef(new Animated.Value(0.4)).current
@@ -195,6 +197,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     return () => { loop.stop() }
   }, [step])
 
+  // Request camera permission when modal opens
+  useEffect(() => {
+    if (visible && !permission?.granted) {
+      requestPermission()
+    }
+  }, [visible])
+
   const handleClose = () => {
     setStep(1)
     setPhotos([])
@@ -203,16 +212,40 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     setShowCustomInput(false)
     setDetectedItems([])
     setZones([])
+    setFlashOn(false)
     onClose()
   }
 
-  const takePhoto = async (label: string, next: number) => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync()
+  const capturePhoto = async (label: string, next: number) => {
+    if (!cameraRef.current) return
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 })
+      if (photo) {
+        const fixed = await ImageManipulator.manipulateAsync(
+          photo.uri,
+          [],
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        )
+        setPhotos(prev => [...prev, {
+          id: String(Date.now()),
+          label,
+          uri: fixed.uri,
+          base64: fixed.base64 ?? undefined,
+        }])
+      }
+    } catch (e) {
+      Alert.alert('Capture failed', 'Could not take photo.')
+    }
+    setStep(next)
+  }
+
+  const launchGallery = async (label: string, next: number) => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
     if (status !== 'granted') {
-      Alert.alert('Camera permission needed', 'Please allow camera access in Settings.')
+      Alert.alert('Photo access needed', 'Please allow photo library access in Settings.')
       return
     }
-    const result = await ImagePicker.launchCameraAsync({
+    const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.7,
       base64: true,
@@ -224,8 +257,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         uri: result.assets[0].uri,
         base64: result.assets[0].base64 ?? undefined,
       }])
+      setStep(next)
     }
-    setStep(next)
   }
 
   const addExtraPhoto = async (label: string) => {
@@ -263,90 +296,81 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
 
-        {/* ── Step 1: Fridge ── */}
-        {step === 1 && (
-          <View style={styles.step}>
-            <View style={styles.topBar}>
-              <ProgressDots total={3} active={0} />
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
-            <CameraPreview />
-            <View style={styles.stepText}>
-              <Text style={styles.title}>Photograph your fridge</Text>
-              <Text style={styles.subtitle}>Open it up and capture the full interior</Text>
-            </View>
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => takePhoto('Fridge', 2)} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep(2)} activeOpacity={0.7}>
-                <Text style={styles.skipText}>Skip</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+        {/* ── Steps 1-3: Camera steps ── */}
+        {(step === 1 || step === 2 || step === 3) && (() => {
+          const stepConfig = {
+            1: { dotIndex: 0, label: 'Fridge', title: 'Photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 2 },
+            2: { dotIndex: 1, label: 'Pantry', title: 'Now photograph your pantry', subtitle: 'Any cabinets where you store dry goods', next: 3 },
+            3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
+          }[step]!
+          return (
+            <View style={styles.step}>
+              {/* Camera viewfinder */}
+              <View style={styles.cameraContainer}>
+                {permission?.granted ? (
+                  <CameraView
+                    ref={cameraRef}
+                    style={styles.camera}
+                    facing="back"
+                    enableTorch={flashOn}
+                  />
+                ) : (
+                  <View style={[styles.camera, { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }]}>
+                    <Text style={{ color: COLORS.textMuted }}>Camera permission required</Text>
+                  </View>
+                )}
 
-        {/* ── Step 2: Pantry ── */}
-        {step === 2 && (
-          <View style={styles.step}>
-            <View style={styles.topBar}>
-              <ProgressDots total={3} active={1} />
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
-            {photos.length > 0 && (
-              <View style={styles.photoRow}>
-                {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
-              </View>
-            )}
-            <CameraPreview />
-            <View style={styles.stepText}>
-              <Text style={styles.title}>Now photograph your pantry or shelves</Text>
-              <Text style={styles.subtitle}>Any cabinets where you store dry goods</Text>
-            </View>
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => takePhoto('Pantry', 3)} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep(3)} activeOpacity={0.7}>
-                <Text style={styles.skipText}>Skip</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+                {/* Corner brackets */}
+                <View style={[styles.bracket, styles.bracketTL]} />
+                <View style={[styles.bracket, styles.bracketTR]} />
+                <View style={[styles.bracket, styles.bracketBL]} />
+                <View style={[styles.bracket, styles.bracketBR]} />
 
-        {/* ── Step 3: Counter ── */}
-        {step === 3 && (
-          <View style={styles.step}>
-            <View style={styles.topBar}>
-              <ProgressDots total={3} active={2} />
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
-            {photos.length > 0 && (
-              <View style={styles.photoRow}>
-                {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
+                {/* Top bar overlay */}
+                <View style={styles.cameraTopBar}>
+                  <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                    <X size={20} stroke="#FFFFFF" strokeWidth={2} />
+                  </TouchableOpacity>
+                  <View style={styles.cameraTopCenter}>
+                    <ProgressDots total={3} active={stepConfig.dotIndex} />
+                  </View>
+                  <View style={{ width: 36 }} />
+                </View>
+
+                {/* Photo thumbnails overlay */}
+                {photos.length > 0 && (
+                  <View style={styles.cameraPhotoRow}>
+                    {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
+                  </View>
+                )}
               </View>
-            )}
-            <CameraPreview />
-            <View style={styles.stepText}>
-              <Text style={styles.title}>Anything on your counter?</Text>
-              <Text style={styles.subtitle}>Fruits, oils, or anything sitting out</Text>
+
+              {/* Bottom controls */}
+              <View style={styles.cameraBottom}>
+                <View style={styles.stepTextCompact}>
+                  <Text style={styles.title}>{stepConfig.title}</Text>
+                  <Text style={styles.subtitle}>{stepConfig.subtitle}</Text>
+                </View>
+
+                <View style={styles.shutterRow}>
+                  <TouchableOpacity style={styles.flashBtn} onPress={() => setFlashOn(f => !f)} activeOpacity={0.7}>
+                    <Zap size={20} stroke={flashOn ? '#FFD700' : COLORS.textMuted} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(stepConfig.label, stepConfig.next)} activeOpacity={0.85}>
+                    <View style={styles.shutterInner} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(stepConfig.label, stepConfig.next)} activeOpacity={0.7}>
+                    <ImageIcon size={20} stroke={COLORS.textMuted} strokeWidth={2} />
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity onPress={() => setStep(stepConfig.next)} activeOpacity={0.7}>
+                  <Text style={styles.skipText}>Skip</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => takePhoto('Counter', 4)} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>Take Photo</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep(4)} activeOpacity={0.7}>
-                <Text style={styles.skipText}>Skip</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
+          )
+        })()}
 
         {/* ── Step 4: Add More ── */}
         {step === 4 && (
@@ -681,14 +705,91 @@ const styles = StyleSheet.create({
     backgroundColor: '#4ADE80',
   },
 
-  // Camera preview
-  cameraPreview: {
+  // Inline camera
+  cameraContainer: {
     flex: 1,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
+    borderRadius: 20,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  camera: {
+    flex: 1,
+  },
+  cameraTopBar: {
+    position: 'absolute',
+    top: 12,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  cameraTopCenter: {
+    flex: 1,
+    paddingHorizontal: 12,
+  },
+  cameraCloseBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+  },
+  cameraPhotoRow: {
+    position: 'absolute',
+    bottom: 12,
+    left: 16,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  bracket: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderColor: 'rgba(255,255,255,0.6)',
+    borderWidth: 3,
+  },
+  bracketTL: { top: '20%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  bracketTR: { top: '20%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  bracketBL: { bottom: '20%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '20%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  cameraBottom: {
+    paddingTop: 12,
+    paddingBottom: 4,
+    gap: 12,
+    alignItems: 'center',
+  },
+  stepTextCompact: { gap: 4, alignSelf: 'stretch' },
+  shutterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 24,
+  },
+  flashBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 4,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterInner: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#FFFFFF',
   },
 
   // Text blocks
