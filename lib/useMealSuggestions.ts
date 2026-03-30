@@ -42,7 +42,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         .select('name')
         .eq('user_id', userId)
         .eq('in_stock', true)
+        .order('created_at', { ascending: true })
 
+      // Oldest items first — GPT prompt will prioritize using them up
       const ingredients = pantryItems?.map(i => i.name) || []
 
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
@@ -89,7 +91,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             })
             await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage }))
           }
-          await new Promise(r => setTimeout(r, 5000))
+          await new Promise(r => setTimeout(r, 2000))
         }
       })()
 
@@ -101,12 +103,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
   const fetchAndGenerate = async (forceGenerate = false) => {
     if (!userId) return
-    setLoading(true)
     setError(null)
 
     try {
-      // Free users: serve cached meals if already generated today
-      if (!isPremium && !forceGenerate) {
+      // Free users: serve cached meals instantly (no loading state)
+      if (!forceGenerate) {
         const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
@@ -130,7 +131,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                     })
                     await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
                   }
-                  await new Promise(r => setTimeout(r, 5000))
+                  await new Promise(r => setTimeout(r, 2000))
                 }
               })()
             }
@@ -139,6 +140,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         }
       }
 
+      setLoading(true)
       const generated = await generate()
       if (generated) setMeals(generated)
     } catch (err: any) {
@@ -149,8 +151,22 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     }
   }
 
+  // On mode change, immediately load cached meals before async fetch
   useEffect(() => {
-    if (userId) fetchAndGenerate()
+    if (!userId) return
+    let cancelled = false
+    ;(async () => {
+      const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
+      if (raw && !cancelled) {
+        const cached: CachedMeals = JSON.parse(raw)
+        if (cached.date === todayStr() && cached.meals.length > 0) {
+          setMeals(cached.meals)
+          return
+        }
+      }
+      if (!cancelled) fetchAndGenerate()
+    })()
+    return () => { cancelled = true }
   }, [userId, isPremium, mode])
 
   return { meals, loading, error, regenerate: () => fetchAndGenerate(true) }

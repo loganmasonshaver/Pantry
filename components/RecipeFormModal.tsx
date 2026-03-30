@@ -11,9 +11,11 @@ import {
   ActivityIndicator,
   Alert,
   StyleSheet,
+  Pressable,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { X, Plus } from 'lucide-react-native'
+import { X, Plus, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 
@@ -57,7 +59,7 @@ function parseIngredients(raw: any[]): Ingredient[] {
 
 export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }: Props) {
   const { user } = useAuth()
-  const isEdit = !!editMeal
+  const isEdit = !!editMeal?.id
 
   // AI auto-fill
   const [aiPrompt, setAiPrompt] = useState('')
@@ -215,53 +217,63 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
   // ── Render ──────────────────────────────────────────────────────────
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={s.overlay}>
-        <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-            {/* Header */}
-            <View style={s.header}>
-              <Text style={s.headerTitle}>{isEdit ? 'Edit Recipe' : 'New Recipe'}</Text>
-              <TouchableOpacity onPress={onClose} hitSlop={12}>
-                <X size={22} stroke="#FFFFFF" strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
+        <SafeAreaView style={s.safe} edges={['bottom']}>
+          {/* Header */}
+          <View style={s.header}>
+            <Text
+              style={s.backText}
+              onPress={() => onClose()}
+            >
+              ← Back
+            </Text>
+            <Text style={s.headerTitle}>{isEdit ? 'Edit Recipe' : 'New Recipe'}</Text>
+            <View style={{ width: 60 }} />
+          </View>
 
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
             <ScrollView
               style={{ flex: 1 }}
               contentContainerStyle={s.scroll}
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
               showsVerticalScrollIndicator={false}
+              onScrollBeginDrag={() => Keyboard.dismiss()}
             >
-              {/* AI Auto-Fill */}
-              <View style={s.section}>
-                <TextInput
-                  style={s.input}
-                  placeholder="Describe a meal (e.g. chicken stir fry)"
-                  placeholderTextColor="#888888"
-                  value={aiPrompt}
-                  onChangeText={setAiPrompt}
-                />
-                <TouchableOpacity
-                  style={[s.aiBtn, (aiLoading || !aiPrompt.trim()) && { opacity: 0.5 }]}
-                  onPress={handleGenerate}
-                  disabled={aiLoading || !aiPrompt.trim()}
-                  activeOpacity={0.8}
-                >
-                  {aiLoading ? (
-                    <ActivityIndicator color="#000000" size="small" />
-                  ) : (
-                    <Text style={s.aiBtnText}>Generate with AI</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+              {/* AI Auto-Fill — only in create mode */}
+              {!isEdit && (
+                <>
+                  <View style={s.section}>
+                    <TextInput
+                      style={s.input}
+                      placeholder="Describe a meal (e.g. chicken stir fry)"
+                      placeholderTextColor="#888888"
+                      value={aiPrompt}
+                      onChangeText={setAiPrompt}
+                    />
+                    <TouchableOpacity
+                      style={[s.aiBtn, (aiLoading || !aiPrompt.trim()) && { opacity: 0.5 }]}
+                      onPress={handleGenerate}
+                      disabled={aiLoading || !aiPrompt.trim()}
+                      activeOpacity={0.8}
+                    >
+                      {aiLoading ? (
+                        <ActivityIndicator color="#000000" size="small" />
+                      ) : (
+                        <Text style={s.aiBtnText}>Generate with AI</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
 
-              {/* Divider */}
-              <View style={s.dividerRow}>
-                <View style={s.dividerLine} />
-                <Text style={s.dividerText}>or fill in manually</Text>
-                <View style={s.dividerLine} />
-              </View>
+                  {/* Divider */}
+                  <View style={s.dividerRow}>
+                    <View style={s.dividerLine} />
+                    <Text style={s.dividerText}>or fill in manually</Text>
+                    <View style={s.dividerLine} />
+                  </View>
+                </>
+              )}
 
               {/* Name */}
               <View style={s.section}>
@@ -419,21 +431,23 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
                 </TouchableOpacity>
               </View>
 
-              {/* Save */}
-              <TouchableOpacity
-                style={[s.saveBtn, saving && { opacity: 0.5 }]}
-                onPress={handleSave}
-                disabled={saving}
-                activeOpacity={0.85}
-              >
-                <Text style={s.saveBtnText}>
-                  {saving ? 'Saving...' : isEdit ? 'Update Recipe' : 'Save Recipe'}
-                </Text>
-              </TouchableOpacity>
-
-              <View style={{ height: 32 }} />
+              <View style={{ height: 16 }} />
             </ScrollView>
           </KeyboardAvoidingView>
+
+          {/* Save — sticky bottom */}
+          <View style={s.stickyBottom}>
+            <TouchableOpacity
+              style={[s.saveBtn, saving && { opacity: 0.5 }]}
+              onPress={handleSave}
+              disabled={saving}
+              activeOpacity={0.85}
+            >
+              <Text style={s.saveBtnText}>
+                {saving ? 'Saving...' : isEdit ? 'Update Recipe' : 'Save Recipe'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </SafeAreaView>
       </View>
     </Modal>
@@ -449,13 +463,23 @@ const s = StyleSheet.create({
   },
   safe: {
     flex: 1,
+    backgroundColor: '#000000',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 8,
+    paddingTop: 56,
+    paddingBottom: 8,
+    zIndex: 10,
+  },
+  backText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4ADE80',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   headerTitle: {
     fontSize: 20,
@@ -594,12 +618,17 @@ const s = StyleSheet.create({
   },
 
   // Save
+  stickyBottom: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
   saveBtn: {
     backgroundColor: '#FFFFFF',
     borderRadius: 30,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
   },
   saveBtnText: {
     fontSize: 16,

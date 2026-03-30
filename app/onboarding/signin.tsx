@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
+import TurnstileWebView from '../../components/TurnstileWebView'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -26,17 +27,29 @@ export default function SignInScreen() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [lastAttempt, setLastAttempt] = useState(0)
+  const [failCount, setFailCount] = useState(0)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
 
   const handleSignIn = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields')
       return
     }
+    const now = Date.now()
+    const cooldown = failCount >= 5 ? 60000 : failCount >= 3 ? 15000 : 3000
+    if (now - lastAttempt < cooldown) {
+      Alert.alert('Too many attempts', `Please wait ${Math.ceil(cooldown / 1000)} seconds.`)
+      return
+    }
+    setLastAttempt(now)
     try {
       setLoading(true)
-      await signIn(email, password)
-      router.replace('/(tabs)')
+      await signIn(email, password, captchaToken ?? undefined)
+      setFailCount(0)
+      router.replace({ pathname: '/onboarding/verify-email', params: { email } })
     } catch (error: any) {
+      setFailCount(f => f + 1)
       Alert.alert('Sign In Failed', error.message)
     } finally {
       setLoading(false)
@@ -45,6 +58,7 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
+      <TurnstileWebView onToken={setCaptchaToken} />
       <TouchableOpacity style={s.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
         <ArrowLeft size={22} stroke="#FFFFFF" strokeWidth={2} />
       </TouchableOpacity>
@@ -117,6 +131,7 @@ export default function SignInScreen() {
             try {
               setLoading(true)
               await signInWithGoogle()
+              // Google users skip OTP — already verified via Google
               router.replace('/(tabs)')
             } catch (e: any) {
               if (e.code !== '12501') Alert.alert('Google Sign-In Failed', e.message)

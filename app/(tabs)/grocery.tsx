@@ -272,15 +272,32 @@ export default function GroceryScreen() {
     const count = checked.length
     setItems(prev => prev.filter(i => !i.checked))
 
-    // Insert into pantry_items
-    await supabase.from('pantry_items').insert(
-      checked.map(i => ({
-        user_id: user.id,
-        name: i.name,
-        category: i.category,
-        in_stock: true,
-      })),
-    )
+    // Check which items already exist in pantry
+    const { data: existing } = await supabase
+      .from('pantry_items')
+      .select('name')
+      .eq('user_id', user.id)
+    const existingNames = new Set((existing ?? []).map(e => e.name.toLowerCase()))
+
+    // Only insert items not already in pantry
+    const newItems = checked.filter(i => !existingNames.has(i.name.toLowerCase()))
+    if (newItems.length > 0) {
+      await supabase.from('pantry_items').insert(
+        newItems.map(i => ({
+          user_id: user.id,
+          name: i.name,
+          category: i.category,
+          in_stock: true,
+        })),
+      )
+    }
+
+    // Mark existing ones as in_stock in case they were toggled off
+    const existingItems = checked.filter(i => existingNames.has(i.name.toLowerCase()))
+    for (const item of existingItems) {
+      await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', user.id).ilike('name', item.name)
+    }
+
     // Remove from grocery_items
     await supabase.from('grocery_items').delete().in('id', checked.map(i => i.id))
 
@@ -856,40 +873,6 @@ const styles = StyleSheet.create({
   },
   disambigBtnText: { fontSize: 13, fontWeight: '600', color: '#4ADE80' },
 
-  // Instacart promo
-  instacartCard: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(0,201,167,0.2)',
-    gap: 12,
-  },
-  instacartLeft: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  instacartIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,201,167,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  instacartTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textWhite,
-    marginBottom: 3,
-  },
-  instacartSub: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    lineHeight: 18,
-  },
   storeLogos: {
     marginHorizontal: -4,
   },
@@ -908,13 +891,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
   },
-  instacartCta: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#00C9A7',
-    alignSelf: 'flex-end',
-  },
-
   // Progress bar
   progressCard: {
     backgroundColor: '#1A1A1A',

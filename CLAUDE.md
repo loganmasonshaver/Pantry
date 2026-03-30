@@ -9,6 +9,7 @@
 After completing each feature or fix, immediately update ~/my-briefing/todos/active.md:
 - Check off completed tasks
 - Add any new bugs discovered to the Bugs section
+- Add a content idea to the 📱 Content Ideas section (e.g. "Show [feature] in action — 60s screen recording")
 Do this after each task — not just at session end — so progress is saved if the session cuts off.
 
 ## On Session End

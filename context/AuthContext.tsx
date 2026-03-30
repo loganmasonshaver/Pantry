@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { identifyUser, resetUser } from '../lib/analytics';
 import * as AppleAuthentication from 'expo-apple-authentication';
@@ -11,8 +12,8 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   appleSignInAvailable: boolean;
-  signUp: (email: string, password: string, metadata?: Record<string, string>) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, metadata?: Record<string, string>, captchaToken?: string) => Promise<void>;
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<void>;
   signInWithApple: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -50,17 +51,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signUp = async (email: string, password: string, metadata?: Record<string, string>) => {
+  const signUp = async (email: string, password: string, metadata?: Record<string, string>, captchaToken?: string) => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
-      options: metadata ? { data: metadata } : undefined,
+      options: {
+        ...(metadata ? { data: metadata } : {}),
+        ...(captchaToken ? { captchaToken } : {}),
+      },
     });
     if (error) throw error;
   };
 
-  const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const signIn = async (email: string, password: string, captchaToken?: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      options: captchaToken ? { captchaToken } : undefined,
+    });
     if (error) throw error;
   };
 
@@ -126,6 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    await AsyncStorage.removeItem('otp_verified');
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };

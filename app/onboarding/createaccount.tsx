@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router'
 import { Eye, EyeOff } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
 import { trackAccountCreated } from '../../lib/analytics'
+import TurnstileWebView from '../../components/TurnstileWebView'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -28,6 +29,8 @@ export default function CreateAccountScreen() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [lastAttempt, setLastAttempt] = useState(0)
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
 
   const handleCreateAccount = async () => {
     if (!name || !email || !password) {
@@ -38,11 +41,17 @@ export default function CreateAccountScreen() {
       Alert.alert('Error', 'Password must be at least 6 characters')
       return
     }
+    const now = Date.now()
+    if (now - lastAttempt < 30000) {
+      Alert.alert('Please wait', 'You can try again in a few seconds.')
+      return
+    }
+    setLastAttempt(now)
     try {
       setLoading(true)
-      await signUp(email, password, { full_name: name })
+      await signUp(email, password, { full_name: name }, captchaToken ?? undefined)
       trackAccountCreated('email')
-      router.replace({ pathname: '/onboarding', params: { step: '8' } })
+      router.replace({ pathname: '/onboarding/verify-email', params: { email } })
     } catch (error: any) {
       Alert.alert('Sign Up Failed', error.message)
     } finally {
@@ -82,6 +91,7 @@ export default function CreateAccountScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
+      <TurnstileWebView onToken={setCaptchaToken} />
       <View style={s.progressTrack}>
         <View style={[s.progressFill, { width: '85%' }]} />
       </View>

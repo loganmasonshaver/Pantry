@@ -210,11 +210,15 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     const today = new Date().toISOString().split('T')[0]
     const cals = parseInt(calories) || 0
     const prot = parseInt(protein) || 0
+    const crbs = parseInt(carbs) || 0
+    const ft = parseInt(fat) || 0
     const { error } = await supabase.from('meal_logs').insert({
       user_id: user.id,
       meal_name: mealName.trim(),
       calories: cals,
       protein: prot,
+      carbs: crbs,
+      fat: ft,
       slot: selectedSlot,
       logged_at: today,
     })
@@ -591,7 +595,7 @@ const styles = StyleSheet.create({
   },
   cameraTopBar: {
     position: 'absolute',
-    top: 12,
+    top: 50,
     left: 16,
     right: 16,
     flexDirection: 'row',

@@ -45,6 +45,8 @@ type LogEntry = {
   time: string
   calories: number
   protein: number
+  carbs: number
+  fat: number
   Icon: React.ElementType
   food_id: string | null
   serving_id: string | null
@@ -75,13 +77,21 @@ function iconForSlot(label: string): React.ElementType {
 function MacroCard({
   calorieGoal,
   proteinGoal,
+  carbsGoal,
+  fatGoal,
   caloriesConsumed,
   proteinConsumed,
+  carbsConsumed,
+  fatConsumed,
 }: {
   calorieGoal: number
   proteinGoal: number
+  carbsGoal: number
+  fatGoal: number
   caloriesConsumed: number
   proteinConsumed: number
+  carbsConsumed: number
+  fatConsumed: number
 }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -93,8 +103,8 @@ function MacroCard({
   const macroRows = [
     { label: 'Calories', consumed: caloriesConsumed, goal: calorieGoal, unit: 'kcal', color: '#FFFFFF' },
     { label: 'Protein',  consumed: proteinConsumed,  goal: proteinGoal, unit: 'g',    color: '#4ADE80' },
-    { label: 'Carbs',    consumed: 0,                goal: 280,         unit: 'g',    color: '#F59E0B' },
-    { label: 'Fat',      consumed: 0,                goal: 70,          unit: 'g',    color: '#60A5FA' },
+    { label: 'Carbs',    consumed: carbsConsumed,     goal: carbsGoal,   unit: 'g',    color: '#F59E0B' },
+    { label: 'Fat',      consumed: fatConsumed,       goal: fatGoal,     unit: 'g',    color: '#60A5FA' },
   ]
 
   const cal  = macroRows[0]
@@ -185,7 +195,7 @@ function MealCard({
       activeOpacity={0.75}
       onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
     >
-      {meal.image ? (
+      {meal.image && meal.image.startsWith('http') ? (
         <Image source={{ uri: meal.image }} style={styles.mealImageReal} resizeMode="cover" />
       ) : (
         <ShimmerBox style={styles.mealImagePlaceholder} />
@@ -325,12 +335,55 @@ export default function HomeScreen() {
   const { isPremium } = usePremium()
   const { registerPlacement } = useSuperwall()
   const [mealMode, setMealMode] = useState<'cookNow' | 'mealPlan'>('cookNow')
-  const { meals, loading, error, regenerate } = useMealSuggestions(user?.id, isPremium, mealMode)
+  const cookNow = useMealSuggestions(user?.id, isPremium, 'cookNow')
+  const mealPlan = useMealSuggestions(user?.id, isPremium, 'mealPlan')
+  const { meals, loading, error, regenerate } = mealMode === 'cookNow' ? cookNow : mealPlan
+
+  const ESSENTIAL_STAPLES = [
+    'salt', 'pepper', 'olive oil', 'garlic', 'butter', 'onion',
+    'soy sauce', 'eggs', 'rice', 'flour', 'sugar', 'milk',
+    'paprika', 'cumin', 'chili powder', 'oregano', 'lemon', 'vinegar',
+  ]
+  const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
+  const [missingStaples, setMissingStaples] = useState<string[]>([])
+  const [staplesDismissed, setStaplesDismissed] = useState(false)
+
+  // Fetch pantry names and compute missing staples
+  useEffect(() => {
+    if (!user) return
+    supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true)
+      .then(({ data }) => {
+        const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
+        setPantryNames(names)
+        const missing = ESSENTIAL_STAPLES.filter(s => !names.has(s))
+        setMissingStaples(missing)
+      })
+  }, [user])
+
+  const addStapleToPantry = async (name: string) => {
+    if (!user) return
+    setPantryNames(prev => { const n = new Set(prev); n.add(name); return n })
+    setMissingStaples(prev => prev.filter(s => s !== name))
+    const { data: existing } = await supabase.from('pantry_items').select('id').eq('user_id', user.id).ilike('name', name).limit(1)
+    if (existing && existing.length > 0) {
+      await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
+    } else {
+      await supabase.from('pantry_items').insert({ user_id: user.id, name, category: 'Condiments & Spices', in_stock: true })
+    }
+  }
+
+  const addStapleToGrocery = async (name: string) => {
+    if (!user) return
+    setMissingStaples(prev => prev.filter(s => s !== name))
+    await supabase.from('grocery_items').insert({ user_id: user.id, name, category: 'Condiments & Spices' })
+  }
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
   const [showIntroPopup, setShowIntroPopup] = useState(false)
   const [calorieGoal, setCalorieGoal] = useState(2400)
   const [proteinGoal, setProteinGoal] = useState(180)
+  const [carbsGoal, setCarbsGoal] = useState(250)
+  const [fatGoal, setFatGoal] = useState(80)
 
   useEffect(() => {
     if (!loading && meals.length > 0) trackMealsGenerated(meals.length)
@@ -340,7 +393,7 @@ export default function HomeScreen() {
     if (!user) return
     supabase
       .from('profiles')
-      .select('food_prefs_banner_dismissed, food_intro_popup_dismissed, calorie_goal, protein_goal')
+      .select('food_prefs_banner_dismissed, food_intro_popup_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -348,6 +401,8 @@ export default function HomeScreen() {
         if (!data?.food_intro_popup_dismissed) setShowIntroPopup(true)
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
+        if (data?.carbs_goal) setCarbsGoal(data.carbs_goal)
+        if (data?.fat_goal) setFatGoal(data.fat_goal)
       })
   }, [user])
 
@@ -411,7 +466,7 @@ export default function HomeScreen() {
     const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('meal_logs')
-      .select('id, meal_name, calories, protein, slot, created_at, food_id, serving_id, quantity')
+      .select('id, meal_name, calories, protein, carbs, fat, slot, created_at, food_id, serving_id, quantity')
       .eq('user_id', user.id)
       .eq('logged_at', today)
       .order('created_at', { ascending: true })
@@ -430,6 +485,8 @@ export default function HomeScreen() {
         time,
         calories: row.calories ?? 0,
         protein: row.protein ?? 0,
+        carbs: row.carbs ?? 0,
+        fat: row.fat ?? 0,
         Icon: iconForSlot(label),
         food_id: row.food_id ?? null,
         serving_id: row.serving_id ?? null,
@@ -492,12 +549,15 @@ export default function HomeScreen() {
 
   const [showAILogModal, setShowAILogModal] = useState(false)
   const [showFoodSearchModal, setShowFoodSearchModal] = useState(false)
+  const [foodSearchSlot, setFoodSearchSlot] = useState('Breakfast')
   const [showAddModal, setShowAddModal] = useState(false)
   const [newSlotName, setNewSlotName] = useState('')
   const [showLogModal, setShowLogModal] = useState(false)
   const [logName, setLogName] = useState('')
   const [logCals, setLogCals] = useState('')
   const [logProtein, setLogProtein] = useState('')
+  const [logCarbs, setLogCarbs] = useState('')
+  const [logFat, setLogFat] = useState('')
   const [logSlot, setLogSlot] = useState('Breakfast')
   const [logSaving, setLogSaving] = useState(false)
 
@@ -514,6 +574,8 @@ export default function HomeScreen() {
     setLogName('')
     setLogCals('')
     setLogProtein('')
+    setLogCarbs('')
+    setLogFat('')
     setLogSlot(slots[0]?.label ?? 'Breakfast')
     setShowLogModal(true)
   }
@@ -528,6 +590,8 @@ export default function HomeScreen() {
       meal_name: name,
       calories: parseInt(logCals) || 0,
       protein: parseInt(logProtein) || 0,
+      carbs: parseInt(logCarbs) || 0,
+      fat: parseInt(logFat) || 0,
       slot: logSlot,
       logged_at: today,
     })
@@ -538,8 +602,11 @@ export default function HomeScreen() {
     }
   }
 
-  const totalCal = slots.flatMap(s => s.entries).reduce((s, e) => s + e.calories, 0)
-  const totalPro = slots.flatMap(s => s.entries).reduce((s, e) => s + e.protein, 0)
+  const allEntries = slots.flatMap(s => s.entries)
+  const totalCal = allEntries.reduce((s, e) => s + e.calories, 0)
+  const totalPro = allEntries.reduce((s, e) => s + e.protein, 0)
+  const totalCarbs = allEntries.reduce((s, e) => s + e.carbs, 0)
+  const totalFat = allEntries.reduce((s, e) => s + e.fat, 0)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -554,7 +621,7 @@ export default function HomeScreen() {
             </View>
             <View>
               <Text style={styles.hiText}>
-                Hi, {user?.user_metadata?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there'} 👋
+                Hi, {user?.user_metadata?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there'}
               </Text>
               <Text style={styles.greetText}>Ready to eat well today?</Text>
             </View>
@@ -588,8 +655,12 @@ export default function HomeScreen() {
         <MacroCard
           calorieGoal={calorieGoal}
           proteinGoal={proteinGoal}
+          carbsGoal={carbsGoal}
+          fatGoal={fatGoal}
           caloriesConsumed={totalCal}
           proteinConsumed={totalPro}
+          carbsConsumed={totalCarbs}
+          fatConsumed={totalFat}
         />
 
         <View style={[styles.panel, !mealsExpanded && styles.panelCollapsed]}>
@@ -690,6 +761,35 @@ export default function HomeScreen() {
           )}
         </View>
 
+        {/* ── Missing staples nudge ── */}
+        {missingStaples.length >= 3 && !staplesDismissed && !loading && (
+          <View style={styles.staplesCard}>
+            <View style={styles.staplesHeader}>
+              <View>
+                <Text style={styles.staplesTitle}>Missing kitchen basics?</Text>
+                <Text style={styles.staplesSub}>Adding these helps us suggest tastier meals</Text>
+              </View>
+              <TouchableOpacity onPress={() => setStaplesDismissed(true)} activeOpacity={0.7}>
+                <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>Dismiss</Text>
+              </TouchableOpacity>
+            </View>
+            {missingStaples.slice(0, 6).map(name => (
+              <View key={name} style={styles.stapleRow}>
+                <Text style={styles.stapleName}>{name}</Text>
+                <View style={styles.stapleActions}>
+                  <TouchableOpacity onPress={() => addStapleToPantry(name)} activeOpacity={0.7}>
+                    <Text style={styles.stapleHaveIt}>I have this</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#333', fontSize: 11 }}>|</Text>
+                  <TouchableOpacity onPress={() => addStapleToGrocery(name)} activeOpacity={0.7}>
+                    <Text style={styles.stapleGrocery}>+ Grocery</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         <View style={styles.logSection}>
           <View style={styles.logHeader}>
             <Text style={styles.logTitle}>Today's Log</Text>
@@ -708,7 +808,7 @@ export default function HomeScreen() {
               onDeleteEntry={(entryId) => deleteEntry(slot.id, entryId)}
               onEditEntry={(entry) => setEditEntry(entry)}
               onRemoveSlot={() => removeSlot(slot.id)}
-              onLog={() => setShowFoodSearchModal(true)}
+              onLog={() => { setFoodSearchSlot(slot.label); setShowFoodSearchModal(true) }}
             />
           ))}
 
@@ -786,6 +886,24 @@ export default function HomeScreen() {
                 onChangeText={setLogProtein}
               />
             </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TextInput
+                style={[styles.modalInput, { flex: 1 }]}
+                placeholder="Carbs (g)"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="numeric"
+                value={logCarbs}
+                onChangeText={setLogCarbs}
+              />
+              <TextInput
+                style={[styles.modalInput, { flex: 1 }]}
+                placeholder="Fat (g)"
+                placeholderTextColor={COLORS.textMuted}
+                keyboardType="numeric"
+                value={logFat}
+                onChangeText={setLogFat}
+              />
+            </View>
 
             <View style={styles.logSlotRow}>
               {slots.map(s => (
@@ -827,7 +945,7 @@ export default function HomeScreen() {
       <FoodSearchModal
         visible={showFoodSearchModal}
         slots={slots.map(s => s.label)}
-        defaultSlot={slots[0]?.label ?? 'Breakfast'}
+        defaultSlot={foodSearchSlot}
         onClose={() => setShowFoodSearchModal(false)}
         onLogged={fetchTodayLogs}
       />
@@ -1011,6 +1129,36 @@ const styles = StyleSheet.create({
   loadingContainer: { alignItems: 'center', paddingVertical: 40, gap: 16 },
   loadingText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
   errorText: { fontSize: 14, color: '#EF4444', textAlign: 'center' },
+  staplesCard: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.15)',
+  },
+  staplesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  staplesTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textWhite },
+  staplesSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  stapleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  stapleName: { fontSize: 14, fontWeight: '500', color: COLORS.textWhite, textTransform: 'capitalize' },
+  stapleActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stapleHaveIt: { fontSize: 12, fontWeight: '600', color: '#4ADE80' },
+  stapleGrocery: { fontSize: 12, fontWeight: '600', color: '#00C9A7' },
   logSection: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 40, gap: 10 },
   logHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   aiEstimateBtn: {

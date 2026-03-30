@@ -101,37 +101,22 @@ function getLast7ActiveDays(dates: string[]): boolean[] {
   })
 }
 
-// ── Fallback mock data (shown when no weight logs exist yet) ───────────
+// ── Empty data (shown when no weight logs exist yet) ───────────
 
-const MOCK_PERIOD_DATA: Record<PeriodKey, { values: number[]; labels: string[] }> = {
-  '7D': {
-    values: [195, 193, 192, 189, 187, 184, 182],
-    labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-  },
-  '1M': {
-    values: [197, 195, 194, 192, 191, 189, 188, 186, 185, 183, 182, 181, 180, 179, 182],
-    labels: ['Mar 1', '', '', '', 'Mar 8', '', '', '', 'Mar 15', '', '', '', 'Mar 22', '', 'Mar 28'],
-  },
-  '3M': {
-    values: [205, 203, 200, 198, 196, 194, 192, 190, 188, 186, 184, 182],
-    labels: ['Jan', '', '', 'Feb', '', '', 'Mar', '', '', '', '', 'Now'],
-  },
-  '6M': {
-    values: [215, 212, 209, 207, 204, 201, 199, 196, 194, 191, 188, 185, 182],
-    labels: ['Oct', '', 'Nov', '', 'Dec', '', 'Jan', '', 'Feb', '', 'Mar', '', 'Now'],
-  },
-  'All': {
-    values: [220, 216, 212, 208, 205, 202, 199, 196, 193, 190, 187, 184, 182],
-    labels: ['Apr', '', 'Jun', '', 'Aug', '', 'Oct', '', 'Dec', '', 'Feb', '', 'Now'],
-  },
+const EMPTY_PERIOD_DATA: Record<PeriodKey, { values: number[]; labels: string[] }> = {
+  '7D': { values: [], labels: [] },
+  '1M': { values: [], labels: [] },
+  '3M': { values: [], labels: [] },
+  '6M': { values: [], labels: [] },
+  'All': { values: [], labels: [] },
 }
 
-const MOCK_PERIOD_DATES: Record<PeriodKey, string[]> = {
-  '7D':  ['Mar 12', 'Mar 13', 'Mar 14', 'Mar 15', 'Mar 16', 'Mar 17', 'Mar 18'],
-  '1M':  Array.from({ length: 15 }, (_, i) => `Mar ${i + 1}`),
-  '3M':  ['Jan 1', 'Jan 8', 'Jan 15', 'Jan 22', 'Feb 1', 'Feb 8', 'Feb 15', 'Feb 22', 'Mar 1', 'Mar 8', 'Mar 15', 'Mar 22'],
-  '6M':  ['Oct 1', 'Oct 15', 'Nov 1', 'Nov 15', 'Dec 1', 'Dec 15', 'Jan 1', 'Jan 15', 'Feb 1', 'Feb 15', 'Mar 1', 'Mar 15', 'Mar 18'],
-  'All': ['Apr 1', 'May 1', 'Jun 1', 'Jul 1', 'Aug 1', 'Sep 1', 'Oct 1', 'Nov 1', 'Dec 1', 'Jan 1', 'Feb 1', 'Mar 1', 'Mar 18'],
+const EMPTY_PERIOD_DATES: Record<PeriodKey, string[]> = {
+  '7D': [],
+  '1M': [],
+  '3M': [],
+  '6M': [],
+  'All': [],
 }
 
 const CHART_H = 60
@@ -159,15 +144,15 @@ function WeightChart({
   onWeightChangeRef.current = onWeightChange
   externalDataRef.current = externalData
 
-  const periodData = externalData ?? MOCK_PERIOD_DATA
-  const periodDates = externalDates ?? MOCK_PERIOD_DATES
+  const periodData = externalData ?? EMPTY_PERIOD_DATA
+  const periodDates = externalDates ?? EMPTY_PERIOD_DATES
 
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
-        const activeData = (externalDataRef.current ?? MOCK_PERIOD_DATA)[periodRef.current].values
+        const activeData = (externalDataRef.current ?? EMPTY_PERIOD_DATA)[periodRef.current].values
         if (activeData.length === 0) return
         const x = evt.nativeEvent.locationX
         const idx = Math.round((x / CHART_W) * (activeData.length - 1))
@@ -176,7 +161,7 @@ function WeightChart({
         onWeightChangeRef.current(activeData[clamped])
       },
       onPanResponderMove: (evt) => {
-        const activeData = (externalDataRef.current ?? MOCK_PERIOD_DATA)[periodRef.current].values
+        const activeData = (externalDataRef.current ?? EMPTY_PERIOD_DATA)[periodRef.current].values
         if (activeData.length === 0) return
         const x = evt.nativeEvent.locationX
         const idx = Math.round((x / CHART_W) * (activeData.length - 1))
@@ -231,7 +216,7 @@ function WeightChart({
 
       {isEmpty ? (
         <View style={chartStyles.emptyChart}>
-          <Text style={chartStyles.emptyChartText}>No entries yet</Text>
+          <Text style={chartStyles.emptyChartText}>Log your weight to see progress</Text>
         </View>
       ) : (
         <>
@@ -482,12 +467,21 @@ function calculateGoals(age: number, gender: string, heightCm: number, weightKg:
   const weightLbs = weightKg / 0.453592
   const proteinPerLb = fitnessGoal === 'lose' ? 1.2 : fitnessGoal === 'maintain' ? 1.0 : 0.8
   const protein = Math.round(weightLbs * proteinPerLb)
-  return { calories, protein }
+  // Derive carbs/fat from remaining calories after protein
+  // Protein = 4 cal/g, Fat = 30% of calories (9 cal/g), Carbs = remainder (4 cal/g)
+  const proteinCals = protein * 4
+  const fatCals = Math.round(calories * 0.30)
+  const fat = Math.round(fatCals / 9)
+  const carbsCals = calories - proteinCals - fatCals
+  const carbs = Math.max(0, Math.round(carbsCals / 4))
+  return { calories, protein, carbs, fat }
 }
 
 type Profile = {
   calorie_goal: number | null
   protein_goal: number | null
+  carbs_goal: number | null
+  fat_goal: number | null
   meals_per_day: number | null
   max_prep_minutes: number | null
   weight_kg: number | null
@@ -722,6 +716,7 @@ export default function ProfileScreen() {
       age, gender: calcGender, height_cm: heightCm, weight_kg: weightKg,
       activity_level: calcActivity, fitness_goal: calcGoal,
       calorie_goal: result.calories, protein_goal: result.protein,
+      carbs_goal: result.carbs, fat_goal: result.fat,
     }).eq('id', user!.id)
     setShowCalcModal(false)
 

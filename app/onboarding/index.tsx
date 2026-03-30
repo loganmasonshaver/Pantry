@@ -15,7 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame } from 'lucide-react-native'
+import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock } from 'lucide-react-native'
+import { ActivityIndicator } from 'react-native'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall } from 'expo-superwall'
@@ -28,7 +29,7 @@ const MUTED = '#888888'
 const CARD = '#1A1A1A'
 
 const PROGRESS: Record<number, number> = {
-  2: 12, 3: 25, 4: 37, 5: 50, 6: 62, 7: 75, 8: 87,
+  2: 12, 3: 22, 4: 33, 5: 44, 6: 55, 7: 66, 8: 82, 9: 92,
 }
 
 type OnboardingData = {
@@ -156,7 +157,7 @@ function calculateGoals(age: number, gender: string, heightCm: number, weightKg:
 function S3Numbers({
   calories, protein, onCalories, onProtein, onNext, onBack,
   age, gender, activityLevel, fitnessGoal, ft, inches, weight,
-  onAge, onGender, onActivityLevel, onFitnessGoal,
+  onAge, onGender, onActivityLevel, onFitnessGoal, goal,
 }: {
   calories: string; protein: string; onCalories: (v: string) => void; onProtein: (v: string) => void
   onNext: () => void; onBack: () => void
@@ -164,16 +165,30 @@ function S3Numbers({
   ft: string; inches: string; weight: string
   onAge: (v: string) => void; onGender: (v: string) => void
   onActivityLevel: (v: string) => void; onFitnessGoal: (v: string) => void
+  goal: string
 }) {
+  // Auto-map step 2 goal to fitness goal
+  useEffect(() => {
+    if (!fitnessGoal && goal) {
+      const map: Record<string, string> = { lose: 'lose', build: 'gain', maintain: 'maintain' }
+      if (map[goal]) onFitnessGoal(map[goal])
+    }
+  }, [goal])
   const [showCalc, setShowCalc] = useState(false)
   const [calcResult, setCalcResult] = useState<{ calories: number; protein: number } | null>(null)
+
 
   const canCalculate = age && gender && activityLevel && fitnessGoal && ft && weight
 
   const handleCalculate = () => {
     const heightCm = (parseInt(ft || '0') * 12 + parseInt(inches || '0')) * 2.54
     const weightKg = parseFloat(weight || '0') * 0.453592
-    const result = calculateGoals(parseInt(age), gender, heightCm, weightKg, activityLevel, fitnessGoal)
+    const parsedAge = parseInt(age) || 25
+    if (!heightCm || !weightKg) {
+      Alert.alert('Missing info', 'Please go back and enter your height and weight first.')
+      return
+    }
+    const result = calculateGoals(parsedAge, gender || 'male', heightCm, weightKg, activityLevel || 'moderate', fitnessGoal || 'maintain')
     setCalcResult(result)
   }
 
@@ -254,11 +269,11 @@ function S3Numbers({
           <Text style={[s.subtitle, { textAlign: 'center', marginBottom: 32 }]}>Based on your profile using the Mifflin-St Jeor formula</Text>
           <View style={[s.inputCard, { width: '100%', marginBottom: 16 }]}>
             <Text style={s.inputLabel}>Daily Calories</Text>
-            <Text style={[s.input, { paddingVertical: 4 }]}>{calcResult.calories.toLocaleString()} kcal</Text>
+            <Text style={{ fontSize: 24, fontWeight: '800', color: '#FFFFFF', paddingVertical: 4 }}>{calcResult.calories.toLocaleString('en-US')} kcal</Text>
           </View>
           <View style={[s.inputCard, { width: '100%', marginBottom: 16 }]}>
             <Text style={s.inputLabel}>Daily Protein</Text>
-            <Text style={[s.input, { paddingVertical: 4 }]}>{calcResult.protein}g</Text>
+            <Text style={{ fontSize: 24, fontWeight: '800', color: TEAL, paddingVertical: 4 }}>{String(calcResult.protein)}g</Text>
           </View>
         </View>
         <View style={s.bottomActions}>
@@ -505,6 +520,172 @@ const FEATURES = [
   'Unlimited saved meals',
 ]
 
+function SPreview({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const fadeIn = useRef(new Animated.Value(0)).current
+
+  const cals = parseInt(data.calories) || 2400
+  const prot = parseInt(data.protein) || 150
+  const mealsPerDay = parseInt(data.meals) || 3
+  const prepMin = data.prep === '5 min' ? 5 : data.prep === '15 min' ? 15 : 30
+  const goalLabel = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'gain' ? 'Build Muscle' : 'Maintain'
+
+  // Simulate plan generation
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false)
+      Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true }).start()
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [])
+
+  const calPerMeal = Math.round(cals / mealsPerDay)
+  const protPerMeal = Math.round(prot / mealsPerDay)
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <ProgressBar pct={82} />
+      <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
+        {loading ? (
+          <View style={{ alignItems: 'center', paddingTop: 80, gap: 20 }}>
+            <ActivityIndicator color={TEAL} size="large" />
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#FFFFFF' }}>Building your plan...</Text>
+            <Text style={{ fontSize: 14, color: MUTED, textAlign: 'center' }}>Personalizing meals based on your goals and preferences</Text>
+          </View>
+        ) : (
+          <Animated.View style={{ opacity: fadeIn, gap: 24 }}>
+            <View>
+              <Text style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 }}>Your plan is ready</Text>
+              <Text style={{ fontSize: 15, color: MUTED, marginTop: 6 }}>Here's what we've built for you</Text>
+            </View>
+
+            {/* Goal card */}
+            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Target size={20} stroke={TEAL} strokeWidth={2} />
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Your Goal: {goalLabel}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                <View style={{ alignItems: 'center', flex: 1 }}>
+                  <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF' }}>{cals}</Text>
+                  <Text style={{ fontSize: 12, color: MUTED }}>Daily Calories</Text>
+                </View>
+                <View style={{ width: 1, backgroundColor: '#2A2A2A' }} />
+                <View style={{ alignItems: 'center', flex: 1 }}>
+                  <Text style={{ fontSize: 22, fontWeight: '800', color: TEAL }}>{prot}g</Text>
+                  <Text style={{ fontSize: 12, color: MUTED }}>Daily Protein</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Daily schedule */}
+            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <UtensilsCrossed size={20} stroke={TEAL} strokeWidth={2} />
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Your Daily Schedule</Text>
+              </View>
+              {Array.from({ length: mealsPerDay }, (_, i) => {
+                const labels = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Snack 2', 'Snack 3']
+                return (
+                  <View key={i} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.05)' }}>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#FFFFFF' }}>{labels[i] ?? `Meal ${i + 1}`}</Text>
+                    <Text style={{ fontSize: 13, color: MUTED }}>~{calPerMeal} cal · {protPerMeal}g protein</Text>
+                  </View>
+                )
+              })}
+            </View>
+
+            {/* What you get */}
+            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Sparkles size={20} stroke={TEAL} strokeWidth={2} />
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>What Pantry Does For You</Text>
+              </View>
+              {[
+                'AI generates meals that hit your macros',
+                'Scan your kitchen to update ingredients',
+                'Log meals with a photo — AI estimates calories',
+                `Recipes under ${prepMin} min prep time`,
+                'Auto-build grocery lists from meals',
+              ].map((item, i) => (
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Check size={16} stroke={TEAL} strokeWidth={2.5} />
+                  <Text style={{ fontSize: 14, color: 'rgba(255,255,255,0.8)' }}>{item}</Text>
+                </View>
+              ))}
+            </View>
+          </Animated.View>
+        )}
+      </ScrollView>
+      {!loading && (
+        <View style={s.bottomActions}>
+          <CommitButton onComplete={onNext} />
+          <TouchableOpacity style={s.textLink} onPress={onBack} activeOpacity={0.7}><Text style={s.textLinkText}>Back</Text></TouchableOpacity>
+        </View>
+      )}
+    </SafeAreaView>
+  )
+}
+
+function CommitButton({ onComplete }: { onComplete: () => void }) {
+  const progress = useRef(new Animated.Value(0)).current
+  const [holding, setHolding] = useState(false)
+  const [done, setDone] = useState(false)
+  const animRef = useRef<Animated.CompositeAnimation | null>(null)
+
+  const startHold = () => {
+    setHolding(true)
+    animRef.current = Animated.timing(progress, { toValue: 1, duration: 2500, useNativeDriver: false })
+    animRef.current.start(({ finished }) => {
+      if (finished) {
+        setDone(true)
+        setTimeout(onComplete, 300)
+      }
+    })
+  }
+
+  const stopHold = () => {
+    if (done) return
+    animRef.current?.stop()
+    setHolding(false)
+    Animated.timing(progress, { toValue: 0, duration: 200, useNativeDriver: false }).start()
+  }
+
+  const widthInterp = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] })
+
+  return (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPressIn={startHold}
+      onPressOut={stopHold}
+      style={{
+        backgroundColor: '#1A1A1A',
+        borderRadius: 30,
+        paddingVertical: 18,
+        alignItems: 'center',
+        overflow: 'hidden',
+        borderWidth: 1.5,
+        borderColor: done ? TEAL : holding ? 'rgba(74,222,128,0.4)' : 'rgba(255,255,255,0.15)',
+      }}
+    >
+      <Animated.View
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: widthInterp,
+          backgroundColor: 'rgba(74,222,128,0.15)',
+          borderRadius: 30,
+        }}
+      />
+      <Text style={{ fontSize: 16, fontWeight: '700', color: done ? TEAL : '#FFFFFF' }}>
+        {done ? "Let's go!" : holding ? 'Hold to commit...' : 'Hold to start your journey'}
+      </Text>
+    </TouchableOpacity>
+  )
+}
+
 function S7Paywall({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
   const { registerPlacement } = useSuperwall()
 
@@ -520,7 +701,7 @@ function S7Paywall({ onNext, onBack }: { onNext: () => void; onBack: () => void 
 
   return (
     <SafeAreaView style={s.safe}>
-      <ProgressBar pct={PROGRESS[8]} />
+      <ProgressBar pct={PROGRESS[9]} />
       <View style={s.centerFlex}>
         <TouchableOpacity style={s.textLink} onPress={onNext} activeOpacity={0.7}>
           <Text style={s.textLinkText}>Continue with limited free access</Text>
@@ -643,6 +824,7 @@ export default function Onboarding() {
           ft={data.ft} inches={data.inches} weight={data.weight}
           onAge={update('age')} onGender={update('gender')}
           onActivityLevel={update('activityLevel')} onFitnessGoal={update('fitnessGoal')}
+          goal={data.goal}
           onNext={next} onBack={back}
         />,
     5: <S5Preferences meals={data.meals} prep={data.prep} diet={data.diet} onMeals={update('meals')} onPrep={update('prep')} onDiet={update('diet')} onNext={next} onBack={back} />,
@@ -655,8 +837,8 @@ export default function Onboarding() {
         onNext={() => router.push('/onboarding/createaccount')}
         onBack={back}
       />,
-    8: <S7Paywall onNext={next} onBack={back} />,
-    9: <S8Complete onFinish={finish} />,
+    8: <SPreview data={data} onNext={next} onBack={back} />,
+    9: <S7Paywall onNext={finish} onBack={back} />,
   }
 
   return (

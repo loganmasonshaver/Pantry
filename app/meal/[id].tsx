@@ -17,7 +17,8 @@ const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Utensils } from 'lucide-react-native'
+import { ChevronLeft, Utensils, Clock, Pencil } from 'lucide-react-native'
+import RecipeFormModal from '@/components/RecipeFormModal'
 import { COLORS } from '@/constants/colors'
 import { autoCategoryMatches } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
@@ -41,13 +42,25 @@ function isNeedToBuy(name: string): boolean {
   return name.trim().endsWith('*')
 }
 
+// Strip cooking adjectives for better matching
+const COOKING_ADJECTIVES = ['grilled', 'baked', 'fried', 'roasted', 'steamed', 'sauteed', 'sautéed', 'boiled', 'raw', 'fresh', 'dried', 'diced', 'chopped', 'sliced', 'minced', 'shredded', 'cooked', 'uncooked', 'whole', 'boneless', 'skinless']
+
+function stripAdjectives(name: string): string {
+  let result = name.toLowerCase()
+  for (const adj of COOKING_ADJECTIVES) {
+    result = result.replace(new RegExp(`\\b${adj}\\b`, 'g'), '').trim()
+  }
+  return result.replace(/\s+/g, ' ').trim()
+}
+
 // Check if an item is already covered by existing names
-// "chicken breast" matches "chicken", "chicken" matches "chicken breast"
 function isAlreadyInList(itemName: string, existingNames: Set<string>): boolean {
   const lower = cleanIngredientName(itemName).toLowerCase()
+  const stripped = stripAdjectives(lower)
   for (const existing of existingNames) {
-    if (lower === existing) return true
+    if (lower === existing || stripped === existing) return true
     if (lower.includes(existing) || existing.includes(lower)) return true
+    if (stripped.includes(existing) || existing.includes(stripped)) return true
   }
   return false
 }
@@ -73,6 +86,7 @@ export default function MealDetailScreen() {
   const [saved, setSaved] = useState(false)
   const [logging, setLogging] = useState(false)
   const [logged, setLogged] = useState(false)
+  const [showEditForm, setShowEditForm] = useState(false)
   const [portionMode, setPortionMode] = useState<PortionMode>('Visual')
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
@@ -99,9 +113,11 @@ export default function MealDetailScreen() {
   }
 
   let meal: MealDetail | null = null
+  let isUserCreated = false
   if (mealData) {
     try {
-      const generated: GeneratedMeal = JSON.parse(mealData)
+      const generated: any = JSON.parse(mealData)
+      isUserCreated = generated.is_user_created === true
       meal = {
         ...generated,
         ingredients: generated.ingredients.map((ing, i) => ({
@@ -230,6 +246,8 @@ export default function MealDetailScreen() {
       meal_name: meal.name,
       calories: meal.calories,
       protein: meal.protein,
+      carbs: meal.carbs ?? 0,
+      fat: meal.fat ?? 0,
       slot,
       logged_at: today,
     })
@@ -280,7 +298,13 @@ export default function MealDetailScreen() {
           <ChevronLeft size={24} stroke={COLORS.textWhite} strokeWidth={2} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{meal.name}</Text>
-        <View style={styles.headerBtn} />
+        {isUserCreated ? (
+          <TouchableOpacity style={styles.headerBtn} onPress={() => setShowEditForm(true)} activeOpacity={0.7}>
+            <Pencil size={18} stroke={COLORS.textMuted} strokeWidth={2} />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerBtn} />
+        )}
       </View>
 
       <ScrollView
@@ -299,18 +323,17 @@ export default function MealDetailScreen() {
 
         {/* ── Macro bar ── */}
         {(() => {
-          const calculatedCal = meal.protein * 4 + meal.carbs * 4 + meal.fat * 9
-          const diff = Math.abs(calculatedCal - meal.calories)
-          const correctedCal = diff > 30 ? calculatedCal : meal.calories
+          const correctedCal = meal.calories
           return (
             <View style={styles.macroBar}>
               {[
-                { label: 'Calories', value: String(correctedCal), unit: 'kcal' },
-                { label: 'Protein',  value: `${meal.protein}g`,    unit: ''     },
-                { label: 'Carbs',    value: `${meal.carbs}g`,      unit: ''     },
-                { label: 'Fat',      value: `${meal.fat}g`,        unit: ''     },
+                { label: 'Calories', value: String(correctedCal), color: '#FFFFFF' },
+                { label: 'Protein',  value: `${meal.protein}g`,   color: '#4ADE80' },
+                { label: 'Carbs',    value: `${meal.carbs}g`,     color: '#F59E0B' },
+                { label: 'Fat',      value: `${meal.fat}g`,       color: '#60A5FA' },
               ].map((stat, i, arr) => (
                 <View key={stat.label} style={[styles.macroStat, i < arr.length - 1 && styles.macroStatBorder]}>
+                  <View style={[styles.macroDotIndicator, { backgroundColor: stat.color }]} />
                   <Text style={styles.macroValue}>{stat.value}</Text>
                   <Text style={styles.macroLabel}>{stat.label}</Text>
                 </View>
@@ -318,6 +341,14 @@ export default function MealDetailScreen() {
             </View>
           )
         })()}
+
+        {/* ── Prep time ── */}
+        {meal.prepTime != null && meal.prepTime > 0 && (
+          <View style={styles.prepTimeRow}>
+            <Clock size={14} stroke={COLORS.textMuted} strokeWidth={1.8} />
+            <Text style={styles.prepTimeText}>{meal.prepTime} min prep time</Text>
+          </View>
+        )}
 
         {/* ── Protein warning ── */}
         {showProteinWarning && (
@@ -357,17 +388,24 @@ export default function MealDetailScreen() {
                     {portionMode === 'Visual' ? ing.visual : ing.grams}
                   </Text>
                   <View style={styles.ingredientRight}>
-                    <Text style={styles.ingredientName}>{ing.name}</Text>
-                    {inPantry ? (
-                      <Text style={styles.inPantryLabel}>In pantry</Text>
-                    ) : isBasic ? (
-                      <Text style={styles.basicLabel}>Basic</Text>
-                    ) : (
+                    <View style={styles.ingredientNameRow}>
+                      <Text style={styles.ingredientName}>{ing.name}</Text>
+                      {inPantry && <Text style={styles.inPantryLabel}>In pantry</Text>}
+                      {isBasic && <Text style={styles.basicLabel}>Basic</Text>}
+                    </View>
+                    {!inPantry && !isBasic && (
                       <View style={styles.ingredientActions}>
-                        <TouchableOpacity onPress={() => {
+                        <TouchableOpacity onPress={async () => {
                           if (!user) return
-                          supabase.from('pantry_items').insert({ user_id: user.id, name: ing.name, category: autoCategoryMatches(ing.name)[0] || 'Other', in_stock: true })
                           setPantryNames(prev => { const n = new Set(prev); n.add(ing.name.toLowerCase()); return n })
+                          // Check if already in pantry
+                          const { data: existing } = await supabase.from('pantry_items').select('id').eq('user_id', user.id).ilike('name', ing.name).limit(1)
+                          if (existing && existing.length > 0) {
+                            await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
+                          } else {
+                            const { error } = await supabase.from('pantry_items').insert({ user_id: user.id, name: ing.name, category: autoCategoryMatches(ing.name)[0] || 'Other', in_stock: true })
+                            if (error) Alert.alert('Error', 'Could not add to pantry')
+                          }
                         }} activeOpacity={0.7}>
                           <Text style={styles.inPantryAction}>I have this</Text>
                         </TouchableOpacity>
@@ -435,26 +473,21 @@ export default function MealDetailScreen() {
           <View style={styles.slotCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.slotTitle}>Log to which meal?</Text>
 
-            {/* Scroll wheel */}
-            <View style={styles.wheelContainer}>
-              <View style={styles.wheelHighlight} pointerEvents="none" />
-              <ScrollView
-                ref={slotScrollRef}
-                showsVerticalScrollIndicator={false}
-                snapToInterval={ITEM_HEIGHT}
-                decelerationRate="fast"
-                onScroll={onSlotScroll}
-                scrollEventThrottle={16}
-                contentContainerStyle={{ paddingVertical: ITEM_HEIGHT }}
-              >
-                {SLOT_OPTIONS.map((slot, i) => (
-                  <View key={slot} style={styles.wheelItem}>
-                    <Text style={[styles.wheelItemText, selectedSlotIndex === i && styles.wheelItemTextActive]}>
-                      {slot}
-                    </Text>
-                  </View>
-                ))}
-              </ScrollView>
+            <View style={{ gap: 10, marginVertical: 8 }}>
+              {SLOT_OPTIONS.map(slot => (
+                <TouchableOpacity
+                  key={slot}
+                  style={[styles.slotOptionBtn, selectedSlotIndex === SLOT_OPTIONS.indexOf(slot) && styles.slotOptionBtnActive]}
+                  onPress={() => {
+                    hapticImpact()
+                    setShowSlotPicker(false)
+                    logToSlot(slot)
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.slotOptionText, selectedSlotIndex === SLOT_OPTIONS.indexOf(slot) && styles.slotOptionTextActive]}>{slot}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
             {/* Custom option */}
@@ -494,22 +527,53 @@ export default function MealDetailScreen() {
                 <Text style={styles.slotCustomLink}>+ Custom meal</Text>
               </TouchableOpacity>
             )}
-
-            {/* Confirm */}
-            <TouchableOpacity
-              style={styles.slotConfirmBtn}
-              onPress={() => {
-                hapticImpact()
-                setShowSlotPicker(false)
-                logToSlot(SLOT_OPTIONS[selectedSlotIndex])
-              }}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.slotConfirmText}>Log to {SLOT_OPTIONS[selectedSlotIndex]}</Text>
-            </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {isUserCreated && meal && (
+        <RecipeFormModal
+          visible={showEditForm}
+          onClose={() => setShowEditForm(false)}
+          onSaved={async () => {
+            setShowEditForm(false)
+            // Refresh meal data from DB
+            if (user && meal.id) {
+              const { data } = await supabase.from('saved_meals')
+                .select('name, prep_time, calories, protein, carbs, fat, ingredients, steps')
+                .eq('id', meal.id)
+                .single()
+              if (data) {
+                // Force re-render by replacing the route with updated data
+                router.replace({
+                  pathname: '/meal/[id]',
+                  params: {
+                    id: meal.id,
+                    mealData: JSON.stringify({
+                      ...data,
+                      id: meal.id,
+                      prepTime: data.prep_time,
+                      image: meal.image,
+                      is_user_created: true,
+                    }),
+                  },
+                })
+              }
+            }
+          }}
+          editMeal={{
+            id: meal.id ?? id ?? '',
+            name: meal.name,
+            prep_time: meal.prepTime,
+            calories: meal.calories,
+            protein: meal.protein,
+            carbs: meal.carbs,
+            fat: meal.fat,
+            ingredients: meal.ingredients,
+            steps: meal.steps,
+          }}
+        />
+      )}
     </SafeAreaView>
   )
 }
@@ -590,6 +654,12 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: 'rgba(255,255,255,0.08)',
   },
+  macroDotIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginBottom: 4,
+  },
   macroValue: {
     fontSize: 17,
     fontWeight: '700',
@@ -599,6 +669,20 @@ const styles = StyleSheet.create({
   macroLabel: {
     fontSize: 11,
     color: COLORS.textDim,
+    fontWeight: '500',
+  },
+
+  // Prep time
+  prepTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 12,
+  },
+  prepTimeText: {
+    fontSize: 14,
+    color: COLORS.textMuted,
     fontWeight: '500',
   },
 
@@ -627,7 +711,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
@@ -669,29 +753,28 @@ const styles = StyleSheet.create({
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 10,
   },
   ingredientBorder: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   ingredientPortion: {
-    width: 56,
-    fontSize: 13,
+    width: 85,
+    fontSize: 12,
     fontWeight: '700',
     color: COLORS.accent,
-    paddingTop: 1,
   },
   ingredientRight: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
   ingredientNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 8,
   },
   missingDot: {
     width: 7,
@@ -703,6 +786,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: COLORS.textWhite,
+    flex: 1,
   },
   addToGrocery: {
     fontSize: 12,
@@ -784,7 +868,8 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
-    gap: 16,
+    paddingBottom: 40,
+    gap: 12,
   },
   slotTitle: {
     fontSize: 18,
@@ -792,14 +877,9 @@ const styles = StyleSheet.create({
     color: COLORS.textWhite,
     textAlign: 'center',
   },
-  wheelContainer: {
-    height: 150,
-    overflow: 'hidden',
-    position: 'relative',
-  },
   wheelHighlight: {
     position: 'absolute',
-    top: 50,
+    top: 75,
     left: 0,
     right: 0,
     height: 50,
@@ -823,6 +903,25 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: COLORS.textWhite,
+  },
+  slotOptionBtn: {
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: '#111111',
+    alignItems: 'center',
+  },
+  slotOptionBtnActive: {
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.3)',
+  },
+  slotOptionText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: COLORS.textWhite,
+  },
+  slotOptionTextActive: {
+    color: '#4ADE80',
   },
   slotCustomLink: {
     fontSize: 14,
@@ -869,7 +968,7 @@ const styles = StyleSheet.create({
 
   // Steps
   stepList: {
-    gap: 20,
+    gap: 14,
   },
   stepRow: {
     flexDirection: 'row',

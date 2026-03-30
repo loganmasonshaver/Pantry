@@ -30,11 +30,22 @@ Deno.serve(async (req: Request) => {
 
     const cacheKey = normalizeKey(mealName)
 
-    // Check DB cache
+    // Check DB cache — verify URL is still valid
     const { data: cached, error: cacheReadErr } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
     console.log('Cache read:', cacheKey, cached ? 'HIT' : 'MISS', cacheReadErr?.message ?? '')
     if (cached?.image_url) {
-      return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
+      // Verify the URL hasn't expired (Replicate URLs can expire)
+      try {
+        const check = await fetch(cached.image_url, { method: 'HEAD' })
+        if (check.ok) {
+          return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
+        }
+        // URL expired — delete stale cache entry and regenerate
+        console.log('Cache expired:', cacheKey)
+        await db.from('image_cache').delete().eq('meal_key', cacheKey)
+      } catch {
+        await db.from('image_cache').delete().eq('meal_key', cacheKey)
+      }
     }
 
     if (!replicateToken) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })

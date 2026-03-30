@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   View,
   Text,
@@ -10,10 +10,14 @@ import {
   Animated,
   ActivityIndicator,
   Image,
+  Alert,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect } from 'expo-router'
-import { Bookmark, Search, X, Utensils, Clock, Plus } from 'lucide-react-native'
+import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router'
+import { Bookmark, Search, X, Utensils, Clock, Plus, Link } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
@@ -51,8 +55,28 @@ const FILTERS = ['All', 'High Protein', 'Quick', 'My Recipes']
 // ── Meal card ──────────────────────────────────────────────────────────
 
 function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () => void; onEdit?: () => void }) {
+  const router = useRouter()
+  const handlePress = () => {
+    const mealData = JSON.stringify({
+      id: meal.id,
+      name: meal.name,
+      prepTime: meal.prep_time,
+      calories: meal.calories,
+      protein: meal.protein,
+      carbs: meal.carbs ?? 0,
+      fat: meal.fat ?? 0,
+      ingredients: (meal.ingredients ?? []).map((ing: any, i: number) => ({
+        ...ing,
+        id: ing.id ?? String(i),
+      })),
+      steps: meal.steps ?? [],
+      image: meal.image,
+      is_user_created: meal.is_user_created,
+    })
+    router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData } })
+  }
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.9} onLongPress={meal.is_user_created ? onEdit : undefined}>
+    <TouchableOpacity style={styles.card} activeOpacity={0.75} onPress={handlePress}>
       {meal.is_user_created && (
         <View style={styles.myRecipeBadge}>
           <Text style={styles.myRecipeBadgeText}>My Recipe</Text>
@@ -92,6 +116,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
 
 export default function SavedScreen() {
   const { user } = useAuth()
+  const { sharedUrl } = useLocalSearchParams<{ sharedUrl?: string }>()
   const [meals, setMeals] = useState<SavedMeal[]>([])
   const [loading, setLoading] = useState(true)
   const [activeFilter, setActiveFilter] = useState('All')
@@ -99,6 +124,55 @@ export default function SavedScreen() {
   const [removed, setRemoved] = useState<{ meal: SavedMeal; index: number } | null>(null)
   const [showRecipeForm, setShowRecipeForm] = useState(false)
   const [editingMeal, setEditingMeal] = useState<SavedMeal | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importUrl, setImportUrl] = useState('')
+  const [importing, setImporting] = useState(false)
+
+  // Auto-open import modal when URL is shared from another app
+  useEffect(() => {
+    if (sharedUrl) {
+      setImportUrl(sharedUrl)
+      setShowImportModal(true)
+    }
+  }, [sharedUrl])
+
+  const handleImportFromUrl = async () => {
+    const url = importUrl.trim()
+    if (!url) return
+    if (!/youtu\.?be|tiktok\.com/.test(url)) {
+      Alert.alert('Unsupported link', 'Please paste a YouTube or TikTok URL.')
+      return
+    }
+    setImporting(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('extract-recipe-from-url', {
+        body: { url },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      // Auto-fill the recipe form with extracted data
+      setShowImportModal(false)
+      setImportUrl('')
+      setEditingMeal({
+        id: '',
+        name: data.name || '',
+        prep_time: data.prepTime ?? null,
+        calories: data.calories ?? null,
+        protein: data.protein ?? null,
+        carbs: data.carbs ?? null,
+        fat: data.fat ?? null,
+        ingredients: data.ingredients || [],
+        steps: data.steps || [],
+        is_user_created: true,
+        tags: [],
+      } as any)
+      setShowRecipeForm(true)
+    } catch (e: any) {
+      Alert.alert('Import failed', e.message || 'Could not extract recipe from this link.')
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const toastOpacity = useRef(new Animated.Value(0)).current
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -261,7 +335,7 @@ export default function SavedScreen() {
             <Bookmark size={32} stroke="#4ADE80" strokeWidth={1.8} />
           </View>
           <Text style={styles.emptyTitle}>No saved meals yet</Text>
-          <Text style={styles.emptySub}>Save a meal from the Home screen to see it here</Text>
+          <Text style={styles.emptySub}>Tap the bookmark on any meal to save it</Text>
         </View>
       ) : (
         <ScrollView
@@ -285,6 +359,42 @@ export default function SavedScreen() {
           </TouchableOpacity>
         </Animated.View>
       )}
+      {/* ── Import URL modal ── */}
+      <Modal visible={showImportModal} transparent animationType="fade">
+        <KeyboardAvoidingView style={styles.importOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.importSheet}>
+            <Text style={styles.importTitle}>Import from URL</Text>
+            <Text style={styles.importSub}>Paste a YouTube or TikTok recipe link</Text>
+            <TextInput
+              style={styles.importInput}
+              placeholder="https://..."
+              placeholderTextColor={COLORS.textMuted}
+              value={importUrl}
+              onChangeText={setImportUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              autoFocus
+            />
+            <TouchableOpacity
+              style={[styles.importBtn, (!importUrl.trim() || importing) && { opacity: 0.4 }]}
+              onPress={handleImportFromUrl}
+              disabled={!importUrl.trim() || importing}
+              activeOpacity={0.85}
+            >
+              {importing ? (
+                <ActivityIndicator color="#000" size="small" />
+              ) : (
+                <Text style={styles.importBtnText}>Extract Recipe</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.importCancel} onPress={() => { setShowImportModal(false); setImportUrl('') }} activeOpacity={0.7}>
+              <Text style={styles.importCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <RecipeFormModal
         visible={showRecipeForm}
         onClose={() => { setShowRecipeForm(false); setEditingMeal(null) }}
@@ -475,5 +585,57 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4ADE80',
     letterSpacing: 0.3,
+  },
+
+  importOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  importSheet: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 20,
+    padding: 24,
+    gap: 12,
+  },
+  importTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.3,
+  },
+  importSub: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    marginBottom: 4,
+  },
+  importInput: {
+    backgroundColor: '#111111',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    color: COLORS.textWhite,
+  },
+  importBtn: {
+    backgroundColor: COLORS.textWhite,
+    borderRadius: 30,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  importBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  importCancel: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  importCancelText: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    fontWeight: '500',
   },
 })

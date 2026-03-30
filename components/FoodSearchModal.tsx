@@ -68,6 +68,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<FoodSearchResult[]>([])
   const [searching, setSearching] = useState(false)
+  const [resultMacros, setResultMacros] = useState<Record<string, { cal: number; prot: number; serving: string }>>({})
+
 
   // Scan state
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
@@ -81,6 +83,11 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [selectedServing, setSelectedServing] = useState<FoodServing | null>(null)
   const [selectedSlot, setSelectedSlot] = useState(defaultSlot)
   const [saving, setSaving] = useState(false)
+
+  // Sync slot when modal opens with a new defaultSlot
+  useEffect(() => {
+    if (visible) setSelectedSlot(initialSlot ?? defaultSlot)
+  }, [visible])
 
   // Portion quantity
   const [quantity, setQuantity] = useState('1')
@@ -135,11 +142,29 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const handleClose = () => { reset(); onClose() }
 
   const doSearch = useCallback(async (q: string) => {
-    if (!q.trim()) { setResults([]); return }
+    if (!q.trim()) { setResults([]); setResultMacros({}); return }
     setSearching(true)
+    setResultMacros({})
     try {
       const res = await searchFoods(q.trim())
       setResults(res)
+      // Fetch actual serving macros for each result in background
+      res.forEach(async (food) => {
+        try {
+          const detail = await getFoodById(food.food_id)
+          const s = detail.servings[0]
+          if (s) {
+            setResultMacros(prev => ({
+              ...prev,
+              [food.food_id]: {
+                cal: Math.round(parseFloat(s.calories) || 0),
+                prot: Math.round(parseFloat(s.protein) || 0),
+                serving: s.serving_description,
+              },
+            }))
+          }
+        } catch {}
+      })
     } catch {
       Alert.alert('Search failed', 'Could not reach FatSecret. Check your connection.')
     } finally {
@@ -217,11 +242,13 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       const parsed = parseMacros(selectedServing)
       const qty = Math.max(0.1, parseFloat(quantity) || 1)
       const base = activeOverride
-        ? { calories: activeOverride.calories, protein: activeOverride.protein }
-        : { calories: parsed.calories, protein: parsed.protein }
+        ? { calories: activeOverride.calories, protein: activeOverride.protein, carbs: activeOverride.carbs ?? parsed.carbs, fat: activeOverride.fat ?? parsed.fat }
+        : { calories: parsed.calories, protein: parsed.protein, carbs: parsed.carbs, fat: parsed.fat }
       const macros = {
         calories: Math.round(base.calories * qty),
         protein: Math.round(base.protein * qty),
+        carbs: Math.round(base.carbs * qty),
+        fat: Math.round(base.fat * qty),
       }
       const today = new Date().toISOString().split('T')[0]
       let error: any
@@ -229,6 +256,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         ;({ error } = await supabase.from('meal_logs').update({
           calories: macros.calories,
           protein: macros.protein,
+          carbs: macros.carbs,
+          fat: macros.fat,
           serving_id: selectedServing.serving_id,
           quantity: qty,
         }).eq('id', editLogId))
@@ -238,6 +267,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
           meal_name: selectedFood.food_name,
           calories: macros.calories,
           protein: macros.protein,
+          carbs: macros.carbs,
+          fat: macros.fat,
           slot: selectedSlot,
           logged_at: today,
           food_id: selectedFood.food_id,
@@ -473,7 +504,15 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                     <Text style={styles.hintText}>Type to search millions of foods and brands</Text>
                   )}
                   {results.map((food, i) => {
-                    const m = quickMacros(food.food_description)
+                    const rm = resultMacros[food.food_id]
+                    const subtitle = rm
+                      ? [
+                          `${rm.cal} cal`,
+                          `${rm.prot}g protein`,
+                          rm.serving,
+                          food.brand_name || null,
+                        ].filter(Boolean).join(', ')
+                      : food.brand_name || ''
                     return (
                       <TouchableOpacity
                         key={`${food.food_id}-${i}`}
@@ -483,8 +522,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                       >
                         <View style={styles.resultInfo}>
                           <Text style={styles.resultName} numberOfLines={1}>{food.food_name}</Text>
-                          {food.brand_name && <Text style={styles.resultBrand}>{food.brand_name}</Text>}
-                          <Text style={styles.resultMacros}>{m.per} · {m.cal} kcal · {m.prot}g protein</Text>
+                          {subtitle ? <Text style={styles.resultBrand}>{subtitle}</Text> : null}
                         </View>
                         <ChevronRight size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
                       </TouchableOpacity>

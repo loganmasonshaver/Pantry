@@ -107,7 +107,7 @@ Deno.serve(async (req: Request) => {
     const isCookNow = mode === "cookNow"
 
     const ingredientRule = isCookNow
-      ? `- STRICTLY use ONLY ingredients from the pantry list below. Do NOT include ANY ingredient not on this list — not even cooking basics like oil, salt, pepper, butter, or spices unless they are explicitly listed. The user wants to cook right now with ONLY what they have. If an ingredient is not in the list, do not use it.`
+      ? `- STRICTLY use ONLY ingredients from the pantry list below. Do NOT include ANY ingredient not on this list — not even cooking basics like oil, salt, pepper, butter, or spices unless they are explicitly listed. The user wants to cook right now with ONLY what they have. If an ingredient is not in the list, do not use it. Every single ingredient in the recipe MUST appear in the pantry list.`
       : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy. Mark any non-pantry ingredient by appending " *" to its name (e.g. "salmon fillet *").`
 
     const prompt = `You are a nutrition-focused meal planner. Generate exactly ${count} high-protein meal suggestions.
@@ -120,17 +120,19 @@ User profile:
 - Max prep time: ${maxPrepMinutes} minutes
 - Dietary restrictions: ${restrictions}${dislikesLine}${dislikedMealsLine}${likedMealsLine}
 
-Available pantry ingredients:
+Available pantry ingredients (listed oldest first — prioritize using the first items to reduce food waste):
 ${ingredients.join(", ")}
 
 Rules:
 ${ingredientRule}
+- PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - Each meal should be high protein (at least ${Math.round(proteinGoal / mealsPerDay)}g protein)
 - Calories per meal should be around ${Math.round(calorieGoal / mealsPerDay)} kcal
 - Keep prep time under ${maxPrepMinutes} minutes
 - For each ingredient include both a visual portion size (e.g. "1 palm", "1 fist", "2 tbsp") AND a gram/ml weight (e.g. "120g", "185g", "30ml")
 - No repeated meals
 - ONLY suggest real, practical meals that people actually eat. No bizarre combinations.
+- Make every meal DELICIOUS — use seasonings, sauces, and condiments from the pantry list to maximize flavor. Plain unseasoned food is not acceptable. If the pantry has seasonings/sauces, use them generously. Think restaurant-quality flavor, not bland diet food.
 - Fruits should not be mixed with savory meats (e.g. no "banana beef smoothie" or "kiwi steak bowl")
 - Each meal should be a coherent dish — something you'd find at a restaurant or in a cookbook
 - Smoothies should only contain typical smoothie ingredients (fruits, protein powder, milk, yogurt, greens)
