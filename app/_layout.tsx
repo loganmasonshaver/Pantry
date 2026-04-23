@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react'
-import { View } from 'react-native'
-import { Stack, router } from 'expo-router'
+import { View, LogBox } from 'react-native'
+import { Stack, router, usePathname } from 'expo-router'
+
+// Known 3rd-party noise — library hasn't migrated yet. Our code is clean.
+// Remove these when upstream updates.
+LogBox.ignoreLogs([
+  'InteractionManager has been deprecated', // react-native-draggable-flatlist@4.0.3
+])
 import { StatusBar } from 'expo-status-bar'
 import { DarkTheme, ThemeProvider } from '@react-navigation/native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AuthProvider, useAuth } from '../context/AuthContext'
+import { AIConsentProvider } from '../context/AIConsentContext'
 import { useNotifications } from '../hooks/useNotifications'
 import { SuperwallProvider } from 'expo-superwall'
 import { SuperwallContextProvider } from '../context/SuperwallContext'
@@ -22,6 +29,7 @@ const AppTheme = {
 function RootLayoutNav() {
   const { session, loading } = useAuth()
   const [checking, setChecking] = useState(true)
+  const pathname = usePathname()
   useNotifications(session?.user?.id ?? null)
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent()
 
@@ -39,6 +47,12 @@ function RootLayoutNav() {
   useEffect(() => {
     if (loading) return
 
+    // Don't redirect while user is resetting their password
+    if (pathname === '/onboarding/reset-password') {
+      setChecking(false)
+      return
+    }
+
     Promise.all([
       AsyncStorage.getItem('onboarding_complete'),
       AsyncStorage.getItem('otp_verified'),
@@ -55,7 +69,9 @@ function RootLayoutNav() {
         } else if (onboardingValue === 'true') {
           router.replace('/(tabs)')
         } else {
-          router.replace({ pathname: '/onboarding', params: { step: '8' } })
+          // No step param — let onboarding resume from its own saved onboarding_step key.
+          // Hardcoding a step here broke when the step order changed (step 8 is now Goal, not Paywall).
+          router.replace('/onboarding')
         }
       } else {
         // Clear OTP flag on sign out
@@ -76,6 +92,7 @@ function RootLayoutNav() {
         <Stack.Screen name="onboarding/signin" />
         <Stack.Screen name="onboarding/createaccount" />
         <Stack.Screen name="onboarding/verify-email" />
+        <Stack.Screen name="onboarding/reset-password" />
         <Stack.Screen name="meal/[id]" />
         <Stack.Screen name="delivery-webview" />
         <Stack.Screen name="food-preferences" />
@@ -94,7 +111,9 @@ export default function RootLayout() {
               apiKeys={{ ios: process.env.EXPO_PUBLIC_SUPERWALL_API_KEY! }}
             >
               <SuperwallContextProvider>
-                <RootLayoutNav />
+                <AIConsentProvider>
+                  <RootLayoutNav />
+                </AIConsentProvider>
               </SuperwallContextProvider>
             </SuperwallProvider>
           </AuthProvider>

@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
+import { useAIConsent } from '../context/AIConsentContext'
 
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
+const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 
 type CachedMeals = { date: string; meals: GeneratedMeal[] }
 
@@ -12,16 +14,36 @@ function todayStr() {
 }
 
 export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow') {
+  const { requestConsent } = useAIConsent()
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const fetchImage = async (name: string, ingredientNames: string[] = []): Promise<string | null> => {
+    // Check device cache first — avoids any network call if already fetched before
+    try {
+      const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
+      if (raw) {
+        const localCache: Record<string, string> = JSON.parse(raw)
+        if (localCache[name]) return localCache[name]
+      }
+    } catch {}
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const { data } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames } })
-        if (data?.image) return data.image
-      } catch {}
+        const { data, error } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames } })
+        console.log(`[MealImage] ${name}: data=`, JSON.stringify(data)?.substring(0, 100), 'error=', error)
+        if (data?.image) {
+          // Persist to device cache so future renders are instant
+          try {
+            const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
+            const localCache: Record<string, string> = raw ? JSON.parse(raw) : {}
+            localCache[name] = data.image
+            await AsyncStorage.setItem(IMAGE_URL_CACHE_KEY, JSON.stringify(localCache))
+          } catch {}
+          return data.image
+        }
+      } catch (e) { console.log(`[MealImage] ${name} error:`, e) }
       await new Promise(r => setTimeout(r, 3000))
     }
     return null
@@ -31,6 +53,28 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     if (!userId) return
 
     try {
+      // DIAGNOSTIC: check session state before making any auth-required calls
+      const sessionCheck = await supabase.auth.getSession()
+      console.log('[SESSION_CHECK v3]', {
+        hasSession: !!sessionCheck.data?.session,
+        userId: sessionCheck.data?.session?.user?.id,
+        expires_at: sessionCheck.data?.session?.expires_at,
+        expires_in_seconds: sessionCheck.data?.session?.expires_at
+          ? sessionCheck.data.session.expires_at - Math.floor(Date.now() / 1000)
+          : null,
+        access_token_preview: sessionCheck.data?.session?.access_token?.slice(0, 40),
+      })
+
+      // If no session, try refreshing
+      if (!sessionCheck.data?.session) {
+        console.log('[SESSION_CHECK v3] no session, attempting refresh...')
+        const refreshed = await supabase.auth.refreshSession()
+        console.log('[SESSION_CHECK v3] refresh result', {
+          hasSession: !!refreshed.data?.session,
+          error: refreshed.error?.message,
+        })
+      }
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes')
@@ -57,6 +101,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
       const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
 
+      const ok = await requestConsent()
+      if (!ok) { setLoading(false); return }
+
       const generated = await generateMeals({
         ingredients: ingredients.length > 0 ? ingredients : ['chicken breast', 'rice', 'eggs', 'broccoli'],
         calorieGoal: profile?.calorie_goal || 2400,
@@ -74,12 +121,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Cache today's meals for free-tier daily limit
       await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated }))
 
-      // Fetch images one at a time with retry
+      // Fetch all images in parallel
       const mealsToImage = [...generated]
       ;(async () => {
-        for (let i = 0; i < mealsToImage.length; i++) {
-          if (mealsToImage[i].image) continue
-          const meal = mealsToImage[i]
+        await Promise.all(mealsToImage.map(async (meal, i) => {
+          if (meal.image) return
           const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
           const image = await fetchImage(meal.name, ingNames)
           if (image) {
@@ -89,10 +135,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
               updated[i] = { ...updated[i], image }
               return updated
             })
-            await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage }))
           }
-          await new Promise(r => setTimeout(r, 2000))
-        }
+        }))
+        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage }))
       })()
 
       return generated
@@ -112,16 +157,41 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
           if (cached.date === todayStr() && cached.meals.length > 0) {
+            const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_'))
+            if (isSeeded) {
+              // Onboarding-seeded meals: show immediately for UX continuity.
+              // Fetch images in background (no auth required on generate-meal-image).
+              // The regen button triggers a full AI generation replacing them.
+              setMeals(cached.meals)
+              setLoading(false)
+              ;(async () => {
+                const withImages = [...cached.meals]
+                await Promise.all(withImages.map(async (meal, i) => {
+                  if (meal.image) return
+                  const image = await fetchImage(meal.name, [])
+                  if (image) {
+                    withImages[i] = { ...withImages[i], image }
+                    setMeals(prev => {
+                      const updated = [...prev]
+                      updated[i] = { ...updated[i], image }
+                      return updated
+                    })
+                  }
+                }))
+                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: withImages }))
+              })()
+              return
+            }
             setMeals(cached.meals)
             setLoading(false)
             // Fetch any missing images for cached meals
             const cachedMeals = [...cached.meals]
             if (cachedMeals.some(m => !m.image)) {
               ;(async () => {
-                for (let i = 0; i < cachedMeals.length; i++) {
-                  if (cachedMeals[i].image) continue
-                  const ingNames = cachedMeals[i].ingredients?.map((ing: any) => ing.name) ?? []
-                  const image = await fetchImage(cachedMeals[i].name, ingNames)
+                await Promise.all(cachedMeals.map(async (meal, i) => {
+                  if (meal.image) return
+                  const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+                  const image = await fetchImage(meal.name, ingNames)
                   if (image) {
                     cachedMeals[i] = { ...cachedMeals[i], image }
                     setMeals(prev => {
@@ -129,10 +199,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                       updated[i] = { ...updated[i], image }
                       return updated
                     })
-                    await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
                   }
-                  await new Promise(r => setTimeout(r, 2000))
-                }
+                }))
+                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
               })()
             }
             return
@@ -144,7 +213,29 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const generated = await generate()
       if (generated) setMeals(generated)
     } catch (err: any) {
-      console.log('MEAL ERROR:', err.message, err)
+      console.log('MEAL ERROR v3:', err.message)
+      console.log('MEAL ERROR status:', err?.context?.status)
+      // Read the response body — use clone so we don't consume it
+      try {
+        if (err?.context && typeof err.context.clone === 'function') {
+          const bodyText = await err.context.clone().text()
+          console.log('MEAL ERROR body text:', bodyText)
+        } else if (err?.context && typeof err.context.text === 'function') {
+          const bodyText = await err.context.text()
+          console.log('MEAL ERROR body text:', bodyText)
+        }
+      } catch (readErr: any) {
+        console.log('MEAL ERROR body read failed:', readErr?.message)
+      }
+      // Check session state AFTER the error
+      try {
+        const s = await supabase.auth.getSession()
+        console.log('MEAL ERROR post-session', {
+          hasSession: !!s.data?.session,
+          expires_at: s.data?.session?.expires_at,
+          token_preview: s.data?.session?.access_token?.slice(0, 40),
+        })
+      } catch {}
       setError(err.message)
     } finally {
       setLoading(false)

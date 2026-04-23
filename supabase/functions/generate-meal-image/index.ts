@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-const replicateToken = Deno.env.get("REPLICATE_API_TOKEN")
+const falApiKey = Deno.env.get("FAL_API_KEY")
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const db = createClient(supabaseUrl, supabaseServiceKey)
@@ -20,8 +20,11 @@ const corsHeaders = {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
+  // No auth required — images are globally cached (shared across all users).
+  // The global Supabase image_cache table means one user's generation benefits everyone.
+  // IP rate limiting below is sufficient to prevent abuse.
   const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 20, 60000)
+  const { allowed } = rateLimit(ip, 15, 60000)
   if (!allowed) return rateLimitResponse()
 
   try {
@@ -30,73 +33,82 @@ Deno.serve(async (req: Request) => {
 
     const cacheKey = normalizeKey(mealName)
 
-    // Check DB cache — verify URL is still valid
-    const { data: cached, error: cacheReadErr } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
-    console.log('Cache read:', cacheKey, cached ? 'HIT' : 'MISS', cacheReadErr?.message ?? '')
+    // Check DB cache — use Supabase Storage URLs (permanent, no expiry)
+    const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
     if (cached?.image_url) {
-      // Verify the URL hasn't expired (Replicate URLs can expire)
-      try {
-        const check = await fetch(cached.image_url, { method: 'HEAD' })
-        if (check.ok) {
-          return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
-        }
-        // URL expired — delete stale cache entry and regenerate
-        console.log('Cache expired:', cacheKey)
-        await db.from('image_cache').delete().eq('meal_key', cacheKey)
-      } catch {
-        await db.from('image_cache').delete().eq('meal_key', cacheKey)
-      }
+      return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
     }
 
-    if (!replicateToken) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
+    if (!falApiKey) {
+      console.log('FAL_API_KEY is missing or empty')
+      return new Response(JSON.stringify({ image: null, error: 'no FAL key' }), { headers: jsonHeaders })
+    }
 
-    const prompt = `Hyperrealistic professional food photography of ${mealName}${ingredients.length ? ` made with ${ingredients.join(', ')}` : ''}. ONLY show these exact ingredients, nothing else. Overhead shot on a dark plate, restaurant quality, warm natural lighting, sharp focus, photorealistic, 8k`
+    // Build prompt with ingredients for visual accuracy.
+    // Filter out sauces/oils/seasonings from the ingredient list — the model treats
+    // them as separate plated items (bowls of oil next to the dish) instead of integrating
+    // them into the food. They're emphasized via "glossy, sauced" language instead.
+    const sauceKeywords = ['oil', 'sauce', 'vinegar', 'dressing', 'syrup', 'butter', 'seasoning', 'spice', 'paste', 'glaze', 'marinade', 'mayo', 'mayonnaise', 'ketchup', 'mustard', 'sriracha', 'soy sauce']
+    const visibleIngredients = ingredients.filter((i: string) => {
+      const lower = i.toLowerCase()
+      return !sauceKeywords.some(k => lower.includes(k))
+    })
+    const ingredientList = visibleIngredients.length ? ` with ${visibleIngredients.join(', ')}` : ''
+    const prompt = `Overhead food photography of ${mealName}${ingredientList}, single plated composition on a dark ceramic plate, glossy saucy finish with oils and sauces fully integrated into the dish (never in separate bowls or jars), sheen and moisture visible on the food surface, rich color, no side dishes, no garnish props, no extra bowls, dark moody background, moody restaurant lighting, sharp focus, appetizing, photorealistic`
 
-    // Try up to 3 times to create and poll a prediction
+    // Generate via FAL Flux 2
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const res = await fetch("https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions", {
+        console.log('FAL key prefix:', falApiKey?.substring(0, 4))
+        const falUrl = "https://fal.run/fal-ai/flux-2"
+        const res = await fetch(falUrl, {
           method: "POST",
-          headers: { Authorization: `Bearer ${replicateToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ input: { prompt, num_outputs: 1, aspect_ratio: "16:9", output_format: "webp", output_quality: 80 } }),
+          headers: {
+            "Authorization": `Key ${falApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            prompt,
+            image_size: "square",
+            num_images: 1,
+            output_format: "jpeg",
+          }),
         })
-        const prediction = await res.json()
+        const data = await res.json()
+        console.log('FAL response status:', res.status, 'body:', JSON.stringify(data).substring(0, 300))
 
-        // Direct output (unlikely but handle it)
-        if (prediction.output?.[0]) {
-          const { error: ce } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: prediction.output[0] })
-          console.log('Cache save (direct):', cacheKey, ce?.message ?? 'OK')
-          return new Response(JSON.stringify({ image: prediction.output[0] }), { headers: jsonHeaders })
-        }
-
-        // No polling URL — Replicate returned an error, retry
-        if (!prediction.urls?.get) {
-          console.log(`Attempt ${attempt + 1}: no polling URL, status=${prediction.status}, error=${JSON.stringify(prediction.error)}`)
+        // FAL returns images array
+        const imageUrl = data.images?.[0]?.url
+        if (!imageUrl) {
+          console.log(`Attempt ${attempt + 1}: no image URL`, JSON.stringify(data).substring(0, 200))
           await new Promise(r => setTimeout(r, 2000))
           continue
         }
 
-        // Poll for completion
-        let result = prediction
-        for (let poll = 0; poll < 100; poll++) {
-          await new Promise(r => setTimeout(r, 500))
-          const pollRes = await fetch(result.urls.get, {
-            headers: { Authorization: `Bearer ${replicateToken}` },
-          })
-          result = await pollRes.json()
-          if (result.status === "succeeded" || result.status === "failed") break
+        // Upload to Supabase Storage for permanent caching
+        const imageRes = await fetch(imageUrl)
+        const blob = await imageRes.blob()
+        const filename = `${cacheKey.replace(/\s+/g, '-')}.jpg`
+
+        const { error: uploadErr } = await db.storage.from('meal-images').upload(filename, blob, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        })
+
+        let permanentUrl = imageUrl // fallback to FAL URL if upload fails
+        if (!uploadErr) {
+          const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
+          permanentUrl = urlData.publicUrl
+        } else {
+          console.log('Storage upload failed, using FAL URL:', uploadErr.message)
         }
 
-        if (result.output?.[0]) {
-          const { error: cacheErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: result.output[0] })
-          if (cacheErr) console.log('Cache save error:', cacheErr.message)
-          else console.log('Cached:', cacheKey)
-          return new Response(JSON.stringify({ image: result.output[0] }), { headers: jsonHeaders })
-        }
+        // Cache in DB
+        const { error: cacheErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: permanentUrl }, { onConflict: 'meal_key' })
+        if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
+        else console.log('Cached OK:', cacheKey)
 
-        // Failed — retry
-        console.log(`Attempt ${attempt + 1}: prediction ended with status=${result.status}`)
-        await new Promise(r => setTimeout(r, 2000))
+        return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
       } catch (e) {
         console.log(`Attempt ${attempt + 1} error:`, e)
         await new Promise(r => setTimeout(r, 2000))
