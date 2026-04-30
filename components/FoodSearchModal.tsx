@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import {
   View,
@@ -14,7 +15,8 @@ import {
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { X, Search, ScanBarcode, ChevronLeft, ChevronRight } from 'lucide-react-native'
+import { X, Search, ScanBarcode, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react-native'
+import Svg, { Circle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { trackMealLogged } from '@/lib/analytics'
@@ -39,6 +41,7 @@ type Props = {
   defaultSlot: string
   onClose: () => void
   onLogged: () => void
+  logDate?: string
   // Edit mode — pre-load a logged entry for editing
   editLogId?: string
   initialFoodId?: string
@@ -59,7 +62,7 @@ function quickMacros(desc: string) {
   return { cal, prot, carb, fat, per }
 }
 
-export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot }: Props) {
+export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, logDate, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot }: Props) {
   const insets = useSafeAreaInsets()
   const [tab, setTab] = useState<Tab>('search')
   const [step, setStep] = useState<Step>('browse')
@@ -99,6 +102,31 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Recent foods
+  type RecentFood = { food_id: string; food_name: string; brand_name?: string; cal: number; prot: number; serving: string }
+  const [recentFoods, setRecentFoods] = useState<RecentFood[]>([])
+  const RECENT_FOODS_KEY = 'pantry_recent_foods'
+
+  useEffect(() => {
+    if (visible) {
+      AsyncStorage.getItem(RECENT_FOODS_KEY).then(data => {
+        if (data) setRecentFoods(JSON.parse(data))
+      })
+    }
+  }, [visible])
+
+  const addToRecents = async (food: { food_id: string; food_name: string; brand_name?: string }, cal: number, prot: number, serving: string) => {
+    const entry: RecentFood = { food_id: food.food_id, food_name: food.food_name, brand_name: food.brand_name, cal, prot, serving }
+    const existing = await AsyncStorage.getItem(RECENT_FOODS_KEY)
+    let recents: RecentFood[] = existing ? JSON.parse(existing) : []
+    // Remove duplicate if exists
+    recents = recents.filter(r => r.food_id !== food.food_id)
+    // Add to front, cap at 15
+    recents = [entry, ...recents].slice(0, 15)
+    await AsyncStorage.setItem(RECENT_FOODS_KEY, JSON.stringify(recents))
+    setRecentFoods(recents)
+  }
 
   // Pre-load food when opening in edit mode
   useEffect(() => {
@@ -191,6 +219,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     setDetailLoading(true)
     setStep('detail')
     setScannedBarcode(null)
+    setQuantity('1')
     try {
       const food = await getFoodById(foodId)
       setSelectedFood(food)
@@ -250,7 +279,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         carbs: Math.round(base.carbs * qty),
         fat: Math.round(base.fat * qty),
       }
-      const today = new Date().toISOString().split('T')[0]
+      const logDay = logDate || new Date().toISOString().split('T')[0]
       let error: any
       if (editLogId) {
         ;({ error } = await supabase.from('meal_logs').update({
@@ -270,14 +299,17 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
           carbs: macros.carbs,
           fat: macros.fat,
           slot: selectedSlot,
-          logged_at: today,
+          logged_at: logDay,
           food_id: selectedFood.food_id,
           serving_id: selectedServing.serving_id,
           quantity: qty,
         }))
       }
       if (error) { Alert.alert('Error', error.message); return }
-      if (!editLogId) trackMealLogged(selectedSlot, macros.calories, macros.protein)
+      if (!editLogId) {
+        trackMealLogged(selectedSlot, macros.calories, macros.protein)
+        addToRecents(selectedFood, macros.calories, macros.protein, selectedServing.serving_description ?? '')
+      }
       onLogged()
       handleClose()
     } catch (e: any) {
@@ -295,7 +327,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         {/* ── Detail view ── */}
         {step === 'detail' && (
           <View style={styles.step}>
-            <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+            <View style={[styles.topBar, { paddingTop: insets.top - 4 }]}>
               <TouchableOpacity style={styles.backBtn} onPress={() => { setStep('browse'); setSelectedFood(null) }} activeOpacity={0.7}>
                 <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
@@ -314,70 +346,99 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
               </View>
             ) : (
               <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-                {selectedFood.brand_name && (
-                  <Text style={styles.brandName}>{selectedFood.brand_name}</Text>
-                )}
 
-                {/* Serving picker */}
-                {selectedFood.servings.length > 1 && (
-                  <View style={styles.servingSection}>
-                    <Text style={styles.servingLabel}>Serving size</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                      <View style={styles.servingChips}>
-                        {selectedFood.servings.map(s => (
-                          <TouchableOpacity
-                            key={s.serving_id}
-                            style={[styles.servingChip, selectedServing?.serving_id === s.serving_id && styles.servingChipActive]}
-                            onPress={() => setSelectedServing(s)}
-                            activeOpacity={0.7}
-                          >
-                            <Text style={[styles.servingChipText, selectedServing?.serving_id === s.serving_id && styles.servingChipTextActive]}>
-                              {s.serving_description}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
-                      </View>
-                    </ScrollView>
-                  </View>
-                )}
-
-                {/* Quantity input */}
-                <View style={styles.quantityRow}>
-                  <Text style={styles.quantityLabel}>Quantity</Text>
-                  <View style={styles.quantityInputWrap}>
-                    <TextInput
-                      style={styles.quantityInput}
-                      value={quantity}
-                      onChangeText={setQuantity}
-                      keyboardType="decimal-pad"
-                      selectTextOnFocus
-                      placeholderTextColor={COLORS.textMuted}
-                    />
-                    <Text style={styles.quantityUnit}>× serving</Text>
-                  </View>
-                </View>
-
-                {/* Macro grid */}
+                {/* Macro display */}
                 {selectedServing && (() => {
-                  const parsed = parseMacros(selectedServing)
                   const qty = Math.max(0.1, parseFloat(quantity) || 1)
+                  const raw = {
+                    calories: parseFloat(selectedServing.calories) || 0,
+                    protein: parseFloat(selectedServing.protein) || 0,
+                    carbs: parseFloat(selectedServing.carbohydrate) || 0,
+                    fat: parseFloat(selectedServing.fat) || 0,
+                  }
                   const base = activeOverride
                     ? { calories: activeOverride.calories, protein: activeOverride.protein, carbs: activeOverride.carbs, fat: activeOverride.fat }
-                    : parsed
+                    : raw
                   const m = {
                     calories: Math.round(base.calories * qty),
                     protein: Math.round(base.protein * qty),
                     carbs: Math.round(base.carbs * qty),
                     fat: Math.round(base.fat * qty),
                   }
+                  const ringSize = 150
+                  const strokeWidth = 10
+                  const radius = (ringSize - strokeWidth) / 2
+                  const circumference = 2 * Math.PI * radius
+
+                  // Macro split: calories from each macro
+                  const proteinCal = m.protein * 4
+                  const carbsCal = m.carbs * 4
+                  const fatCal = m.fat * 9
+                  const totalMacroCal = proteinCal + carbsCal + fatCal || 1
+                  const proteinPct = proteinCal / totalMacroCal
+                  const carbsPct = carbsCal / totalMacroCal
+                  const fatPct = fatCal / totalMacroCal
+
+                  // Build ring segments — only include macros > 0
+                  const segments = [
+                    { pct: proteinPct, color: '#4ADE80' },
+                    { pct: carbsPct, color: '#F59E0B' },
+                    { pct: fatPct, color: '#60A5FA' },
+                  ].filter(s => s.pct > 0.01)
+                  const gapDeg = segments.length > 1 ? 4 : 0 // 4 degree gap
+                  const totalGapDeg = gapDeg * segments.length
+                  const availableDeg = 360 - totalGapDeg
+                  let rotationCursor = 0
+                  const ringSegments = segments.map(s => {
+                    const segDeg = availableDeg * s.pct
+                    const segLen = (segDeg / 360) * circumference
+                    const rotation = rotationCursor
+                    rotationCursor += segDeg + gapDeg
+                    return { ...s, segLen, rotation }
+                  })
+
                   return (
                     <>
+                      {/* Macro split ring */}
+                      <View style={styles.calorieRingWrap}>
+                        <View style={{ width: ringSize, height: ringSize }}>
+                          <Svg width={ringSize} height={ringSize} style={{ position: 'absolute' }}>
+                            <Circle cx={ringSize / 2} cy={ringSize / 2} r={radius} stroke="#1A1A1A" strokeWidth={strokeWidth} fill="none" />
+                          </Svg>
+                          {ringSegments.map((seg, i) => (
+                            <Svg key={i} width={ringSize} height={ringSize} style={{ position: 'absolute', transform: [{ rotate: `${seg.rotation - 90}deg` }] }}>
+                              <Circle cx={ringSize / 2} cy={ringSize / 2} r={radius} stroke={seg.color} strokeWidth={strokeWidth} fill="none"
+                                strokeDasharray={`${seg.segLen} ${circumference - seg.segLen}`} strokeDashoffset={0} />
+                            </Svg>
+                          ))}
+                        </View>
+                        <View style={styles.calorieRingCenter}>
+                          <Text style={styles.calorieRingValue}>{m.calories}</Text>
+                          <Text style={styles.calorieRingLabel}>KCAL</Text>
+                        </View>
+                      </View>
+
+                      {/* Macro legend */}
+                      <View style={styles.macroLegend}>
+                        {[
+                          { label: 'Protein', pct: proteinPct, color: '#4ADE80' },
+                          { label: 'Carbs', pct: carbsPct, color: '#F59E0B' },
+                          { label: 'Fat', pct: fatPct, color: '#60A5FA' },
+                        ].filter(l => l.pct > 0.01).map(l => (
+                          <View key={l.label} style={styles.macroLegendItem}>
+                            <View style={[styles.macroLegendDot, { backgroundColor: l.color }]} />
+                            <Text style={styles.macroLegendText}>{l.label} {Math.round(l.pct * 100)}%</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      {/* Macro cards */}
                       <View style={styles.macroGrid}>
                         {[
-                          { label: 'Calories', value: m.calories, unit: 'kcal', color: '#FFFFFF' },
-                          { label: 'Protein',  value: m.protein,  unit: 'g',    color: '#4ADE80' },
-                          { label: 'Carbs',    value: m.carbs,    unit: 'g',    color: '#F59E0B' },
-                          { label: 'Fat',      value: m.fat,      unit: 'g',    color: '#60A5FA' },
+                          { label: 'PROTEIN', value: m.protein, unit: 'g', color: '#4ADE80' },
+                          { label: 'CARBS',   value: m.carbs,   unit: 'g', color: '#F59E0B' },
+                          { label: 'FAT',     value: m.fat,     unit: 'g', color: '#60A5FA' },
+                          { label: 'FIBER',   value: Math.round(Number(selectedServing.fiber || 0) * qty), unit: 'g', color: COLORS.textMuted },
                         ].map(macro => (
                           <View key={macro.label} style={styles.macroCell}>
                             <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
@@ -386,6 +447,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                           </View>
                         ))}
                       </View>
+
                       <TouchableOpacity
                         style={styles.fixLink}
                         onPress={() => setMacroEditVisible(true)}
@@ -399,8 +461,56 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                   )
                 })()}
 
+                {/* Serving size + Quantity row */}
+                <View style={styles.servingQtyRow}>
+                  {selectedFood.servings.length > 1 ? (
+                    <View style={styles.servingSizeWrap}>
+                      <Text style={styles.servingQtyLabel}>SERVING SIZE</Text>
+                      <TouchableOpacity
+                        style={styles.servingDropdown}
+                        onPress={() => {
+                          const options = selectedFood!.servings.map(s => s.serving_description)
+                          Alert.alert('Serving Size', '', options.map(opt => ({
+                            text: opt,
+                            onPress: () => {
+                              const s = selectedFood!.servings.find(sv => sv.serving_description === opt)
+                              if (s) setSelectedServing(s)
+                            },
+                          })).concat([{ text: 'Cancel', style: 'cancel' } as any]))
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.servingDropdownText} numberOfLines={1}>
+                          {selectedServing?.serving_description ?? 'Select'}
+                        </Text>
+                        <ChevronDown size={14} stroke={COLORS.textMuted} strokeWidth={2} />
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <View style={styles.servingSizeWrap}>
+                      <Text style={styles.servingQtyLabel}>SERVING SIZE</Text>
+                      <View style={styles.servingDropdown}>
+                        <Text style={styles.servingDropdownText}>{selectedServing?.serving_description ?? '1 serving'}</Text>
+                      </View>
+                    </View>
+                  )}
+                  <View style={styles.qtyWrap}>
+                    <Text style={styles.servingQtyLabel}>QTY</Text>
+                    <View style={styles.qtyBox}>
+                      <TextInput
+                        style={styles.qtyInput}
+                        value={quantity}
+                        onChangeText={setQuantity}
+                        keyboardType="decimal-pad"
+                        selectTextOnFocus
+                        placeholderTextColor={COLORS.textMuted}
+                      />
+                    </View>
+                  </View>
+                </View>
+
                 {/* Slot picker */}
-                <Text style={styles.slotLabel}>Add to meal</Text>
+                <Text style={styles.slotLabel}>ADD TO MEAL</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.slotScroll}>
                   <View style={styles.slotChips}>
                     {slots.map(s => (
@@ -416,16 +526,6 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                   </View>
                 </ScrollView>
 
-                {/* Attribution — required by FatSecret free tier */}
-                <View style={styles.attribution}>
-                  <Text style={styles.attributionText}>Nutrition data</Text>
-                  <Image
-                    source={{ uri: 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret.png' }}
-                    style={styles.attributionLogo}
-                    resizeMode="contain"
-                  />
-                </View>
-
                 <TouchableOpacity
                   style={[styles.logBtn, (!selectedServing || saving) && { opacity: 0.5 }]}
                   onPress={saveLog}
@@ -437,6 +537,15 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                     : <Text style={styles.logBtnText}>{editLogId ? 'Update Log' : `Log to ${selectedSlot}`}</Text>
                   }
                 </TouchableOpacity>
+
+                {/* Attribution — required by FatSecret free tier */}
+                <View style={styles.attribution}>
+                  <Image
+                    source={{ uri: 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret.png' }}
+                    style={styles.attributionLogo}
+                    resizeMode="contain"
+                  />
+                </View>
 
                 <View style={{ height: 16 }} />
               </ScrollView>
@@ -500,9 +609,70 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                   {results.length === 0 && !searching && query.length > 0 && (
                     <Text style={styles.emptyText}>No results for "{query}"</Text>
                   )}
-                  {results.length === 0 && !query && (
+                  {results.length === 0 && !query && recentFoods.length > 0 && (
+                    <View style={{ paddingHorizontal: 4, paddingTop: 8 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>Recently Logged</Text>
+                      {recentFoods.map((food, i) => (
+                        <TouchableOpacity
+                          key={`recent-${food.food_id}-${i}`}
+                          style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.06)' }}
+                          activeOpacity={0.7}
+                          onPress={() => {
+                            setDetailLoading(true)
+                            setStep('detail')
+                            getFoodById(food.food_id)
+                              .then(detail => {
+                                setSelectedFood(detail)
+                                setSelectedServing(detail.servings[0] ?? null)
+                                loadOverride(detail.food_id)
+                              })
+                              .catch(() => { setStep('browse'); Alert.alert('Error', 'Could not load food') })
+                              .finally(() => setDetailLoading(false))
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.textWhite }}>{food.food_name}</Text>
+                            <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
+                              {food.cal} cal · {food.prot}g protein{food.brand_name ? ` · ${food.brand_name}` : ''}
+                            </Text>
+                          </View>
+                          <ChevronRight size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                  {results.length === 0 && !query && recentFoods.length === 0 && (
                     <Text style={styles.hintText}>Type to search millions of foods and brands</Text>
                   )}
+                  {/* Matching recents shown first */}
+                  {results.length > 0 && (() => {
+                    const q = query.toLowerCase()
+                    const matchingRecents = recentFoods.filter(r =>
+                      r.food_name.toLowerCase().includes(q) &&
+                      !results.some(res => res.food_id === r.food_id)
+                    )
+                    if (matchingRecents.length === 0) return null
+                    return (
+                      <>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5, marginBottom: 8, marginTop: 4, textTransform: 'uppercase' }}>Previously Logged</Text>
+                        {matchingRecents.map((food, i) => (
+                          <TouchableOpacity
+                            key={`recent-match-${food.food_id}-${i}`}
+                            style={styles.resultRow}
+                            onPress={() => openDetail(food.food_id)}
+                            activeOpacity={0.75}
+                          >
+                            <View style={styles.resultInfo}>
+                              <Text style={styles.resultName} numberOfLines={1}>{food.food_name}</Text>
+                              <Text style={styles.resultBrand}>{food.cal} cal, {food.prot}g protein</Text>
+                            </View>
+                            <ChevronRight size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
+                          </TouchableOpacity>
+                        ))}
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5, marginBottom: 8, marginTop: 16, textTransform: 'uppercase' }}>Results</Text>
+                      </>
+                    )
+                  })()}
                   {results.map((food, i) => {
                     const rm = resultMacros[food.food_id]
                     const subtitle = rm
@@ -624,7 +794,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    marginBottom: 20,
+    marginBottom: 4,
     gap: 10,
   },
   topTitle: {
@@ -742,112 +912,170 @@ const styles = StyleSheet.create({
   loadingText: { fontSize: 14, color: COLORS.textMuted },
 
   // Detail
-  brandName: { fontSize: 13, color: COLORS.textMuted, paddingHorizontal: 20, marginBottom: 16 },
-  servingSection: { paddingHorizontal: 20, marginBottom: 20 },
-  servingLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4, marginBottom: 10 },
-  servingChips: { flexDirection: 'row', gap: 8 },
-  servingChip: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  servingChipActive: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
-  servingChipText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
-  servingChipTextActive: { color: '#000000', fontWeight: '600' },
+  brandName: { fontSize: 13, color: COLORS.textMuted, paddingHorizontal: 20, marginTop: -12, marginBottom: 0 },
 
+  // Calorie ring
+  calorieRingWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  calorieRingCenter: {
+    position: 'absolute',
+    alignItems: 'center',
+  },
+  calorieRingValue: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -1,
+  },
+  calorieRingLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 2,
+    marginTop: -2,
+  },
+
+  // Macro legend
+  macroLegend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginBottom: 24,
+  },
+  macroLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  macroLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  macroLegendText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+
+  // Macro grid
+  macroDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 2 },
   macroGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
     paddingHorizontal: 20,
-    marginBottom: 24,
+    marginBottom: 16,
   },
   macroCell: {
     width: '47%',
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    padding: 14,
-    gap: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#141414',
+    borderRadius: 16,
+    padding: 16,
+    gap: 6,
   },
-  macroDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 2 },
-  macroCellLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4 },
-  macroCellValue: { fontSize: 22, fontWeight: '700', color: COLORS.textWhite },
-  macroCellUnit: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
-
-  slotLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted, paddingHorizontal: 20, marginBottom: 10 },
-  slotScroll: { marginBottom: 4 },
-  slotChips: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingBottom: 4 },
-  slotChip: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+  macroCellLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 1.5,
   },
-  slotChipActive: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
-  slotChipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
-  slotChipTextActive: { color: '#000000' },
+  macroCellValue: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  macroCellUnit: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
 
-  attribution: {
+  // Serving + Qty row (Stitch style)
+  servingQtyRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginHorizontal: 20,
-    marginBottom: 20,
-    marginTop: 8,
+    paddingHorizontal: 20,
+    gap: 12,
+    marginBottom: 24,
   },
-  attributionText: { fontSize: 11, color: COLORS.textMuted },
-  attributionLogo: { width: 100, height: 20 },
-  attributionSmall: { alignItems: 'center', paddingVertical: 16 },
-  attributionLogoSmall: { width: 90, height: 18, opacity: 0.6 },
-
-  quantityRow: {
+  servingSizeWrap: {
+    flex: 1,
+    gap: 8,
+  },
+  servingQtyLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 1.5,
+  },
+  servingDropdown: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    backgroundColor: '#141414',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  quantityLabel: {
-    fontSize: 12,
+  servingDropdownText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: COLORS.textMuted,
-    letterSpacing: 0.4,
+    color: COLORS.textWhite,
+    flex: 1,
   },
-  quantityInputWrap: {
-    flexDirection: 'row',
+  qtyWrap: {
+    width: 80,
+    gap: 8,
+  },
+  qtyBox: {
+    backgroundColor: '#141414',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
-  quantityInput: {
+  qtyInput: {
     fontSize: 16,
     fontWeight: '700',
     color: COLORS.textWhite,
-    minWidth: 36,
     textAlign: 'center',
     padding: 0,
-  },
-  quantityUnit: {
-    fontSize: 12,
-    color: COLORS.textMuted,
+    minWidth: 36,
   },
 
+  // Slot picker
+  slotLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 1.5,
+    paddingHorizontal: 20,
+    marginBottom: 10,
+  },
+  slotScroll: { marginBottom: 24 },
+  slotChips: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingBottom: 4 },
+  slotChip: {
+    backgroundColor: '#141414',
+    borderRadius: 30,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  slotChipActive: { backgroundColor: '#4ADE80' },
+  slotChipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  slotChipTextActive: { color: '#000000' },
+
+  // Attribution (subtle)
+  attribution: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    marginBottom: 12,
+    opacity: 0.4,
+  },
+  attributionLogo: { width: 120, height: 16 },
+  attributionSmall: { alignItems: 'center', paddingVertical: 16 },
+  attributionLogoSmall: { width: 90, height: 18, opacity: 0.4 },
+
+  // Fix link
   fixLink: {
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 8,
     marginBottom: 8,
   },
   fixLinkText: {
@@ -856,6 +1084,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
 
+  // Log button
   logBtn: {
     backgroundColor: COLORS.textWhite,
     borderRadius: 30,

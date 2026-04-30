@@ -9,6 +9,7 @@ export type FoodServing = {
   protein: string
   carbohydrate: string
   fat: string
+  fiber?: string
   metric_serving_amount?: string
   metric_serving_unit?: string
 }
@@ -64,17 +65,60 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
   const food = data.food
   const rawServings = food.servings?.serving
   const servingsArr: FoodServing[] = rawServings
-    ? (Array.isArray(rawServings) ? rawServings : [rawServings]).map((s: any) => ({
+    ? (Array.isArray(rawServings) ? rawServings : [rawServings]).map((s: any) => {
+        // Append gram equivalent to description if available and not already a gram serving
+        let desc = s.serving_description ?? ''
+        const metricG = parseFloat(s.metric_serving_amount ?? '0')
+        if (metricG > 0 && s.metric_serving_unit === 'g' && !/^\d+\s*g$/.test(desc)) {
+          desc = `${desc} (${Math.round(metricG)}g)`
+        }
+        return {
         serving_id: s.serving_id,
-        serving_description: s.serving_description,
+        serving_description: desc,
         calories: s.calories,
         protein: s.protein,
         carbohydrate: s.carbohydrate,
         fat: s.fat,
+        fiber: s.fiber,
         metric_serving_amount: s.metric_serving_amount,
         metric_serving_unit: s.metric_serving_unit,
-      }))
+      }})
     : []
+
+  // Add synthetic "100g" and "1g" options if metric data is available and no gram serving exists
+  const hasGramServing = servingsArr.some(s =>
+    s.serving_description.match(/^\d+\s*g$/) || s.serving_description === '100 g'
+  )
+  if (!hasGramServing && servingsArr.length > 0) {
+    const ref = servingsArr[0]
+    const metricG = parseFloat(ref.metric_serving_amount ?? '0')
+    if (metricG > 0 && (ref.metric_serving_unit === 'g' || ref.metric_serving_unit === 'ml')) {
+      const scale100 = 100 / metricG
+      const scale1 = 1 / metricG
+      servingsArr.push({
+        serving_id: '__100g',
+        serving_description: '100 g',
+        calories: String(Math.round(parseFloat(ref.calories) * scale100)),
+        protein: String(Math.round(parseFloat(ref.protein) * scale100 * 10) / 10),
+        carbohydrate: String(Math.round(parseFloat(ref.carbohydrate) * scale100 * 10) / 10),
+        fat: String(Math.round(parseFloat(ref.fat) * scale100 * 10) / 10),
+        fiber: ref.fiber ? String(Math.round(parseFloat(ref.fiber) * scale100 * 10) / 10) : undefined,
+        metric_serving_amount: '100',
+        metric_serving_unit: 'g',
+      })
+      servingsArr.push({
+        serving_id: '__1g',
+        serving_description: '1 g',
+        calories: String(parseFloat(ref.calories) * scale1),
+        protein: String(parseFloat(ref.protein) * scale1),
+        carbohydrate: String(parseFloat(ref.carbohydrate) * scale1),
+        fat: String(parseFloat(ref.fat) * scale1),
+        fiber: ref.fiber ? String(parseFloat(ref.fiber) * scale1) : undefined,
+        metric_serving_amount: '1',
+        metric_serving_unit: 'g',
+      })
+    }
+  }
 
   return {
     food_id: food.food_id,

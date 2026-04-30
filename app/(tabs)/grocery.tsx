@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
 import { Trash2, Check, Plus, X, Clock, ShoppingCart } from 'lucide-react-native'
+import Svg, { Circle as SvgCircle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
@@ -442,49 +443,43 @@ export default function GroceryScreen() {
             )}
           </View>
           <View style={styles.bottomBar}>
-            <Text style={styles.storeLabel}>Order from your favorite grocery stores</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storeLogosContent}>
-              {[
-                { name: 'Costco', bg: '#E31837' },
-                { name: 'Kroger', bg: '#0058A3' },
-                { name: 'Walmart', bg: '#0071CE' },
-                { name: 'Aldi', bg: '#00005F' },
-                { name: 'Publix', bg: '#3E8534' },
-                { name: 'Sprouts', bg: '#4A7C2E' },
-                { name: 'H-E-B', bg: '#E21836' },
-                { name: 'Target', bg: '#CC0000' },
-              ].map(store => (
-                <View key={store.name} style={[styles.storeBadge, { backgroundColor: store.bg }]}>
-                  <Text style={styles.storeBadgeText}>{store.name}</Text>
-                </View>
-              ))}
-            </ScrollView>
             <TouchableOpacity
               style={styles.deliveryBtn}
               activeOpacity={0.85}
               onPress={() => { pendingOrderRef.current = true; router.push('/delivery-webview') }}
             >
-              <ShoppingCart size={18} stroke="#00C9A7" strokeWidth={2} />
+              <ShoppingCart size={18} stroke="#4ADE80" strokeWidth={2} />
               <Text style={styles.deliveryBtnText}>Browse & Order</Text>
             </TouchableOpacity>
           </View>
         </>
       ) : (
         <>
-          {/* ── Progress Bar ── */}
+          {/* ── Progress Card with Ring ── */}
           <View style={styles.progressCard}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.progressText}>
-                {checkedCount === items.length
-                  ? 'All items collected!'
-                  : `${checkedCount}/${items.length} items collected`}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.progressLabel}>
+                {checkedCount === items.length ? 'All Done' : checkedCount >= items.length * 0.5 ? 'Almost Done' : 'Getting Started'}
               </Text>
-              <Text style={styles.progressPercent}>
-                {Math.round((checkedCount / items.length) * 100)}%
+              <Text style={styles.progressTitle}>Grocery Run</Text>
+              <Text style={styles.progressSub}>
+                {checkedCount === items.length
+                  ? 'Everything collected!'
+                  : `Just ${items.length - checkedCount} item${items.length - checkedCount !== 1 ? 's' : ''} left to complete your list.`}
               </Text>
             </View>
-            <View style={styles.progressBarTrack}>
-              <View style={[styles.progressBarFill, { width: `${(checkedCount / items.length) * 100}%` }]} />
+            <View style={{ width: 80, height: 80, alignItems: 'center', justifyContent: 'center' }}>
+              <Svg width={80} height={80} style={{ transform: [{ rotate: '-90deg' }] }}>
+                <SvgCircle cx={40} cy={40} r={34} stroke="rgba(255,255,255,0.08)" strokeWidth={5} fill="transparent" />
+                <SvgCircle cx={40} cy={40} r={34} stroke="#4ADE80" strokeWidth={5} fill="transparent"
+                  strokeDasharray={`${2 * Math.PI * 34}`}
+                  strokeDashoffset={2 * Math.PI * 34 * (1 - checkedCount / items.length)}
+                  strokeLinecap="round" />
+              </Svg>
+              <View style={{ position: 'absolute', alignItems: 'center' }}>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textWhite }}>{checkedCount}/{items.length}</Text>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5 }}>Items</Text>
+              </View>
             </View>
           </View>
 
@@ -527,19 +522,9 @@ export default function GroceryScreen() {
             )}
 
             {/* ── Grouped items ── */}
-            {items.length <= 10 ? (
-              /* Flat list — no category headers for small lists */
-              <View style={styles.groupCard}>
-                {items.map((item, i) => (
-                  <View key={item.id}>
-                    {i > 0 && <View style={styles.divider} />}
-                    <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} />
-                  </View>
-                ))}
-              </View>
-            ) : (
-              /* Grouped by category */
-              grouped.map(group => (
+            {(() => {
+              /* Always grouped by category */
+              return grouped.map(group => (
                 <View key={group.category} style={styles.group}>
                   <Text style={styles.groupLabel}>{group.category}</Text>
                   <View style={styles.groupCard}>
@@ -552,7 +537,7 @@ export default function GroceryScreen() {
                   </View>
                 </View>
               ))
-            )}
+            })()}
           </ScrollView>
 
           {/* ── Bottom action ── */}
@@ -577,23 +562,6 @@ export default function GroceryScreen() {
                 <Text style={styles.deliveryBtnText}>Order</Text>
               </TouchableOpacity>
             </View>
-            <Text style={styles.storeLabel}>Order from your favorite grocery stores</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.storeLogosContent}>
-              {[
-                { name: 'Costco', bg: '#E31837' },
-                { name: 'Kroger', bg: '#0058A3' },
-                { name: 'Walmart', bg: '#0071CE' },
-                { name: 'Aldi', bg: '#00005F' },
-                { name: 'Publix', bg: '#3E8534' },
-                { name: 'Sprouts', bg: '#4A7C2E' },
-                { name: 'H-E-B', bg: '#E21836' },
-                { name: 'Target', bg: '#CC0000' },
-              ].map(store => (
-                <View key={store.name} style={[styles.storeBadge, { backgroundColor: store.bg }]}>
-                  <Text style={styles.storeBadgeText}>{store.name}</Text>
-                </View>
-              ))}
-            </ScrollView>
           </View>
         </>
       )}
@@ -716,17 +684,17 @@ const styles = StyleSheet.create({
   },
   mealPillText: { fontSize: 13, color: COLORS.textWhite, fontWeight: '500' },
 
-  group: { marginBottom: 24 },
+  group: { marginBottom: 16 },
   groupLabel: {
     fontSize: 11,
     fontWeight: '700',
     color: COLORS.textMuted,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 1.5,
     marginBottom: 8,
     marginLeft: 4,
   },
-  groupCard: { backgroundColor: '#111111', borderRadius: 16, overflow: 'hidden' },
+  groupCard: { backgroundColor: COLORS.cardElevated, borderRadius: 16, overflow: 'hidden' },
   divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginLeft: 56 },
 
   swipeContainer: { overflow: 'hidden' },
@@ -744,16 +712,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14,
     gap: 14,
-    backgroundColor: '#111111',
+    backgroundColor: COLORS.cardElevated,
   },
   checkbox: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -784,8 +752,8 @@ const styles = StyleSheet.create({
   addBtnTextDisabled: { color: COLORS.textMuted },
   addBtnSub: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
   deliveryBtn: {
-    borderWidth: 1.5,
-    borderColor: '#00C9A7',
+    borderWidth: 2,
+    borderColor: '#4ADE80',
     borderRadius: 30,
     paddingVertical: 14,
     paddingHorizontal: 18,
@@ -794,7 +762,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
   },
-  deliveryBtnText: { color: '#00C9A7', fontSize: 14, fontWeight: '700' },
+  deliveryBtnText: { color: '#4ADE80', fontSize: 14, fontWeight: '700' },
 
   emptyState: {
     flex: 1,
@@ -823,13 +791,13 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: COLORS.cardElevated,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
     gap: 14,
     borderWidth: 1,
-    borderColor: '#2A2A2A',
+    borderColor: COLORS.trackDark,
   },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   modalTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite },
@@ -891,34 +859,36 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.2,
   },
-  // Progress bar
+  // Progress card
   progressCard: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: COLORS.cardElevated,
+    borderRadius: 16,
+    padding: 20,
     marginHorizontal: 20,
-    marginBottom: 12,
-    gap: 10,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    overflow: 'hidden',
   },
-  progressBarTrack: {
-    height: 6,
-    backgroundColor: '#2A2A2A',
-    borderRadius: 3,
-  },
-  progressBarFill: {
-    height: 6,
-    backgroundColor: '#4ADE80',
-    borderRadius: 3,
-  },
-  progressText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textWhite,
-  },
-  progressPercent: {
-    fontSize: 14,
+  progressLabel: {
+    fontSize: 11,
     fontWeight: '700',
     color: '#4ADE80',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    marginBottom: 4,
+  },
+  progressTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.5,
+  },
+  progressSub: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 6,
   },
   storeLabel: {
     fontSize: 12,

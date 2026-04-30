@@ -23,6 +23,10 @@ import { X, Check, Receipt, Camera, ImageIcon, Zap, Plus } from 'lucide-react-na
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useAIConsent } from '@/context/AIConsentContext'
+import { usePremium } from '@/context/SuperwallContext'
+import { useSuperwall } from 'expo-superwall'
+import { trackUpgradePromptShown } from '@/lib/analytics'
 // ── Types ────────────────────────────────────────────────────────────────
 
 type ParsedItem = {
@@ -107,6 +111,9 @@ type Props = {
 
 export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Props) {
   const { user } = useAuth()
+  const { requestConsent } = useAIConsent()
+  const { isPremium, triggerUpgrade } = usePremium()
+  const { registerPlacement } = useSuperwall()
   const [step, setStep] = useState<'pick' | 'scanning' | 'visualReview' | 'saving'>('pick')
   const [imageUri, setImageUri] = useState<string | null>(null)
   const [items, setItems] = useState<ParsedItem[]>([])
@@ -191,6 +198,26 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
 
   const processImage = async (uri: string, base64: string | null) => {
     if (!base64) { Alert.alert('Error', 'Could not read image.'); return }
+    if (!isPremium) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('receipt_scan_count')
+        .eq('id', user!.id)
+        .single()
+      const count = profile?.receipt_scan_count ?? 0
+      if (count >= 3) {
+        trackUpgradePromptShown('scan_limit')
+        await triggerUpgrade('receipt_scan_limit')
+        onClose()
+        return
+      }
+      await supabase
+        .from('profiles')
+        .update({ receipt_scan_count: count + 1 })
+        .eq('id', user!.id)
+    }
+    const ok = await requestConsent()
+    if (!ok) return
     setImageUri(uri)
     setStep('scanning')
     setError(null)

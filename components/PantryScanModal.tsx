@@ -21,6 +21,10 @@ import { X, ScanLine, Check, Plus, Zap, ImageIcon } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useAIConsent } from '@/context/AIConsentContext'
+import { usePremium } from '@/context/SuperwallContext'
+import { useSuperwall } from 'expo-superwall'
+import { trackUpgradePromptShown } from '@/lib/analytics'
 
 const { width: SCREEN_W } = Dimensions.get('window')
 
@@ -73,6 +77,15 @@ const RESULT_CATEGORIES = [
   'Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantry Staples',
 ]
 
+const LOADING_MESSAGES = [
+  { title: 'AI is scanning your kitchen...', sub: 'Looking at every shelf and corner' },
+  { title: 'Detecting ingredients...', sub: 'Identifying each item in your photos' },
+  { title: 'Reading labels & packaging...', sub: 'Checking brand names and product details' },
+  { title: 'Identifying fresh produce...', sub: 'Spotting fruits, veggies, and herbs' },
+  { title: 'Categorizing everything...', sub: 'Sorting items by grocery aisle' },
+  { title: 'Almost ready...', sub: 'Putting the finishing touches together' },
+]
+
 const EXTRA_OPTIONS = [
   { id: 'freezer', label: 'Freezer' },
   { id: 'fridge2', label: 'Second Fridge' },
@@ -120,6 +133,9 @@ type Props = {
 
 export default function PantryScanModal({ visible, onClose, onItemsAdded }: Props) {
   const { user } = useAuth()
+  const { requestConsent } = useAIConsent()
+  const { isPremium, triggerUpgrade } = usePremium()
+  const { registerPlacement } = useSuperwall()
   const [step, setStep] = useState(1)
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
   const [showDone, setShowDone] = useState(false)
@@ -128,6 +144,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
+  const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
 
   // Camera
   const cameraRef = useRef<CameraView>(null)
@@ -160,6 +177,26 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         setShowDone(true)
         return
       }
+      if (!isPremium) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('pantry_scan_count')
+          .eq('id', user!.id)
+          .single()
+        const count = profile?.pantry_scan_count ?? 0
+        if (count >= 3) {
+          trackUpgradePromptShown('scan_limit')
+          await triggerUpgrade('pantry_scan_limit')
+          handleClose()
+          return
+        }
+        await supabase
+          .from('profiles')
+          .update({ pantry_scan_count: count + 1 })
+          .eq('id', user!.id)
+      }
+      const ok = await requestConsent()
+      if (!ok) { onClose(); return }
       try {
         const { data, error } = await supabase.functions.invoke('scan-pantry', {
           body: { images: base64Images },
@@ -196,6 +233,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
     return () => { loop.stop() }
   }, [step])
+
+  // Cycle through loading messages while scan is in progress
+  useEffect(() => {
+    if (step !== 5 || showDone) return
+    setLoadingMessageIdx(0)
+    const interval = setInterval(() => {
+      setLoadingMessageIdx(prev => (prev + 1) % LOADING_MESSAGES.length)
+    }, 2200)
+    return () => clearInterval(interval)
+  }, [step, showDone])
 
   // Request camera permission when modal opens
   useEffect(() => {
@@ -299,8 +346,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
           const stepConfig = {
-            1: { dotIndex: 0, label: 'Fridge', title: 'Photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 2 },
-            2: { dotIndex: 1, label: 'Pantry', title: 'Now photograph your pantry', subtitle: 'Any cabinets where you store dry goods', next: 3 },
+            1: { dotIndex: 0, label: 'Pantry', title: 'Photograph your pantry', subtitle: 'Open your cabinets and capture the full shelves', next: 2 },
+            2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 3 },
             3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
           }[step]!
           return (
@@ -461,32 +508,40 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
         {/* ── Step 5: Loading ── */}
         {step === 5 && (
-          <View style={[styles.step, styles.centered]}>
+          <View style={styles.step}>
             <TouchableOpacity style={[styles.closeBtn, styles.closeBtnAbs]} onPress={handleClose}>
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
-            <View style={styles.pulseWrap}>
-              <Animated.View
-                style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]}
-              />
-              <View style={styles.pulseCore}>
-                <ScanLine size={32} stroke="#4ADE80" strokeWidth={1.6} />
+
+            {/* Centered loading indicator (fills available space) */}
+            <View style={styles.loadingBody}>
+              <View style={styles.pulseWrap}>
+                <Animated.View
+                  style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]}
+                />
+                <View style={styles.pulseCore}>
+                  <ScanLine size={32} stroke="#4ADE80" strokeWidth={1.6} />
+                </View>
               </View>
+              <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>
+                {showDone ? 'Scan complete' : LOADING_MESSAGES[loadingMessageIdx].title}
+              </Text>
+              <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>
+                {showDone ? `Found ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} in your kitchen` : LOADING_MESSAGES[loadingMessageIdx].sub}
+              </Text>
             </View>
-            <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>
-              AI is scanning your kitchen...
-            </Text>
-            <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8 }]}>
-              Detecting ingredients from your photos
-            </Text>
+
+            {/* View Results button (fixed at bottom) */}
             {showDone && (
-              <TouchableOpacity
-                style={[styles.primaryBtn, { marginTop: 44, width: 220 }]}
-                onPress={() => setStep(55)}
-                activeOpacity={0.85}
-              >
-                <Text style={styles.primaryBtnText}>View Results</Text>
-              </TouchableOpacity>
+              <View style={styles.loadingFooter}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { width: '100%' }]}
+                  onPress={() => setStep(55)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>View Results</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         )}
@@ -923,6 +978,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#000000',
+  },
+
+  // Loading layout
+  loadingBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: 20,
+  },
+  loadingFooter: {
+    paddingBottom: 8,
+    paddingHorizontal: 4,
   },
 
   // Loading pulse

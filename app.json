@@ -14,8 +14,8 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.pantry.app",
-      "usesAppleSignIn": true,
+      "bundleIdentifier": "com.kobalabs.pantry",
+      "usesAppleSignIn": false,
       "infoPlist": {
         "NSCameraUsageDescription": "Pantry needs camera access to scan barcodes and food items."
       }
@@ -72,7 +72,8 @@
             "NSExtensionActivationSupportsWebPageWithMaxCount": 1
           }
         }
-      ]
+      ],
+      "expo-video"
     ],
     "experiments": {
       "typedRoutes": true

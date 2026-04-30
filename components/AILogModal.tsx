@@ -23,6 +23,10 @@ import { X, Camera, FileText, ImageIcon, ChevronRight, Zap } from 'lucide-react-
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useAIConsent } from '@/context/AIConsentContext'
+import { usePremium } from '@/context/SuperwallContext'
+import { useSuperwall } from 'expo-superwall'
+import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackMealLogged } from '@/lib/analytics'
 
 const { width: SCREEN_W } = Dimensions.get('window')
@@ -71,6 +75,9 @@ type Props = {
 
 export default function AILogModal({ visible, slots, defaultSlot, onClose, onLogged }: Props) {
   const { user } = useAuth()
+  const { requestConsent } = useAIConsent()
+  const { isPremium } = usePremium()
+  const { registerPlacement } = useSuperwall()
   const [step, setStep] = useState<Step>('input')
   const [scanMode, setScanMode] = useState<ScanMode>('food')
   const [description, setDescription] = useState('')
@@ -179,6 +186,16 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     const hasPhoto = !!imageBase64
     if (!hasText && !hasPhoto) return
 
+    if (!isPremium) {
+      trackUpgradePromptShown('ai_log_limit')
+      await registerPlacement('ai_log_limit')
+      onClose()
+      return
+    }
+
+    const ok = await requestConsent()
+    if (!ok) return
+
     setStep('analyzing')
     try {
       // Prefer photo if available, fall back to text
@@ -186,13 +203,17 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
         ? await estimateFromPhoto(imageBase64!)
         : await estimateFromText(description.trim())
 
+      // Auto-correct calories to match macros (protein×4 + carbs×4 + fat×9)
+      const correctedCal = (estimate.protein || 0) * 4 + (estimate.carbs || 0) * 4 + (estimate.fat || 0) * 9
+      const finalCal = correctedCal > 0 ? correctedCal : estimate.calories
+
       setMealName(estimate.name)
-      setCalories(String(estimate.calories))
+      setCalories(String(finalCal))
       setProtein(String(estimate.protein))
       setCarbs(String(estimate.carbs))
       setFat(String(estimate.fat))
       originalMacros.current = {
-        calories: estimate.calories,
+        calories: finalCal,
         protein: estimate.protein,
         carbs: estimate.carbs,
         fat: estimate.fat,
@@ -365,15 +386,17 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
 
           {/* ── Review step ── */}
           {step === 'review' && (
-            <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
-              <View style={styles.step}>
+            <>
+              <View style={{ paddingHorizontal: 24, paddingTop: 56, paddingBottom: 0 }}>
                 <View style={styles.topBar}>
                   <Text style={styles.topTitle}>Review & Log</Text>
                   <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                     <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
-
+              </View>
+              <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
+              <View style={[styles.step, { paddingTop: 4 }]}>
                 <Text style={styles.reviewSub}>AI estimate — tap any value to edit</Text>
 
                 {/* Meal name */}
@@ -425,7 +448,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   ))}
                 </View>
 
-                {/* Macro mismatch warning with suggestion for last edited macro */}
+                {/* Auto-sync: if user edits a macro, recalculate calories to match */}
                 {(() => {
                   const p = parseInt(protein) || 0
                   const c = parseInt(carbs) || 0
@@ -433,51 +456,9 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   const cal = parseInt(calories) || 0
                   const macroCals = p * 4 + c * 4 + f * 9
                   const diff = Math.abs(macroCals - cal)
-                  if (cal === 0 && macroCals > 0) {
-                    return (
-                      <View style={styles.mismatchBanner}>
-                        <Text style={styles.mismatchText}>
-                          Calories are 0 but macros add up to {macroCals} kcal. Set calories or clear macros.
-                        </Text>
-                      </View>
-                    )
-                  }
-                  if (cal > 0 && diff > 50 && lastEditedMacro) {
-                    let sugLabel = lastEditedMacro
-                    let sugValue = 0
-                    let sugUnit = 'g'
-                    let onApply = () => {}
-                    if (lastEditedMacro === 'protein') {
-                      sugValue = Math.max(0, Math.round((cal - (c * 4 + f * 9)) / 4))
-                      onApply = () => { setProtein(String(sugValue)); setLastEditedMacro(null) }
-                    } else if (lastEditedMacro === 'carbs') {
-                      sugValue = Math.max(0, Math.round((cal - (p * 4 + f * 9)) / 4))
-                      onApply = () => { setCarbs(String(sugValue)); setLastEditedMacro(null) }
-                    } else if (lastEditedMacro === 'fat') {
-                      sugValue = Math.max(0, Math.round((cal - (p * 4 + c * 4)) / 9))
-                      onApply = () => { setFat(String(sugValue)); setLastEditedMacro(null) }
-                    }
-                    return (
-                      <View style={styles.mismatchBanner}>
-                        <Text style={styles.mismatchText}>
-                          Macros add up to {macroCals} kcal ({macroCals > cal ? '+' : ''}{macroCals - cal} off).
-                        </Text>
-                        <TouchableOpacity style={styles.mismatchSuggest} onPress={onApply} activeOpacity={0.7}>
-                          <Text style={styles.mismatchSuggestText}>
-                            Set {sugLabel} to {sugValue}{sugUnit} to match →
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )
-                  }
-                  if (cal > 0 && diff > 50 && !lastEditedMacro) {
-                    return (
-                      <View style={styles.mismatchBanner}>
-                        <Text style={styles.mismatchText}>
-                          Macros add up to {macroCals} kcal ({macroCals > cal ? '+' : ''}{macroCals - cal} off). Adjust a macro to match.
-                        </Text>
-                      </View>
-                    )
+                  if (diff > 10 && macroCals > 0 && lastEditedMacro) {
+                    // Silently sync calories to match macros
+                    setTimeout(() => setCalories(String(macroCals)), 0)
                   }
                   return null
                 })()}
@@ -511,13 +492,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   })()) && { opacity: 0.5 }]}
                   onPress={saveLog}
                   activeOpacity={0.85}
-                  disabled={!mealName.trim() || saving || (() => {
-                    const p = parseInt(protein) || 0, c = parseInt(carbs) || 0, f = parseInt(fat) || 0, cal = parseInt(calories) || 0
-                    const macroCals = p * 4 + c * 4 + f * 9
-                    if (cal === 0 && macroCals > 0) return true
-                    if (cal > 0 && Math.abs(macroCals - cal) > 50) return true
-                    return false
-                  })()}
+                  disabled={!mealName.trim() || saving}
                 >
                   {saving
                     ? <ActivityIndicator color="#000000" />
@@ -543,6 +518,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                 </View>
               </View>
             </ScrollView>
+            </>
           )}
 
         </KeyboardAvoidingView>
@@ -556,7 +532,7 @@ const styles = StyleSheet.create({
   step: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 8,
+    paddingTop: 20,
     paddingBottom: 24,
   },
   centered: { alignItems: 'center', justifyContent: 'center' },
@@ -849,7 +825,7 @@ const styles = StyleSheet.create({
   analyzingSub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
 
   // Review
-  reviewSub: { fontSize: 13, color: COLORS.textMuted, marginBottom: 20, marginTop: -12 },
+  reviewSub: { fontSize: 13, color: COLORS.textMuted, marginBottom: 20, marginTop: 0 },
   reviewField: {
     backgroundColor: '#111111',
     borderRadius: 14,

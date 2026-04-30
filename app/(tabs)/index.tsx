@@ -5,7 +5,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   Dimensions,
-  Animated,
+  Animated as RNAnimated,
+  Easing,
   LayoutAnimation,
   Platform,
   UIManager,
@@ -18,8 +19,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown } from 'lucide-react-native'
+import { useScrollToTop } from '@react-navigation/native'
+import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
+import Svg, { Circle as SvgCircle } from 'react-native-svg'
+import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
@@ -28,6 +32,8 @@ import { trackMealsGenerated, trackMealRegenerated, trackUpgradePromptShown } fr
 import AILogModal from '../../components/AILogModal'
 import FoodSearchModal from '../../components/FoodSearchModal'
 import EditPortionModal from '../../components/EditPortionModal'
+import PantryScanModal from '../../components/PantryScanModal'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useFocusEffect } from 'expo-router'
 import { useMealSuggestions } from '../../lib/useMealSuggestions'
 import { GeneratedMeal } from '../../lib/meals'
@@ -51,6 +57,7 @@ type LogEntry = {
   food_id: string | null
   serving_id: string | null
   quantity: number
+  meal_data: any | null
 }
 
 type MealSlot = {
@@ -74,108 +81,89 @@ function iconForSlot(label: string): React.ElementType {
   return Utensils
 }
 
-function MacroCard({
-  calorieGoal,
-  proteinGoal,
-  carbsGoal,
-  fatGoal,
-  caloriesConsumed,
-  proteinConsumed,
-  carbsConsumed,
-  fatConsumed,
-}: {
-  calorieGoal: number
-  proteinGoal: number
-  carbsGoal: number
-  fatGoal: number
-  caloriesConsumed: number
-  proteinConsumed: number
-  carbsConsumed: number
-  fatConsumed: number
-}) {
-  const [expanded, setExpanded] = useState(false)
+function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
+  const remaining = goal - consumed
+  const isOver = remaining < 0
+  const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
+  const size = 170
+  const strokeWidth = 10
+  const radius = (size - strokeWidth) / 2
+  const circumference = 2 * Math.PI * radius
 
-  const toggle = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    setExpanded(prev => !prev)
-  }
+  const animProgress = useRef(new RNAnimated.Value(0)).current
+  const [displayRemaining, setDisplayRemaining] = useState(goal)
+  const [displayOffset, setDisplayOffset] = useState(circumference)
 
-  const macroRows = [
-    { label: 'Calories', consumed: caloriesConsumed, goal: calorieGoal, unit: 'kcal', color: '#FFFFFF' },
-    { label: 'Protein',  consumed: proteinConsumed,  goal: proteinGoal, unit: 'g',    color: '#4ADE80' },
-    { label: 'Carbs',    consumed: carbsConsumed,     goal: carbsGoal,   unit: 'g',    color: '#F59E0B' },
-    { label: 'Fat',      consumed: fatConsumed,       goal: fatGoal,     unit: 'g',    color: '#60A5FA' },
-  ]
-
-  const cal  = macroRows[0]
-  const prot = macroRows[1]
+  useEffect(() => {
+    if (isOver) {
+      // Over goal — show full red ring immediately, display how much over
+      setDisplayRemaining(remaining)
+      setDisplayOffset(0)
+      return
+    }
+    animProgress.setValue(0)
+    setDisplayRemaining(goal)
+    setDisplayOffset(circumference)
+    RNAnimated.timing(animProgress, { toValue: progress, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
+    const listener = animProgress.addListener(({ value }) => {
+      setDisplayRemaining(Math.round(goal - goal * value))
+      setDisplayOffset(circumference * (1 - value))
+    })
+    return () => animProgress.removeListener(listener)
+  }, [consumed, goal])
 
   return (
-    <TouchableOpacity style={styles.macroCard} activeOpacity={0.85} onPress={toggle}>
-      {!expanded && (
-        <View style={styles.macroColRow}>
-          <View style={styles.macroCol}>
-            <Text style={styles.macroColLabel}>Total Daily Cals</Text>
-            <Text style={styles.macroColValue}>
-              <Text style={styles.macroColBold}>{cal.consumed.toLocaleString()} / {cal.goal.toLocaleString()} kcal</Text>
-            </Text>
-            <View style={styles.macroBarTrack}>
-              <View style={[styles.macroBarFill, { width: `${Math.min(cal.consumed / cal.goal, 1) * 100}%`, backgroundColor: '#FFFFFF' }]} />
-            </View>
-            <Text style={styles.macroColRemaining}>{Math.max(cal.goal - cal.consumed, 0).toLocaleString()} kcal left</Text>
-          </View>
-          <View style={styles.macroColDivider} />
-          <View style={styles.macroCol}>
-            <Text style={styles.macroColLabel}>Protein</Text>
-            <Text style={styles.macroColValue}>
-              <Text style={styles.macroColBold}>{prot.consumed} / {prot.goal}g</Text>
-            </Text>
-            <View style={styles.macroBarTrack}>
-              <View style={[styles.macroBarFill, { width: `${Math.min(prot.consumed / prot.goal, 1) * 100}%`, backgroundColor: '#4ADE80' }]} />
-            </View>
-          </View>
-        </View>
-      )}
-      {expanded && (
-        <View style={styles.macroExpandedBlock}>
-          {macroRows.map((row, i) => (
-            <View key={row.label}>
-              {i > 0 && <View style={styles.macroExpandedDivider} />}
-              <View style={styles.macroExpandedRow}>
-                <Text style={styles.macroExpandedLabel}>{row.label}</Text>
-                <View style={styles.macroExpandedBarTrack}>
-                  <View style={[styles.macroBarFill, { width: `${Math.min(row.consumed / row.goal, 1) * 100}%`, backgroundColor: row.color }]} />
-                </View>
-                <Text style={styles.macroExpandedValue}>
-                  <Text style={styles.macroExpandedBold}>{row.consumed.toLocaleString()}</Text>
-                  <Text style={styles.macroExpandedUnit}> / {row.goal.toLocaleString()}{row.label === 'Calories' ? '' : row.unit}</Text>
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-      <View style={styles.macroChevronRow}>
-        <View style={expanded ? { transform: [{ rotate: '180deg' }] } : undefined}>
-          <ChevronDown size={14} stroke={COLORS.textMuted} strokeWidth={2} />
-        </View>
+    <View style={{ alignItems: 'center', justifyContent: 'center', width: size, height: size }}>
+      <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
+        <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.10)" strokeWidth={strokeWidth} fill="transparent" />
+        <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke={isOver ? '#EF4444' : '#4ADE80'} strokeWidth={strokeWidth} fill="transparent"
+          strokeDasharray={`${circumference}`} strokeDashoffset={isOver ? 0 : displayOffset} strokeLinecap="round" />
+      </Svg>
+      <View style={{ position: 'absolute', alignItems: 'center' }}>
+        <Text style={{ fontSize: 38, fontWeight: '800', color: isOver ? '#EF4444' : COLORS.textWhite, letterSpacing: -1 }}>{isOver ? `-${Math.abs(remaining).toLocaleString()}` : displayRemaining.toLocaleString()}</Text>
+        <Text style={{ fontSize: 12, fontWeight: '700', color: isOver ? '#EF4444' : '#4ADE80', textTransform: 'uppercase', letterSpacing: 1.5 }}>{isOver ? 'OVER' : 'KCAL LEFT'}</Text>
       </View>
-    </TouchableOpacity>
+    </View>
+  )
+}
+
+function MacroBar({ label, consumed, goal, color }: { label: string; consumed: number; goal: number; color: string }) {
+  const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
+  const animWidth = useRef(new RNAnimated.Value(0)).current
+
+  useEffect(() => {
+    animWidth.setValue(0)
+    RNAnimated.timing(animWidth, { toValue: progress * 100, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
+  }, [consumed, goal])
+
+  return (
+    <View style={{ gap: 5 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+          <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textWhite }}>{label}</Text>
+        </View>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textWhite }}>{consumed}<Text style={{ color: COLORS.textMuted, fontWeight: '500' }}> / {goal}g</Text></Text>
+      </View>
+      <View style={{ height: 5, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 3, overflow: 'hidden' }}>
+        {progress > 0 && <RNAnimated.View style={{ height: 5, backgroundColor: color, borderRadius: 3, width: animWidth.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />}
+      </View>
+    </View>
   )
 }
 
 function ShimmerBox({ style }: { style: any }) {
-  const shimmer = useRef(new Animated.Value(0)).current
+  const shimmer = useRef(new RNAnimated.Value(0)).current
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(shimmer, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        Animated.timing(shimmer, { toValue: 0, duration: 1000, useNativeDriver: true }),
+    RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(shimmer, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        RNAnimated.timing(shimmer, { toValue: 0, duration: 1000, useNativeDriver: true }),
       ])
     ).start()
   }, [])
   return (
-    <Animated.View style={[style, { opacity: shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] }) }]} />
+    <RNAnimated.View style={[style, { opacity: shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] }) }]} />
   )
 }
 
@@ -290,28 +278,37 @@ function SlotCard({
           {slot.entries.map((entry, i) => (
             <View key={entry.id}>
               {i > 0 && <View style={styles.slotDivider} />}
-              <Swipeable
-                renderRightActions={() => (
-                  <TouchableOpacity style={styles.deleteAction} onPress={() => onDeleteEntry(entry.id)} activeOpacity={0.8}>
-                    <Trash2 size={18} stroke="#FFFFFF" strokeWidth={2} />
+              <View style={styles.logCard}>
+                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} activeOpacity={0.7} onPress={() => {
+                    if (entry.food_id) {
+                      onEditEntry(entry)
+                    } else if (entry.meal_data) {
+                      router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify(entry.meal_data) }})
+                    } else {
+                      router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify({
+                        name: entry.name, calories: entry.calories, protein: entry.protein,
+                        carbs: entry.carbs, fat: entry.fat, ingredients: [], steps: [], image: null,
+                      })}})
+                    }
+                  }}>
+                    <View style={styles.logIconCircle} />
+                    <View style={styles.logInfo}>
+                      <Text style={styles.logName}>{entry.name}</Text>
+                      <Text style={styles.logTime}>{entry.time}</Text>
+                    </View>
+                    <View style={styles.logMacros}>
+                      <Text style={styles.logCal}>{entry.calories} kcal</Text>
+                      <Text style={styles.logPro}>{entry.protein}g protein</Text>
+                    </View>
                   </TouchableOpacity>
-                )}
-                overshootRight={false}
-              >
-                <TouchableOpacity style={styles.logCard} activeOpacity={0.7} onPress={() => onEditEntry(entry)}>
-                  <View style={styles.logIconCircle}>
-                    <entry.Icon size={12} stroke="#888888" strokeWidth={1.8} />
-                  </View>
-                  <View style={styles.logInfo}>
-                    <Text style={styles.logName}>{entry.name}</Text>
-                    <Text style={styles.logTime}>{entry.time}</Text>
-                  </View>
-                  <View style={styles.logMacros}>
-                    <Text style={styles.logCal}>{entry.calories} kcal</Text>
-                    <Text style={styles.logPro}>{entry.protein}g protein</Text>
-                  </View>
-                </TouchableOpacity>
-              </Swipeable>
+                  <TouchableOpacity
+                    style={{ padding: 8, marginLeft: 4 }}
+                    activeOpacity={0.6}
+                    onPress={() => onDeleteEntry(entry.id)}
+                  >
+                    <Trash2 size={16} stroke="#EF4444" strokeWidth={1.8} />
+                  </TouchableOpacity>
+              </View>
             </View>
           ))}
         </View>
@@ -332,7 +329,7 @@ function SlotCard({
 export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
-  const { isPremium } = usePremium()
+  const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
   const [mealMode, setMealMode] = useState<'cookNow' | 'mealPlan'>('cookNow')
   const cookNow = useMealSuggestions(user?.id, isPremium, 'cookNow')
@@ -345,6 +342,7 @@ export default function HomeScreen() {
     'paprika', 'cumin', 'chili powder', 'oregano', 'lemon', 'vinegar',
   ]
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
+  const [pantryFetched, setPantryFetched] = useState(false)
   const [missingStaples, setMissingStaples] = useState<string[]>([])
   const [staplesDismissed, setStaplesDismissed] = useState(false)
 
@@ -355,10 +353,20 @@ export default function HomeScreen() {
       .then(({ data }) => {
         const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
         setPantryNames(names)
+        setPantryFetched(true)
         const missing = ESSENTIAL_STAPLES.filter(s => !names.has(s))
         setMissingStaples(missing)
       })
   }, [user])
+
+  // Show scan CTA only after fetch completes and pantry is confirmed empty
+  useEffect(() => {
+    if (!pantryFetched) return
+    if (pantryNames.size > 0) { setShowScanCta(false); return }
+    AsyncStorage.getItem('pantry_scan_cta_dismissed').then(val => {
+      if (!val) setShowScanCta(true)
+    })
+  }, [pantryFetched, pantryNames])
 
   const addStapleToPantry = async (name: string) => {
     if (!user) return
@@ -368,22 +376,116 @@ export default function HomeScreen() {
     if (existing && existing.length > 0) {
       await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
     } else {
-      await supabase.from('pantry_items').insert({ user_id: user.id, name, category: 'Condiments & Spices', in_stock: true })
+      await supabase.from('pantry_items').insert({ user_id: user.id, name, category: 'Spices & Seasonings', in_stock: true })
     }
   }
 
   const addStapleToGrocery = async (name: string) => {
     if (!user) return
     setMissingStaples(prev => prev.filter(s => s !== name))
-    await supabase.from('grocery_items').insert({ user_id: user.id, name, category: 'Condiments & Spices' })
+    await supabase.from('grocery_items').insert({ user_id: user.id, name, category: 'Spices & Seasonings' })
   }
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
+  const [showScanCta, setShowScanCta] = useState(false)
+  const [showPantryScanFromHome, setShowPantryScanFromHome] = useState(false)
+  const [trendingMeals, setTrendingMeals] = useState<any[]>([])
+
+  // Fetch trending meals from cache (generated daily, kept 3 days for fallback)
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0]
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+
+    const mapRows = (rows: any[]) => rows.map(m => ({
+      id: m.id, name: m.name, calories: m.calories, protein: m.protein,
+      carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+      ingredients: m.ingredients, steps: m.steps, image: m.image,
+      trend_source: m.trend_source,
+    }))
+
+    // Pull last 3 days' worth, newest first — gives us a deep enough pool even if today's
+    // generation was thin. We sort/order client-side to prioritize today's meals.
+    supabase.from('trending_meals')
+      .select('*')
+      .gte('generated_at', threeDaysAgo)
+      .order('generated_at', { ascending: false })
+      .order('id')
+      .then(({ data }) => {
+        const todayRows = (data ?? []).filter(r => r.generated_at === today)
+        const olderRows = (data ?? []).filter(r => r.generated_at !== today)
+
+        if (todayRows.length > 0) {
+          // Show today's meals first; fall back to older days only if today has fewer than 4
+          const combined = todayRows.length >= 4
+            ? todayRows
+            : [...todayRows, ...olderRows].slice(0, 10)
+          setTrendingMeals(mapRows(combined))
+        } else if (olderRows.length > 0) {
+          // No meals for today yet — show yesterday's while we trigger fresh generation
+          setTrendingMeals(mapRows(olderRows.slice(0, 10)))
+          supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
+            if (res?.meals && res.meals.length > 0) {
+              setTrendingMeals(res.meals.map((m: any) => ({
+                id: m.id || String(Math.random()), name: m.name, calories: m.calories, protein: m.protein,
+                carbs: m.carbs, fat: m.fat, prepTime: m.prepTime || m.prep_time,
+                ingredients: m.ingredients, steps: m.steps, image: m.image || null,
+                trend_source: m.trend_source,
+              })))
+            }
+          })
+        } else {
+          // Completely empty — trigger fresh generation
+          supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
+            if (res?.meals) {
+              setTrendingMeals(res.meals.map((m: any) => ({
+                id: m.id || String(Math.random()), name: m.name, calories: m.calories, protein: m.protein,
+                carbs: m.carbs, fat: m.fat, prepTime: m.prepTime || m.prep_time,
+                ingredients: m.ingredients, steps: m.steps, image: m.image || null,
+                trend_source: m.trend_source,
+              })))
+            }
+          })
+        }
+      })
+  }, [])
+
   const [showIntroPopup, setShowIntroPopup] = useState(false)
   const [calorieGoal, setCalorieGoal] = useState(2400)
   const [proteinGoal, setProteinGoal] = useState(180)
   const [carbsGoal, setCarbsGoal] = useState(250)
   const [fatGoal, setFatGoal] = useState(80)
+  const [foodDislikes, setFoodDislikes] = useState<string[]>([])
+  const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
+
+  // Keyword map for dietary restrictions → forbidden ingredient substrings for trending meal filtering
+  const RESTRICTION_KEYWORDS: Record<string, string[]> = {
+    vegetarian: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'pepperoni', 'prosciutto', 'salami', 'anchovies', 'tuna', 'salmon', 'shrimp', 'crab', 'lobster', 'fish', 'meat'],
+    vegan: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'fish', 'shrimp', 'tuna', 'salmon', 'crab', 'lobster', 'meat', 'egg', 'eggs', 'milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'honey'],
+    'gluten-free': ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumbs', 'croutons', 'tortilla', 'noodles', 'ramen', 'udon', 'couscous'],
+    'dairy-free': ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta'],
+    'nut-free': ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter'],
+    'nut allergy': ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter'],
+    'peanut allergy': ['peanut', 'peanut butter', 'peanut sauce'],
+    pescatarian: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal'],
+    halal: ['pork', 'bacon', 'ham', 'prosciutto', 'lard', 'pepperoni', 'salami'],
+    kosher: ['pork', 'bacon', 'ham', 'shrimp', 'lobster', 'crab', 'shellfish'],
+  }
+
+  const trendingMealPassesFilters = (meal: any): boolean => {
+    const ingredientNames = (meal.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
+    const mealNameLower = (meal.name ?? '').toLowerCase()
+    for (const dislike of foodDislikes) {
+      const d = dislike.toLowerCase()
+      if (ingredientNames.some((ing: string) => ing.includes(d)) || mealNameLower.includes(d)) return false
+    }
+    for (const restriction of dietaryRestrictions) {
+      const keywords = RESTRICTION_KEYWORDS[restriction.toLowerCase()] ?? []
+      for (const kw of keywords) {
+        if (ingredientNames.some((ing: string) => ing.includes(kw)) || mealNameLower.includes(kw)) return false
+      }
+    }
+    return true
+  }
 
   useEffect(() => {
     if (!loading && meals.length > 0) trackMealsGenerated(meals.length)
@@ -393,7 +495,7 @@ export default function HomeScreen() {
     if (!user) return
     supabase
       .from('profiles')
-      .select('food_prefs_banner_dismissed, food_intro_popup_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal')
+      .select('food_prefs_banner_dismissed, food_intro_popup_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal, food_dislikes, dietary_restrictions')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -403,6 +505,8 @@ export default function HomeScreen() {
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
         if (data?.carbs_goal) setCarbsGoal(data.carbs_goal)
         if (data?.fat_goal) setFatGoal(data.fat_goal)
+        if (data?.food_dislikes) setFoodDislikes(data.food_dislikes ?? [])
+        if (data?.dietary_restrictions) setDietaryRestrictions((data.dietary_restrictions ?? []).filter((r: string) => r !== 'None'))
       })
   }, [user])
 
@@ -444,15 +548,29 @@ export default function HomeScreen() {
         meal_name: meal.name,
         rating: next,
       }, { onConflict: 'user_id,meal_name' })
+      // Show learning feedback so user sees the AI improving
+      showRatingToast(next === 1 ? "Got it — we'll suggest more like this" : "Noted — we'll skip this kind of meal")
     }
   }
 
+  const showRatingToast = (message: string) => {
+    setRatingToastMessage(message)
+    setShowRatingToast_(true)
+    RNAnimated.sequence([
+      RNAnimated.timing(ratingToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      RNAnimated.delay(1800),
+      RNAnimated.timing(ratingToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setShowRatingToast_(false))
+  }
+
   const [mealsExpanded, setMealsExpanded] = useState(false)
-  const chevronAnim = useRef(new Animated.Value(0)).current
+  const chevronAnim = useRef(new RNAnimated.Value(0)).current
+  const scrollRef = useRef<ScrollView>(null)
+  useScrollToTop(scrollRef)
 
   const toggleMeals = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    Animated.timing(chevronAnim, { toValue: mealsExpanded ? 0 : 1, duration: 250, useNativeDriver: true }).start()
+    RNAnimated.timing(chevronAnim, { toValue: mealsExpanded ? 0 : 1, duration: 250, useNativeDriver: true }).start()
     setMealsExpanded(prev => !prev)
   }
 
@@ -460,15 +578,28 @@ export default function HomeScreen() {
 
   const [slots, setSlots] = useState<MealSlot[]>(INITIAL_SLOTS)
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set(['breakfast']))
+  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0])
+  const isToday = selectedDate === new Date().toISOString().split('T')[0]
+
+  const goBackDay = () => {
+    const d = new Date(selectedDate + 'T12:00:00')
+    d.setDate(d.getDate() - 1)
+    setSelectedDate(d.toISOString().split('T')[0])
+  }
+  const goForwardDay = () => {
+    if (isToday) return
+    const d = new Date(selectedDate + 'T12:00:00')
+    d.setDate(d.getDate() + 1)
+    setSelectedDate(d.toISOString().split('T')[0])
+  }
 
   const fetchTodayLogs = useCallback(async () => {
     if (!user) return
-    const today = new Date().toISOString().split('T')[0]
     const { data } = await supabase
       .from('meal_logs')
-      .select('id, meal_name, calories, protein, carbs, fat, slot, created_at, food_id, serving_id, quantity')
+      .select('id, meal_name, calories, protein, carbs, fat, slot, created_at, food_id, serving_id, quantity, meal_data')
       .eq('user_id', user.id)
-      .eq('logged_at', today)
+      .eq('logged_at', selectedDate)
       .order('created_at', { ascending: true })
     if (!data) return
 
@@ -491,6 +622,7 @@ export default function HomeScreen() {
         food_id: row.food_id ?? null,
         serving_id: row.serving_id ?? null,
         quantity: row.quantity ?? 1,
+        meal_data: row.meal_data ?? null,
       })
     }
 
@@ -507,7 +639,7 @@ export default function HomeScreen() {
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setSlots(result)
-  }, [user?.id])
+  }, [user?.id, selectedDate])
 
   useFocusEffect(useCallback(() => {
     fetchTodayLogs()
@@ -538,6 +670,9 @@ export default function HomeScreen() {
   }
 
   const [ratings, setRatings] = useState<Record<string, 1 | -1>>({})
+  const [showRatingToast_, setShowRatingToast_] = useState(false)
+  const [ratingToastMessage, setRatingToastMessage] = useState('')
+  const ratingToastOpacity = useRef(new RNAnimated.Value(0)).current
   const [editEntry, setEditEntry] = useState<LogEntry | null>(null)
 
   const handleEntryUpdated = (logId: string, calories: number, protein: number) => {
@@ -584,7 +719,6 @@ export default function HomeScreen() {
     const name = logName.trim()
     if (!name || !user) return
     setLogSaving(true)
-    const today = new Date().toISOString().split('T')[0]
     const { error } = await supabase.from('meal_logs').insert({
       user_id: user.id,
       meal_name: name,
@@ -593,7 +727,7 @@ export default function HomeScreen() {
       carbs: parseInt(logCarbs) || 0,
       fat: parseInt(logFat) || 0,
       slot: logSlot,
-      logged_at: today,
+      logged_at: selectedDate,
     })
     setLogSaving(false)
     if (!error) {
@@ -610,21 +744,30 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      {/* ── Rating feedback toast ── */}
+      {showRatingToast_ && (
+        <RNAnimated.View style={[styles.ratingToast, { opacity: ratingToastOpacity }]}>
+          <Text style={styles.ratingToastText}>{ratingToastMessage}</Text>
+        </RNAnimated.View>
+      )}
+      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
+          <View style={styles.headerTopRow}>
+            <Text style={styles.brandText}>Pantry</Text>
             <View style={styles.avatar}>
               <Text style={styles.avatarInitial}>
                 {(user?.user_metadata?.full_name ?? user?.email ?? 'U').charAt(0).toUpperCase()}
               </Text>
             </View>
-            <View>
-              <Text style={styles.hiText}>
-                Hi, {user?.user_metadata?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there'}
-              </Text>
-              <Text style={styles.greetText}>Ready to eat well today?</Text>
-            </View>
+          </View>
+          <View style={styles.headerGreeting}>
+            <Text style={styles.hiText}>
+              {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening'}, {user?.user_metadata?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there'}
+            </Text>
+            <Text style={styles.greetText}>
+              {totalCal === 0 ? "Let's start tracking today" : totalCal >= calorieGoal ? 'Goal reached! Nice work' : 'Ready for your next meal?'}
+            </Text>
           </View>
         </View>
 
@@ -652,117 +795,210 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        <MacroCard
-          calorieGoal={calorieGoal}
-          proteinGoal={proteinGoal}
-          carbsGoal={carbsGoal}
-          fatGoal={fatGoal}
-          caloriesConsumed={totalCal}
-          proteinConsumed={totalPro}
-          carbsConsumed={totalCarbs}
-          fatConsumed={totalFat}
-        />
-
-        <View style={[styles.panel, !mealsExpanded && styles.panelCollapsed]}>
-          <TouchableOpacity style={[styles.sectionHeader, mealsExpanded && styles.sectionHeaderExpanded]} onPress={toggleMeals} activeOpacity={0.7}>
-            <View style={styles.sectionTitleRow}>
-              <Text style={styles.sectionTitle}>Suggested Meals</Text>
-              {!mealsExpanded && (
-                <Text style={styles.mealsCollapsedSub}>
-                  {loading ? 'Generating...' : `${meals.length} meals ready`}
-                </Text>
-              )}
-            </View>
-            <Animated.View style={{ transform: [{ rotate: chevronRotation }] }}>
-              <ChevronDown size={20} stroke={COLORS.textMuted} strokeWidth={2} />
-            </Animated.View>
+        {/* ── Day navigation ── */}
+        <View style={styles.dayNav}>
+          <TouchableOpacity onPress={goBackDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
+          <TouchableOpacity onPress={() => setSelectedDate(new Date().toISOString().split('T')[0])} activeOpacity={0.7}>
+            <Text style={styles.dayNavText}>
+              {isToday ? 'Today' : (() => {
+                const d = new Date(selectedDate + 'T12:00:00')
+                const yesterday = new Date()
+                yesterday.setDate(yesterday.getDate() - 1)
+                if (selectedDate === yesterday.toISOString().split('T')[0]) return 'Yesterday'
+                return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+              })()}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={goForwardDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <ChevronRight size={20} stroke={isToday ? '#333' : COLORS.textWhite} strokeWidth={2} />
+          </TouchableOpacity>
+        </View>
 
-          {mealsExpanded && (
-            <>
-              {/* Mode toggle */}
-              <View style={styles.mealModeToggle}>
-                <TouchableOpacity
-                  style={[styles.mealModeBtn, mealMode === 'cookNow' && styles.mealModeBtnActive]}
-                  onPress={() => setMealMode('cookNow')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.mealModeBtnText, mealMode === 'cookNow' && styles.mealModeBtnTextActive]}>Cook Now</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.mealModeBtn, mealMode === 'mealPlan' && styles.mealModeBtnActive]}
-                  onPress={() => setMealMode('mealPlan')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.mealModeBtnText, mealMode === 'mealPlan' && styles.mealModeBtnTextActive]}>Meal Plan</Text>
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.mealModeSub}>
-                {mealMode === 'cookNow' ? 'Only uses ingredients in your pantry' : 'May include items you need to buy'}
+        {/* ── Hero Dashboard Card ── */}
+        <View style={styles.heroCard}>
+          <View style={{ alignItems: 'center', marginBottom: 8 }}>
+            <CalorieGauge consumed={totalCal} goal={calorieGoal} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+              <Flame size={13} stroke="#4ADE80" strokeWidth={2} fill="rgba(74,222,128,0.25)" />
+              <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
+                {totalCal > 0 ? `${totalCal.toLocaleString()} consumed` : 'Keep logging!'}
               </Text>
+            </View>
+          </View>
 
-              {loading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator color="#4ADE80" size="large" />
-                  <Text style={styles.loadingText}>
-                    {mealMode === 'cookNow' ? 'Finding meals from your pantry...' : 'Planning meals for the week...'}
-                  </Text>
-                </View>
-              ) : error ? (
-                <View style={styles.loadingContainer}>
-                  <Text style={styles.errorText}>Failed to generate meals</Text>
-                  <TouchableOpacity style={styles.regenButton} onPress={regenerate} activeOpacity={0.8}>
-                    <RefreshCw size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-                    <Text style={styles.regenText}>Try Again</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.mealList}>
-                    {meals.map((meal) => (
-                      <MealCard
-                        key={meal.id}
-                        meal={meal}
-                        rating={ratings[meal.id] ?? null}
-                        onRate={(r) => rateMeal(meal, r)}
-                      />
-                    ))}
+          <View style={{ gap: 10 }}>
+            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color="#4ADE80" />
+            <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color="#F59E0B" />
+            <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color="#60A5FA" />
+          </View>
+        </View>
+
+        {/* ── First-time pantry scan CTA ── */}
+        {showScanCta && (
+          <TouchableOpacity
+            style={styles.scanCtaCard}
+            activeOpacity={0.85}
+            onPress={() => setShowPantryScanFromHome(true)}
+          >
+            <View style={styles.scanCtaInner}>
+              <View style={styles.scanCtaIconWrap}>
+                <Camera size={22} stroke="#4ADE80" strokeWidth={2} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.scanCtaTitle}>See what you can cook tonight</Text>
+                <Text style={styles.scanCtaSub}>Scan your pantry in 10 seconds</Text>
+              </View>
+              <ChevronRight size={16} stroke="#4ADE80" strokeWidth={2} />
+            </View>
+            <TouchableOpacity
+              style={styles.scanCtaLaterWrap}
+              onPress={async (e) => {
+                e.stopPropagation()
+                setShowScanCta(false)
+                await AsyncStorage.setItem('pantry_scan_cta_dismissed', '1')
+              }}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.scanCtaLaterText}>Later</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
+
+        {/* ── Suggested For You — Horizontal Scroll ── */}
+        <View style={{ marginBottom: 28 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
+            <Text style={styles.sectionTitle}>Suggested For You</Text>
+            <TouchableOpacity
+              onPress={() => {
+                if (!isPremium) {
+                  trackUpgradePromptShown('regen_limit')
+                  Alert.alert('Upgrade to Premium', 'Free accounts get 1 set of suggestions per day.', [
+                    { text: 'Not now', style: 'cancel' },
+                    { text: 'Upgrade', onPress: () => triggerUpgrade('regen_limit') },
+                  ])
+                  return
+                }
+                trackMealRegenerated()
+                regenerate()
+              }}
+              activeOpacity={0.7}
+            >
+              <RefreshCw size={16} stroke="#4ADE80" strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
+
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator color="#4ADE80" size="large" />
+              <Text style={styles.loadingText}>Finding meals from your pantry...</Text>
+            </View>
+          ) : error ? (
+            <View style={styles.loadingContainer}>
+              <Text style={styles.errorText}>Failed to generate meals</Text>
+              <TouchableOpacity style={styles.regenButton} onPress={regenerate} activeOpacity={0.8}>
+                <RefreshCw size={18} stroke="#000" strokeWidth={2} />
+                <Text style={styles.regenText}>Try Again</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
+              {meals.map((meal) => (
+                <TouchableOpacity
+                  key={meal.id}
+                  style={styles.heroMealCard}
+                  activeOpacity={0.85}
+                  onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
+                >
+                  {meal.image && meal.image.startsWith('http') ? (
+                    <Image source={{ uri: meal.image }} style={styles.heroMealImage} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
+                      <Utensils size={32} stroke="#555" strokeWidth={1.5} />
+                    </View>
+                  )}
+                  <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                    locations={[0.3, 0.6, 1]}
+                    style={styles.heroMealGradient}
+                  />
+                  <View style={styles.heroMealContent}>
+                    <Text style={styles.heroMealName} numberOfLines={2}>{meal.name}</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                      {meal.prepTime > 0 && (
+                        <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
+                          <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{meal.prepTime} MIN</Text>
+                        </View>
+                      )}
+                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                        <Text style={styles.heroMealPillText}>{meal.calories} CAL</Text>
+                      </View>
+                      {meal.protein > 0 && (
+                        <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
+                          <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{meal.protein}P</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.regenButton}
-                    onPress={() => {
-                      if (!isPremium) {
-                        trackUpgradePromptShown('regen_limit')
-                        Alert.alert(
-                          'Upgrade to Premium',
-                          'Free accounts get 1 set of suggestions per day. Upgrade for unlimited regeneration.',
-                          [
-                            { text: 'Not now', style: 'cancel' },
-                            { text: 'Upgrade', onPress: () => {
-                              registerPlacement('regen_limit')
-                            }},
-                          ]
-                        )
-                        return
-                      }
-                      trackMealRegenerated()
-                      regenerate()
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <RefreshCw size={18} stroke={isPremium ? COLORS.textWhite : COLORS.textMuted} strokeWidth={2} />
-                    <Text style={[styles.regenText, !isPremium && { color: COLORS.textMuted }]}>
-                      {isPremium ? 'Regenerate' : 'Regenerate · Premium'}
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           )}
         </View>
 
-        {/* ── Missing staples nudge ── */}
-        {missingStaples.length >= 3 && !staplesDismissed && !loading && (
+        {/* ── Trending Now ── */}
+        {(() => {
+          const filteredTrending = trendingMeals.filter(trendingMealPassesFilters)
+          if (filteredTrending.length === 0) return null
+          return (
+        <View style={{ marginBottom: 28 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 20, marginBottom: 16 }}>
+            <Flame size={14} stroke="#EF4444" strokeWidth={2} fill="#EF4444" />
+            <Text style={styles.sectionTitle}>Trending</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
+            {filteredTrending.map((meal, i) => (
+              <TouchableOpacity
+                key={`trending-${meal.id}-${i}`}
+                style={styles.trendingCard}
+                activeOpacity={0.85}
+                onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify({ ...meal, image: meal.image }) } })}
+              >
+                {meal.image && meal.image.startsWith('http') ? (
+                  <Image source={{ uri: meal.image }} style={styles.trendingImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.trendingImage, { backgroundColor: '#2A2A2A' }]} />
+                )}
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} locations={[0.2, 0.9]} style={styles.trendingGradient} />
+                <View style={styles.trendingContent}>
+                  <Text style={styles.trendingName} numberOfLines={2}>{meal.name}</Text>
+                  <View style={{ flexDirection: 'row', gap: 5, marginTop: 6 }}>
+                    {meal.prepTime > 0 && (
+                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
+                        <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{meal.prepTime}m</Text>
+                      </View>
+                    )}
+                    <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                      <Text style={styles.heroMealPillText}>{meal.calories} CAL</Text>
+                    </View>
+                    {meal.protein > 0 && (
+                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
+                        <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{meal.protein}P</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+          )
+        })()}
+
+        {/* ── Missing staples nudge — only shown after user has scanned their pantry ── */}
+        {missingStaples.length >= 3 && !staplesDismissed && !loading && pantryNames.size > 0 && (
           <View style={styles.staplesCard}>
             <View style={styles.staplesHeader}>
               <View>
@@ -790,37 +1026,105 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {/* ── Daily Meal Log — Cards ── */}
         <View style={styles.logSection}>
-          <View style={styles.logHeader}>
-            <Text style={styles.logTitle}>Today's Log</Text>
-          </View>
-          <TouchableOpacity style={styles.aiEstimateBtn} activeOpacity={0.85} onPress={() => setShowAILogModal(true)}>
-            <ScanLine size={20} stroke="#000000" strokeWidth={2} />
-            <Text style={styles.aiEstimateBtnText}>Estimate with AI</Text>
+          <Text style={styles.logTitle}>Daily Meal Log</Text>
+
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              backgroundColor: '#0A0A0A', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 18, marginTop: 14,
+              borderWidth: 1.5, borderColor: 'rgba(74,222,128,0.4)',
+              shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.15, shadowRadius: 12,
+            }}
+            activeOpacity={0.8}
+            onPress={() => setShowAILogModal(true)}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{
+                width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(74,222,128,0.12)',
+                alignItems: 'center', justifyContent: 'center',
+              }}>
+                <Camera size={18} stroke="#4ADE80" strokeWidth={2.5} />
+              </View>
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>Snap & Log with AI</Text>
+                <Text style={{ fontSize: 11, color: '#888', marginTop: 1 }}>Point your camera at any food</Text>
+              </View>
+            </View>
+            <View style={{
+              width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(74,222,128,0.15)',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <ScanLine size={16} stroke="#4ADE80" strokeWidth={2} />
+            </View>
           </TouchableOpacity>
 
-          {slots.map(slot => (
-            <SlotCard
-              key={slot.id}
-              slot={slot}
-              expanded={expandedSlots.has(slot.id)}
-              onToggle={() => toggleSlot(slot.id)}
-              onDeleteEntry={(entryId) => deleteEntry(slot.id, entryId)}
-              onEditEntry={(entry) => setEditEntry(entry)}
-              onRemoveSlot={() => removeSlot(slot.id)}
-              onLog={() => { setFoodSearchSlot(slot.label); setShowFoodSearchModal(true) }}
-            />
-          ))}
+          <View style={{ marginTop: 12, gap: 10 }}>
+            {slots.map((slot) => {
+              const hasEntries = slot.entries.length > 0
+              const slotCal = slot.entries.reduce((s, e) => s + e.calories, 0)
+              const SlotIcon = iconForSlot(slot.label)
+              return (
+                <View key={slot.id} style={styles.mealSlotCard}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                    <View style={styles.mealSlotIcon}>
+                      <SlotIcon size={18} stroke={hasEntries ? '#4ADE80' : COLORS.textMuted} strokeWidth={1.8} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <Text style={styles.mealSlotLabel}>{slot.label}</Text>
+                        <TouchableOpacity
+                          style={styles.mealSlotLogBtn}
+                          onPress={() => { setFoodSearchSlot(slot.label); setShowFoodSearchModal(true) }}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={styles.mealSlotLogBtnText}>{hasEntries ? '+' : 'Log'}</Text>
+                        </TouchableOpacity>
+                      </View>
+                      {hasEntries ? (
+                        slot.entries.map((entry, idx) => (
+                          <View key={entry.id} style={{ flexDirection: 'row', alignItems: 'center',
+                              paddingTop: 8, marginTop: idx > 0 ? 8 : 4,
+                              borderTopWidth: idx > 0 ? 1 : 0,
+                              borderTopColor: 'rgba(255,255,255,0.12)' }}>
+                            <TouchableOpacity onPress={() => {
+                              if (entry.food_id) {
+                                setEditEntry(entry)
+                              } else if (entry.meal_data) {
+                                router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify(entry.meal_data) }})
+                              } else {
+                                router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify({
+                                  name: entry.name, calories: entry.calories, protein: entry.protein,
+                                  carbs: entry.carbs, fat: entry.fat, ingredients: [], steps: [], image: null,
+                                })}})
+                              }
+                            }} activeOpacity={0.7} style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 13, color: COLORS.textWhite, fontWeight: '500', flex: 1 }}>{entry.name}</Text>
+                              <Text style={{ fontSize: 12, color: COLORS.textMuted, fontWeight: '600', marginLeft: 8 }}>{entry.calories} kcal</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => deleteEntry(slot.id, entry.id)} activeOpacity={0.6} style={{ paddingLeft: 12, paddingVertical: 4 }}>
+                              <X size={14} stroke="#666" strokeWidth={2} />
+                            </TouchableOpacity>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 4 }}>Nothing logged yet</Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              )
+            })}
+          </View>
 
           <TouchableOpacity style={styles.addSlotBtn} activeOpacity={0.6} onPress={() => setShowAddModal(true)}>
-            <Plus size={15} stroke={COLORS.textMuted} strokeWidth={2} />
-            <Text style={styles.addSlotText}>Add Meal</Text>
+            <Plus size={15} stroke="#4ADE80" strokeWidth={2} />
+            <Text style={styles.addSlotText}>+ Add Meal</Text>
           </TouchableOpacity>
 
-          <Text style={styles.logTotal}>
-            Total today: {totalCal.toLocaleString()} kcal · {totalPro}g protein
-          </Text>
         </View>
+
       </ScrollView>
 
       <Modal visible={showAddModal} transparent animationType="fade">
@@ -948,6 +1252,7 @@ export default function HomeScreen() {
         defaultSlot={foodSearchSlot}
         onClose={() => setShowFoodSearchModal(false)}
         onLogged={fetchTodayLogs}
+        logDate={selectedDate}
       />
 
       {/* ── Edit portion — reuse FoodSearchModal in edit mode ── */}
@@ -980,6 +1285,17 @@ export default function HomeScreen() {
           onUpdated={handleEntryUpdated}
         />
       )}
+
+      {/* ── Pantry scan from home CTA ── */}
+      <PantryScanModal
+        visible={showPantryScanFromHome}
+        onClose={() => setShowPantryScanFromHome(false)}
+        onItemsAdded={() => {
+          setShowPantryScanFromHome(false)
+          setShowScanCta(false)
+          AsyncStorage.setItem('pantry_scan_cta_dismissed', '1')
+        }}
+      />
 
       {/* ── Food intro one-time popup ── */}
       <Modal visible={showIntroPopup} transparent animationType="fade">
@@ -1018,7 +1334,10 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flex: 1, backgroundColor: COLORS.background },
   scrollContent: { paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 },
+  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  brandText: { fontSize: 18, fontWeight: '800', color: '#4ADE80', letterSpacing: -0.3 },
+  headerGreeting: { gap: 4 },
   prefBanner: {
     marginHorizontal: 20,
     marginBottom: 16,
@@ -1045,19 +1364,14 @@ const styles = StyleSheet.create({
     color: '#00C9A7',
     fontWeight: '500',
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontSize: 18, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
-  hiText: { fontSize: 20, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.3 },
-  greetText: { fontSize: 14, color: COLORS.textDim, marginTop: 1 },
-  macroCard: { marginHorizontal: 20, marginBottom: 24, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', backgroundColor: '#1A1A1A', paddingHorizontal: 18, paddingTop: 18, paddingBottom: 10 },
-  macroColRow: { flexDirection: 'row', gap: 16 },
-  macroCol: { flex: 1, gap: 6 },
-  macroColDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginVertical: 2 },
-  macroColValue: { fontSize: 13, color: COLORS.textDim },
-  macroColBold: { fontSize: 16, fontWeight: '700', color: COLORS.textWhite },
-  macroColLabel: { fontSize: 11, color: COLORS.textMuted, fontWeight: '500', marginBottom: 4 },
-  macroColRemaining: { fontSize: 11, color: COLORS.textMuted, fontWeight: '400', marginTop: 5 },
+  avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.trackDark },
+  avatarInitial: { fontSize: 14, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
+  hiText: { fontSize: 26, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  greetText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
+  macroCard: { marginHorizontal: 20, marginBottom: 24, borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+  macroSectionLabel: { fontSize: 10, fontWeight: '700', color: '#4ADE80', textTransform: 'uppercase', letterSpacing: 2 },
+  macroCalorieText: { fontSize: 32, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  macroRingsRow: { flexDirection: 'row', justifyContent: 'space-evenly', paddingHorizontal: 20, marginTop: 4 },
   macroBarTrack: { height: 4, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 2, overflow: 'hidden' },
   macroBarFill: { height: '100%', borderRadius: 2 },
   macroChevronRow: { alignItems: 'center', marginTop: 10 },
@@ -1069,53 +1383,65 @@ const styles = StyleSheet.create({
   macroExpandedValue: { width: 100, fontSize: 12, color: COLORS.textMuted, textAlign: 'right' },
   macroExpandedBold: { fontSize: 13, fontWeight: '700', color: COLORS.textWhite },
   macroExpandedUnit: { fontSize: 12, fontWeight: '400', color: COLORS.textMuted },
-  panel: { backgroundColor: COLORS.card, borderTopLeftRadius: 28, borderTopRightRadius: 28, borderBottomLeftRadius: 0, borderBottomRightRadius: 0, marginHorizontal: 20, minHeight: 500, paddingTop: 12, paddingHorizontal: 24, paddingBottom: 36 },
-  panelCollapsed: { borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 16, minHeight: 0, paddingTop: 0, paddingBottom: 0 },
+  panel: { backgroundColor: 'transparent', marginHorizontal: 20, paddingTop: 12, paddingHorizontal: 0, paddingBottom: 16 },
+  panelCollapsed: { paddingTop: 0, paddingBottom: 0 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, marginBottom: 0 },
-  sectionHeaderExpanded: { paddingBottom: 0, marginBottom: 20 },
+  sectionHeaderExpanded: { paddingBottom: 0, marginBottom: 8 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sectionTitle: { fontSize: 20, fontWeight: '800', color: COLORS.text, letterSpacing: -0.4 },
+  sectionTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 2, textTransform: 'uppercase' },
   mealsCollapsedSub: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   mealList: { gap: 14, marginBottom: 28 },
-  mealCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, borderColor: '#EBEBEB', backgroundColor: COLORS.card, padding: 16, gap: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2 },
+  mealCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, padding: 16, gap: 16 },
   mealImageReal: { width: 72, height: 72, borderRadius: 12 },
-  mealImagePlaceholder: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#2C2C2C', alignItems: 'center', justifyContent: 'center' },
+  mealImagePlaceholder: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#3A3A3A', alignItems: 'center', justifyContent: 'center' },
   mealInfo: { flex: 1, gap: 6 },
   ratingBtns: { flexDirection: 'column', gap: 8, alignItems: 'center' },
   ratingBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
   ratingBtnUp: { backgroundColor: 'rgba(74,222,128,0.12)' },
   ratingBtnDown: { backgroundColor: 'rgba(239,68,68,0.12)' },
-  mealName: { fontSize: 16, fontWeight: '700', color: COLORS.text, letterSpacing: -0.2 },
+  ratingToast: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    zIndex: 100,
+  },
+  ratingToastText: { color: '#4ADE80', fontSize: 14, fontWeight: '600' },
+  mealName: { fontSize: 16, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
   mealMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   mealMetaText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   mealMacros: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  mealMacroText: { fontSize: 13, color: COLORS.text, fontWeight: '400' },
-  mealMacroBold: { fontWeight: '700' },
+  mealMacroText: { fontSize: 13, color: COLORS.textDim, fontWeight: '400' },
+  mealMacroBold: { fontWeight: '700', color: COLORS.textWhite },
   macroDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: COLORS.textMuted },
-  regenButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: COLORS.background, borderRadius: 16, paddingVertical: 18 },
-  regenText: { color: COLORS.textWhite, fontSize: 16, fontWeight: '700', letterSpacing: 0.2 },
+  regenButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#4ADE80', borderRadius: 30, paddingVertical: 16, shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 12 },
+  regenText: { color: '#000000', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
 
   mealModeToggle: {
     flexDirection: 'row',
-    backgroundColor: '#111111',
-    borderRadius: 14,
+    backgroundColor: COLORS.cardElevated,
+    borderRadius: 24,
     padding: 3,
-    marginHorizontal: 16,
     marginBottom: 6,
   },
   mealModeBtn: {
     flex: 1,
     paddingVertical: 10,
-    borderRadius: 11,
+    borderRadius: 22,
     alignItems: 'center',
   },
   mealModeBtnActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#4ADE80',
   },
   mealModeBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.5)',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   mealModeBtnTextActive: {
     color: '#000000',
@@ -1132,7 +1458,7 @@ const styles = StyleSheet.create({
   staplesCard: {
     marginHorizontal: 20,
     marginTop: 20,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: COLORS.cardElevated,
     borderRadius: 16,
     padding: 16,
     gap: 10,
@@ -1166,22 +1492,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: '#4ADE80',
-    borderRadius: 16,
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: '#4ADE80',
+    borderRadius: 30,
     paddingVertical: 14,
     marginBottom: 16,
   },
   aiEstimateBtnText: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#000000',
+    color: '#4ADE80',
   },
-  logTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.4 },
+  logTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 2, textTransform: 'uppercase' },
   logPillBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 12 },
   logPillBtnText: { fontSize: 12, fontWeight: '600', color: COLORS.textWhite },
-  slotCard: { backgroundColor: '#1A1A1A', borderRadius: 12, borderWidth: 1, borderColor: '#2A2A2A', overflow: 'hidden' },
+  slotCard: { backgroundColor: COLORS.cardElevated, borderRadius: 14, borderWidth: 1, borderColor: COLORS.trackDark, overflow: 'hidden' },
   slotHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, paddingHorizontal: 14 },
-  slotLabel: { fontSize: 15, fontWeight: '700', color: COLORS.textWhite },
+  slotLabel: { fontSize: 10, fontWeight: '700', color: '#4ADE80', textTransform: 'uppercase', letterSpacing: 1.5 },
   slotHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   slotCal: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   slotDeleteRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
@@ -1194,19 +1522,19 @@ const styles = StyleSheet.create({
   slotLogBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,222,128,0.1)', borderRadius: 14, paddingVertical: 6, paddingHorizontal: 12 },
   slotLogBtnText: { fontSize: 12, fontWeight: '600', color: '#4ADE80' },
   deleteAction: { width: 80, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' },
-  logCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 0, gap: 10, backgroundColor: '#1A1A1A' },
-  logIconCircle: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
+  logCard: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, paddingHorizontal: 0, gap: 10, backgroundColor: COLORS.cardElevated },
+  logIconCircle: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#4ADE80' },
   logInfo: { flex: 1, gap: 2 },
   logName: { fontSize: 13, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.1 },
   logTime: { fontSize: 11, color: COLORS.textMuted },
   logMacros: { alignItems: 'flex-end', gap: 2 },
   logCal: { fontSize: 13, fontWeight: '700', color: COLORS.textWhite },
   logPro: { fontSize: 11, color: COLORS.textMuted },
-  addSlotBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 },
-  addSlotText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
+  addSlotBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, marginTop: 6 },
+  addSlotText: { fontSize: 14, color: '#4ADE80', fontWeight: '600' },
   logTotal: { fontSize: 12, color: COLORS.textMuted, textAlign: 'right', marginTop: 4 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', paddingHorizontal: 24 },
-  modalCard: { backgroundColor: '#1A1A1A', borderRadius: 20, padding: 20, gap: 16, borderWidth: 1, borderColor: '#2A2A2A' },
+  modalCard: { backgroundColor: COLORS.cardElevated, borderRadius: 20, padding: 20, gap: 16, borderWidth: 1, borderColor: COLORS.trackDark },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   modalTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite },
   modalInput: { backgroundColor: '#2A2A2A', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: COLORS.textWhite },
@@ -1278,4 +1606,260 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
+  // Hero dashboard card
+  dayNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    paddingVertical: 8,
+    marginHorizontal: 20,
+    marginBottom: 4,
+  },
+  dayNavText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    minWidth: 100,
+    textAlign: 'center',
+  },
+  heroCard: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    backgroundColor: '#0F0F0F',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.08)',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 30,
+  },
+
+  // Hero meal cards (horizontal scroll)
+  heroMealCard: {
+    width: 240,
+    height: 280,
+    borderRadius: 28,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#1A1A1A',
+  },
+  heroMealImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    borderRadius: 28,
+  },
+  heroMealGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 200,
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+  },
+  heroMealContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 18,
+  },
+  heroMealPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  heroMealPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  heroMealName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    lineHeight: 22,
+  },
+
+  // Trending cards
+  trendingCard: {
+    width: 200,
+    height: 240,
+    borderRadius: 16,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: COLORS.cardElevated,
+  },
+  trendingImage: {
+    width: '100%',
+    height: '100%',
+    position: 'absolute',
+    opacity: 0.8,
+  },
+  trendingGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '70%',
+  },
+  trendingBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  trendingBadgeText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: COLORS.textWhite,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  trendingContent: {
+    position: 'absolute',
+    bottom: 12,
+    left: 12,
+    right: 12,
+  },
+  trendingName: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    lineHeight: 17,
+    marginBottom: 4,
+  },
+  trendingKcal: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#4ADE80',
+  },
+
+  // Meal slot cards (MyFitnessPal style)
+  mealSlotCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.cardElevated,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  mealSlotIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#262626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mealSlotLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+  },
+  mealSlotLogBtn: {
+    backgroundColor: 'rgba(74,222,128,0.15)',
+    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+  },
+  mealSlotLogBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4ADE80',
+  },
+
+
+  // Timeline dots
+  timelineDotFilled: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#4ADE80',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    marginTop: 4,
+  },
+  timelineDotEmpty: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: COLORS.textMuted,
+    backgroundColor: COLORS.background,
+    marginTop: 4,
+  },
+  timelineLine: {
+    width: 1,
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginTop: 4,
+  },
+
+  // First-time pantry scan CTA
+  scanCtaCard: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    backgroundColor: 'rgba(74,222,128,0.08)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.25)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  scanCtaInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  scanCtaIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanCtaTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    marginBottom: 2,
+  },
+  scanCtaSub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+  },
+  scanCtaLaterWrap: {
+    alignSelf: 'flex-end',
+  },
+  scanCtaLaterText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
 })

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
   View,
   Text,
@@ -74,13 +75,16 @@ export default function FoodPreferencesScreen() {
   const commitInput = (raw: string) => {
     const trimmed = raw.trim()
     if (!trimmed) return
-    // Avoid duplicates with predefined chips or existing custom chips
     const normalized = trimmed.toLowerCase()
-    const alreadyExists =
-      customChips.some(c => c.toLowerCase() === normalized) ||
-      DISLIKE_CHIPS.some(c => c.toLowerCase() === normalized)
-    if (!alreadyExists) {
-      // Capitalize first letter
+    // If it matches a predefined chip, auto-select it
+    const predefined = DISLIKE_CHIPS.find(c => c.toLowerCase() === normalized)
+    if (predefined) {
+      if (!selected.includes(predefined)) setSelected(prev => [...prev, predefined])
+      setInputText('')
+      return
+    }
+    // Avoid duplicate custom chips
+    if (!customChips.some(c => c.toLowerCase() === normalized)) {
       const label = trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
       setCustomChips(prev => [...prev, label])
     }
@@ -126,6 +130,8 @@ export default function FoodPreferencesScreen() {
         food_prefs_banner_dismissed: true,
       })
       .eq('id', user.id)
+    // Clear meal cache so next home screen load regenerates without disliked ingredients
+    await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setSaving(false)
     if (error) {
       Alert.alert('Save Failed', error.message)
@@ -171,38 +177,23 @@ export default function FoodPreferencesScreen() {
               These will never appear in your meal suggestions.
             </Text>
 
-            {/* ── All chips: predefined + custom ── */}
+            {/* ── Suggestions (hide selected ones) ── */}
             <View style={styles.chipGrid}>
-              {DISLIKE_CHIPS.map(chip => {
-                const active = selected.includes(chip)
+              {DISLIKE_CHIPS.filter(chip => !selected.includes(chip)).map(chip => {
                 return (
                   <TouchableOpacity
                     key={chip}
-                    style={[styles.chip, active && styles.chipActive]}
+                    style={styles.chip}
                     onPress={() => toggleChip(chip)}
                     activeOpacity={0.75}
                   >
-                    {active && (
-                      <Check size={13} stroke={TEAL} strokeWidth={2.5} />
-                    )}
-                    <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                    <Text style={styles.chipText}>
                       {chip}
                     </Text>
                   </TouchableOpacity>
                 )
               })}
 
-              {customChips.map(chip => (
-                <TouchableOpacity
-                  key={chip}
-                  style={styles.customChip}
-                  onPress={() => removeCustomChip(chip)}
-                  activeOpacity={0.75}
-                >
-                  <Text style={styles.customChipText}>{chip}</Text>
-                  <X size={13} stroke={TEAL} strokeWidth={2.5} />
-                </TouchableOpacity>
-              ))}
             </View>
 
             {/* ── Add custom item ── */}
@@ -231,6 +222,36 @@ export default function FoodPreferencesScreen() {
               )}
             </View>
             <Text style={styles.customHint}>Press return or comma to add each item</Text>
+
+            {(selected.length > 0 || customChips.length > 0) && (
+              <View style={styles.customChipsSection}>
+                <Text style={styles.customChipsSectionLabel}>Avoiding</Text>
+                <View style={styles.chipGrid}>
+                  {selected.map(chip => (
+                    <TouchableOpacity
+                      key={chip}
+                      style={styles.customChip}
+                      onPress={() => toggleChip(chip)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.customChipText}>{chip}</Text>
+                      <X size={13} stroke={TEAL} strokeWidth={2.5} />
+                    </TouchableOpacity>
+                  ))}
+                  {customChips.map(chip => (
+                    <TouchableOpacity
+                      key={chip}
+                      style={styles.customChip}
+                      onPress={() => removeCustomChip(chip)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.customChipText}>{chip}</Text>
+                      <X size={13} stroke={TEAL} strokeWidth={2.5} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
           </ScrollView>
 
           {/* ── Save button ── */}
@@ -393,6 +414,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textMuted,
     marginTop: 8,
+  },
+  customChipsSection: {
+    marginTop: 24,
+  },
+  customChipsSectionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    marginBottom: 12,
   },
 
   bottomBar: {

@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, Plus, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useAIConsent } from '@/context/AIConsentContext'
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -59,6 +60,7 @@ function parseIngredients(raw: any[]): Ingredient[] {
 
 export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }: Props) {
   const { user } = useAuth()
+  const { requestConsent } = useAIConsent()
   const isEdit = !!editMeal?.id
 
   // AI auto-fill
@@ -110,6 +112,8 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
   async function handleGenerate() {
     const desc = aiPrompt.trim()
     if (!desc) return
+    const ok = await requestConsent()
+    if (!ok) return
     setAiLoading(true)
     try {
       const { data, error } = await supabase.functions.invoke('generate-recipe', {

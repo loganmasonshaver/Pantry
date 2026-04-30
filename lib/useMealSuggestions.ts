@@ -77,7 +77,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes')
+        .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences')
         .eq('id', userId)
         .single()
 
@@ -115,6 +115,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         foodDislikes: profile?.food_dislikes || [],
         dislikedMeals,
         likedMeals,
+        cuisinePreferences: profile?.cuisine_preferences || [],
         mode,
       })
 
@@ -158,53 +159,33 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           const cached: CachedMeals = JSON.parse(raw)
           if (cached.date === todayStr() && cached.meals.length > 0) {
             const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_'))
-            if (isSeeded) {
-              // Onboarding-seeded meals: show immediately for UX continuity.
-              // Fetch images in background (no auth required on generate-meal-image).
-              // The regen button triggers a full AI generation replacing them.
+            if (!isSeeded) {
               setMeals(cached.meals)
               setLoading(false)
-              ;(async () => {
-                const withImages = [...cached.meals]
-                await Promise.all(withImages.map(async (meal, i) => {
-                  if (meal.image) return
-                  const image = await fetchImage(meal.name, [])
-                  if (image) {
-                    withImages[i] = { ...withImages[i], image }
-                    setMeals(prev => {
-                      const updated = [...prev]
-                      updated[i] = { ...updated[i], image }
-                      return updated
-                    })
-                  }
-                }))
-                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: withImages }))
-              })()
+              // Fetch any missing images for cached meals
+              const cachedMeals = [...cached.meals]
+              if (cachedMeals.some(m => !m.image)) {
+                ;(async () => {
+                  await Promise.all(cachedMeals.map(async (meal, i) => {
+                    if (meal.image) return
+                    const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+                    const image = await fetchImage(meal.name, ingNames)
+                    if (image) {
+                      cachedMeals[i] = { ...cachedMeals[i], image }
+                      setMeals(prev => {
+                        const updated = [...prev]
+                        updated[i] = { ...updated[i], image }
+                        return updated
+                      })
+                    }
+                  }))
+                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
+                })()
+              }
               return
             }
-            setMeals(cached.meals)
-            setLoading(false)
-            // Fetch any missing images for cached meals
-            const cachedMeals = [...cached.meals]
-            if (cachedMeals.some(m => !m.image)) {
-              ;(async () => {
-                await Promise.all(cachedMeals.map(async (meal, i) => {
-                  if (meal.image) return
-                  const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
-                  const image = await fetchImage(meal.name, ingNames)
-                  if (image) {
-                    cachedMeals[i] = { ...cachedMeals[i], image }
-                    setMeals(prev => {
-                      const updated = [...prev]
-                      updated[i] = { ...updated[i], image }
-                      return updated
-                    })
-                  }
-                }))
-                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
-              })()
-            }
-            return
+            // Seeded placeholders have no recipe data — clear and fall through to generate
+            await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
           }
         }
       }
@@ -242,7 +223,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     }
   }
 
-  // On mode change, immediately load cached meals before async fetch
+  // On mode change, immediately load cached meals before async fetch.
+  // On mode change, immediately load cached meals before async fetch.
+  // Seeded meals (onboarding placeholders) are skipped — they have no recipe data.
   useEffect(() => {
     if (!userId) return
     let cancelled = false
@@ -251,8 +234,33 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
         if (cached.date === todayStr() && cached.meals.length > 0) {
-          setMeals(cached.meals)
-          return
+          const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_'))
+          if (!isSeeded) {
+            // Real AI meals: show immediately, then fetch any missing images in background
+            setMeals(cached.meals)
+            if (cached.meals.some(m => !m.image)) {
+              const cachedMeals = [...cached.meals]
+              ;(async () => {
+                await Promise.all(cachedMeals.map(async (meal, i) => {
+                  if (meal.image) return
+                  const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+                  const image = await fetchImage(meal.name, ingNames)
+                  if (image && !cancelled) {
+                    cachedMeals[i] = { ...cachedMeals[i], image }
+                    setMeals(prev => {
+                      const updated = [...prev]
+                      updated[i] = { ...updated[i], image }
+                      return updated
+                    })
+                  }
+                }))
+                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
+              })()
+            }
+            return
+          }
+          // Seeded: treat as cache miss — clear and generate real meals
+          await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         }
       }
       if (!cancelled) fetchAndGenerate()

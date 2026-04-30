@@ -10,6 +10,7 @@ import {
   TextInput,
   Dimensions,
   Image,
+  Animated,
 } from 'react-native'
 let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
@@ -17,8 +18,9 @@ const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Utensils, Clock, Pencil } from 'lucide-react-native'
+import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown } from 'lucide-react-native'
 import RecipeFormModal from '@/components/RecipeFormModal'
+import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { autoCategoryMatches } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
@@ -29,13 +31,19 @@ import { usePremium } from '../../context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged, trackUpgradePromptShown } from '../../lib/analytics'
 
+const screenWidth = Dimensions.get('window').width
+
 type PortionMode = 'Visual' | 'Grams'
 
 // Common cooking basics that everyone has — don't count as "missing"
 const COOKING_BASICS = new Set(['salt', 'pepper', 'black pepper', 'water', 'cooking spray'])
 
 function cleanIngredientName(name: string): string {
-  return name.replace(/\s*\*\s*$/, '').trim()
+  return name
+    .replace(/\s*\*\s*$/, '')          // strip trailing asterisk
+    .replace(/^\d+[\s/.-]*/g, '')       // strip leading numbers ("4 eggs" → "eggs")
+    .replace(/^[\d½¼¾⅓⅔]+\s*/g, '')   // strip unicode fractions
+    .trim()
 }
 
 function isNeedToBuy(name: string): boolean {
@@ -65,14 +73,21 @@ function isAlreadyInList(itemName: string, existingNames: Set<string>): boolean 
   return false
 }
 
-function renderStepText(step: string) {
-  // Strip "Step 1:", "Step 2:", etc. prefix since we show numbered circles
-  const cleaned = step.replace(/^Step\s*\d+\s*:\s*/i, '')
-  const parts = cleaned.split(/\*\*(.+?)\*\*/)
-  return parts.map((part, i) =>
-    i % 2 === 1
-      ? <Text key={i} style={{ fontWeight: '700', color: '#FFFFFF' }}>{part}</Text>
-      : part
+function renderStepContent(step: string | { title: string; detail: string }) {
+  if (typeof step === 'object' && step.title) {
+    return (
+      <View style={{ flex: 1, gap: 6 }}>
+        <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>{step.title}</Text>
+        <Text style={{ fontSize: 14, color: '#ABABAB', lineHeight: 22 }}>{step.detail}</Text>
+      </View>
+    )
+  }
+  // Legacy string format
+  const cleaned = (typeof step === 'string' ? step : '').replace(/^Step\s*\d+\s*:\s*/i, '')
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={{ fontSize: 14, color: '#ABABAB', lineHeight: 22 }}>{cleaned}</Text>
+    </View>
   )
 }
 
@@ -80,17 +95,166 @@ export default function MealDetailScreen() {
   const { id, mealData } = useLocalSearchParams<{ id: string; mealData?: string }>()
   const router = useRouter()
   const { user } = useAuth()
-  const { isPremium } = usePremium()
+  const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [logging, setLogging] = useState(false)
   const [logged, setLogged] = useState(false)
+  const [userRating, setUserRating] = useState<1 | -1 | null>(null)
+  const [ratingToast, setRatingToast] = useState<string | null>(null)
+  const ratingToastOpacity = useRef(new Animated.Value(0)).current
   const [showEditForm, setShowEditForm] = useState(false)
   const [portionMode, setPortionMode] = useState<PortionMode>('Visual')
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
+  const [ingredientImages, setIngredientImages] = useState<Record<string, string>>({})
+  const [generatedImage, setGeneratedImage] = useState<string | null>(null)
+  const slideAnim = useRef(new Animated.Value(0)).current // 0 = thumbnail, 1 = AI image
+
+  // Normalize ambiguous ingredient names for image lookup
+  const IMAGE_ALIASES: Record<string, string> = {
+    'pepper': 'pepper',
+    'oil': 'olive oil',
+    'sugar': 'sugar',
+    'flour': 'flour',
+    'rice': 'rice',
+    'cream': 'heavy cream',
+    // Variations → cached image
+    'broccoli florets': 'broccoli',
+    'sweet potatoes': 'sweet potato',
+    'lamb chops': 'lamb',
+    'red kidney beans': 'kidney beans',
+    'lemon juice': 'lemon',
+    'lemon zest': 'lemon',
+    'lime juice': 'lime',
+    'lime zest': 'lime',
+    'lean ground beef': 'ground beef',
+    'extra lean ground beef': 'ground beef',
+    'baby kale': 'kale',
+    'baby spinach': 'spinach',
+    'chopped spinach': 'spinach',
+    'frozen spinach': 'spinach',
+    'sauteed spinach': 'spinach',
+    'persian cucumber': 'cucumber',
+    'english cucumber': 'cucumber',
+    'scallions': 'green onion',
+    'spring onions': 'green onion',
+    'fresh mint': 'mint',
+    'fresh basil': 'basil',
+    'fresh cilantro': 'cilantro',
+    'fresh parsley': 'parsley',
+    'fresh dill': 'dill',
+    'fresh thyme': 'thyme',
+    'fresh rosemary': 'rosemary',
+    'fresh ginger': 'ginger',
+    'cooked chicken': 'chicken breast',
+    'cooked chicken breast': 'chicken breast',
+    'shredded chicken': 'chicken breast',
+    'rotisserie chicken': 'chicken breast',
+    'grilled chicken': 'chicken breast',
+    'plain greek yogurt': 'greek yogurt',
+    'nonfat greek yogurt': 'greek yogurt',
+    'low fat greek yogurt': 'greek yogurt',
+    'vanilla greek yogurt': 'greek yogurt',
+    'pickle juice': 'pickles',
+    'chicken thighs': 'chicken thigh',
+    'chicken breasts': 'chicken breast',
+    'pork chops': 'pork chop',
+    'salmon fillet': 'salmon',
+    'salmon fillets': 'salmon',
+    'red bell pepper': 'bell pepper',
+    'green bell pepper': 'bell pepper',
+    'yellow bell pepper': 'bell pepper',
+    'cherry tomatoes': 'tomato',
+    'roma tomatoes': 'tomato',
+    'grape tomatoes': 'tomato',
+    'diced tomatoes': 'tomato',
+    'crushed tomatoes': 'tomato sauce',
+    'white rice': 'rice',
+    'jasmine rice': 'rice',
+    'basmati rice': 'rice',
+    'whole wheat pasta': 'pasta',
+    'spaghetti': 'pasta',
+    'penne': 'pasta',
+    'rotini': 'pasta',
+    'black pepper': 'pepper',
+    'ground cumin': 'cumin',
+    'ground cinnamon': 'cinnamon',
+    'ground turmeric': 'turmeric',
+    'smoked paprika': 'paprika',
+    'extra virgin olive oil': 'olive oil',
+    'evoo': 'olive oil',
+    'low sodium soy sauce': 'soy sauce',
+    'dijon mustard': 'mustard',
+    'yellow mustard': 'mustard',
+    'sea salt': 'salt',
+    'kosher salt': 'salt',
+    'garlic cloves': 'garlic',
+    'minced garlic': 'garlic',
+  }
+  const normalizeForImage = (name: string) => {
+    const lower = name.toLowerCase()
+    if (IMAGE_ALIASES[lower]) return IMAGE_ALIASES[lower]
+    // Fuzzy match: check if any alias key is contained in the name
+    for (const [key, value] of Object.entries(IMAGE_ALIASES)) {
+      if (lower.includes(key)) return value
+    }
+    return lower
+  }
+
+  // Fetch ingredient images from library + generate missing ones on-demand
+  useEffect(() => {
+    if (!meal) return
+    const names = meal.ingredients.map(i => normalizeForImage(cleanIngredientName(i.name).toLowerCase()))
+
+    // Fetch existing images
+    supabase.from('ingredient_images').select('name, image_url').in('name', names)
+      .then(({ data }) => {
+        const imageMap: Record<string, string> = {}
+        data?.forEach(row => { imageMap[row.name] = row.image_url })
+        setIngredientImages(imageMap)
+
+        // Find ingredients not in library — generate on-demand
+        const missing = names.filter(n => !data?.some(d => d.name === n))
+        if (missing.length > 0) {
+          generateMissingIngredientImages(missing)
+        }
+      })
+  }, [meal?.name])
+
+  const generateMissingIngredientImages = async (names: string[]) => {
+    const failed: string[] = []
+    for (const name of names) {
+      try {
+        const res = await supabase.functions.invoke('generate-ingredient-images', {
+          body: { single: name },
+        })
+        if (res.data?.url) {
+          setIngredientImages(prev => ({ ...prev, [name]: res.data.url }))
+        } else {
+          failed.push(name)
+        }
+      } catch { failed.push(name) }
+      await new Promise(r => setTimeout(r, 500))
+    }
+    // Retry failed ones after a delay
+    if (failed.length > 0) {
+      await new Promise(r => setTimeout(r, 3000))
+      for (const name of failed) {
+        try {
+          const res = await supabase.functions.invoke('generate-ingredient-images', {
+            body: { single: name },
+          })
+          if (res.data?.url) {
+            setIngredientImages(prev => ({ ...prev, [name]: res.data.url }))
+          }
+        } catch {}
+        await new Promise(r => setTimeout(r, 500))
+      }
+    }
+  }
 
   useEffect(() => {
     if (!user) return
@@ -99,6 +263,72 @@ export default function MealDetailScreen() {
     supabase.from('grocery_items').select('name').eq('user_id', user.id)
       .then(({ data }) => setGroceryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
   }, [user])
+
+  // Fetch this meal's existing rating so the UI reflects current state
+  useEffect(() => {
+    if (!user || !meal?.name) return
+    supabase.from('meal_ratings').select('rating').eq('user_id', user.id).eq('meal_name', meal.name).maybeSingle()
+      .then(({ data }) => setUserRating((data?.rating as 1 | -1 | undefined) ?? null))
+  }, [user, mealData, id])
+
+  const showRatingToast = (message: string) => {
+    setRatingToast(message)
+    Animated.sequence([
+      Animated.timing(ratingToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(1800),
+      Animated.timing(ratingToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setRatingToast(null))
+  }
+
+  const rateMeal = async (rating: 1 | -1) => {
+    if (!user || !meal) return
+    const next = userRating === rating ? null : rating
+    setUserRating(next)
+    if (next === null) {
+      await supabase.from('meal_ratings').delete()
+        .eq('user_id', user.id).eq('meal_name', meal.name)
+    } else {
+      await supabase.from('meal_ratings').upsert({
+        user_id: user.id,
+        meal_name: meal.name,
+        rating: next,
+      }, { onConflict: 'user_id,meal_name' })
+      showRatingToast(next === 1 ? "Got it — we'll suggest more like this" : "Noted — we'll skip this kind of meal")
+    }
+  }
+
+  // Auto-generate AI meal image if none provided (trending meals)
+  useEffect(() => {
+    if (!meal || meal.image || generatedImage) return
+    const ingredientNames = meal.ingredients.map(i => i.name)
+
+    const tryGenerate = (attempt = 0) => {
+      supabase.functions.invoke('generate-meal-image', {
+        body: { mealName: meal.name, ingredients: ingredientNames },
+      }).then(({ data }) => {
+        if (data?.image) {
+          Image.prefetch(data.image).then(() => {
+            setGeneratedImage(data.image)
+            setTimeout(() => {
+              Animated.timing(slideAnim, {
+                toValue: 1,
+                duration: 1400,
+                useNativeDriver: true,
+                easing: require('react-native').Easing.bezier(0.25, 0.1, 0.25, 1),
+              }).start()
+            }, 2000)
+          }).catch(() => {
+            setGeneratedImage(data.image)
+          })
+        } else if (attempt < 2) {
+          setTimeout(() => tryGenerate(attempt + 1), 3000)
+        }
+      }).catch(() => {
+        if (attempt < 2) setTimeout(() => tryGenerate(attempt + 1), 3000)
+      })
+    }
+    tryGenerate()
+  }, [meal?.name])
 
   const addToGrocery = async (ingredientName: string) => {
     if (!user || addedToGrocery.has(ingredientName)) return
@@ -110,6 +340,46 @@ export default function MealDetailScreen() {
       category: autoCategoryMatches(ingredientName)[0] || 'Other',
       checked: false,
     })
+  }
+
+  const removeFromGrocery = async (ingredientName: string) => {
+    if (!user) return
+    setAddedToGrocery(prev => { const n = new Set(prev); n.delete(ingredientName); return n })
+    // Only remove items linked to this meal, so we don't nuke items added from elsewhere
+    await supabase.from('grocery_items')
+      .delete()
+      .eq('user_id', user.id)
+      .ilike('name', ingredientName)
+      .eq('meal', meal?.name ?? '')
+      .eq('checked', false)
+  }
+
+  const toggleGrocery = (ingredientName: string) => {
+    if (addedToGrocery.has(ingredientName)) removeFromGrocery(ingredientName)
+    else addToGrocery(ingredientName)
+  }
+
+  const addToPantry = async (ingredientName: string) => {
+    if (!user) return
+    setPantryNames(prev => { const n = new Set(prev); n.add(ingredientName.toLowerCase()); return n })
+    const { data: existing } = await supabase.from('pantry_items').select('id').eq('user_id', user.id).ilike('name', ingredientName).limit(1)
+    if (existing && existing.length > 0) {
+      await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
+    } else {
+      await supabase.from('pantry_items').insert({ user_id: user.id, name: ingredientName, category: autoCategoryMatches(ingredientName)[0] || 'Other', in_stock: true })
+    }
+  }
+
+  const removeFromPantry = async (ingredientName: string) => {
+    if (!user) return
+    setPantryNames(prev => { const n = new Set(prev); n.delete(ingredientName.toLowerCase()); return n })
+    await supabase.from('pantry_items').update({ in_stock: false }).eq('user_id', user.id).ilike('name', ingredientName)
+  }
+
+  const toggleHaveIt = (ingredientName: string) => {
+    const inPantry = pantryNames.has(ingredientName.toLowerCase())
+    if (inPantry) removeFromPantry(ingredientName)
+    else addToPantry(ingredientName)
   }
 
   let meal: MealDetail | null = null
@@ -199,16 +469,16 @@ export default function MealDetailScreen() {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', user.id)
         .then(r => ({ count: r.count ?? 0 }))
-      if (count >= 5) {
+      if (count >= 3) {
         trackUpgradePromptShown('meal_save_limit')
         trackMealSaveBlocked()
         Alert.alert(
           'Upgrade to Premium',
-          'Free accounts can save up to 5 meals. Upgrade for unlimited saves.',
+          'Free accounts can save up to 3 meals. Upgrade for unlimited saves.',
           [
             { text: 'Not now', style: 'cancel' },
             { text: 'Upgrade', onPress: () => {
-              registerPlacement('meal_save_limit')
+              triggerUpgrade('meal_save_limit')
             }},
           ]
         )
@@ -217,6 +487,9 @@ export default function MealDetailScreen() {
     }
 
     setSaving(true)
+    // Persist the image so saved meals show the same photo as the original card
+    // (prevents re-generation with a different prompt for trending meals)
+    const imageToSave = meal!.image || generatedImage || null
     const { error } = await supabase.rpc('insert_saved_meal', {
       p_user_id: user.id,
       p_name: meal!.name,
@@ -227,6 +500,7 @@ export default function MealDetailScreen() {
       p_prep_time: meal!.prepTime ?? null,
       p_ingredients: meal!.ingredients,
       p_steps: meal!.steps,
+      p_image_url: imageToSave,
     })
     setSaving(false)
     if (error) {
@@ -241,6 +515,15 @@ export default function MealDetailScreen() {
     if (!user || !meal) return
     setLogging(true)
     const today = new Date().toISOString().split('T')[0]
+
+    // Try to get cached image if we don't have one yet
+    let mealImage = meal.image || generatedImage || null
+    if (!mealImage) {
+      const cacheKey = meal.name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+      const { data: cached } = await supabase.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
+      if (cached?.image_url) mealImage = cached.image_url
+    }
+
     const { error } = await supabase.from('meal_logs').insert({
       user_id: user.id,
       meal_name: meal.name,
@@ -250,6 +533,17 @@ export default function MealDetailScreen() {
       fat: meal.fat ?? 0,
       slot,
       logged_at: today,
+      meal_data: {
+        name: meal.name,
+        calories: meal.calories,
+        protein: meal.protein,
+        carbs: meal.carbs ?? 0,
+        fat: meal.fat ?? 0,
+        prepTime: meal.prepTime,
+        ingredients: meal.ingredients,
+        steps: meal.steps,
+        image: mealImage,
+      },
     })
     setLogging(false)
     if (error) {
@@ -257,13 +551,22 @@ export default function MealDetailScreen() {
     } else {
       setLogged(true)
       trackMealLogged(slot, meal.calories, meal.protein)
+      setTimeout(() => router.back(), 800)
     }
   }
 
   const SLOT_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   const ITEM_HEIGHT = 50
   const [showSlotPicker, setShowSlotPicker] = useState(false)
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState(0)
+  // Default slot based on time of day: Breakfast <11am, Lunch 11am-3pm, Dinner 3pm-9pm, Snack otherwise
+  const getDefaultSlotIndex = () => {
+    const h = new Date().getHours()
+    if (h < 11) return 0 // Breakfast
+    if (h < 15) return 1 // Lunch
+    if (h < 21) return 2 // Dinner
+    return 3 // Snack
+  }
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState(getDefaultSlotIndex())
   const [customSlotName, setCustomSlotName] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const slotScrollRef = useRef<ScrollView>(null)
@@ -271,12 +574,13 @@ export default function MealDetailScreen() {
 
   const handleLog = () => {
     if (!meal || logged) return
-    setSelectedSlotIndex(0)
+    const defaultIdx = getDefaultSlotIndex()
+    setSelectedSlotIndex(defaultIdx)
     setShowCustomInput(false)
     setCustomSlotName('')
     lastHapticIndex.current = -1
     setShowSlotPicker(true)
-    setTimeout(() => slotScrollRef.current?.scrollTo({ y: 0, animated: false }), 50)
+    setTimeout(() => slotScrollRef.current?.scrollTo({ y: defaultIdx * ITEM_HEIGHT, animated: false }), 50)
   }
 
   const onSlotScroll = useCallback((e: any) => {
@@ -297,13 +601,11 @@ export default function MealDetailScreen() {
         <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} activeOpacity={0.7}>
           <ChevronLeft size={24} stroke={COLORS.textWhite} strokeWidth={2} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{meal.name}</Text>
-        {isUserCreated ? (
+        <View style={{ flex: 1 }} />
+        {isUserCreated && (
           <TouchableOpacity style={styles.headerBtn} onPress={() => setShowEditForm(true)} activeOpacity={0.7}>
             <Pencil size={18} stroke={COLORS.textMuted} strokeWidth={2} />
           </TouchableOpacity>
-        ) : (
-          <View style={styles.headerBtn} />
         )}
       </View>
 
@@ -313,13 +615,73 @@ export default function MealDetailScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* ── Hero image ── */}
-        {meal.image ? (
-          <Image source={{ uri: meal.image }} style={styles.heroImage} resizeMode="cover" />
+        {(meal as any).thumbnailImage && !meal.image ? (
+          /* Sliding hero: YouTube thumbnail slides out, AI image slides in */
+          <View style={styles.heroContainer}>
+            {/* AI image behind */}
+            {generatedImage && (
+              <Animated.View style={[StyleSheet.absoluteFill, {
+                transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [screenWidth, 0] }) }],
+              }]}>
+                <Image source={{ uri: generatedImage }} style={styles.heroImage} resizeMode="cover" />
+              </Animated.View>
+            )}
+            {/* YouTube thumbnail on top, slides out */}
+            <Animated.View style={[StyleSheet.absoluteFill, {
+              transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -screenWidth] }) }],
+            }]}>
+              <Image source={{ uri: (meal as any).thumbnailImage }} style={styles.heroImage} resizeMode="cover" />
+            </Animated.View>
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
+              locations={[0.3, 0.7, 1]}
+              style={styles.heroGradient}
+            />
+          </View>
+        ) : (meal.image || generatedImage) ? (
+          <View style={styles.heroContainer}>
+            <Image source={{ uri: meal.image || generatedImage! }} style={styles.heroImage} resizeMode="cover" />
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
+              locations={[0.3, 0.7, 1]}
+              style={styles.heroGradient}
+            />
+          </View>
         ) : (
           <View style={styles.hero}>
             <Utensils size={40} stroke="#555555" strokeWidth={1.5} />
           </View>
         )}
+
+        {/* ── Meal title + meta ── */}
+        <View style={[styles.mealTitleSection, !(meal.image || generatedImage || (meal as any).thumbnailImage) && { marginTop: 16 }]}>
+          <Text style={styles.mealTitleText}>{meal.name}</Text>
+          <View style={styles.mealMetaRow}>
+            {meal.prepTime != null && meal.prepTime > 0 && (
+              <View style={styles.mealMetaPill}>
+                <Clock size={14} stroke="#4ADE80" strokeWidth={2} />
+                <Text style={styles.mealMetaPillText}>{meal.prepTime} min</Text>
+              </View>
+            )}
+            <View style={{ flex: 1 }} />
+            <TouchableOpacity
+              style={[styles.inlineRatingBtn, userRating === 1 && styles.inlineRatingBtnUp]}
+              onPress={() => rateMeal(1)}
+              activeOpacity={0.7}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <ThumbsUp size={15} stroke={userRating === 1 ? '#4ADE80' : COLORS.textMuted} strokeWidth={2.2} fill={userRating === 1 ? 'rgba(74,222,128,0.2)' : 'none'} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.inlineRatingBtn, userRating === -1 && styles.inlineRatingBtnDown]}
+              onPress={() => rateMeal(-1)}
+              activeOpacity={0.7}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <ThumbsDown size={15} stroke={userRating === -1 ? '#EF4444' : COLORS.textMuted} strokeWidth={2.2} fill={userRating === -1 ? 'rgba(239,68,68,0.2)' : 'none'} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* ── Macro bar ── */}
         {(() => {
@@ -327,14 +689,13 @@ export default function MealDetailScreen() {
           return (
             <View style={styles.macroBar}>
               {[
-                { label: 'Calories', value: String(correctedCal), color: '#FFFFFF' },
+                { label: 'Kcal', value: String(correctedCal), color: '#4ADE80' },
                 { label: 'Protein',  value: `${meal.protein}g`,   color: '#4ADE80' },
                 { label: 'Carbs',    value: `${meal.carbs}g`,     color: '#F59E0B' },
                 { label: 'Fat',      value: `${meal.fat}g`,       color: '#60A5FA' },
               ].map((stat, i, arr) => (
                 <View key={stat.label} style={[styles.macroStat, i < arr.length - 1 && styles.macroStatBorder]}>
-                  <View style={[styles.macroDotIndicator, { backgroundColor: stat.color }]} />
-                  <Text style={styles.macroValue}>{stat.value}</Text>
+                  <Text style={[styles.macroValue, stat.label === 'Kcal' && { color: '#4ADE80' }]}>{stat.value}</Text>
                   <Text style={styles.macroLabel}>{stat.label}</Text>
                 </View>
               ))}
@@ -342,13 +703,7 @@ export default function MealDetailScreen() {
           )
         })()}
 
-        {/* ── Prep time ── */}
-        {meal.prepTime != null && meal.prepTime > 0 && (
-          <View style={styles.prepTimeRow}>
-            <Clock size={14} stroke={COLORS.textMuted} strokeWidth={1.8} />
-            <Text style={styles.prepTimeText}>{meal.prepTime} min prep time</Text>
-          </View>
-        )}
+        {/* Prep time shown in title section above */}
 
         {/* ── Protein warning ── */}
         {showProteinWarning && (
@@ -384,39 +739,44 @@ export default function MealDetailScreen() {
               const needsBuy = (ing as any).needToBuy === true
               return (
                 <View key={ing.id} style={[styles.ingredientRow, i < meal.ingredients.length - 1 && styles.ingredientBorder]}>
-                  <Text style={styles.ingredientPortion}>
-                    {portionMode === 'Visual' ? ing.visual : ing.grams}
-                  </Text>
-                  <View style={styles.ingredientRight}>
-                    <View style={styles.ingredientNameRow}>
-                      <Text style={styles.ingredientName}>{ing.name}</Text>
-                      {inPantry && <Text style={styles.inPantryLabel}>In pantry</Text>}
-                      {isBasic && <Text style={styles.basicLabel}>Basic</Text>}
+                  {ingredientImages[normalizeForImage(ing.name.toLowerCase())] ? (
+                    <Image source={{ uri: ingredientImages[normalizeForImage(ing.name.toLowerCase())] }} style={styles.ingredientThumb} />
+                  ) : (
+                    <View style={styles.ingredientThumbPlaceholder}>
+                      <Text style={styles.ingredientThumbInitial}>{ing.name.charAt(0).toUpperCase()}</Text>
                     </View>
-                    {!inPantry && !isBasic && (
-                      <View style={styles.ingredientActions}>
-                        <TouchableOpacity onPress={async () => {
-                          if (!user) return
-                          setPantryNames(prev => { const n = new Set(prev); n.add(ing.name.toLowerCase()); return n })
-                          // Check if already in pantry
-                          const { data: existing } = await supabase.from('pantry_items').select('id').eq('user_id', user.id).ilike('name', ing.name).limit(1)
-                          if (existing && existing.length > 0) {
-                            await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
-                          } else {
-                            const { error } = await supabase.from('pantry_items').insert({ user_id: user.id, name: ing.name, category: autoCategoryMatches(ing.name)[0] || 'Other', in_stock: true })
-                            if (error) Alert.alert('Error', 'Could not add to pantry')
-                          }
-                        }} activeOpacity={0.7}>
-                          <Text style={styles.inPantryAction}>I have this</Text>
-                        </TouchableOpacity>
-                        <Text style={{ color: '#333', fontSize: 11 }}>|</Text>
-                        <TouchableOpacity onPress={() => addToGrocery(ing.name)} activeOpacity={0.7}>
-                          <Text style={[styles.groceryAction, addedToGrocery.has(ing.name) && { color: COLORS.textMuted }]}>
-                            {addedToGrocery.has(ing.name) ? '✓ On list' : '+ Grocery list'}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    )}
+                  )}
+                  <View style={styles.ingredientRight}>
+                    <Text style={styles.ingredientName}>{ing.name}</Text>
+                    <Text style={styles.ingredientPortion}>
+                      {portionMode === 'Visual' ? ing.visual : ing.grams}
+                    </Text>
+                  </View>
+                  <View style={styles.ingredientActions}>
+                    <TouchableOpacity
+                      style={[styles.ingredientPill, inPantry && styles.ingredientPillActive]}
+                      onPress={() => toggleHaveIt(ing.name)}
+                      activeOpacity={0.7}
+                    >
+                      {inPantry ? (
+                        <X size={13} stroke="#4ADE80" strokeWidth={2.5} />
+                      ) : (
+                        <Check size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                      )}
+                      <Text style={inPantry ? styles.ingredientPillTextActive : styles.ingredientPillText}>
+                        {inPantry ? 'Remove' : 'Have it'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.ingredientPill, addedToGrocery.has(ing.name) && styles.ingredientPillActive]}
+                      onPress={() => toggleGrocery(ing.name)}
+                      activeOpacity={0.7}
+                    >
+                      <ShoppingCart size={13} stroke={addedToGrocery.has(ing.name) ? '#4ADE80' : COLORS.textMuted} strokeWidth={2} />
+                      <Text style={addedToGrocery.has(ing.name) ? styles.ingredientPillTextActive : styles.ingredientPillText}>
+                        {addedToGrocery.has(ing.name) ? 'In list' : 'Grocery'}
+                      </Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
               )
@@ -427,19 +787,26 @@ export default function MealDetailScreen() {
 
         {/* ── Steps ── */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Instructions</Text>
+          <Text style={[styles.sectionTitle, { marginBottom: 16 }]}>Instructions</Text>
           <View style={styles.stepList}>
             {meal.steps.map((step, i) => (
               <View key={i} style={styles.stepRow}>
                 <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>{i + 1}</Text>
+                  <Text style={styles.stepNumberText}>{String(i + 1).padStart(2, '0')}</Text>
                 </View>
-                <Text style={styles.stepText}>{renderStepText(step)}</Text>
+                {renderStepContent(step)}
               </View>
             ))}
           </View>
         </View>
       </ScrollView>
+
+      {/* ── Rating feedback toast ── */}
+      {ratingToast && (
+        <Animated.View style={[styles.ratingToast, { opacity: ratingToastOpacity }]} pointerEvents="none">
+          <Text style={styles.ratingToastText}>{ratingToast}</Text>
+        </Animated.View>
+      )}
 
       {/* ── Fixed bottom buttons ── */}
       <View style={styles.bottomBar}>
@@ -599,15 +966,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   headerBtn: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(38,38,38,0.6)',
   },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '700',
     color: COLORS.textWhite,
     letterSpacing: -0.3,
@@ -619,57 +988,101 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 24,
+    paddingBottom: 100,
   },
 
   // Hero
   hero: {
-    height: 220,
+    height: 120,
     width: '100%',
-    backgroundColor: '#2C2C2C',
+    backgroundColor: COLORS.cardElevated,
     alignItems: 'center',
     justifyContent: 'center',
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+  },
+  heroContainer: {
+    position: 'relative',
+    height: 340,
+    overflow: 'hidden',
   },
   heroImage: {
-    height: 240,
+    height: 340,
     width: '100%',
+  },
+  heroGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 180,
+  },
+
+  // Meal title
+  mealTitleSection: {
+    paddingHorizontal: 20,
+    marginTop: -24,
+    marginBottom: 4,
+  },
+  mealTitleText: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.5,
+    lineHeight: 34,
+    marginBottom: 10,
+  },
+  mealMetaRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mealMetaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#191919',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  mealMetaPillText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.textMuted,
   },
 
   // Macro bar
   macroBar: {
     flexDirection: 'row',
-    backgroundColor: '#1A1A1A',
     marginHorizontal: 20,
     marginTop: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
+    gap: 8,
   },
   macroStat: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 18,
-    gap: 5,
+    paddingVertical: 14,
+    backgroundColor: COLORS.cardElevated,
+    borderRadius: 20,
+    gap: 4,
   },
-  macroStatBorder: {
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.08)',
-  },
+  macroStatBorder: {},
   macroDotIndicator: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginBottom: 4,
+    width: 0,
+    height: 0,
   },
   macroValue: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.textWhite,
     letterSpacing: -0.3,
   },
   macroLabel: {
-    fontSize: 11,
-    color: COLORS.textDim,
-    fontWeight: '500',
+    fontSize: 9,
+    color: COLORS.textMuted,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
   },
 
   // Prep time
@@ -714,16 +1127,17 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    letterSpacing: -0.4,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4ADE80',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
 
   // Portion pill toggle
   pillToggle: {
     flexDirection: 'row',
-    backgroundColor: '#1A1A1A',
+    backgroundColor: COLORS.cardElevated,
     borderRadius: 20,
     padding: 3,
   },
@@ -746,30 +1160,46 @@ const styles = StyleSheet.create({
 
   // Ingredients
   ingredientList: {
-    backgroundColor: '#111111',
-    borderRadius: 16,
-    overflow: 'hidden',
+    gap: 6,
   },
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
     gap: 10,
+    backgroundColor: '#191919',
+    borderRadius: 14,
   },
-  ingredientBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+  ingredientBorder: {},
+  ingredientThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#262626',
+  },
+  ingredientThumbPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#262626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ingredientThumbInitial: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textMuted,
   },
   ingredientPortion: {
-    width: 85,
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.accent,
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    marginTop: 2,
   },
   ingredientRight: {
     flex: 1,
-    gap: 2,
+    gap: 0,
   },
   ingredientNameRow: {
     flexDirection: 'row',
@@ -783,8 +1213,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FF4444',
   },
   ingredientName: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '700',
     color: COLORS.textWhite,
     flex: 1,
   },
@@ -844,7 +1274,45 @@ const styles = StyleSheet.create({
   ingredientActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+  },
+  ingredientIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#262626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ingredientIconBtnActive: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ingredientPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 16,
+    backgroundColor: '#262626',
+  },
+  ingredientPillActive: {
+    backgroundColor: 'rgba(74,222,128,0.12)',
+  },
+  ingredientPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  ingredientPillTextActive: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4ADE80',
   },
   inPantryAction: {
     fontSize: 11,
@@ -864,7 +1332,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   slotCard: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: COLORS.cardElevated,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
@@ -968,32 +1436,32 @@ const styles = StyleSheet.create({
 
   // Steps
   stepList: {
-    gap: 14,
+    gap: 24,
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 14,
+    gap: 16,
   },
   stepNumber: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#1A1A1A',
+    width: 36,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     flexShrink: 0,
-    marginTop: 1,
+    marginTop: 2,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    height: 'auto',
   },
   stepNumberText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textWhite,
+    fontSize: 26,
+    fontWeight: '800',
+    color: '#2A2A2A',
   },
   stepText: {
     flex: 1,
     fontSize: 14,
-    color: '#FFFFFF',
+    color: '#ABABAB',
     lineHeight: 22,
     fontWeight: '400',
   },
@@ -1005,6 +1473,36 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  inlineRatingBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+  },
+  inlineRatingBtnUp: {
+    backgroundColor: 'rgba(74,222,128,0.15)',
+  },
+  inlineRatingBtnDown: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+  },
+  ratingToast: {
+    position: 'absolute',
+    top: 60,
+    alignSelf: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 30,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    zIndex: 100,
+  },
+  ratingToastText: {
+    color: '#4ADE80',
+    fontSize: 14,
+    fontWeight: '600',
   },
   logButton: {
     flex: 2,
@@ -1024,13 +1522,13 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: COLORS.cardElevated,
     borderRadius: 30,
     paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: COLORS.trackDark,
   },
   saveButtonDone: {
     backgroundColor: 'rgba(74,222,128,0.1)',

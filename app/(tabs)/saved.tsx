@@ -21,6 +21,7 @@ import { Bookmark, Search, X, Utensils, Clock, Plus, Link } from 'lucide-react-n
 import { COLORS } from '@/constants/colors'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
+import { useAIConsent } from '../../context/AIConsentContext'
 import RecipeFormModal from '@/components/RecipeFormModal'
 
 const { width } = Dimensions.get('window')
@@ -116,6 +117,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
 
 export default function SavedScreen() {
   const { user } = useAuth()
+  const { requestConsent } = useAIConsent()
   const { sharedUrl } = useLocalSearchParams<{ sharedUrl?: string }>()
   const [meals, setMeals] = useState<SavedMeal[]>([])
   const [loading, setLoading] = useState(true)
@@ -143,6 +145,8 @@ export default function SavedScreen() {
       Alert.alert('Unsupported link', 'Please paste a YouTube or TikTok URL.')
       return
     }
+    const ok = await requestConsent()
+    if (!ok) return
     setImporting(true)
     try {
       const { data, error } = await supabase.functions.invoke('extract-recipe-from-url', {
@@ -182,14 +186,21 @@ export default function SavedScreen() {
     setLoading(true)
     const { data, error } = await supabase
       .from('saved_meals')
-      .select('id, name, prep_time, calories, protein, carbs, fat, ingredients, steps, is_user_created')
+      .select('id, name, prep_time, calories, protein, carbs, fat, ingredients, steps, is_user_created, image_url')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (!error && data) {
-      const mealsWithTags = data.map(row => ({ ...row, tags: deriveTags(row), image: null as string | null, is_user_created: row.is_user_created ?? false }))
+      // Use the stored image_url first (preserves trending meal images and any image used at save time)
+      const mealsWithTags = data.map(row => ({
+        ...row,
+        tags: deriveTags(row),
+        image: row.image_url ?? null as string | null,
+        is_user_created: row.is_user_created ?? false,
+      }))
       setMeals(mealsWithTags)
-      // Fetch cached images in background
+      // Only fetch generated images for meals that don't have a stored image (legacy saves)
       mealsWithTags.forEach(async (meal, i) => {
+        if (meal.image) return // already have stored image — skip regeneration
         try {
           const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
             body: { mealName: meal.name },

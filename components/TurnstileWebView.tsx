@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { View } from 'react-native'
 import { WebView } from 'react-native-webview'
 
@@ -10,8 +10,9 @@ const html = `
 <head>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onLoad" async defer></script>
   <script>
+    var widgetId;
     function onLoad() {
-      turnstile.render('#ct', {
+      widgetId = turnstile.render('#ct', {
         sitekey: '${SITE_KEY}',
         callback: function(token) {
           window.ReactNativeWebView.postMessage(token);
@@ -21,18 +22,33 @@ const html = `
         },
       });
     }
+    function resetWidget() {
+      if (widgetId !== undefined) {
+        turnstile.reset(widgetId);
+      }
+    }
   </script>
 </head>
 <body><div id="ct"></div></body>
 </html>
 `
 
+export type TurnstileRef = {
+  reset: () => void
+}
+
 type Props = {
   onToken: (token: string) => void
 }
 
-export default function TurnstileWebView({ onToken }: Props) {
+export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onToken }, ref) {
   const webviewRef = useRef<WebView>(null)
+
+  useImperativeHandle(ref, () => ({
+    reset: () => {
+      webviewRef.current?.injectJavaScript('resetWidget(); true;')
+    },
+  }))
 
   const handleMessage = useCallback(
     (event: { nativeEvent: { data: string } }) => {
@@ -55,4 +71,4 @@ export default function TurnstileWebView({ onToken }: Props) {
       />
     </View>
   )
-}
+})

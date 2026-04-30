@@ -13,6 +13,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Settings, ChevronRight } from 'lucide-react-native'
@@ -20,7 +21,9 @@ import { COLORS } from '@/constants/colors'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useRouter } from 'expo-router'
 import { useAuth } from '@/context/AuthContext'
+import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
+import { useSuperwall, useUser } from 'expo-superwall'
 import { trackWeightLogged } from '@/lib/analytics'
 
 const { width } = Dimensions.get('window')
@@ -497,8 +500,31 @@ type Profile = {
 export default function ProfileScreen() {
   const router = useRouter()
   const { user, signOut: authSignOut } = useAuth()
+  const { acceptedAt, revokeConsent } = useAIConsent()
+  const { registerPlacement } = useSuperwall()
+  const { refresh: refreshSuperwallUser, getEntitlements } = useUser()
   const [darkMode, setDarkMode] = useState(true)
+  const [restoring, setRestoring] = useState(false)
   const [profile, setProfile] = useState<Profile | null>(null)
+
+  const handleRestorePurchases = async () => {
+    if (restoring) return
+    setRestoring(true)
+    try {
+      await refreshSuperwallUser()
+      const entitlements = await getEntitlements()
+      if (entitlements?.active && entitlements.active.length > 0) {
+        Alert.alert('Purchases Restored', 'Your subscription is active.')
+      } else {
+        // Fallback: present paywall which has native Restore button tied to StoreKit
+        await registerPlacement('restore_purchases')
+      }
+    } catch (e: any) {
+      Alert.alert('Restore Failed', e?.message ?? 'Please try again.')
+    } finally {
+      setRestoring(false)
+    }
+  }
 
   // Edit goal modal
   type GoalField = 'calorie_goal' | 'protein_goal' | 'meals_per_day' | 'max_prep_minutes'
@@ -541,6 +567,8 @@ export default function ProfileScreen() {
     if (!user) return
     await supabase.from('profiles').update({ dietary_restrictions: dietDraft }).eq('id', user.id)
     setProfile(p => p ? { ...p, dietary_restrictions: dietDraft } : p)
+    // Clear meal cache so next home screen load regenerates with updated restrictions
+    await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setShowDietModal(false)
   }
   // Calculator modal
@@ -791,9 +819,31 @@ export default function ProfileScreen() {
     ])
   }
 
-  const resetOnboarding = async () => {
-    await AsyncStorage.removeItem('onboarding_complete')
-    router.replace('/onboarding')
+  const resetOnboarding = () => {
+    Alert.alert(
+      'Reset to New User?',
+      'Clears all onboarding data and signs you out. Use this to test the full new-user flow.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            await AsyncStorage.multiRemove([
+              'onboarding_complete',
+              'onboarding_step',
+              'onboarding_data',
+              'otp_verified',
+              'onboarding_swiped_meals',
+              'pantry_daily_meals_cookNow',
+              'pantry_daily_meals_mealPlan',
+              'pantry_image_urls_v1',
+            ])
+            await authSignOut()
+          },
+        },
+      ]
+    )
   }
 
   return (
@@ -818,7 +868,7 @@ export default function ProfileScreen() {
 
           <View style={styles.statsRow}>
             <View style={styles.stat}>
-              <Text style={styles.statValue}>{streak > 0 ? `${streak} 🔥` : '0'}</Text>
+              <Text style={styles.statValue}>{streak}</Text>
               <Text style={styles.statLabel}>Day Streak</Text>
             </View>
             <View style={styles.statDivider} />
@@ -950,20 +1000,59 @@ export default function ProfileScreen() {
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>{editGoal?.label}</Text>
-              <View style={styles.modalInputRow}>
-                <TextInput
-                  style={styles.modalInput}
-                  value={editValue}
-                  onChangeText={setEditValue}
-                  keyboardType="numeric"
-                  placeholder="0"
-                  placeholderTextColor={COLORS.textMuted}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={saveGoal}
-                />
-                {editGoal?.unit ? <Text style={styles.modalUnit}>{editGoal.unit}</Text> : null}
-              </View>
+
+              {editGoal?.field === 'max_prep_minutes' ? (
+                // Preset picker for max prep time — matches onboarding options (10 / 20 / 30 / 60+)
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginVertical: 8 }}>
+                  {[
+                    { label: '10 min', value: 10 },
+                    { label: '20 min', value: 20 },
+                    { label: '30 min', value: 30 },
+                    { label: '60+ min', value: 90 },
+                  ].map(opt => {
+                    const selected = parseInt(editValue) === opt.value
+                    return (
+                      <TouchableOpacity
+                        key={opt.value}
+                        onPress={() => setEditValue(String(opt.value))}
+                        activeOpacity={0.8}
+                        style={{
+                          paddingVertical: 12,
+                          paddingHorizontal: 18,
+                          borderRadius: 30,
+                          backgroundColor: selected ? '#FFFFFF' : '#1A1A1A',
+                          borderWidth: 1,
+                          borderColor: selected ? '#FFFFFF' : '#2A2A2A',
+                        }}
+                      >
+                        <Text style={{
+                          fontSize: 14,
+                          fontWeight: '700',
+                          color: selected ? '#000000' : '#FFFFFF',
+                        }}>
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  })}
+                </View>
+              ) : (
+                <View style={styles.modalInputRow}>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editValue}
+                    onChangeText={setEditValue}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={COLORS.textMuted}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={saveGoal}
+                  />
+                  {editGoal?.unit ? <Text style={styles.modalUnit}>{editGoal.unit}</Text> : null}
+                </View>
+              )}
+
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.modalCancel} onPress={() => setEditGoal(null)} activeOpacity={0.7}>
                   <Text style={styles.modalCancelText}>Cancel</Text>
@@ -1000,7 +1089,9 @@ export default function ProfileScreen() {
           />
           <GoalRow
             label="Max Prep Time"
-            value={profile?.max_prep_minutes ? `${profile.max_prep_minutes} min` : '—'}
+            value={profile?.max_prep_minutes
+              ? (profile.max_prep_minutes >= 90 ? '60+ min' : `${profile.max_prep_minutes} min`)
+              : '—'}
             onPress={() => openGoalEdit('max_prep_minutes', 'Max Prep Time', 'min', profile?.max_prep_minutes ?? null)}
           />
           <GoalRow
@@ -1115,8 +1206,30 @@ export default function ProfileScreen() {
             label="Dark Mode"
             toggle={{ value: darkMode, onChange: setDarkMode }}
           />
-          <SettingsRow label="Privacy Policy" />
-          <SettingsRow label="Terms of Service" isLast />
+          <SettingsRow
+            label="AI Data Processing"
+            value={acceptedAt ? `Accepted ${new Date(acceptedAt).toLocaleDateString()}` : 'Not accepted'}
+            onPress={() => {
+              if (acceptedAt) {
+                Alert.alert(
+                  'AI Data Processing',
+                  'Pantry sends your text and images to OpenAI and Anthropic to power AI features (meal suggestions, macro estimates, photo scans). They do not use your data for training. Revoke consent to disable AI features.',
+                  [
+                    { text: 'Close', style: 'cancel' },
+                    { text: 'Revoke', style: 'destructive', onPress: () => revokeConsent() },
+                  ]
+                )
+              } else {
+                Alert.alert(
+                  'AI Data Processing',
+                  'Pantry sends your text and images to OpenAI and Anthropic to power AI features. You\'ll be asked to accept the first time you use one.'
+                )
+              }
+            }}
+          />
+          <SettingsRow label="Restore Purchases" value={restoring ? 'Restoring…' : undefined} onPress={handleRestorePurchases} />
+          <SettingsRow label="Privacy Policy" onPress={() => Linking.openURL('https://heypantry.app/privacy')} />
+          <SettingsRow label="Terms of Service" onPress={() => Linking.openURL('https://heypantry.app/terms')} isLast />
         </View>
 
         {/* ── Sign out ── */}

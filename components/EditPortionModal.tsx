@@ -106,10 +106,11 @@ export default function EditPortionModal({
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         {/* Header */}
         <View style={styles.topBar}>
-          <Text style={styles.topTitle} numberOfLines={1}>{logName}</Text>
           <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
             <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
+          <Text style={styles.topTitle} numberOfLines={1}>{logName}</Text>
+          <View style={{ width: 34 }} />
         </View>
 
         {loading ? (
@@ -261,8 +262,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 8,
-    marginBottom: 20,
+    paddingTop: 4,
+    paddingBottom: 16,
     gap: 10,
   },
   topTitle: {
@@ -271,6 +272,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textWhite,
     letterSpacing: -0.3,
+    textAlign: 'center',
   },
   closeBtn: {
     width: 34,
@@ -281,27 +283,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  brandName: { fontSize: 13, color: COLORS.textMuted, paddingHorizontal: 20, marginBottom: 16 },
+  brandName: { fontSize: 13, color: COLORS.textMuted, paddingHorizontal: 20, marginBottom: 8 },
 
   sectionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
     color: COLORS.textMuted,
-    letterSpacing: 0.4,
-    marginBottom: 10,
+    letterSpacing: 1.5,
+    marginBottom: 8,
   },
 
   servingSection: { paddingHorizontal: 20, marginBottom: 20 },
   chips: { flexDirection: 'row', gap: 8 },
   chip: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#141414',
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
-  chipActive: { backgroundColor: '#FFFFFF', borderColor: '#FFFFFF' },
+  chipActive: { backgroundColor: '#FFFFFF' },
   chipText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
   chipTextActive: { color: '#000000', fontWeight: '600' },
 
@@ -315,13 +315,11 @@ const styles = StyleSheet.create({
   quantityInputWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111111',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#141414',
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
   },
   quantityInput: {
     fontSize: 16,
@@ -338,53 +336,47 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
     paddingHorizontal: 20,
-    marginBottom: 24,
+    marginBottom: 16,
   },
   macroCell: {
     width: '47%',
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    padding: 14,
-    gap: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#141414',
+    borderRadius: 16,
+    padding: 16,
+    gap: 6,
   },
   macroDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 2 },
-  macroCellLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4 },
-  macroCellValue: { fontSize: 22, fontWeight: '700', color: COLORS.textWhite },
-  macroCellUnit: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
+  macroCellLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5 },
+  macroCellValue: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  macroCellUnit: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
 
   attribution: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginHorizontal: 20,
-    marginBottom: 20,
+    marginBottom: 16,
+    opacity: 0.4,
   },
   attributionText: { fontSize: 11, color: COLORS.textMuted },
-  attributionLogo: { width: 100, height: 20 },
+  attributionLogo: { width: 120, height: 16 },
 
   fallbackHint: {
-    fontSize: 13,
+    fontSize: 14,
     color: COLORS.textMuted,
     paddingHorizontal: 20,
-    marginBottom: 20,
-    lineHeight: 18,
+    marginBottom: 24,
+    lineHeight: 20,
   },
-  fallbackFields: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, marginBottom: 24 },
+  fallbackFields: { flexDirection: 'row', gap: 12, paddingHorizontal: 20, marginBottom: 28 },
   fallbackField: {
     flex: 1,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: '#141414',
+    borderRadius: 16,
+    padding: 16,
   },
-  fallbackInputRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 4 },
+  fallbackInputRow: { flexDirection: 'row', alignItems: 'baseline', gap: 4, marginTop: 6 },
   fallbackInput: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 28,
+    fontWeight: '800',
     color: COLORS.textWhite,
     padding: 0,
     flex: 1,

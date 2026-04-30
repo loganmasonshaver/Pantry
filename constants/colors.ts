@@ -12,4 +12,6 @@ export const COLORS = {
   tabBar: '#FFFFFF',
   tabActive: '#000000',
   tabInactive: '#AAAAAA',
+  cardElevated: '#1f1f1f',
+  trackDark: 'rgba(255,255,255,0.08)',
 } as const

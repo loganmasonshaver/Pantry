@@ -37,7 +37,7 @@ export function trackSubscriptionPurchased(plan: 'monthly' | 'lifetime', price?:
   posthog.capture('subscription_purchased', { plan, ...(price != null ? { price } : {}) })
 }
 
-export function trackUpgradePromptShown(source: 'meal_save_limit' | 'regen_limit') {
+export function trackUpgradePromptShown(source: 'meal_save_limit' | 'regen_limit' | 'scan_limit' | 'ai_log_limit') {
   posthog.capture('upgrade_prompt_shown', { source })
 }
 

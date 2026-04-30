@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import {
   View,
   Text,
@@ -11,8 +11,9 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useFocusEffect } from 'expo-router'
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAuth } from '../../context/AuthContext'
 import TurnstileWebView from '../../components/TurnstileWebView'
 
@@ -30,6 +31,15 @@ export default function SignInScreen() {
   const [lastAttempt, setLastAttempt] = useState(0)
   const [failCount, setFailCount] = useState(0)
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [turnstileKey, setTurnstileKey] = useState(0)
+
+  // Refresh Turnstile token when screen regains focus (e.g. returning from reset-password)
+  useFocusEffect(
+    useCallback(() => {
+      setCaptchaToken(null)
+      setTurnstileKey(k => k + 1)
+    }, [])
+  )
 
   const handleSignIn = async () => {
     if (!email || !password) {
@@ -47,9 +57,11 @@ export default function SignInScreen() {
       setLoading(true)
       await signIn(email, password, captchaToken ?? undefined)
       setFailCount(0)
-      router.replace({ pathname: '/onboarding/verify-email', params: { email } })
+      router.replace({ pathname: '/onboarding/verify-email', params: { email, isSignIn: 'true' } })
     } catch (error: any) {
       setFailCount(f => f + 1)
+      setCaptchaToken(null)
+      setTurnstileKey(k => k + 1)
       Alert.alert('Sign In Failed', error.message)
     } finally {
       setLoading(false)
@@ -58,10 +70,12 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <TurnstileWebView onToken={setCaptchaToken} />
-      <TouchableOpacity style={s.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-        <ArrowLeft size={22} stroke="#FFFFFF" strokeWidth={2} />
-      </TouchableOpacity>
+      <TurnstileWebView key={turnstileKey} onToken={setCaptchaToken} />
+      <View style={s.topBarRow}>
+        <TouchableOpacity style={s.backArrowBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <ArrowLeft size={18} stroke="#FFFFFF" strokeWidth={2.5} />
+        </TouchableOpacity>
+      </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.body} showsVerticalScrollIndicator={false}>
@@ -102,7 +116,7 @@ export default function SignInScreen() {
             </View>
           </View>
 
-          <TouchableOpacity style={s.forgotLink} activeOpacity={0.7}>
+          <TouchableOpacity style={s.forgotLink} activeOpacity={0.7} onPress={() => router.push({ pathname: '/onboarding/reset-password', params: { prefillEmail: email } })}>
             <Text style={s.forgotText}>Forgot password?</Text>
           </TouchableOpacity>
 
@@ -117,6 +131,7 @@ export default function SignInScreen() {
               try {
                 setLoading(true)
                 await signInWithApple()
+                await AsyncStorage.setItem('onboarding_complete', 'true')
                 router.replace('/(tabs)')
               } catch (e: any) {
                 if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Apple Sign-In Failed', e.message)
@@ -132,6 +147,7 @@ export default function SignInScreen() {
               setLoading(true)
               await signInWithGoogle()
               // Google users skip OTP — already verified via Google
+              await AsyncStorage.setItem('onboarding_complete', 'true')
               router.replace('/(tabs)')
             } catch (e: any) {
               if (e.code !== '12501') Alert.alert('Google Sign-In Failed', e.message)
@@ -164,7 +180,11 @@ export default function SignInScreen() {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000000' },
-  backBtn: { padding: 20, paddingBottom: 8, alignSelf: 'flex-start' },
+  topBarRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8 },
+  backArrowBtn: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#1A1A1A',
+    alignItems: 'center', justifyContent: 'center',
+  },
 
   body: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 16 },
   title: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 8 },

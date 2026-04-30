@@ -14,7 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AuthProvider, useAuth } from '../context/AuthContext'
 import { AIConsentProvider } from '../context/AIConsentContext'
 import { useNotifications } from '../hooks/useNotifications'
-import { SuperwallProvider } from 'expo-superwall'
+import { SuperwallProvider, useUser } from 'expo-superwall'
 import { SuperwallContextProvider } from '../context/SuperwallContext'
 import { ShareIntentProvider, useShareIntent } from 'expo-share-intent'
 
@@ -32,6 +32,18 @@ function RootLayoutNav() {
   const pathname = usePathname()
   useNotifications(session?.user?.id ?? null)
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent()
+  const { identify: superwallIdentify, signOut: superwallSignOut } = useUser()
+
+  // Identify user in Superwall on sign-in so subscription status is linked to the correct account.
+  // Applies to all auth methods: Apple, Google, and email.
+  useEffect(() => {
+    if (loading) return
+    if (session?.user?.id) {
+      superwallIdentify(session.user.id).catch(() => {})
+    } else {
+      superwallSignOut()
+    }
+  }, [session?.user?.id, loading])
 
   // Handle incoming share intent (URL shared from TikTok/YouTube)
   useEffect(() => {

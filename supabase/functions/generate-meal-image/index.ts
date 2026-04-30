@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
       return !sauceKeywords.some(k => lower.includes(k))
     })
     const ingredientList = visibleIngredients.length ? ` with ${visibleIngredients.join(', ')}` : ''
-    const prompt = `Overhead food photography of ${mealName}${ingredientList}, single plated composition on a dark ceramic plate, glossy saucy finish with oils and sauces fully integrated into the dish (never in separate bowls or jars), sheen and moisture visible on the food surface, rich color, no side dishes, no garnish props, no extra bowls, dark moody background, moody restaurant lighting, sharp focus, appetizing, photorealistic`
+    const prompt = `Professional food photography of ${mealName}${ingredientList}, complete and fully assembled dish exactly as served in a restaurant — buns on burgers, tortillas on tacos and wraps, rice in bowls, pasta in dishes — dark ceramic plate or appropriate vessel, glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra bowls, dark moody background, warm moody restaurant lighting, sharp focus, appetizing, photorealistic`
 
     // Generate via FAL Flux 2
     for (let attempt = 0; attempt < 3; attempt++) {

@@ -19,7 +19,7 @@ const CODE_LENGTH = 8
 
 export default function VerifyEmailScreen() {
   const router = useRouter()
-  const { email } = useLocalSearchParams<{ email: string }>()
+  const { email, isSignIn } = useLocalSearchParams<{ email: string; isSignIn?: string }>()
   const [code, setCode] = useState<string[]>(Array(CODE_LENGTH).fill(''))
   const [loading, setLoading] = useState(false)
   const [resendCooldown, setResendCooldown] = useState(0)
@@ -102,12 +102,18 @@ export default function VerifyEmailScreen() {
         inputs.current[0]?.focus()
       } else {
         await AsyncStorage.setItem('otp_verified', 'true')
-        // Check if onboarding is complete
+        // Sign-in flow: always go to tabs (they've done onboarding before)
+        if (isSignIn === 'true') {
+          await AsyncStorage.setItem('onboarding_complete', 'true')
+          router.replace('/(tabs)')
+          return
+        }
+        // Sign-up flow: check if onboarding is complete
         const onboardingDone = await AsyncStorage.getItem('onboarding_complete')
         if (onboardingDone === 'true') {
           router.replace('/(tabs)')
         } else {
-          router.replace({ pathname: '/onboarding', params: { step: '8' } })
+          router.replace({ pathname: '/onboarding', params: { step: '18' } })
         }
       }
     } catch (e: any) {

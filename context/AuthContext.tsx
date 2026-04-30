@@ -101,6 +101,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       options: {
         redirectTo: redirectUrl,
         skipBrowserRedirect: true,
+        queryParams: { prompt: 'select_account' },
       },
     });
     if (error || !data.url) throw error || new Error('No OAuth URL');

@@ -14,9 +14,11 @@ import {
   Alert,
   Image,
   Pressable,
+  PanResponder,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
+import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { VideoView, useVideoPlayer } from 'expo-video'
 import Svg, { Path, Line, Circle as SvgCircle, Text as SvgText } from 'react-native-svg'
@@ -27,12 +29,13 @@ const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle)
 const AnimatedLine = Animated.createAnimatedComponent(Line)
 import { ActivityIndicator } from 'react-native'
 import { supabase } from '../../lib/supabase'
+import { generateMeals } from '../../lib/meals'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { trackOnboardingStep, trackPaywallViewed, trackSubscriptionPurchased } from '../../lib/analytics'
 import { DISLIKE_CHIPS } from '../food-preferences'
 
-const { width } = Dimensions.get('window')
+const { width, height: H } = Dimensions.get('window')
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
 const CARD = '#1A1A1A'
@@ -44,8 +47,8 @@ const ABANDONMENT_PAYWALL_ENABLED = false
 // Progress percentages keyed by step number. Keep monotonic — values must increase as step increases.
 const PROGRESS: Record<number, number> = {
   2: 5, 3: 10, 4: 15, 5: 20, 6: 25, 7: 30, 8: 35, 9: 42,
-  10: 50, 11: 55, 12: 60, 13: 65, 14: 72, 15: 80,
-  17: 88, 18: 93, 19: 96, 20: 100,
+  10: 50, 11: 55, 12: 60, 13: 63, 14: 67, 15: 74, 16: 82,
+  18: 88, 19: 93, 20: 96, 21: 100,
 }
 
 type OnboardingData = {
@@ -70,14 +73,16 @@ type OnboardingData = {
   birthday: string
   referralCode: string
   targetWeight: string
+  cuisinePreferences: string[]
 }
 
 const DEFAULT_DATA: OnboardingData = {
-  goal: '', calories: '', protein: '', ft: '', inches: '', weight: '',
+  goal: '', calories: '', protein: '', ft: '5', inches: '9', weight: '180',
   meals: '3', prep: '30 min', dietStyle: 'Classic', diet: [], cookingSkill: '',
   foodDislikes: [], foodDislikesText: '',
   age: '', gender: '', activityLevel: '', fitnessGoal: '',
   attribution: '', birthday: '', referralCode: '', targetWeight: '',
+  cuisinePreferences: [],
 }
 
 function ProgressBar({ pct }: { pct: number }) {
@@ -121,6 +126,15 @@ function WheelPicker({
   const scrollY = useRef(new Animated.Value(initialY)).current
   const containerHeight = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_COUNT
   const paddingVertical = WHEEL_ITEM_HEIGHT * Math.floor(WHEEL_VISIBLE_COUNT / 2)
+
+  useEffect(() => {
+    // contentOffset is unreliable on Animated.ScrollView before layout;
+    // scroll imperatively after mount to guarantee the correct position.
+    const y = selectedIndex * WHEEL_ITEM_HEIGHT
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y, animated: false })
+    })
+  }, [])
 
   const handleMomentumEnd = (y: number) => {
     const index = Math.round(y / WHEEL_ITEM_HEIGHT)
@@ -213,6 +227,7 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
   const player = useVideoPlayer(require('../../assets/onboarding-demo.mov'), (p) => {
     p.loop = false
     p.muted = true
+    p.playbackRate = 0.9
   })
 
   useEffect(() => {
@@ -221,7 +236,7 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
 
     // Hold-phase zoom moments — timestamps relative to the start of the hold (after enter anim).
     // Aligned to the "Suggested for you" meal cards appearing AFTER the pantry scan animation finishes.
-    const ZOOM_AT: number[] = [4500, 7500] // ms into hold
+    const ZOOM_AT: number[] = [5800, 8800] // ms into hold
     const ZOOM_ANIMS = [zoom1, zoom2]
     const ZOOM_IN_DURATION = 320
     const ZOOM_HOLD_DURATION = 520
@@ -256,10 +271,11 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       try {
         ;(player as any).currentTime = 0
       } catch {}
-      // Hold frame 0 for START_HOLD_DELAY ms, then play — lets the opening frame register visually
+      // Hold frame 0 until enter animation finishes + START_HOLD_DELAY, then play.
+      // Zoom offsets use (1000 + START_HOLD_DELAY + t) so video start must match.
       pending.push(setTimeout(() => {
         if (!cancelled) { try { player.play() } catch {} }
-      }, START_HOLD_DELAY))
+      }, 1000 + START_HOLD_DELAY))
 
       // Schedule zoom moments during the hold phase (offset by enter animation + start hold delay)
       ZOOM_AT.forEach((t, i) => {
@@ -856,7 +872,7 @@ function STargetWeight({
   onChange: (v: string) => void
   onNext: () => void; onBack: () => void
 }) {
-  const currentLb = parseInt(weight || '175', 10)
+  const currentLb = parseInt(weight || '180', 10)
   // Default target reflects goal direction so picker starts on a non-zero delta
   const defaultDelta = goal === 'lose' ? -10 : goal === 'build' ? 10 : 0
   const smartDefault = currentLb + defaultDelta
@@ -878,7 +894,7 @@ function STargetWeight({
   const deltaColor = delta === 0 ? MUTED : (goal === 'lose' && delta < 0) || (goal === 'build' && delta > 0) ? TEAL : '#F59E0B'
 
   // BMI safety check
-  const heightInInches = parseInt(ft || '5') * 12 + parseInt(inches || '10')
+  const heightInInches = parseInt(ft || '5') * 12 + parseInt(inches || '9')
   const heightM = heightInInches * 0.0254
   const targetKg = target * 0.453592
   const targetBmi = heightM > 0 ? targetKg / (heightM * heightM) : 0
@@ -995,8 +1011,8 @@ function S4AboutYou({
 
   // Current imperial values (with defaults)
   const currentFt = parseInt(ft || '5', 10)
-  const currentIn = parseInt(inches || '10', 10)
-  const currentLb = parseInt(weight || '175', 10)
+  const currentIn = parseInt(inches || '9', 10)
+  const currentLb = parseInt(weight || '180', 10)
 
   // Derived metric values for display
   const currentCm = ftInToCm(currentFt, currentIn)
@@ -1422,6 +1438,7 @@ function SAllergies({
 }) {
   const shieldPulse = useRef(new Animated.Value(0)).current
   const dislikesInputRef = useRef<any>(null)
+  const [inputText, setInputText] = useState('')
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -1438,9 +1455,31 @@ function SAllergies({
   const ringOpacity = shieldPulse.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0] })
   const ringScale = shieldPulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.5] })
 
+  // Custom chips typed in the text field — stored as comma-separated in foodDislikesText
+  const customChips = foodDislikesText
+    ? foodDislikesText.split(',').map(s => s.trim()).filter(Boolean)
+    : []
+
   const toggleDislike = (chip: string) => {
     onFoodDislikes(foodDislikes.includes(chip) ? foodDislikes.filter(c => c !== chip) : [...foodDislikes, chip])
   }
+
+  const addCustomChip = () => {
+    const trimmed = inputText.trim()
+    if (!trimmed) return
+    const updated = [...customChips, trimmed]
+    onFoodDislikesText(updated.join(', '))
+    setInputText('')
+  }
+
+  const removeCustomChip = (chip: string) => {
+    const updated = customChips.filter(c => c !== chip)
+    onFoodDislikesText(updated.join(', '))
+  }
+
+  // Active predefined chips float to top-left; inactive stay below
+  const activePredefined = DISLIKE_CHIPS.filter(c => foodDislikes.includes(c))
+  const inactivePredefined = DISLIKE_CHIPS.filter(c => !foodDislikes.includes(c))
 
   return (
     <SafeAreaView style={s.safe}>
@@ -1469,14 +1508,24 @@ function SAllergies({
           <Text style={[s.subtitle, { textAlign: 'center' }]}>Tap anything we should skip in your meals</Text>
 
           <View style={s.dietGrid}>
-            {DISLIKE_CHIPS.map(chip => {
-              const active = foodDislikes.includes(chip)
-              return (
-                <TouchableOpacity key={chip} style={[s.dietPill, active && s.dietPillActive]} onPress={() => toggleDislike(chip)} activeOpacity={0.8}>
-                  <Text style={[s.dietPillText, active && s.dietPillTextActive]}>{chip}</Text>
-                </TouchableOpacity>
-              )
-            })}
+            {/* Active predefined chips — float to top-left */}
+            {activePredefined.map(chip => (
+              <TouchableOpacity key={chip} style={[s.dietPill, s.dietPillActive]} onPress={() => toggleDislike(chip)} activeOpacity={0.8}>
+                <Text style={[s.dietPillText, s.dietPillTextActive]}>{chip}</Text>
+              </TouchableOpacity>
+            ))}
+            {/* Custom typed chips — always green, tap to remove */}
+            {customChips.map(chip => (
+              <TouchableOpacity key={`custom-${chip}`} style={[s.dietPill, s.dietPillActive]} onPress={() => removeCustomChip(chip)} activeOpacity={0.8}>
+                <Text style={[s.dietPillText, s.dietPillTextActive]}>{chip} ✕</Text>
+              </TouchableOpacity>
+            ))}
+            {/* Inactive predefined chips below */}
+            {inactivePredefined.map(chip => (
+              <TouchableOpacity key={chip} style={s.dietPill} onPress={() => toggleDislike(chip)} activeOpacity={0.8}>
+                <Text style={s.dietPillText}>{chip}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
           <Pressable style={[s.inputCard, { marginTop: 20 }]} onPress={() => dislikesInputRef.current?.focus()}>
@@ -1486,10 +1535,11 @@ function SAllergies({
               style={[s.input, { fontSize: 16, paddingVertical: 10 }]}
               placeholder="e.g. Mushrooms, Cilantro"
               placeholderTextColor="#888888"
-              value={foodDislikesText}
-              onChangeText={onFoodDislikesText}
+              value={inputText}
+              onChangeText={setInputText}
               autoCapitalize="words"
               returnKeyType="done"
+              onSubmitEditing={addCustomChip}
             />
           </Pressable>
         </ScrollView>
@@ -1652,7 +1702,7 @@ function SGeneratingIntro({ onNext, onBack }: { onNext: () => void; onBack: () =
   )
 }
 
-function SPlanLoading({ onDone }: { onDone: () => void }) {
+function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => void }) {
   const progress = useRef(new Animated.Value(0)).current
   const [pct, setPct] = useState(0)
   const [msgIdx, setMsgIdx] = useState(0)
@@ -1672,6 +1722,43 @@ function SPlanLoading({ onDone }: { onDone: () => void }) {
     const msgInterval = setInterval(() => {
       setMsgIdx(i => Math.min(i + 1, messages.length - 1))
     }, 1050)
+
+    // Generate personalized meals silently in the background while the animation plays.
+    // The 4.2s animation masks the ~2-4s API call. Result stored in AsyncStorage so
+    // SPlanReveal and the home screen both read it immediately on mount.
+    ;(async () => {
+      try {
+        const heightCm = (parseInt(data.ft || '5') * 12 + parseInt(data.inches || '9')) * 2.54
+        const weightKg = parseFloat(data.weight || '180') * 0.453592
+        const parsedAge = parseInt(data.age) || 25
+        const fitness = data.fitnessGoal || (data.goal === 'lose' ? 'lose' : data.goal === 'build' ? 'gain' : 'maintain')
+        const goals = calculateGoals(parsedAge, data.gender || 'male', heightCm, weightKg, data.activityLevel || 'moderate', fitness)
+        const prepMaxMin = data.prep === '10 min' ? 10 : data.prep === '20 min' ? 20 : data.prep === '60+ min' ? 90 : 30
+        const foodDislikes = [
+          ...(data.foodDislikes || []),
+          ...(data.foodDislikesText || '').split(',').map(s => s.trim()).filter(Boolean),
+        ]
+        const meals = await generateMeals({
+          ingredients: [
+            'chicken breast', 'ground beef', 'eggs', 'rice', 'pasta',
+            'olive oil', 'butter', 'garlic', 'onion', 'salt', 'black pepper',
+            'soy sauce', 'hot sauce', 'lemon', 'lime', 'Italian seasoning',
+            'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili flakes',
+            'tomato sauce', 'chicken broth', 'parmesan cheese', 'broccoli', 'spinach',
+          ],
+          calorieGoal: goals.calories,
+          proteinGoal: goals.protein,
+          mealsPerDay: parseInt(data.meals) || 3,
+          cookingSkill: data.cookingSkill || 'moderate',
+          maxPrepMinutes: prepMaxMin,
+          dietaryRestrictions: data.dietStyle && data.dietStyle !== 'Classic' ? [data.dietStyle] : [],
+          foodDislikes,
+          mode: 'cookNow',
+        })
+        const today = new Date().toISOString().slice(0, 10)
+        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals }))
+      } catch {}
+    })()
 
     return () => {
       progress.removeListener(listener)
@@ -1723,6 +1810,72 @@ function SPlanLoading({ onDone }: { onDone: () => void }) {
         </View>
       </View>
     </SafeAreaView>
+  )
+}
+
+// Recomposition graph for "maintain" goal — fat curves down, muscle curves up, both animate L→R.
+function MaintainGraph() {
+  const W = 300, H = 140
+  const pad = { top: 38, right: 28, bottom: 34, left: 28 }
+  const iW = W - pad.left - pad.right
+  const iH = H - pad.top - pad.bottom
+  const xS = pad.left, xE = pad.left + iW
+  const yT = pad.top, yB = pad.top + iH
+  const yM = (yT + yB) / 2
+
+  // S-curves: fat goes top-left → bottom-right, muscle goes bottom-left → top-right
+  const fatPath    = `M ${xS} ${yT} C ${xS + iW * 0.45} ${yT}, ${xS + iW * 0.55} ${yB}, ${xE} ${yB}`
+  const musclePath = `M ${xS} ${yB} C ${xS + iW * 0.45} ${yB}, ${xS + iW * 0.55} ${yT}, ${xE} ${yT}`
+
+  const LEN = 290
+  const anim = useRef(new Animated.Value(0)).current
+  const [off, setOff] = useState(LEN)
+  const [done, setDone] = useState(false)
+
+  useEffect(() => {
+    const l = anim.addListener(({ value }) => {
+      setOff((1 - value) * LEN)
+      if (value >= 0.98 && !done) setDone(true)
+    })
+    Animated.timing(anim, {
+      toValue: 1, duration: 1400, delay: 200,
+      easing: Easing.out(Easing.cubic), useNativeDriver: false,
+    }).start()
+    return () => anim.removeListener(l)
+  }, [])
+
+  const AMBER = '#D4A855'
+
+  return (
+    <View style={{ alignItems: 'center', width: '100%' }}>
+      <Svg width={W} height={H}>
+        {/* Subtle fills */}
+        <Path d={`${fatPath} L ${xE} ${yM} L ${xS} ${yM} Z`} fill={AMBER} fillOpacity={0.08} />
+        <Path d={`${musclePath} L ${xE} ${yM} L ${xS} ${yM} Z`} fill={TEAL} fillOpacity={0.08} />
+
+        {/* Fat line — amber, top-left → bottom-right */}
+        <Path d={fatPath} stroke={AMBER} strokeWidth={2.5} fill="none" strokeLinecap="round"
+          strokeDasharray={`${LEN}`} strokeDashoffset={off} />
+        {/* Muscle line — teal, bottom-left → top-right */}
+        <Path d={musclePath} stroke={TEAL} strokeWidth={2.5} fill="none" strokeLinecap="round"
+          strokeDasharray={`${LEN}`} strokeDashoffset={off} />
+
+        {/* Start dots */}
+        <SvgCircle cx={xS} cy={yT} r={5} fill="#1A1A1A" stroke={AMBER} strokeWidth={2} />
+        <SvgCircle cx={xS} cy={yB} r={5} fill="#1A1A1A" stroke={TEAL} strokeWidth={2} />
+        {/* End dots */}
+        {done && <SvgCircle cx={xE} cy={yB} r={6} fill={AMBER} />}
+        {done && <SvgCircle cx={xE} cy={yT} r={6} fill={TEAL} />}
+
+        {/* Left labels */}
+        <SvgText x={xS + 10} y={yT - 16} fill={AMBER} fontSize="9" fontWeight="700" textAnchor="start">FAT</SvgText>
+        <SvgText x={xS + 10} y={yB + 20} fill={TEAL}  fontSize="9" fontWeight="700" textAnchor="start">MUSCLE</SvgText>
+
+        {/* Right labels */}
+        <SvgText x={xE - 10} y={yT - 16} fill={TEAL}  fontSize="9" fontWeight="700" textAnchor="end">↑ MORE</SvgText>
+        <SvgText x={xE - 10} y={yB + 20} fill={AMBER} fontSize="9" fontWeight="700" textAnchor="end">↓ LESS</SvgText>
+      </Svg>
+    </View>
   )
 }
 
@@ -1852,14 +2005,14 @@ function PlanRing({ value, unit, label, color, delay = 0 }: { value: number; uni
   )
 }
 
-function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
+function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: OnboardingData; onNext: () => void; onBack: () => void; isPrefetchOnly?: boolean }) {
   // 5 sections reveal top-to-bottom: heading, trajectory card, macro rings, meal card, disclaimer
   const sectionAnims = useRef([0, 1, 2, 3, 4].map(() => new Animated.Value(0))).current
 
   const { cals, prot } = useMemo(() => {
     // Use sensible defaults for any missing onboarding field so Plan Reveal always shows useful numbers
-    const heightCm = (parseInt(data.ft || '5') * 12 + parseInt(data.inches || '10')) * 2.54
-    const weightKg = parseFloat(data.weight || '175') * 0.453592
+    const heightCm = (parseInt(data.ft || '5') * 12 + parseInt(data.inches || '9')) * 2.54
+    const weightKg = parseFloat(data.weight || '180') * 0.453592
     const parsedAge = parseInt(data.age) || 25
     const fitness = data.fitnessGoal || (data.goal === 'lose' ? 'lose' : data.goal === 'build' ? 'gain' : 'maintain')
     const result = calculateGoals(parsedAge, data.gender || 'male', heightCm, weightKg, data.activityLevel || 'moderate', fitness)
@@ -1871,19 +2024,20 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
   const goalLabel = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'gain' ? 'Build Muscle' : 'Maintain'
 
   useEffect(() => {
+    if (isPrefetchOnly) return  // hidden prefetch instance — skip animations
     // Slow top-to-bottom page reveal: 500ms between each section.
     // Meal card (index 3) appears at ~1500ms — enough time for cached images to resolve.
     Animated.stagger(500, sectionAnims.map(anim =>
       Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) })
     )).start()
-  }, [])
+  }, [isPrefetchOnly])
 
   const calPerMeal = Math.round(cals / mealsPerDay)
   const protPerMeal = Math.round(prot / mealsPerDay)
 
   // Self-healing weight display: fall back to sane defaults if onboarding data is partial.
   // Also apply goal-based default target when user skipped the target wheel or left it at current.
-  const currentLb = parseInt(data.weight || '175', 10)
+  const currentLb = parseInt(data.weight || '180', 10)
   const rawTarget = parseInt(data.targetWeight || '0', 10)
   const defaultDelta = data.goal === 'lose' ? -10 : data.goal === 'build' ? 10 : 0
   const targetLb = (rawTarget > 0 && rawTarget !== currentLb)
@@ -1957,7 +2111,7 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
       },
       Pescatarian: {
         Breakfast: [
-          { name: 'Smoked Salmon Bagel with Cream Cheese', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten', 'Dairy'], skill: 'easy', prepMin: 5 },
+          { name: 'Smoked Salmon Bagel with Cream Cheese', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten', 'Dairy'], skill: 'easy', prepMin: 10 },
           { name: 'Veggie Egg White Scramble', Icon: Sprout, tint: '#60A5FA', contains: ['Eggs'], skill: 'easy', prepMin: 10 },
           { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#60A5FA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 5 },
@@ -2145,7 +2299,23 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
     })
   }, [data.dietStyle, data.meals, data.goal, data.foodDislikes, data.foodDislikesText, data.cookingSkill, prepMin])
 
-  // Load AI-generated images for each sample meal.
+  // AI-generated meals — written to AsyncStorage by SPlanLoading in the background.
+  // Use these if ready; fall back to curated sampleMeals (also diet-aware) otherwise.
+  const [aiMeals, setAiMeals] = useState<any[]>([])
+  useEffect(() => {
+    AsyncStorage.getItem('pantry_daily_meals_cookNow').then(raw => {
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        const meals: any[] = parsed?.meals ?? []
+        if (meals.length > 0) setAiMeals(meals.slice(0, parseInt(data.meals) || 3))
+      }
+    }).catch(() => {})
+  }, [])
+
+  // Prefer AI-generated meals (personalized); fall back to curated sample if not ready
+  const mealsForDisplay = aiMeals.length > 0 ? aiMeals : sampleMeals
+
+  // Load AI-generated images for each meal.
   // Checks device AsyncStorage first (instant), falls back to Supabase edge function (network).
   // Both this screen and the home screen share the same local URL cache key so images are
   // never fetched twice across the entire app lifetime.
@@ -2160,44 +2330,37 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
 
       // Show any already-cached images instantly
       const preloaded: Record<string, string> = {}
-      for (const m of sampleMeals) {
+      for (const m of mealsForDisplay) {
         if (localCache[m.name]) preloaded[m.name] = localCache[m.name]
       }
       if (!cancelled && Object.keys(preloaded).length > 0) setMealImages(preloaded)
 
-      // Fetch missing ones from edge function, fill in as they arrive
+      // Fetch missing ones from edge function, fill in as they arrive.
+      // Always write to AsyncStorage even if cancelled (user navigated away) — the home
+      // screen needs these URLs cached so it doesn't have to re-fetch.
       const updatedCache = { ...localCache }
-      await Promise.all(sampleMeals.map(async (m) => {
+      await Promise.all(mealsForDisplay.map(async (m) => {
         if (localCache[m.name]) return // already have it
         try {
           const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
             body: { mealName: m.name, ingredients: [] },
           })
-          if (imgData?.image && !cancelled) {
+          if (imgData?.image) {
             updatedCache[m.name] = imgData.image
-            setMealImages(prev => ({ ...prev, [m.name]: imgData.image }))
+            // Only update React state if still mounted
+            if (!cancelled) setMealImages(prev => ({ ...prev, [m.name]: imgData.image }))
+            // Always persist — home screen reads this cache
+            AsyncStorage.setItem(IMAGE_URL_CACHE_KEY, JSON.stringify(updatedCache))
           }
         } catch {}
       }))
-
-      // Persist any newly-fetched URLs so next visit is instant
-      if (!cancelled && Object.keys(updatedCache).length > Object.keys(localCache).length) {
-        AsyncStorage.setItem(IMAGE_URL_CACHE_KEY, JSON.stringify(updatedCache))
-      }
     })()
     return () => { cancelled = true }
-  }, [sampleMeals])
-
-  // Meal card header — skill-led title ("Culinary-level meals"), with diet + avoids as subline
-  const mealHeaderTitle = skillOpt ? `${skillOpt.label}-level meals` : 'Meals made for you'
-  const subChips: string[] = []
-  if (data.dietStyle && data.dietStyle !== 'Classic') subChips.push(data.dietStyle)
-  if (allAvoids.length > 0) subChips.push(`avoiding ${allAvoids.length}`)
-  const mealHeaderSubline = subChips.join(' · ')
+  }, [mealsForDisplay])
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[17]} />
+      <TopBar onBack={onBack} pct={PROGRESS[18]} />
       <ScrollView contentContainerStyle={[s.scrollBody, { gap: 20 }]} showsVerticalScrollIndicator={false}>
         {/* Section 0 — Badge + heading */}
         <Animated.View style={{ opacity: sectionAnims[0], transform: [{ translateY: sectionAnims[0].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
@@ -2242,9 +2405,12 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
                 )}
               </>
             ) : (
-              <Text style={{ fontSize: 13, color: MUTED, textAlign: 'center', paddingVertical: 20 }}>
-                Your plan is calibrated to your current goals.
-              </Text>
+              <>
+                <MaintainGraph />
+                <Text style={{ fontSize: 12, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
+                  Same weight · better body composition
+                </Text>
+              </>
             )}
           </View>
         </Animated.View>
@@ -2263,57 +2429,66 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
         <Animated.View style={{ opacity: sectionAnims[3], transform: [{ translateY: sectionAnims[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
           <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 14 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{
-                width: 36, height: 36, borderRadius: 18,
-                backgroundColor: skillOpt ? `${skillOpt.iconColor}22` : 'rgba(74,222,128,0.15)',
-                alignItems: 'center', justifyContent: 'center',
-              }}>
-                {skillOpt ? (
-                  <skillOpt.Icon size={20} stroke={skillOpt.iconColor} strokeWidth={2} />
-                ) : (
-                  <ShieldCheck size={20} stroke={TEAL} strokeWidth={2} />
-                )}
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(74,222,128,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+                <Sparkles size={20} stroke={TEAL} strokeWidth={2} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 }}>
-                  {mealHeaderTitle}
+                  {aiMeals.length > 0 ? 'Your first day' : 'Meals made for you'}
                 </Text>
-                {mealHeaderSubline !== '' && (
-                  <Text style={{ fontSize: 12, color: MUTED, marginTop: 3, fontWeight: '500' }}>
-                    {mealHeaderSubline}
-                  </Text>
-                )}
+                <Text style={{ fontSize: 12, color: MUTED, marginTop: 3, fontWeight: '500' }}>
+                  {aiMeals.length > 0 ? 'Generated from your goals' : 'Tailored to your goals'}
+                </Text>
               </View>
             </View>
-            {sampleMeals.map((m, i) => {
+            {mealsForDisplay.map((m, i) => {
               const imageUri = mealImages[m.name]
+              const isSwipedMeal = 'calories' in m
+              const calDisplay = isSwipedMeal ? (m as any).calories : Math.round(cals * (m as any).calPct)
+              const protDisplay = isSwipedMeal ? (m as any).protein : Math.round(prot * (m as any).protPct)
+              const prepDisplay = isSwipedMeal ? (m as any).prepTime : (m as any).prepMin
+              const SlotIcon = !isSwipedMeal ? (m as any).Icon : null
+              const slotTint = !isSwipedMeal ? ((m as any).tint ?? TEAL) : TEAL
               return (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 }}>
-                  <View style={{
-                    width: 56, height: 56, borderRadius: 12,
-                    backgroundColor: imageUri ? '#000' : `${m.tint}22`,
-                    alignItems: 'center', justifyContent: 'center',
-                    overflow: 'hidden',
-                  }}>
-                    {imageUri ? (
-                      <Image source={{ uri: imageUri }} style={{ width: 56, height: 56 }} />
-                    ) : (
-                      <m.Icon size={24} stroke={m.tint} strokeWidth={1.8} />
-                    )}
+                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 2 }}>
+                  {/* 72×72 image — matches dashboard MealCard exactly */}
+                  <View style={{ width: 72, height: 72, borderRadius: 12, overflow: 'hidden', backgroundColor: '#242424' }}>
+                    {imageUri
+                      ? <Image source={{ uri: imageUri }} style={{ width: 72, height: 72 }} resizeMode="cover" />
+                      : SlotIcon
+                        ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: `${slotTint}22` }}>
+                            <SlotIcon size={26} stroke={slotTint} strokeWidth={1.8} />
+                          </View>
+                        : null
+                    }
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 1.5, textTransform: 'uppercase' }}>{m.slot}</Text>
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', marginTop: 2 }}>{m.name}</Text>
-                    <Text style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
-                      ~{Math.round(cals * m.calPct)} cal · {Math.round(prot * m.protPct)}g protein · {m.prepMin} min
-                    </Text>
+                  <View style={{ flex: 1, gap: 5 }}>
+                    {(m as any).slot && (
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                        {(m as any).slot}
+                      </Text>
+                    )}
+                    {/* Name — matches dashboard mealName style */}
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
+                    {/* Clock row — matches dashboard mealMeta */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Clock size={13} stroke={MUTED} strokeWidth={1.8} />
+                      <Text style={{ fontSize: 13, color: MUTED }}>{prepDisplay} min prep</Text>
+                    </View>
+                    {/* Macros — matches dashboard mealMacros */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Text style={{ fontSize: 13, color: '#999999' }}>
+                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{calDisplay} kcal</Text>
+                      </Text>
+                      <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#555' }} />
+                      <Text style={{ fontSize: 13, color: '#999999' }}>
+                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{protDisplay}g</Text>{' Protein'}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               )
             })}
-            <Text style={{ fontSize: 11, color: '#555', fontStyle: 'italic', marginTop: 4 }}>
-              Sample preview · real meals are AI-generated daily
-            </Text>
           </View>
         </Animated.View>
 
@@ -2330,26 +2505,7 @@ function SPlanReveal({ data, onNext, onBack }: { data: OnboardingData; onNext: (
         </Animated.View>
       </ScrollView>
       <View style={s.bottomActions}>
-        <PillButton label="Let's get started" onPress={async () => {
-          // Seed today's meal cache so home screen shows the same meals from the plan reveal
-          try {
-            const todayStr = new Date().toISOString().slice(0, 10)
-            const seeded = sampleMeals.map((m, i) => ({
-              id: `seeded_${i}`,
-              name: m.name,
-              prepTime: m.prepMin,
-              calories: Math.round(cals * m.calPct),
-              protein: Math.round(prot * m.protPct),
-              carbs: 0,
-              fat: 0,
-              ingredients: [],
-              steps: [],
-              image: null,
-            }))
-            await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: todayStr, meals: seeded }))
-          } catch {}
-          onNext()
-        }} />
+        <PillButton label="Let's get started" onPress={onNext} />
       </View>
     </SafeAreaView>
   )
@@ -2469,7 +2625,7 @@ function STrialReminder({ onNext, onBack }: { onNext: () => void; onBack: () => 
   return (
     <SafeAreaView style={s.safe}>
       <View style={f.root}>
-        <TopBar onBack={onBack} pct={PROGRESS[19]} />
+        <TopBar onBack={onBack} pct={PROGRESS[19] ?? 93} />
 
         <ScrollView contentContainerStyle={[f.scrollContent, { alignItems: 'center', paddingTop: 8 }]} showsVerticalScrollIndicator={false} bounces={false}>
           {/* Headline */}
@@ -2714,12 +2870,389 @@ function S8Complete({ onFinish }: { onFinish: () => void }) {
   )
 }
 
+const CUISINE_CARDS = [
+  { emoji: '🔥', name: 'Spicy', tagline: 'Bold heat, big flavor' },
+  { emoji: '🍜', name: 'Asian', tagline: 'Stir-fries, noodles, rice bowls' },
+  { emoji: '🌮', name: 'Mexican', tagline: 'Tacos, bowls, bold spices' },
+  { emoji: '🍝', name: 'Italian', tagline: 'Pasta, proteins, comfort food' },
+  { emoji: '🥙', name: 'Mediterranean', tagline: 'Fresh, light, olive oil everything' },
+  { emoji: '🍔', name: 'American', tagline: 'Burgers, grills, comfort classics' },
+  { emoji: '🥗', name: 'Clean & Light', tagline: 'Salads, lean proteins, whole foods' },
+  { emoji: '🍱', name: 'Meal Prep', tagline: 'Batch-friendly, repeatable, efficient' },
+]
+
+function SCuisineSwipe({ onNext, onBack }: { onNext: (liked: string[]) => void; onBack: () => void }) {
+  const [index, setIndex] = useState(0)
+  const [liked, setLiked] = useState<string[]>([])
+
+  const card = CUISINE_CARDS[index]
+  const total = CUISINE_CARDS.length
+
+  const handleSkip = () => {
+    if (index < total - 1) {
+      setIndex(i => i + 1)
+    } else {
+      onNext(liked)
+    }
+  }
+
+  const handleLike = () => {
+    const newLiked = [...liked, card.name]
+    if (index < total - 1) {
+      setLiked(newLiked)
+      setIndex(i => i + 1)
+    } else {
+      onNext(newLiked)
+    }
+  }
+
+  return (
+    <SafeAreaView style={s.safe} edges={['top']}>
+      <TopBar onBack={onBack} pct={PROGRESS[13] ?? 63} />
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
+        <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: '700', marginBottom: 6, textAlign: 'center' }}>
+          What cuisines do you love?
+        </Text>
+        <Text style={{ color: MUTED, fontSize: 14, marginBottom: 32, textAlign: 'center' }}>
+          Tap ♥ to like or ✕ to skip
+        </Text>
+
+        {/* Card */}
+        <View style={{
+          width: 300, height: 380,
+          backgroundColor: CARD,
+          borderRadius: 20,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginBottom: 32,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.4,
+          shadowRadius: 16,
+        }}>
+          <Text style={{ fontSize: 72, marginBottom: 20 }}>{card.emoji}</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 24, fontWeight: '700', marginBottom: 8 }}>{card.name}</Text>
+          <Text style={{ color: MUTED, fontSize: 14, textAlign: 'center', paddingHorizontal: 24 }}>{card.tagline}</Text>
+        </View>
+
+        {/* Dot progress */}
+        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 32 }}>
+          {CUISINE_CARDS.map((_, i) => (
+            <View key={i} style={{
+              width: i === index ? 18 : 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: i === index ? '#FFFFFF' : '#444444',
+            }} />
+          ))}
+        </View>
+
+        {/* Action buttons */}
+        <View style={{ flexDirection: 'row', gap: 12, paddingHorizontal: 0, width: '100%' }}>
+          <TouchableOpacity
+            onPress={handleSkip}
+            activeOpacity={0.75}
+            style={{
+              flex: 1,
+              backgroundColor: CARD,
+              borderRadius: 30,
+              paddingVertical: 18,
+              alignItems: 'center',
+              borderWidth: 1,
+              borderColor: '#333333',
+            }}
+          >
+            <Text style={{ color: '#FFFFFF', fontSize: 22 }}>✕</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleLike}
+            activeOpacity={0.75}
+            style={{
+              flex: 1,
+              backgroundColor: '#FFFFFF',
+              borderRadius: 30,
+              paddingVertical: 18,
+              alignItems: 'center',
+            }}
+          >
+            <Text style={{ color: '#000000', fontSize: 22 }}>♥</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  )
+}
+
+// ─── Step 14: Meal Swipe ──────────────────────────────────────────────────────
+// Ordered: universally loved → more unique/niche. All high-protein, macro-friendly.
+const SWIPE_MEALS = [
+  { name: 'Smash Burger',        calories: 510, protein: 42, prepTime: 15, imageHints: ['brioche bun', 'smashed beef patty', 'melted american cheese', 'pickles', 'caramelized onions'] },
+  { name: 'Chicken Caesar Wrap', calories: 460, protein: 44, prepTime: 15, imageHints: ['flour tortilla wrap', 'grilled chicken slices', 'romaine lettuce', 'parmesan', 'caesar dressing'] },
+  { name: 'Beef Tacos',          calories: 460, protein: 38, prepTime: 20, imageHints: ['corn tortillas', 'seasoned ground beef', 'shredded cheese', 'salsa', 'lime'] },
+  { name: 'Teriyaki Salmon Bowl',calories: 520, protein: 44, prepTime: 20, imageHints: ['white rice', 'glazed salmon fillet', 'teriyaki sauce', 'sesame seeds', 'green onions', 'edamame'] },
+  { name: 'Shrimp Fried Rice',   calories: 480, protein: 32, prepTime: 25, imageHints: ['fried rice', 'shrimp', 'egg', 'green onions', 'soy sauce', 'carrots'] },
+  { name: 'Chicken Tikka Masala',calories: 520, protein: 40, prepTime: 30, imageHints: ['chicken pieces', 'creamy tomato curry sauce', 'basmati rice', 'naan bread', 'cilantro'] },
+  { name: 'Beef and Broccoli',   calories: 430, protein: 36, prepTime: 20, imageHints: ['sliced beef', 'broccoli florets', 'brown sauce', 'white rice', 'sesame seeds'] },
+  { name: 'Korean BBQ Bowl',     calories: 490, protein: 38, prepTime: 25, imageHints: ['rice bowl', 'bulgogi beef', 'kimchi', 'fried egg', 'gochujang sauce', 'sesame'] },
+]
+const MEAL_SWIPE_THRESHOLD = 80
+
+function SMealSwipe({ onNext, onBack }: { onNext: (liked: string[]) => void; onBack: () => void }) {
+  const indexRef = useRef(0)
+  const likedRef = useRef<string[]>([])
+  const isAnimatingRef = useRef(false)
+  const [displayIndex, setDisplayIndex] = useState(0)
+  const [images, setImages] = useState<Record<string, string>>({})
+  const pan = useRef(new Animated.ValueXY()).current
+  const cardOpacity = useRef(new Animated.Value(1)).current
+  const nextCardScale = useRef(new Animated.Value(0.95)).current
+
+  const CARD_W = width - 32
+  const CARD_H = Math.min(480, H * 0.60)
+  const IMG_H  = CARD_H  // image fills the full card; info overlays it
+
+  // Fetch AI-generated images on mount — same edge function + cache as dashboard
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const raw = await AsyncStorage.getItem('pantry_image_urls_v1')
+        const cache: Record<string, string> = raw ? JSON.parse(raw) : {}
+        // Show cached images immediately
+        const alreadyCached: Record<string, string> = {}
+        for (const m of SWIPE_MEALS) {
+          if (cache[m.name]) alreadyCached[m.name] = cache[m.name]
+        }
+        if (Object.keys(alreadyCached).length > 0) setImages(alreadyCached)
+        // Fetch missing ones in parallel
+        await Promise.all(SWIPE_MEALS.map(async (m) => {
+          if (cache[m.name]) return
+          try {
+            const { data } = await supabase.functions.invoke('generate-meal-image', {
+              body: { mealName: m.name, ingredients: m.imageHints ?? [] },
+            })
+            if (data?.image) {
+              cache[m.name] = data.image
+              setImages(prev => ({ ...prev, [m.name]: data.image }))
+            }
+          } catch {}
+        }))
+        await AsyncStorage.setItem('pantry_image_urls_v1', JSON.stringify(cache))
+      } catch {}
+    })()
+  }, [])
+
+  const cardRotate  = pan.x.interpolate({ inputRange: [-200, 0, 200], outputRange: ['-12deg', '0deg', '12deg'] })
+  const likeOpacity = pan.x.interpolate({ inputRange: [0, MEAL_SWIPE_THRESHOLD], outputRange: [0, 1], extrapolate: 'clamp' })
+  const nopeOpacity = pan.x.interpolate({ inputRange: [-MEAL_SWIPE_THRESHOLD, 0], outputRange: [1, 0], extrapolate: 'clamp' })
+  const greenWash   = pan.x.interpolate({ inputRange: [0, MEAL_SWIPE_THRESHOLD * 1.5], outputRange: [0, 0.3], extrapolate: 'clamp' })
+  const redWash     = pan.x.interpolate({ inputRange: [-MEAL_SWIPE_THRESHOLD * 1.5, 0], outputRange: [0.3, 0], extrapolate: 'clamp' })
+
+  // Reset pan + reveal card AFTER React re-renders with the new displayIndex.
+  // Also clears the animation lock so the next swipe is accepted.
+  useEffect(() => {
+    pan.x.setValue(0)
+    cardOpacity.setValue(1)
+    nextCardScale.setValue(0.95)
+    isAnimatingRef.current = false
+  }, [displayIndex])
+
+  const doSwipe = (isLike: boolean) => {
+    if (isAnimatingRef.current) return
+    isAnimatingRef.current = true
+    const meal = SWIPE_MEALS[indexRef.current]
+    if (isLike) likedRef.current = [...likedRef.current, meal.name]
+    const toX = isLike ? 500 : -500
+    Animated.parallel([
+      Animated.timing(pan.x, { toValue: toX, duration: 380, useNativeDriver: false }),
+      Animated.timing(nextCardScale, { toValue: 1, duration: 380, useNativeDriver: false }),
+    ]).start(() => {
+      cardOpacity.setValue(0)
+      indexRef.current++
+      setDisplayIndex(indexRef.current)
+      if (indexRef.current >= SWIPE_MEALS.length) {
+        AsyncStorage.setItem('onboarding_swiped_meals', JSON.stringify(likedRef.current)).catch(() => {})
+        onNext(likedRef.current)
+      }
+    })
+  }
+
+  const doSwipeRef = useRef(doSwipe)
+  doSwipeRef.current = doSwipe
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 5,
+      onPanResponderMove: (_, g) => { pan.x.setValue(g.dx) },
+      onPanResponderRelease: (_, g) => {
+        if (isAnimatingRef.current) return
+        if (g.dx > MEAL_SWIPE_THRESHOLD) doSwipeRef.current(true)
+        else if (g.dx < -MEAL_SWIPE_THRESHOLD) doSwipeRef.current(false)
+        else Animated.spring(pan.x, { toValue: 0, useNativeDriver: false }).start()
+      },
+    })
+  ).current
+
+  if (displayIndex >= SWIPE_MEALS.length) return null
+
+  const meal     = SWIPE_MEALS[displayIndex]
+  const nextMeal = SWIPE_MEALS[displayIndex + 1]
+  const img      = images[meal.name]
+  const nextImg  = nextMeal ? images[nextMeal.name] : null
+
+  return (
+    <SafeAreaView style={s.safe} edges={['top']}>
+      <TopBar onBack={onBack} pct={PROGRESS[13] ?? 63} />
+
+      <View style={{ flex: 1, alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, justifyContent: 'space-between' }}>
+        <View style={{ alignItems: 'center' }}>
+          <Text style={{ color: '#FFFFFF', fontSize: 22, fontWeight: '700', marginBottom: 4, textAlign: 'center' }}>
+            Which meals excite you?
+          </Text>
+          <Text style={{ color: MUTED, fontSize: 14, textAlign: 'center' }}>
+            Swipe right to save, left to skip
+          </Text>
+        </View>
+
+        {/* Card stack */}
+        <View style={{ width: CARD_W, height: CARD_H }}>
+          {/* Next card peeking behind — scales 0.95→1 as top card flies off */}
+          {nextMeal && (
+            <Animated.View
+              style={{
+                position: 'absolute', width: CARD_W, height: CARD_H,
+                backgroundColor: CARD, borderRadius: 20, overflow: 'hidden',
+                transform: [{ scale: nextCardScale }],
+              }}
+            >
+              {nextImg
+                ? <Image source={{ uri: nextImg }} style={{ width: CARD_W, height: IMG_H }} resizeMode="cover" />
+                : <View style={{ width: CARD_W, height: IMG_H, backgroundColor: '#242424' }} />
+              }
+              <LinearGradient
+                colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.93)']}
+                style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 180, justifyContent: 'flex-end', paddingHorizontal: 16, paddingBottom: 18 }}
+              >
+                <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 10 }}>{nextMeal.name}</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(90,55,10,0.88)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Clock size={11} stroke="#D4A855" strokeWidth={2} />
+                    <Text style={{ color: '#D4A855', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 }}>{nextMeal.prepTime} MIN</Text>
+                  </View>
+                  <View style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}>
+                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 }}>{nextMeal.calories} CAL</Text>
+                  </View>
+                  <View style={{ backgroundColor: 'rgba(74,222,128,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#4ADE80' }}>
+                    <Text style={{ color: '#4ADE80', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 }}>{nextMeal.protein}P</Text>
+                  </View>
+                </View>
+              </LinearGradient>
+            </Animated.View>
+          )}
+
+          {/* Active card */}
+          <Animated.View
+            style={{
+              position: 'absolute', width: CARD_W, height: CARD_H,
+              backgroundColor: CARD, borderRadius: 20, overflow: 'hidden',
+              shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+              shadowOpacity: 0.5, shadowRadius: 20,
+              opacity: cardOpacity,
+              transform: [{ translateX: pan.x }, { rotate: cardRotate }],
+            }}
+            {...panResponder.panHandlers}
+          >
+            {/* Food image or placeholder */}
+            {img
+              ? <Image source={{ uri: img }} style={{ width: CARD_W, height: IMG_H }} resizeMode="cover" />
+              : <View style={{ width: CARD_W, height: IMG_H, backgroundColor: '#242424' }} />
+            }
+
+            {/* Color washes on swipe */}
+            <Animated.View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: '#4ADE80', opacity: greenWash }} />
+            <Animated.View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: '#FF4D4D', opacity: redWash }} />
+
+            {/* SAVE / SKIP badges */}
+            <Animated.View style={{
+              position: 'absolute', top: 20, left: 20,
+              borderWidth: 2.5, borderColor: '#4ADE80', borderRadius: 8,
+              paddingHorizontal: 14, paddingVertical: 5, opacity: likeOpacity,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+            }}>
+              <Text style={{ color: '#4ADE80', fontSize: 17, fontWeight: '900', letterSpacing: 1 }}>SAVE</Text>
+            </Animated.View>
+            <Animated.View style={{
+              position: 'absolute', top: 20, right: 20,
+              borderWidth: 2.5, borderColor: '#FF4D4D', borderRadius: 8,
+              paddingHorizontal: 14, paddingVertical: 5, opacity: nopeOpacity,
+              backgroundColor: 'rgba(0,0,0,0.6)',
+            }}>
+              <Text style={{ color: '#FF4D4D', fontSize: 17, fontWeight: '900', letterSpacing: 1 }}>SKIP</Text>
+            </Animated.View>
+
+            {/* Info — gradient overlay with name + pills */}
+            <LinearGradient
+              colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.93)']}
+              style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 180, justifyContent: 'flex-end', paddingHorizontal: 16, paddingBottom: 18 }}
+            >
+              <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 10 }}>
+                {meal.name}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {/* Prep time — amber pill */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(90,55,10,0.88)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Clock size={11} stroke="#D4A855" strokeWidth={2} />
+                  <Text style={{ color: '#D4A855', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 }}>{meal.prepTime} MIN</Text>
+                </View>
+                {/* Calories — neutral pill */}
+                <View style={{ backgroundColor: 'rgba(255,255,255,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 }}>
+                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 }}>{meal.calories} CAL</Text>
+                </View>
+                {/* Protein — green pill */}
+                <View style={{ backgroundColor: 'rgba(74,222,128,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: '#4ADE80' }}>
+                  <Text style={{ color: '#4ADE80', fontSize: 11, fontWeight: '700', letterSpacing: 0.4 }}>{meal.protein}P</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        </View>
+
+        {/* Dot progress */}
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          {SWIPE_MEALS.map((_, i) => (
+            <View key={i} style={{
+              width: i === displayIndex ? 18 : 6, height: 6, borderRadius: 3,
+              backgroundColor: i < displayIndex ? TEAL : i === displayIndex ? '#FFFFFF' : '#444444',
+            }} />
+          ))}
+        </View>
+
+        {/* Buttons */}
+        <View style={{ flexDirection: 'row', gap: 12, width: '100%' }}>
+          <TouchableOpacity
+            onPress={() => doSwipeRef.current(false)} activeOpacity={0.75}
+            style={{ flex: 1, backgroundColor: '#1A0000', borderRadius: 30, paddingVertical: 18, alignItems: 'center', borderWidth: 1.5, borderColor: '#FF4D4D' }}
+          >
+            <Text style={{ color: '#FF4D4D', fontSize: 22, fontWeight: '700' }}>✕</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => doSwipeRef.current(true)} activeOpacity={0.75}
+            style={{ flex: 1, backgroundColor: TEAL, borderRadius: 30, paddingVertical: 18, alignItems: 'center' }}
+          >
+            <Text style={{ color: '#000000', fontSize: 22, fontWeight: '700' }}>♥</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
+  )
+}
+
 export default function Onboarding() {
   const router = useRouter()
   const { user } = useAuth()
   const { step: stepParam } = useLocalSearchParams<{ step?: string }>()
   const [step, setStep] = useState(1)
   const [stepLoaded, setStepLoaded] = useState(false)
+  const [finishing, setFinishing] = useState(false)
   const fadeAnim = useRef(new Animated.Value(1)).current
   const [data, setData] = useState<OnboardingData>(DEFAULT_DATA)
 
@@ -2746,7 +3279,7 @@ export default function Onboarding() {
       if (saved) {
         const savedStep = parseInt(saved, 10)
         if (!isNaN(savedStep)) {
-          const target = (savedStep === 14 || savedStep === 15) ? 16 : savedStep
+          const target = (savedStep === 15 || savedStep === 16) ? 17 : savedStep === 13 ? 14 : savedStep
           setStep(target)
         }
       }
@@ -2786,8 +3319,8 @@ export default function Onboarding() {
     })
   }
 
-  const next = () => navigate(step + 1)
-  const back = () => navigate(step - 1)
+  const next = () => navigate(step === 12 ? 14 : step + 1)  // step 13 (meal swipe) removed
+  const back = () => navigate(step === 14 ? 12 : step - 1) // step 13 removed — 14 goes back to 12
 
   const prepToMinutes = (prep: string) => {
     if (prep === '10 min') return 10
@@ -2852,11 +3385,46 @@ export default function Onboarding() {
           activity_level: finalData.activityLevel || null,
           fitness_goal: resolvedFitnessGoal,
           referral_code_used: finalData.referralCode ? finalData.referralCode.toUpperCase().trim() : null,
+          cuisine_preferences: finalData.cuisinePreferences || [],
         }).eq('id', user.id)
 
         if (error) {
           Alert.alert('Save Error', error.message)
           return
+        }
+
+        // If meals weren't pre-generated during account creation (e.g. email sign-up),
+        // generate them now and show a brief loading overlay.
+        const existingCache = await AsyncStorage.getItem('pantry_daily_meals_cookNow')
+        const todayStr = new Date().toISOString().slice(0, 10)
+        const cacheReady = existingCache
+          ? (() => { try { const c = JSON.parse(existingCache); return c.date === todayStr && c.meals?.length > 0 } catch { return false } })()
+          : false
+        if (!cacheReady) {
+          setFinishing(true)
+          try {
+            const meals = await generateMeals({
+              ingredients: [
+                'chicken breast', 'ground beef', 'eggs', 'rice', 'pasta',
+                'olive oil', 'butter', 'garlic', 'onion', 'salt', 'black pepper',
+                'soy sauce', 'hot sauce', 'lemon', 'lime', 'Italian seasoning',
+                'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili flakes',
+                'tomato sauce', 'chicken broth', 'parmesan cheese', 'broccoli', 'spinach',
+              ],
+              calorieGoal: computedCals ?? 2400,
+              proteinGoal: computedProt ?? 150,
+              mealsPerDay: parseInt(finalData.meals) || 3,
+              cookingSkill: finalData.cookingSkill || 'moderate',
+              maxPrepMinutes: prepToMinutes(finalData.prep),
+              dietaryRestrictions: mergedRestrictions,
+              foodDislikes: allDislikes,
+              cuisinePreferences: finalData.cuisinePreferences || [],
+              mode: 'cookNow',
+            })
+            await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: todayStr, meals }))
+          } catch {
+            // Fail silently — home screen will generate on load
+          }
         }
       }
 
@@ -2865,6 +3433,7 @@ export default function Onboarding() {
       await AsyncStorage.setItem('onboarding_complete', 'true')
       router.replace('/(tabs)')
     } catch (error: any) {
+      setFinishing(false)
       Alert.alert('Error', error.message)
     }
   }
@@ -2882,14 +3451,24 @@ export default function Onboarding() {
     10: <SCookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
     11: <SMealCadence meals={data.meals} prep={data.prep} onMeals={update('meals')} onPrep={update('prep')} onNext={next} onBack={back} />,
     12: <SDietStyle value={data.dietStyle} onChange={update('dietStyle')} onNext={next} onBack={back} />,
-    13: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={update('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
-    14: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onNext={next} onBack={back} />,
-    15: <SGeneratingIntro onNext={next} onBack={back} />,
-    16: <SPlanLoading onDone={next} />,
-    17: <SPlanReveal data={data} onNext={() => user ? navigate(18) : router.push('/onboarding/createaccount')} onBack={() => navigate(15)} />,
-    18: <STryFree onNext={next} onBack={back} />,
-    19: <STrialReminder onNext={next} onBack={back} />,
-    20: <S7Paywall data={data} onNext={finish} onBack={back} />,
+    14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={update('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
+    15: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onNext={next} onBack={back} />,
+    16: <SGeneratingIntro onNext={next} onBack={back} />,
+    17: <SPlanLoading data={data} onDone={next} />,
+    18: <SPlanReveal data={data} onNext={() => user ? navigate(19) : router.push('/onboarding/createaccount')} onBack={() => navigate(16)} />,
+    19: <STryFree onNext={next} onBack={back} />,
+    20: <STrialReminder onNext={next} onBack={back} />,
+    21: <S7Paywall data={data} onNext={finish} onBack={back} />,
+  }
+
+  if (finishing) {
+    return (
+      <View style={[s.root, { alignItems: 'center', justifyContent: 'center', gap: 20 }]}>
+        <ActivityIndicator size="large" color="#FFFFFF" />
+        <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '600' }}>Building your meal plan…</Text>
+        <Text style={{ color: '#888888', fontSize: 14 }}>This takes just a few seconds</Text>
+      </View>
+    )
   }
 
   return (
@@ -2897,6 +3476,13 @@ export default function Onboarding() {
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         {stepLoaded && screens[step]}
       </Animated.View>
+      {/* Pre-mount SPlanReveal during the loading screen so image fetches start 4s early.
+          Positioned off-screen — component is mounted + effects run, but user sees nothing. */}
+      {stepLoaded && step === 17 && (
+        <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, overflow: 'hidden' }}>
+          <SPlanReveal data={data} isPrefetchOnly onNext={() => {}} onBack={() => {}} />
+        </View>
+      )}
     </View>
   )
 }

@@ -1,20 +1,35 @@
 # Pantry App — Active Todos
 
+## 🔥 FIRST THING TOMORROW
+- [x] **FAL.AI Flux Pro images** — already worked out by Logan
+- [x] Fix YouTube API key for trending meals — working
+
 ## 🔨 In Progress
 - [x] RevenueCat → Superwall migration (SDK wired, placements configured, dashboard set up)
-- [ ] Design Superwall paywall to match Pantry UI (after frontend redesign)
+- [ ] "Skip onboarding" paywall strategy (Halo AI style) — let skeptical users skip onboarding to explore features first, then show a different paywall tailored to browsers. Two paywall variants: one for committed onboarding completers, one for skippers. Should increase overall conversion.
+- [ ] Usage-gated paywall — show paywall at moment of action, not just onboarding. Let free users take the photo/input (e.g. pantry scan, receipt scan, AI estimate), then hit paywall right before the API call fires. User is already invested in the action so conversion is higher. Apply to all premium API-backed features.
 - [x] Freemium gates (1 suggestion/day, 5 saved meals on free tier)
 
-### Payment Strategy (Stripe vs Apple IAP)
-- [ ] Research Stripe mobile checkout UX — study apps using Stripe on iOS with native feel (in-app WebView, Apple Pay via Stripe, minimal friction). Conversion drops if checkout feels like a redirect.
-- [ ] Decide: Stripe (~3% fee) vs Apple IAP (15-30% fee) — Stripe saves $1+/subscriber/mo but must feel seamless
-- [ ] If Stripe: set up Stripe account, build web checkout on heypantry.app, handle subscriptions via webhooks → Supabase
-- [ ] If Apple IAP: Configure App Store Connect products (pantry_monthly, pantry_annual, pantry_lifetime), keep Superwall
+### Paywall Optimization (RevenueCat study — freemium underperforms)
+Based on RevenueCat's analysis of 115K+ apps: pure freemium converts under 2%, free trials convert 15-30% of starters. Health/fitness apps have higher willingness to pay than average.
+- [ ] Add 7-day free trial of premium — shown during onboarding paywall step. Single biggest conversion lever per RevenueCat data.
+- [ ] A/B test weekly ($2.99/week) vs monthly ($7.99/month) pricing via Superwall — weekly sounds cheaper but earns more annually. RevenueCat found weekly effective in fitness.
+- [ ] A/B test hard paywall for paid ad traffic vs soft paywall for organic — hard paywall converts ~34.5% on paid traffic (already planned in Superwall AppStack)
+- [ ] A/B test paywall placement — onboarding step 8 (current) vs immediately after personalization preview vs after first meal generation
+
+### Payment Strategy — DECIDED: Apple IAP in-app + Stripe on web
+Decision: Apple IAP via Superwall for all in-app purchases (safe, compliant). Stripe on heypantry.app for web signups (3% fee vs 15%). No Stripe in-app — Apple rejects/bans apps using third-party payment sheets for digital subscriptions. Confirmed by Austin Hale + Sai.
+- [ ] Configure App Store Connect products (pantry_monthly, pantry_annual, pantry_lifetime) — blocked on Apple Developer account
+- [ ] Design Superwall paywall screens to match Pantry UI (after frontend redesign)
+- [ ] Set up Stripe account for web checkout on heypantry.app
+- [ ] Build Stripe web checkout page on heypantry.app — handle subscriptions via webhooks → Supabase
+- [ ] Sync subscription status: both IAP and Stripe purchases write to same `subscriptions` table in Supabase
 
 ## 📋 Features Left to Build
 
 ### Monetization
 - [x] PostHog analytics integration
+- [ ] Configure Superwall AppStack — hard paywall for paid ad traffic (Meta/TikTok), soft paywall for organic downloads. Hard paywall converts ~34.5% vs ~5% soft on paid traffic. Set up after launching ads.
 
 ### Google + Apple Sign-In
 - [x] Enable Google provider in Supabase Auth dashboard
@@ -68,10 +83,25 @@
 - [x] Landing page deployed to pantryapp.org (Cloudflare Pages)
 - [x] Instacart affiliate application submitted (Impact.com — declined, reapply post-launch with traffic)
 - [ ] Full Instacart integration — use direct deep links for now, wire affiliate links after reapproval
+  - Reapply checklist: email instacart@accelerationpartners.com with App Store download stats, MAU, heypantry.app traffic data, and description of in-app integration (grocery list → one-tap Instacart ordering). Address: (1) show live app + traffic numbers, (2) explain exactly how Instacart is promoted in-app, (3) demonstrate target demo match (health/fitness users buying groceries)
+
+### Calorie Ring Animation
+- [ ] Find or commission a green fire/energy ring Lottie animation — check Rive, Fiverr, or After Effects templates. Drop the file in project and wire behind calorie gauge.
+
+### Food Search UX
+- [ ] Show recently searched/logged foods when opening FoodSearchModal — store last 10-20 searches in AsyncStorage, display as chips or list above search results for quick re-logging
 
 ### Camera UX Improvements
 - [x] Pantry scan: replace system camera with inline camera viewfinder (Cal AI style with brackets/shutter)
 - [x] Receipt scan: replace system camera with inline camera viewfinder (Cal AI style with brackets/shutter)
+
+### Macro-Friendly Desserts Feature
+- [ ] Define scope — AI-generated dessert suggestions that fit within remaining daily macros? Dedicated dessert tab? Dessert category in meal suggestions?
+- [ ] Questions to answer: Does this replace a meal slot or is it a separate "Dessert" slot? Should it pull from user's pantry like regular meals? Calorie/macro ceiling per dessert? Recipe-style or simple suggestions?
+
+### Trending Foods Feature
+- [ ] Define scope — surface trending foods/recipes from the internet on home screen or discover tab? Curated by AI or scraped from social media / food blogs?
+- [ ] Questions to answer: What source for trends (TikTok, Instagram, Google Trends, editorial)? How often do trends refresh? Do trending foods get auto-matched to user's macros/preferences? Is this a discovery feed or a "try this" suggestion? Free or premium feature?
 
 ### V2 Features (post-launch)
 - [x] User recipe uploads — create/edit recipes with AI auto-fill, "My Recipe" badge, filter tab
@@ -79,6 +109,8 @@
 - [ ] Social media recipe import — add Instagram support (requires RapidAPI scraper ~$10/mo)
 - [ ] "What are you in the mood for?" — mood chips + text input on home screen to generate custom meals
 - [ ] Share extension — code built (expo-share-intent), ship post-launch after recipe import is polished
+- [ ] Custom AI model for pantry recognition — train own vision model to detect food items from photos instead of GPT-4o wrapper. Better accuracy, lower latency, reduced per-call cost at scale. Research: fine-tune YOLO/EfficientNet on food dataset or use Apple's CreateML for on-device inference.
+- [ ] Custom AI model for macro estimation from food photos — train own model to estimate calories/protein/carbs/fat from a photo of a plate instead of GPT-4o. Research: food-specific datasets (Nutrition5k, Food-101), could run on-device for instant results with zero API cost.
 
 ### Smart Goal Calculator (Onboarding "Not Sure" Flow)
 - [x] Add age + gender fields to onboarding (collect before macro step)
@@ -111,6 +143,7 @@
 - [x] Google Sign-In redirect_uri_mismatch (fixed: OAuth web flow with pantry://callback redirect)
 - [x] Apple Sign-In auto-popup on app launch (fixed: conditional render via isAvailableAsync check)
 - [ ] Apple Sign-In requires paid Apple Developer account ($99/yr) for Sign in with Apple capability
+- [x] heypantry.app website not loading — resolved 2026-03-30
 
 ### Pantry Scan Visual Review
 - [x] After pantry scan completes, show the captured photo with detected ingredient names as removable chips. Users can remove items before final categorized review.
@@ -129,6 +162,7 @@
 - [x] Home screen: removed redundant Search/Manual buttons, "Estimate with AI" is prominent green CTA
 - [x] Home screen: "Log" button inside expanded empty meal slots
 - [x] Food dislikes popup auto-dismissed after onboarding
+- [ ] Test drag-to-reorder categories on real device (Pantry + Grocery) — requires development build, won't work on Expo Go. May need grip handle UX tweaks after testing on actual touch.
 
 ## 🔒 Security
 - [x] Security audit completed (2026-03-25)
@@ -178,10 +212,11 @@ Design stack: Google Stitch (mockups) → UI UX Pro Max (design system/palettes/
 - [ ] Generate design system with UI UX Pro Max — palette, typography, spacing, component styles for React Native
 - [ ] Mock up all screens in Google Stitch — home, pantry, grocery, saved, profile, meal detail, onboarding
 - [ ] Export Stitch designs and implement with `/newfeature` + frontend-design skill + UI UX Pro Max guidance
-- [ ] Redesign Home screen — macro card, meal cards, today's log section
+- [x] Redesign Home screen — circular macro rings, dark theme throughout, green CTAs, outlined AI estimate button, redesigned header with branding
 - [ ] Redesign Onboarding flow — all 9 steps
-- [ ] Redesign Meal Detail screen
-- [ ] Redesign Pantry + Grocery screens
+- [x] Redesign Meal Detail screen — hero gradient fade, macro pills, icon ingredient actions, step titles from AI, zero-padded numbers
+- [x] Redesign Pantry screen — hero banner with stock level, glass scan cards, category cards with icon circles and count pills, tree-view expanded items
+- [x] Redesign Grocery screen — progress ring card, consistent dark theme, green delivery button
 - [ ] Redesign Saved Meals screen
 - [ ] Redesign Profile/Stats screen
 - [ ] Redesign modals — FoodSearchModal, AILogModal, MacroEditModal, ReceiptScanModal
@@ -195,7 +230,11 @@ Design stack: Google Stitch (mockups) → UI UX Pro Max (design system/palettes/
 - [x] Apple Developer enrollment reset from Individual — cleared by Apple support 2026-03-30, ready to enroll as Organization once D-U-N-S arrives
 - [x] D-U-N-S number requested via Apple/D&B — submitted 2026-03-30
 - [x] D&B docs sent — BIR form + EIN submitted 2026-03-30 (Case #10202968). Certificate of Formation pending from Texas (est. April 3)
-- [ ] Enroll in Apple Developer Program as Organization ($99/yr — needs D-U-N-S + EIN)
+- [x] Certificate of Formation approved by Texas — received 2026-04-01. Download from Northwest account and email to D&B (Case #10202968) to complete D-U-N-S application.
+- [x] Certificate of Formation emailed to D&B (Case #10202968) — sent 2026-04-02
+- [x] D-U-N-S number received — 2026-04-06
+- [x] Apple Developer Program enrollment submitted as Organization (Koba Labs LLC) — 2026-04-06. Pending Apple verification (est. 24-48 hrs). May call to verify signing authority.
+- [ ] Enroll in Apple Developer Program as Organization ($99/yr — needs D-U-N-S + EIN + Certificate of Formation)
 - [ ] Open business bank account with Mercury (mercury.com — needs EIN + LLC docs)
 - [ ] Start "build in public" content — share dev process on TikTok/Instagram/X (start before launch)
 - [ ] Start influencer outreach once LLC is filed — pitch Pantry, open to pivoting app concept if creator has strong audience + better idea
@@ -204,19 +243,24 @@ Design stack: Google Stitch (mockups) → UI UX Pro Max (design system/palettes/
 - [ ] Once viral format found, distribute to additional creators to scale UGC campaign
 
 ## 📱 Content Ideas (record 60s screen recordings)
+
+### 🎬 Record TODAY (2026-03-31) — highest hook potential, 15-30s each
+- [ ] **"I built an AI that tells you what to cook with what's in your fridge"** — show pantry items → generate → meals appear using those ingredients. Strongest hook.
+- [ ] **"I made an app that scans your groceries into your pantry with one photo"** — point camera at groceries → AI detects items → chips → confirm → pantry filled. Visual wow factor.
+- [ ] **"This app scans any food and tells you the exact macros"** — barcode scan OR snap photo of plate → macros appear. Fitness community loves this.
+- [ ] **"Building a food app as a solo dev — day 1"** — casual talking head + quick app montage. Start the series.
+
+Format: hook line first (no intro), voiceover or face-in-corner, end with "app drops soon" / "link in bio". Post to TikTok + Instagram Reels + X.
+
+### Backlog
 - [ ] Show the new "Your plan is ready" onboarding preview step
 - [ ] Show the press-and-hold commitment button in action
 - [ ] Show missing kitchen staples nudge suggesting items to add
 - [ ] Show food search with real macro data from FatSecret
-- [ ] Show AI generating personalized meals based on pantry items
-- [ ] Show pantry scan detecting items from a photo with AI
 - [ ] Show receipt scan auto-populating the pantry
-- [ ] Show barcode scanning pulling up nutrition data instantly
 - [ ] Show the email OTP verification flow (security feature)
-- [ ] Show "Estimate with AI" — snap a photo of food, get macros
 - [ ] Show the macro tracking home screen filling up through the day
 - [ ] Show importing a recipe from a YouTube/TikTok link
-- [ ] "Building an AI meal app as a solo dev" — talk over the home screen
 - [ ] Show the onboarding flow — goals, preferences, macro calculator
 
 ## 🔧 Pre-Launch Fixes
@@ -229,6 +273,7 @@ Design stack: Google Stitch (mockups) → UI UX Pro Max (design system/palettes/
 - [x] Fix AI meal images — fixed empty string check, reduced fetch delay from 5s to 2s, shimmer shows properly while loading
 - [x] Verify pantry + grocery items persist across simulator sessions — confirmed working
 - [x] Polish empty state copy on Saved Meals screen
+- [x] Add password reset flow — "Forgot password?" on sign-in sends OTP code via Supabase, user sets new password, goes straight to dashboard
 - [x] Redesign onboarding — added "Your plan is ready" preview step, press-and-hold commitment button, removed completion screen, auto-mapped fitness goal from step 2, fixed calculator display
 
 ## 🚀 Pre-Launch Checklist

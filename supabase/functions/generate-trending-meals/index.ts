@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
+import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
@@ -98,6 +99,10 @@ async function correctMealMacros(recipe: any): Promise<any> {
 }
 
 Deno.serve(async (req: Request) => {
+  // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
+  const user = await verifyUser(req)
+  if (!user) return unauthorizedResponse()
+
   const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
   const { allowed } = rateLimit(ip, 3, 60000)
   if (!allowed) return rateLimitResponse()
@@ -119,14 +124,14 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    // Step 1: Search YouTube for today's trending high-protein meal videos
-    // Rotate queries by day-of-year so each day gets different search terms
-    const allQueries = [
+    // Step 1: Search YouTube for today's trending high-protein videos across 3 categories:
+    // meals, snacks, desserts. Queries are mixed and rotated by day-of-year so the pool stays
+    // fresh and includes variety beyond just full meals.
+    const mealQueries = [
       'high protein meal prep recipe',
       'healthy high protein dinner',
       'high protein lunch ideas',
       'high protein breakfast recipe',
-      'high protein snack ideas',
       'high protein slow cooker meal',
       'high protein air fryer recipe',
       'high protein bowl recipe',
@@ -138,8 +143,33 @@ Deno.serve(async (req: Request) => {
       'high protein sheet pan dinner',
       'anabolic recipe',
     ]
+    const snackQueries = [
+      'high protein snack recipe',
+      'high protein smoothie recipe',
+      'high protein cottage cheese recipe',
+      'protein balls recipe',
+      'greek yogurt snack ideas',
+      'high protein pancakes',
+      'high protein oats recipe',
+    ]
+    const dessertQueries = [
+      'protein powder dessert recipe',
+      'macro friendly dessert',
+      'protein ice cream recipe',
+      'high protein cheesecake recipe',
+      'protein brownies recipe',
+      'cottage cheese dessert recipe',
+      'healthy protein dessert',
+    ]
+    const allQueries = [...mealQueries, ...snackQueries, ...dessertQueries]
     const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000)
-    const searchQueries = Array.from({ length: 3 }, (_, i) => allQueries[(dayOfYear * 3 + i) % allQueries.length])
+    // Pick one from each category per day — guarantees a mix of meals, snacks, and desserts
+    // regardless of how the query arrays are ordered.
+    const searchQueries = [
+      mealQueries[dayOfYear % mealQueries.length],
+      snackQueries[dayOfYear % snackQueries.length],
+      dessertQueries[dayOfYear % dessertQueries.length],
+    ]
 
     // Fetch previous meal names to avoid repeats
     const { data: prevMeals } = await db.from('trending_meals').select('name').neq('generated_at', today())
@@ -210,8 +240,16 @@ For each one, generate a recipe that ACCURATELY matches what the video describes
 RULES:
 - The recipe MUST match the video content — use the description to determine exact ingredients and method
 - ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion
-- Every recipe MUST have at least 40g protein. If the original recipe is low protein, add a protein source but keep the core dish the same
-- Calories between 400-800 per serving
+- Categorize each recipe as one of: "meal" (full meal 400-800 kcal, protein-rich), "snack" (light 150-350 kcal, still protein-forward), or "dessert" (protein-forward treat 200-500 kcal)
+- Protein targets by category:
+  - meal: at least 30g protein
+  - snack: at least 10g protein
+  - dessert: at least 10g protein
+  If the original recipe is lower protein, add a protein source (protein powder, cottage cheese, Greek yogurt, egg whites) but keep the core dish the same
+- Calorie ranges by category:
+  - meal: 400-800 kcal
+  - snack: 150-350 kcal
+  - dessert: 200-500 kcal
 - MACROS MUST BE CALCULATED FROM THE INGREDIENTS. Add up the calories, protein, carbs, and fat from each ingredient at the listed gram weight. The totals MUST match — do not estimate macros separately from ingredients
 - If the video isn't clearly a recipe or food, skip it
 - Use the actual dish name from the title (cleaned up, no channel name or emoji)
@@ -223,6 +261,7 @@ Respond ONLY with a JSON array, no markdown:
   {
     "video_index": 1,
     "name": "The actual dish name (cleaned up)",
+    "category": "meal",
     "calories": 550,
     "protein": 45,
     "carbs": 40,
@@ -279,17 +318,31 @@ Respond ONLY with a JSON array, no markdown:
     if (fsKey && fsSecret) {
       console.log('Correcting macros via FatSecret...')
       recipes = await Promise.all(recipes.map((r: any) => correctMealMacros(r)))
-      // Re-filter after correction — keep meals with at least 25g protein
-      recipes = recipes.filter((r: any) => r.protein >= 25)
-      console.log(`${recipes.length} meals after macro correction`)
+      // Re-filter after correction — percentage-based threshold mirrors personalized "suggested
+      // for you" logic. Keep meals where protein supplies ≥15% of total calories. This scales
+      // with meal size: a 500 kcal meal needs ~19g; a 800 kcal meal needs ~30g. Absolute 25g
+      // was killing larger-but-still-high-protein recipes.
+      const PROTEIN_CAL_RATIO_MIN = 0.15
+      recipes = recipes.filter((r: any) => {
+        const protein = Number(r.protein) || 0
+        const calories = Number(r.calories) || 0
+        if (calories <= 0) return false
+        const ratio = (protein * 4) / calories
+        return ratio >= PROTEIN_CAL_RATIO_MIN
+      })
+      console.log(`${recipes.length} meals after macro correction (≥${PROTEIN_CAL_RATIO_MIN * 100}% protein ratio)`)
     }
 
     // Step 4: Match recipes back to YouTube thumbnails
     const meals = recipes.map((r: any) => {
       const videoIdx = (r.video_index || 1) - 1
       const video = uniqueVideos[videoIdx] || uniqueVideos[0]
+      // Normalize category — LLM should output 'meal' / 'snack' / 'dessert', but guard against typos/missing
+      const rawCat = (r.category || '').toLowerCase().trim()
+      const category = rawCat === 'snack' ? 'snack' : rawCat === 'dessert' ? 'dessert' : 'meal'
       return {
         name: r.name,
+        category,
         calories: r.calories,
         protein: r.protein,
         carbs: r.carbs,
@@ -303,8 +356,12 @@ Respond ONLY with a JSON array, no markdown:
       }
     })
 
-    // Clear old and insert
-    await db.from('trending_meals').delete().neq('id', '')
+    // Keep the last 3 days of trending meals as fallback if today generates few survivors.
+    // Previously we wiped every run which left zero-meal days when filters rejected recipes.
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+    await db.from('trending_meals').delete().lt('generated_at', threeDaysAgo)
+    // Remove any existing rows for today (in case of re-run) before inserting new ones
+    await db.from('trending_meals').delete().eq('generated_at', today())
     const { error } = await db.from('trending_meals').insert(meals)
 
     if (error) {
@@ -348,8 +405,10 @@ Respond ONLY with a JSON array, no markdown:
       }
     }
 
+    // Re-fetch from DB so the response includes AI-generated image URLs (not YouTube thumbnails)
+    const { data: finalMeals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
     console.log(`Success: ${meals.length} trending meals from YouTube + Groq`)
-    return new Response(JSON.stringify({ generated: true, count: meals.length, meals }), {
+    return new Response(JSON.stringify({ generated: true, count: meals.length, meals: finalMeals ?? meals }), {
       headers: { 'Content-Type': 'application/json' },
     })
   } catch (e) {

@@ -1,0 +1,37 @@
+# Supabase project config — per-function gateway settings.
+# `verify_jwt = false` bypasses the platform's JWT gateway check so functions
+# can accept ES256 asymmetric-signed tokens (which the gateway currently
+# rejects with UNAUTHORIZED_UNSUPPORTED_TOKEN_ALGORITHM). Each function below
+# then verifies the Authorization header manually using supabase-js.
+
+project_id = "pantry"
+
+[functions.generate-meals]
+verify_jwt = false
+
+[functions.generate-meal-image]
+verify_jwt = false
+
+[functions.scan-pantry]
+verify_jwt = false
+
+[functions.parse-receipt]
+verify_jwt = false
+
+[functions.estimate-meal-macros]
+verify_jwt = false
+
+[functions.generate-recipe]
+verify_jwt = false
+
+[functions.extract-recipe-from-url]
+verify_jwt = false
+
+[functions.generate-ingredient-images]
+verify_jwt = false
+
+[functions.generate-trending-meals]
+verify_jwt = false
+
+[functions.fatsecret-proxy]
+verify_jwt = false
