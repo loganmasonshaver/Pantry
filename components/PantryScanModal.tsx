@@ -775,7 +775,7 @@ const styles = StyleSheet.create({
   },
   cameraTopBar: {
     position: 'absolute',
-    top: 30,
+    top: 20,
     left: 16,
     right: 16,
     flexDirection: 'row',
