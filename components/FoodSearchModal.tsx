@@ -78,6 +78,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const [scanned, setScanned] = useState(false)
   const [scanLoading, setScanLoading] = useState(false)
+  // ref (not state) so the guard is synchronous and doesn't cause a re-render
   const scanningRef = useRef(false) // synchronous guard — state updates are async and allow duplicate fires
 
   // Detail state
@@ -176,7 +177,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     try {
       const res = await searchFoods(q.trim())
       setResults(res)
-      // Fetch actual serving macros for each result in background
+      // fetch full nutrition details in background after showing initial results
       res.forEach(async (food) => {
         try {
           const detail = await getFoodById(food.food_id)
@@ -203,6 +204,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const onQueryChange = (text: string) => {
     setQuery(text)
     if (searchTimeout.current) clearTimeout(searchTimeout.current)
+    // debounce to avoid firing a search on every keystroke
     searchTimeout.current = setTimeout(() => doSearch(text), 500)
   }
 
@@ -368,6 +370,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                   const ringSize = 150
                   const strokeWidth = 10
                   const radius = (ringSize - strokeWidth) / 2
+                  // circumference = 2πr
                   const circumference = 2 * Math.PI * radius
 
                   // Macro split: calories from each macro
@@ -385,10 +388,12 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                     { pct: carbsPct, color: '#F59E0B' },
                     { pct: fatPct, color: '#60A5FA' },
                   ].filter(s => s.pct > 0.01)
+                  // 4-degree visual gap between ring segments
                   const gapDeg = segments.length > 1 ? 4 : 0 // 4 degree gap
                   const totalGapDeg = gapDeg * segments.length
                   const availableDeg = 360 - totalGapDeg
                   let rotationCursor = 0
+                  // each segment arc length = circumference × macro fraction
                   const ringSegments = segments.map(s => {
                     const segDeg = availableDeg * s.pct
                     const segLen = (segDeg / 360) * circumference

@@ -205,6 +205,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
 
       // Auto-correct calories to match macros (protein×4 + carbs×4 + fat×9)
       const correctedCal = (estimate.protein || 0) * 4 + (estimate.carbs || 0) * 4 + (estimate.fat || 0) * 9
+      // fall back to GPT estimate if FatSecret has no calorie data
       const finalCal = correctedCal > 0 ? correctedCal : estimate.calories
 
       setMealName(estimate.name)
@@ -458,6 +459,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   const diff = Math.abs(macroCals - cal)
                   if (diff > 10 && macroCals > 0 && lastEditedMacro) {
                     // Silently sync calories to match macros
+                    // deferred to avoid setState during render
                     setTimeout(() => setCalories(String(macroCals)), 0)
                   }
                   return null
@@ -482,6 +484,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   </View>
                 </ScrollView>
 
+                {/* disable save if calories don't match macro totals */}
                 <TouchableOpacity
                   style={[styles.analyzeBtn, (!mealName.trim() || saving || (() => {
                     const p = parseInt(protein) || 0, c = parseInt(carbs) || 0, f = parseInt(fat) || 0, cal = parseInt(calories) || 0

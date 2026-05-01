@@ -11,7 +11,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage: AsyncStorage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: false, // React Native has no URL bar; prevents Supabase from trying to parse OAuth tokens from window.location
   },
 });
 

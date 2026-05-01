@@ -7,20 +7,32 @@ const fsKey = Deno.env.get("FATSECRET_KEY") ?? ""
 const fsSecret = Deno.env.get("FATSECRET_SECRET") ?? ""
 
 // ── FatSecret OAuth 1.0 helpers ──
+// FatSecret uses OAuth 1.0 (not 2.0) — requires HMAC-SHA1 signed request URLs.
+// There is no Bearer token; every request must be signed with the consumer secret.
 const FS_URL = "https://platform.fatsecret.com/rest/server.api"
 
+// OAuth 1.0 requires stricter percent-encoding than encodeURIComponent alone —
+// RFC 3986 reserves !, ', (, ), and * but JS doesn't encode them by default.
 function percentEncode(str: string): string {
   return encodeURIComponent(str).replace(/!/g, "%21").replace(/'/g, "%27")
     .replace(/\(/g, "%28").replace(/\)/g, "%29").replace(/\*/g, "%2A")
 }
 
+// Builds a fully OAuth 1.0 signed GET URL for any FatSecret API method.
+// Flow: collect all params → percent-encode and sort → build signature base string
+//   → HMAC-SHA1 sign with secret key → append signature → return full query URL.
+// The signing key for OAuth 1.0 is `{percentEncoded(consumerSecret)}&` (no token secret).
 async function fsSignedUrl(params: Record<string, string>): Promise<string> {
   const all: Record<string, string> = {
-    oauth_consumer_key: fsKey, oauth_nonce: crypto.randomUUID().replace(/-/g, ""),
-    oauth_signature_method: "HMAC-SHA1", oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+    oauth_consumer_key: fsKey,
+    oauth_nonce: crypto.randomUUID().replace(/-/g, ""), // random alphanumeric, dashes stripped per spec
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)), // Unix epoch seconds
     oauth_version: "1.0", format: "json", ...params,
   }
+  // OAuth spec requires params sorted lexicographically before signing
   const paramStr = Object.keys(all).sort().map(k => `${percentEncode(k)}=${percentEncode(all[k])}`).join("&")
+  // Signature base = HTTP method + encoded URL + encoded param string, all joined by &
   const base = ["GET", percentEncode(FS_URL), percentEncode(paramStr)].join("&")
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(`${percentEncode(fsSecret)}&`),
     { name: "HMAC", hash: "SHA-1" }, false, ["sign"])

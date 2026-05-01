@@ -31,9 +31,12 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
   const [loaded, setLoaded] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Holds the resolve callback of the Promise returned by requestConsent so the modal's
+  // accept/cancel handlers can settle it asynchronously
   const pendingResolve = useRef<((v: boolean) => void) | null>(null)
   // Ref mirror so requestConsent (captured in a closure) can read the latest value.
   const hasConsentRef = useRef(false)
+  // Ref mirror so waitForLoad's polling closure can detect when the profile fetch settles
   const loadedRef = useRef(false)
 
   useEffect(() => {
@@ -51,8 +54,10 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
       .from('profiles')
       .select('ai_consent_accepted_at')
       .eq('id', user.id)
+      // maybeSingle returns null data (not an error) when the row doesn't exist yet
       .maybeSingle()
       .then(({ data }) => {
+        // Null timestamp means the user has never accepted; a truthy timestamp means they have
         const ts = data?.ai_consent_accepted_at ?? null
         setAcceptedAt(ts)
         setHasConsent(!!ts)
@@ -62,6 +67,8 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
       })
   }, [user?.id])
 
+  // Blocks until the profile fetch has completed, with a 5-second safety timeout so the app
+  // never hangs indefinitely if Supabase is slow or unreachable
   const waitForLoad = () =>
     new Promise<void>((resolve) => {
       if (loadedRef.current) { resolve(); return }
@@ -71,7 +78,7 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
           clearInterval(poll)
           resolve()
         }
-      }, 50)
+      }, 50) // Poll every 50ms — fast enough to feel instant, cheap enough not to matter
     })
 
   const requestConsent = async () => {

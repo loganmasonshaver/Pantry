@@ -74,6 +74,7 @@ export default function EditPortionModal({
     let updatePayload: Record<string, any>
 
     if (food && selectedServing) {
+      // floor at 0.1 to prevent zero-quantity division
       const qty = Math.max(0.1, parseFloat(quantity) || 1)
       const base = parseMacros(selectedServing)
       calories = Math.round(base.calories * qty)
@@ -96,7 +97,9 @@ export default function EditPortionModal({
     onClose()
   }
 
+  // floor at 0.1 to prevent zero-quantity division
   const qty = Math.max(0.1, parseFloat(quantity) || 1)
+  // compute fresh macros inline whenever quantity or serving changes
   const liveMacros = food && selectedServing
     ? (() => { const b = parseMacros(selectedServing); return { calories: Math.round(b.calories * qty), protein: Math.round(b.protein * qty), carbs: Math.round(b.carbs * qty), fat: Math.round(b.fat * qty) } })()
     : null

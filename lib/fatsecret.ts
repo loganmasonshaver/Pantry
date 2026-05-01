@@ -49,7 +49,7 @@ export async function searchFoods(query: string, page = 0): Promise<FoodSearchRe
 
   const foods = data?.foods?.food
   if (!foods) return []
-  return (Array.isArray(foods) ? foods : [foods]).map((f: any) => ({
+  return (Array.isArray(foods) ? foods : [foods] /* FatSecret returns a bare object (not array) when exactly one result comes back */).map((f: any) => ({
     food_id: f.food_id,
     food_name: f.food_name,
     brand_name: f.brand_name,
@@ -65,7 +65,7 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
   const food = data.food
   const rawServings = food.servings?.serving
   const servingsArr: FoodServing[] = rawServings
-    ? (Array.isArray(rawServings) ? rawServings : [rawServings]).map((s: any) => {
+    ? (Array.isArray(rawServings) ? rawServings : [rawServings] /* same: single-serving foods come back as an object, not an array */).map((s: any) => {
         // Append gram equivalent to description if available and not already a gram serving
         let desc = s.serving_description ?? ''
         const metricG = parseFloat(s.metric_serving_amount ?? '0')
@@ -93,10 +93,10 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
     const ref = servingsArr[0]
     const metricG = parseFloat(ref.metric_serving_amount ?? '0')
     if (metricG > 0 && (ref.metric_serving_unit === 'g' || ref.metric_serving_unit === 'ml')) {
-      const scale100 = 100 / metricG
+      const scale100 = 100 / metricG // scale nutrients proportionally from this serving size to 100g
       const scale1 = 1 / metricG
       servingsArr.push({
-        serving_id: '__100g',
+        serving_id: '__100g', // __ prefix distinguishes synthetic IDs from real FatSecret serving IDs
         serving_description: '100 g',
         calories: String(Math.round(parseFloat(ref.calories) * scale100)),
         protein: String(Math.round(parseFloat(ref.protein) * scale100 * 10) / 10),
@@ -129,6 +129,7 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
 }
 
 // ── Barcode lookup via Open Food Facts (free, no auth) ────────────────────
+// Open Food Facts is free/no-auth; FatSecret has no barcode endpoint in the free tier
 
 async function productNameFromBarcode(barcode: string): Promise<string | null> {
   try {

@@ -3,6 +3,7 @@ import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 
+// AsyncStorage keys for tracking trial lifecycle across app restarts
 const TRIAL_STARTED_KEY = 'pantry_trial_started_at'
 const TRIAL_EXPIRED_KEY = 'pantry_trial_expired'
 
@@ -38,7 +39,8 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
   const [loading, setLoading] = useState(true)
   const [trialExpired, setTrialExpired] = useState(false)
   const { subscriptionStatus, registerPlacement } = useSuperwall()
-  // Initialise with current status so first-run ACTIVE doesn't misfire the trial logic
+  // Seed with the current status so the very first onSubscriptionStatusChange event doesn't
+  // treat an already-ACTIVE user as a brand-new trial start (prevStatus would otherwise be undefined)
   const prevStatusRef = useRef<string | undefined>(subscriptionStatus?.status)
 
   // Load persisted trial_expired flag
@@ -50,6 +52,7 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     const status = subscriptionStatus?.status
+    // Superwall uses 'ACTIVE' to mean the user has a valid entitlement (trial or paid)
     setIsPremium(status === 'ACTIVE')
     setLoading(false)
   }, [subscriptionStatus])
@@ -62,13 +65,14 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
 
       setIsPremium(newStatus === 'ACTIVE')
 
-      // INACTIVE → ACTIVE: trial just started (schedule once)
+      // Transition INACTIVE → ACTIVE means the user just started a trial (or purchased)
       if (newStatus === 'ACTIVE' && prevStatus !== 'ACTIVE') {
+        // Guard with AsyncStorage so re-installs / app restarts don't re-schedule the notification
         const alreadyStarted = await AsyncStorage.getItem(TRIAL_STARTED_KEY)
         if (!alreadyStarted) {
           const now = Date.now()
           await AsyncStorage.setItem(TRIAL_STARTED_KEY, String(now))
-          // Fire 1 hour before 3-day trial ends (71h from start)
+          // 71 hours = 3-day trial minus 1 hour — nudge the user before it lapses
           const triggerDate = new Date(now + 71 * 60 * 60 * 1000)
           await Notifications.scheduleNotificationAsync({
             content: {
@@ -85,8 +89,9 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
         }
       }
 
-      // ACTIVE → INACTIVE: trial expired without converting
+      // Transition ACTIVE → INACTIVE means trial lapsed without a paid conversion
       if (prevStatus === 'ACTIVE' && newStatus !== 'ACTIVE') {
+        // Only flag as expired if we know a trial actually started (not a user who never trialled)
         const trialStarted = await AsyncStorage.getItem(TRIAL_STARTED_KEY)
         if (trialStarted) {
           await AsyncStorage.setItem(TRIAL_EXPIRED_KEY, 'true')

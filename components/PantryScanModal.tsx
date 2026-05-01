@@ -184,6 +184,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           .eq('id', user!.id)
           .single()
         const count = profile?.pantry_scan_count ?? 0
+        // free tier is capped at 3 pantry scans
         if (count >= 3) {
           trackUpgradePromptShown('scan_limit')
           await triggerUpgrade('pantry_scan_limit')
@@ -238,6 +239,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   useEffect(() => {
     if (step !== 5 || showDone) return
     setLoadingMessageIdx(0)
+    // rotate encouraging messages every 2.2s while AI processes
     const interval = setInterval(() => {
       setLoadingMessageIdx(prev => (prev + 1) % LOADING_MESSAGES.length)
     }, 2200)
@@ -536,6 +538,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
               <View style={styles.loadingFooter}>
                 <TouchableOpacity
                   style={[styles.primaryBtn, { width: '100%' }]}
+                  // 55 is a half-step between step 5 and 6 for the processing animation
                   onPress={() => setStep(55)}
                   activeOpacity={0.85}
                 >

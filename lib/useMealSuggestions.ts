@@ -91,7 +91,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Oldest items first — GPT prompt will prioritize using them up
       const ingredients = pantryItems?.map(i => i.name) || []
 
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() // limits rating history fed to GPT so stale preferences don't bloat the prompt
       const { data: ratings } = await supabase
         .from('meal_ratings')
         .select('meal_name, rating')
@@ -105,7 +105,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       if (!ok) { setLoading(false); return }
 
       const generated = await generateMeals({
-        ingredients: ingredients.length > 0 ? ingredients : ['chicken breast', 'rice', 'eggs', 'broccoli'],
+        ingredients: ingredients.length > 0 ? ingredients : ['chicken breast', 'rice', 'eggs', 'broccoli'], // GPT needs at least some ingredients to generate meaningful meals
         calorieGoal: profile?.calorie_goal || 2400,
         proteinGoal: profile?.protein_goal || 150,
         mealsPerDay: profile?.meals_per_day || 3,
@@ -122,6 +122,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Cache today's meals for free-tier daily limit
       await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated }))
 
+      // images load progressively after meals are shown; errors must not block the UI
       // Fetch all images in parallel
       const mealsToImage = [...generated]
       ;(async () => {
@@ -228,13 +229,13 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // Seeded meals (onboarding placeholders) are skipped — they have no recipe data.
   useEffect(() => {
     if (!userId) return
-    let cancelled = false
+    let cancelled = false // prevents setMeals on an unmounted component if the user navigates away
     ;(async () => {
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
         if (cached.date === todayStr() && cached.meals.length > 0) {
-          const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_'))
+          const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_')) // onboarding placeholder meals have no recipe data; clear them before real generation
           if (!isSeeded) {
             // Real AI meals: show immediately, then fetch any missing images in background
             setMeals(cached.meals)

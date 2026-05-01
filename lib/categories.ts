@@ -24,11 +24,12 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Beverages': ['water', 'juice', 'soda', 'coffee', 'tea', 'kombucha', 'beer', 'wine', 'seltzer', 'sparkling', 'lemonade', 'smoothie', 'protein shake', 'almond milk', 'oat milk', 'soy milk', 'coconut water', 'energy drink', 'gatorade', 'electrolyte', 'protein powder'],
 }
 
+// returns an array because one item can match multiple categories (e.g. "peanut butter" hits both Canned & Nuts)
 export function autoCategoryMatches(itemName: string): string[] {
   const lower = itemName.toLowerCase()
   const matches: string[] = []
   for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some(kw => lower.includes(kw))) matches.push(category)
+    if (keywords.some(kw => lower.includes(kw))) matches.push(category) // substring match so "chicken breast" matches keyword "chicken"
   }
   return matches
 }

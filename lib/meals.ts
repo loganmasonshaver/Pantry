@@ -53,6 +53,7 @@ export async function generateMeals({
     }
   }
 
+  // extracted so it can be called twice (initial attempt + 401 retry) without duplicating the body
   const invoke = async () => supabase.functions.invoke('generate-meals', {
     body: {
       ingredients,
@@ -72,6 +73,7 @@ export async function generateMeals({
 
   let { data, error } = await invoke()
 
+  // JWT can expire mid-session; force a token refresh then retry once
   // If we hit a 401, force a refresh and retry once.
   if (error && (error as any)?.context?.status === 401) {
     console.log('[generateMeals] hit 401, forcing refreshSession and retrying')

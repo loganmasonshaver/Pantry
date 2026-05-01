@@ -59,6 +59,7 @@ function GroceryRow({
 
   const panResponder = useRef(
     PanResponder.create({
+      // only claim the gesture if horizontal movement dominates, so vertical scroll still works
       onMoveShouldSetPanResponder: (_, g) =>
         Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy),
       onPanResponderMove: (_, g) => {
@@ -126,7 +127,7 @@ export default function GroceryScreen() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
     if (data) {
-      // Re-categorize items stuck in "Other" or old categories
+      // migrate items that were saved under old category names
       const fixed = data.map(item => {
         const cleanName = item.name.replace(/\s*\*\s*$/, '').trim()
         if (item.category === 'Other' || item.category === 'Pantry Staples' || item.category === 'Condiments' || item.category === 'Dairy') {
@@ -138,7 +139,7 @@ export default function GroceryScreen() {
         return { ...item, name: cleanName }
       })
 
-      // Remove duplicates (keep the first occurrence, fuzzy match)
+      // fuzzy dedup: skip if a similar item name is already in the list
       const seen: string[] = []
       const deduped = fixed.filter(item => {
         const lower = item.name.toLowerCase()
@@ -446,6 +447,7 @@ export default function GroceryScreen() {
             <TouchableOpacity
               style={styles.deliveryBtn}
               activeOpacity={0.85}
+              // flag checked on focus-return to prompt "Did you order?" confirmation
               onPress={() => { pendingOrderRef.current = true; router.push('/delivery-webview') }}
             >
               <ShoppingCart size={18} stroke="#4ADE80" strokeWidth={2} />
@@ -472,7 +474,9 @@ export default function GroceryScreen() {
               <Svg width={80} height={80} style={{ transform: [{ rotate: '-90deg' }] }}>
                 <SvgCircle cx={40} cy={40} r={34} stroke="rgba(255,255,255,0.08)" strokeWidth={5} fill="transparent" />
                 <SvgCircle cx={40} cy={40} r={34} stroke="#4ADE80" strokeWidth={5} fill="transparent"
+                  // dashoffset controls how much of the ring circumference is visible
                   strokeDasharray={`${2 * Math.PI * 34}`}
+                  // fraction of ring to leave unfilled based on checked ratio
                   strokeDashoffset={2 * Math.PI * 34 * (1 - checkedCount / items.length)}
                   strokeLinecap="round" />
               </Svg>

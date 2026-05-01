@@ -2,7 +2,7 @@ import PostHog from 'posthog-react-native'
 
 const posthog = new PostHog(process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? '', {
   host: 'https://us.i.posthog.com',
-  disabled: !process.env.EXPO_PUBLIC_POSTHOG_API_KEY,
+  disabled: !process.env.EXPO_PUBLIC_POSTHOG_API_KEY, // silently no-ops all capture calls when the key is missing (e.g. local dev without .env)
 })
 
 export default posthog
@@ -34,7 +34,7 @@ export function trackPaywallViewed(source: 'onboarding' | 'meal_detail' | 'home'
 }
 
 export function trackSubscriptionPurchased(plan: 'monthly' | 'lifetime', price?: number) {
-  posthog.capture('subscription_purchased', { plan, ...(price != null ? { price } : {}) })
+  posthog.capture('subscription_purchased', { plan, ...(price != null ? { price } : {}) }) // omit the key entirely so PostHog filters work cleanly
 }
 
 export function trackUpgradePromptShown(source: 'meal_save_limit' | 'regen_limit' | 'scan_limit' | 'ai_log_limit') {
