@@ -13,7 +13,7 @@ import {
   Alert,
   Dimensions,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
 import * as ImageManipulator from 'expo-image-manipulator'
@@ -136,6 +136,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const { requestConsent } = useAIConsent()
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
+  const insets = useSafeAreaInsets()
   const [step, setStep] = useState(1)
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
   const [showDone, setShowDone] = useState(false)
@@ -343,7 +344,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
-      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+      <SafeAreaView style={styles.safe} edges={['bottom']}>
 
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
@@ -376,7 +377,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 <View style={[styles.bracket, styles.bracketBR]} />
 
                 {/* Top bar overlay */}
-                <View style={styles.cameraTopBar}>
+                <View style={[styles.cameraTopBar, { top: insets.top + 12 }]}>
                   <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
                     <X size={20} stroke="#FFFFFF" strokeWidth={2} />
                   </TouchableOpacity>
@@ -775,7 +776,6 @@ const styles = StyleSheet.create({
   },
   cameraTopBar: {
     position: 'absolute',
-    top: 16,
     left: 16,
     right: 16,
     flexDirection: 'row',
