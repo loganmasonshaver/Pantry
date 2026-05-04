@@ -44,7 +44,7 @@ async function parseWithGemini(base64: string): Promise<string> {
             { text: RECEIPT_PROMPT },
           ],
         }],
-        generationConfig: { maxOutputTokens: 1000 },
+        generationConfig: { maxOutputTokens: 1000 }, // receipts rarely exceed 50 items; 1000 tokens is sufficient
       }),
     }
   )
@@ -66,7 +66,7 @@ async function parseWithOpenAI(base64: string): Promise<string> {
       messages: [{
         role: "user",
         content: [
-          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" } },
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" } }, // high detail improves OCR accuracy on receipt text
           { type: "text", text: RECEIPT_PROMPT },
         ],
       }],

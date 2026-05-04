@@ -46,7 +46,7 @@ export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onTok
 
   useImperativeHandle(ref, () => ({
     reset: () => {
-      webviewRef.current?.injectJavaScript('resetWidget(); true;')
+      webviewRef.current?.injectJavaScript('resetWidget(); true;') // WebView requires injected JS to evaluate to a truthy value
     },
   }))
 
@@ -61,10 +61,11 @@ export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onTok
   )
 
   return (
+    // 0×0 hidden view — only exists to run the Turnstile challenge, never shown to the user
     <View style={{ width: 0, height: 0, overflow: 'hidden' }}>
       <WebView
         ref={webviewRef}
-        source={{ html, baseUrl: 'https://heypantry.app' }}
+        source={{ html, baseUrl: 'https://heypantry.app' }} // Cloudflare validates the request origin against this domain
         originWhitelist={['*']}
         javaScriptEnabled
         onMessage={handleMessage}

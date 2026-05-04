@@ -6,6 +6,7 @@ const BASE_URL = "https://platform.fatsecret.com/rest/server.api"
 const CONSUMER_KEY = Deno.env.get("FATSECRET_KEY") ?? ""
 const CONSUMER_SECRET = Deno.env.get("FATSECRET_SECRET") ?? ""
 
+// OAuth 1.0a requires stricter percent-encoding than standard encodeURIComponent
 function percentEncode(str: string): string {
   return encodeURIComponent(str)
     .replace(/!/g, "%21")
@@ -24,20 +25,22 @@ async function buildSignedUrl(params: Record<string, string>): Promise<string> {
     oauth_consumer_key: CONSUMER_KEY,
     oauth_nonce: generateNonce(),
     oauth_signature_method: "HMAC-SHA1",
-    oauth_timestamp: String(Math.floor(Date.now() / 1000)),
+    oauth_timestamp: String(Math.floor(Date.now() / 1000)), // OAuth requires Unix timestamp in seconds
     oauth_version: "1.0",
     format: "json",
     ...params,
   }
 
+  // OAuth 1.0a signature requires parameters sorted alphabetically
   const sortedKeys = Object.keys(oauthParams).sort()
   const paramString = sortedKeys
     .map((k) => `${percentEncode(k)}=${percentEncode(oauthParams[k])}`)
     .join("&")
 
+  // signature base string format: METHOD & encoded_url & encoded_params
   const signatureBase = ["GET", percentEncode(BASE_URL), percentEncode(paramString)].join("&")
 
-  const signingKey = `${percentEncode(CONSUMER_SECRET)}&`
+  const signingKey = `${percentEncode(CONSUMER_SECRET)}&` // trailing & is required; empty token secret for consumer-only requests
   const encoder = new TextEncoder()
   const key = await crypto.subtle.importKey(
     "raw",
@@ -74,7 +77,7 @@ Deno.serve(async (req: Request) => {
   if (!user) return unauthorizedResponse()
 
   const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 30, 60000)
+  const { allowed } = rateLimit(ip, 30, 60000) // 30 FatSecret requests per minute per IP
   if (!allowed) return rateLimitResponse()
 
   try {

@@ -19,7 +19,7 @@ const TEAL = '#4ADE80'
 type Props = {
   visible: boolean
   onClose: () => void
-  source?: 'regen_limit' | 'meal_save_limit' | 'scan_limit' | 'browse'
+  source?: 'regen_limit' | 'meal_save_limit' | 'scan_limit' | 'browse' // tracks which limit triggered the paywall for analytics
 }
 
 const FEATURES = [
@@ -38,12 +38,13 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
       trackPaywallViewed(source as any)
       Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start()
     } else {
-      fadeAnim.setValue(0)
+      fadeAnim.setValue(0) // reset without animation so the next open always starts from opacity 0
     }
   }, [visible])
 
   const handleStartTrial = async () => {
     try {
+      // delegates to Superwall, which presents the native StoreKit IAP sheet for this placement
       await registerPlacement('usage_paywall')
     } catch {}
     onClose()

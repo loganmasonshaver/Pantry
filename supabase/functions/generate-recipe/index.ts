@@ -64,9 +64,9 @@ Respond ONLY with valid JSON, no markdown, no explanation:
         "Authorization": `Bearer ${openaiApiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-4o-mini", // cheaper model; recipe generation doesn't need vision or top-tier reasoning
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
+        temperature: 0.7, // moderate creativity for varied recipes without hallucinating ingredient combos
         max_tokens: 2000,
       }),
     })
@@ -79,7 +79,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
     }
 
     const text = data.choices?.[0]?.message?.content || "{}"
-    const clean = text.replace(/```json|```/g, "").trim()
+    const clean = text.replace(/```json|```/g, "").trim() // GPT sometimes wraps JSON in markdown code fences despite instructions
     const recipe = JSON.parse(clean)
 
     return new Response(JSON.stringify(recipe), {
