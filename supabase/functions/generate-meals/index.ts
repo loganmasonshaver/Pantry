@@ -164,7 +164,7 @@ User profile:
 - Daily calorie goal: ${calorieGoal} kcal
 - Daily protein goal: ${proteinGoal}g
 - Meals per day: ${mealsPerDay}
-- Cooking skill: ${cookingSkill}
+- Cooking skill: ${cookingSkill === 'minimal' ? 'minimal (beginner-friendly meals only — basic heat application, one pan where possible, think scrambled eggs, pasta with jarred sauce, sheet pan meals, no complex techniques)' : cookingSkill === 'moderate' ? 'moderate (standard home cook — can follow a multi-step recipe, comfortable with a pan and oven)' : cookingSkill === 'adventurous' ? 'adventurous (confident cook — bold and global flavors, complexity is welcome, unfamiliar ingredients encouraged)' : cookingSkill === 'culinary' ? 'culinary (advanced home cook — multi-step techniques, braising, homemade sauces, chef-level complexity expected)' : cookingSkill}
 - Max prep time: ${maxPrepMinutes} minutes
 - Dietary restrictions: ${restrictions}${restrictionsLine}${dislikesLine}${dislikedMealsLine}${likedMealsLine}${cuisineLine}
 

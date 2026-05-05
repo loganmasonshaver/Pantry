@@ -120,7 +120,7 @@ export default function CreateAccountScreen() {
           mode: 'cookNow',
         })
         const today = new Date().toISOString().slice(0, 10)
-        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals }))
+        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: d.dietStyle || 'Classic' }))
       } catch {}
     })()
   }

@@ -228,15 +228,18 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     p.loop = false
     p.muted = true
     p.playbackRate = 0.9
+    // warm up during init so every cycle starts from the same player state
+    p.play()
+    p.pause()
   })
 
   useEffect(() => {
     let cancelled = false
     const pending: ReturnType<typeof setTimeout>[] = []
 
-    // Hold-phase zoom moments — timestamps relative to the start of the hold (after enter anim).
+    // Hold-phase zoom moments — ms after play() is called (player is pre-warmed so latency is consistent)
     // Aligned to the "Suggested for you" meal cards appearing AFTER the pantry scan animation finishes.
-    const ZOOM_AT: number[] = [5800, 8800] // ms into hold
+    const ZOOM_AT: number[] = [6000, 9400] // ms into hold
     const ZOOM_ANIMS = [zoom1, zoom2]
     const ZOOM_IN_DURATION = 320
     const ZOOM_HOLD_DURATION = 520
@@ -442,9 +445,9 @@ const w1 = StyleSheet.create({
 })
 
 const GOALS = [
-  { id: 'lose', Icon: TrendingDown, iconColor: '#EF4444', label: 'Lose Weight', sub: 'Burn fat while hitting your protein goals' },
-  { id: 'build', Icon: Dumbbell, iconColor: TEAL, label: 'Build Muscle', sub: 'High protein meals to support your gains' },
-  { id: 'maintain', Icon: Scale, iconColor: '#60A5FA', label: 'Maintain Weight', sub: 'Balanced meals to keep you on track' },
+  { id: 'maintain', Icon: Scale, iconColor: '#60A5FA', label: 'Body Recomp', sub: 'Build muscle and lose fat simultaneously — your weight stays the same' },
+  { id: 'build', Icon: Dumbbell, iconColor: TEAL, label: 'Maximize Muscle', sub: 'Maximize size and strength with a caloric surplus' },
+  { id: 'lose', Icon: TrendingDown, iconColor: '#EF4444', label: 'Lose Weight', sub: 'Burn fat while holding onto muscle with a caloric deficit' },
 ]
 
 const GENDERS = [
@@ -853,7 +856,7 @@ function S2Goal({ value, onChange, onNext, onBack }: { value: string; onChange: 
                 <Text style={s.selectCardLabel}>{g.label}</Text>
                 <Text style={s.selectCardSub}>{g.sub}</Text>
               </View>
-              {value === g.id && <View style={s.checkCircle}><Check size={12} stroke="#000000" strokeWidth={3} /></View>}
+              <View style={[s.checkCircle, { opacity: value === g.id ? 1 : 0 }]}><Check size={12} stroke="#000000" strokeWidth={3} /></View>
             </TouchableOpacity>
           ))}
         </View>
@@ -961,7 +964,7 @@ function calculateGoals(age: number, gender: string, heightCm: number, weightKg:
   const goalAdj = FITNESS_GOAL_OPTIONS.find(g => g.key === fitnessGoal)?.adj ?? 0
   const calories = Math.round(tdee + goalAdj)
   const weightLbs = weightKg / 0.453592
-  const proteinPerLb = fitnessGoal === 'lose' ? 1.2 : fitnessGoal === 'maintain' ? 1.0 : 0.8
+  const proteinPerLb = fitnessGoal === 'lose' ? 1.0 : fitnessGoal === 'maintain' ? 1.0 : 0.8
   const protein = Math.round(weightLbs * proteinPerLb)
   return { calories, protein }
 }
@@ -1305,7 +1308,7 @@ function SCookingSkill({ value, onChange, onNext, onBack }: { value: string; onC
                 <Text style={s.selectCardLabel}>{o.label}</Text>
                 <Text style={s.selectCardSub}>{o.sub}</Text>
               </View>
-              {value === o.id && <View style={s.checkCircle}><Check size={12} stroke="#000000" strokeWidth={3} /></View>}
+              <View style={[s.checkCircle, { opacity: value === o.id ? 1 : 0 }]}><Check size={12} stroke="#000000" strokeWidth={3} /></View>
             </TouchableOpacity>
           ))}
         </View>
@@ -1756,7 +1759,7 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
           mode: 'cookNow',
         })
         const today = new Date().toISOString().slice(0, 10)
-        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals }))
+        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: data.dietStyle || 'Classic' }))
       } catch {}
     })()
 
@@ -1823,9 +1826,10 @@ function MaintainGraph() {
   const yT = pad.top, yB = pad.top + iH
   const yM = (yT + yB) / 2
 
-  // S-curves: fat goes top-left → bottom-right, muscle goes bottom-left → top-right
-  const fatPath    = `M ${xS} ${yT} C ${xS + iW * 0.45} ${yT}, ${xS + iW * 0.55} ${yB}, ${xE} ${yB}`
-  const musclePath = `M ${xS} ${yB} C ${xS + iW * 0.45} ${yB}, ${xS + iW * 0.55} ${yT}, ${xE} ${yT}`
+  // Asymmetric S-curves: gradual on the left, dramatic drop/rise on the right
+  // Control points pushed right (0.62 / 0.88) so the curve stays flat early then bends hard near the end
+  const fatPath    = `M ${xS} ${yT} C ${xS + iW * 0.62} ${yT}, ${xS + iW * 0.88} ${yB}, ${xE} ${yB}`
+  const musclePath = `M ${xS} ${yB} C ${xS + iW * 0.62} ${yB}, ${xS + iW * 0.88} ${yT}, ${xE} ${yT}`
 
   const LEN = 290
   const anim = useRef(new Animated.Value(0)).current
@@ -2021,7 +2025,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   const mealsPerDay = parseInt(data.meals) || 3
   const prepMin = data.prep === '10 min' ? 10 : data.prep === '20 min' ? 20 : data.prep === '60+ min' ? 90 : 30
-  const goalLabel = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'gain' ? 'Build Muscle' : 'Maintain'
+  const goalLabel = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'build' ? 'Maximize Muscle' : 'Body Recomp'
 
   useEffect(() => {
     if (isPrefetchOnly) return  // hidden prefetch instance — skip animations
@@ -2040,9 +2044,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   const currentLb = parseInt(data.weight || '180', 10)
   const rawTarget = parseInt(data.targetWeight || '0', 10)
   const defaultDelta = data.goal === 'lose' ? -10 : data.goal === 'build' ? 10 : 0
-  const targetLb = (rawTarget > 0 && rawTarget !== currentLb)
-    ? rawTarget
-    : currentLb + defaultDelta
+  // Body Recomp skips the target weight step — always treat as "no change" regardless of stale data
+  const targetLb = data.goal === 'maintain'
+    ? currentLb
+    : (rawTarget > 0 && rawTarget !== currentLb)
+      ? rawTarget
+      : currentLb + defaultDelta
   const hasValidTarget = targetLb !== currentLb
   const weightDelta = hasValidTarget ? Math.abs(targetLb - currentLb) : 0
   const isGainDirection = hasValidTarget && targetLb > currentLb
@@ -2219,6 +2226,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       minimal:     ['easy'],
       moderate:    ['easy', 'medium'],
       adventurous: ['easy', 'medium', 'hard'],
+      culinary:    ['medium', 'hard'],
     }
     const skillAllowed = allowedSkills[userSkill] ?? ['easy', 'medium']
     const pickedNames = new Set<string>()
@@ -2306,6 +2314,10 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     AsyncStorage.getItem('pantry_daily_meals_cookNow').then(raw => {
       if (raw) {
         const parsed = JSON.parse(raw)
+        // Discard cached meals if they were generated for a different diet — prevents
+        // Pescatarian users seeing Classic chicken dishes from a prior session
+        const storedDiet = parsed?.dietStyle ?? 'Classic'
+        if (storedDiet !== (data.dietStyle || 'Classic')) return
         const meals: any[] = parsed?.meals ?? []
         if (meals.length > 0) setAiMeals(meals.slice(0, parseInt(data.meals) || 3))
       }
@@ -2818,7 +2830,7 @@ function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () 
       // Pass user goal as Superwall attribute so paywall template can personalize copy
       // Reference in dashboard as {{ user.goal_label }} e.g. "Start your {{ user.goal_label }} plan"
       const goalLabel = data.goal === 'lose' ? 'fat-loss' : data.goal === 'build' ? 'muscle-building' : 'maintenance'
-      const goalCta = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'build' ? 'Build Muscle' : 'Stay on Track'
+      const goalCta = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'build' ? 'Maximize Muscle' : 'Body Recomp'
       try {
         await updateSuperwallUser({
           goal: data.goal,
@@ -3319,8 +3331,16 @@ export default function Onboarding() {
     })
   }
 
-  const next = () => navigate(step === 12 ? 14 : step + 1)  // step 13 (meal swipe) removed
-  const back = () => navigate(step === 14 ? 12 : step - 1) // step 13 removed — 14 goes back to 12
+  const next = () => {
+    if (step === 12) return navigate(14)                          // step 13 (meal swipe) removed
+    if (step === 8 && data.goal === 'maintain') return navigate(10) // body recomp skips target weight
+    navigate(step + 1)
+  }
+  const back = () => {
+    if (step === 14) return navigate(12)                          // step 13 removed — 14 goes back to 12
+    if (step === 10 && data.goal === 'maintain') return navigate(8) // body recomp skips back over target weight
+    navigate(step - 1)
+  }
 
   const prepToMinutes = (prep: string) => {
     if (prep === '10 min') return 10
@@ -3398,7 +3418,7 @@ export default function Onboarding() {
         const existingCache = await AsyncStorage.getItem('pantry_daily_meals_cookNow')
         const todayStr = new Date().toISOString().slice(0, 10)
         const cacheReady = existingCache
-          ? (() => { try { const c = JSON.parse(existingCache); return c.date === todayStr && c.meals?.length > 0 } catch { return false } })()
+          ? (() => { try { const c = JSON.parse(existingCache); return c.date === todayStr && c.meals?.length > 0 && (c.dietStyle ?? 'Classic') === (finalData.dietStyle || 'Classic') } catch { return false } })()
           : false
         if (!cacheReady) {
           setFinishing(true)
@@ -3421,7 +3441,7 @@ export default function Onboarding() {
               cuisinePreferences: finalData.cuisinePreferences || [],
               mode: 'cookNow',
             })
-            await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: todayStr, meals }))
+            await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: todayStr, meals, dietStyle: finalData.dietStyle || 'Classic' }))
           } catch {
             // Fail silently — home screen will generate on load
           }
@@ -3511,11 +3531,11 @@ const s = StyleSheet.create({
   title: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 8 },
   subtitle: { fontSize: 15, color: MUTED, marginBottom: 28, lineHeight: 22 },
   cardList: { gap: 12 },
-  selectCard: { backgroundColor: CARD, borderRadius: 16, borderWidth: 1.5, borderColor: '#2A2A2A', padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  selectCard: { backgroundColor: CARD, borderRadius: 16, borderWidth: 1.5, borderColor: '#2A2A2A', paddingVertical: 14, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', gap: 14 },
   selectCardActive: { borderColor: TEAL },
-  selectCardLabel: { fontSize: 17, fontWeight: '700', color: '#FFFFFF', flex: 1 },
-  selectCardSub: { fontSize: 13, color: MUTED, marginTop: 3 },
-  goalIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  selectCardLabel: { fontSize: 17, fontWeight: '700', color: '#FFFFFF', lineHeight: 19 },
+  selectCardSub: { fontSize: 13, color: MUTED, lineHeight: 17, marginTop: 2 },
+  goalIconCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   checkCircle: { width: 22, height: 22, borderRadius: 11, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center' },
   inputCard: { backgroundColor: CARD, borderRadius: 16, padding: 16, gap: 10 },
   inputLabel: { fontSize: 13, fontWeight: '600', color: MUTED },

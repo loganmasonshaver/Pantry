@@ -468,7 +468,7 @@ function calculateGoals(age: number, gender: string, heightCm: number, weightKg:
   const tdee = bmr * (ACTIVITY_MULTIPLIERS[activityLevel] ?? 1.55)
   const calories = Math.round(tdee + (GOAL_ADJUSTMENTS[fitnessGoal] ?? 0))
   const weightLbs = weightKg / 0.453592
-  const proteinPerLb = fitnessGoal === 'lose' ? 1.2 : fitnessGoal === 'maintain' ? 1.0 : 0.8
+  const proteinPerLb = fitnessGoal === 'lose' ? 1.0 : fitnessGoal === 'maintain' ? 1.0 : 0.8
   const protein = Math.round(weightLbs * proteinPerLb)
   // Derive carbs/fat from remaining calories after protein
   // Protein = 4 cal/g, Fat = 30% of calories (9 cal/g), Carbs = remainder (4 cal/g)
