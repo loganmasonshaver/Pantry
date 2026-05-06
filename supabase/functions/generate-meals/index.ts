@@ -177,13 +177,14 @@ ${ingredientRule}
 - Each meal MUST have at least ${perMealProteinMin}g protein (scaled to this user's daily target and meal count). Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - Calories per meal should be around ${Math.round(calorieGoal / mealsPerDay)} kcal
-- HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less.
+- HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
+${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — this is extremely tight. You are ONLY allowed to suggest meals from this approved list of genuinely fast formats: protein shake or smoothie, Greek yogurt parfait, overnight oats (pre-made), cottage cheese bowl, scrambled eggs on toast (2-3 min scramble max), microwave rice + canned/pre-cooked protein, wrap or tortilla with pre-cooked filling, tuna or chicken salad on bread or crackers, cold high-protein bowl using pre-cooked or ready-to-eat ingredients. FORBIDDEN formats: any raw meat that must be cooked from scratch (chicken breast, ground beef, shrimp, fish fillets), pasta (boiling alone takes 8-10 min), oven dishes, stir fries with raw protein, soups from scratch, anything with more than 2 cooking steps. If your pantry has pre-cooked or ready-to-eat proteins (rotisserie chicken, canned tuna, canned chicken, hard boiled eggs, deli meat, Greek yogurt, cottage cheese, protein powder), use those.` : ''}
 - Complexity must match the time budget:
-  - ≤10 min: no-cook assembly, microwave reheats, scrambled eggs + toast, smoothies, yogurt bowls, overnight oats, wraps, cold plates. Single pan max. NO oven, NO multi-step sauces, NO braises, NO searing proteins over 6 min.
-  - ≤20 min: quick stove-top — single-pan sear/sauté, scramble, quick stir-fry, quick pasta. NO oven, NO braises, NO slow-cook.
+  - ≤10 min: no-cook assembly, microwave reheats, scrambled eggs + toast, smoothies, yogurt bowls, overnight oats, wraps with pre-cooked fillings, cold plates. NO raw meat cooked from scratch, NO pasta, NO oven.
+  - ≤20 min: quick stove-top only — single-pan sear/sauté, scramble, quick stir-fry, quick pasta. NO oven, NO braises.
   - ≤30 min: standard weeknight — one protein + one starch + veg. Sheet-pan, one-pan, stir-fry, pasta. No slow-roasts or braises.
-  - ≤90 min: full recipes including roasts, braises, marinated dishes, multi-component dishes, slow cooks.
-- Recipe steps must reflect this budget. Do NOT describe a 30-minute cook for a claimed 10-minute meal. If you claim a short prepTime, the steps must ACTUALLY be doable in that time.
+  - ≤90 min: full recipes including roasts, braises, marinated dishes, multi-component dishes.
+- Recipe steps must ACTUALLY fit within the prepTime claimed. If a step alone (e.g. boiling pasta) takes longer than the budget, the entire meal is disqualified.
 - For each ingredient include both a visual portion size (e.g. "1 palm", "1 fist", "2 tbsp") AND a gram/ml weight (e.g. "120g", "185g", "30ml")
 - No repeated meals
 - ONLY suggest real, practical meals that people actually eat. No bizarre combinations.
@@ -205,7 +206,7 @@ Respond ONLY with a JSON array, no markdown, no explanation:
   {
     "id": "1",
     "name": "meal name",
-    "prepTime": ${maxPrepMinutes},
+    "prepTime": 25,
     "calories": 500,
     "protein": 45,
     "carbs": 40,
@@ -274,22 +275,13 @@ Respond ONLY with a JSON array, no markdown, no explanation:
     // If we lose too many (<50% survive), keep them but clamp the displayed prepTime so
     // the user-facing number is honest to their cap. The LLM lied about the number but
     // the meal itself may still be usable; clamping prevents user confusion.
+    // Drop any meal whose honest prepTime exceeds the user's budget — never clamp/lie.
+    // The prompt's whitelist for ≤10 min should prevent this from wiping all meals.
     const originalCount = meals.length
-    const compliant = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
-    const droppedCount = originalCount - compliant.length
+    meals = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
+    const droppedCount = originalCount - meals.length
     if (droppedCount > 0) {
-      console.log(`Prep-time validation: ${droppedCount}/${originalCount} meals exceeded maxPrepMinutes=${maxPrepMinutes}`)
-    }
-    if (compliant.length >= Math.ceil(originalCount / 2)) {
-      // At least half compliant — use only compliant meals
-      meals = compliant
-    } else {
-      // Too many non-compliant — clamp the prepTime field to avoid misleading the user
-      meals = meals.map((m: any) => ({
-        ...m,
-        prepTime: Math.min(Number(m.prepTime) || maxPrepMinutes, maxPrepMinutes),
-      }))
-      console.log('Too few compliant — clamped prepTime on all meals instead of dropping')
+      console.log(`Prep-time validation: dropped ${droppedCount}/${originalCount} meals that exceeded maxPrepMinutes=${maxPrepMinutes}`)
     }
 
     // Return meals immediately, images will be fetched by a separate function

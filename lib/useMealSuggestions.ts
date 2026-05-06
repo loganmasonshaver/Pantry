@@ -7,7 +7,7 @@ import { useAIConsent } from '../context/AIConsentContext'
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
 const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 
-type CachedMeals = { date: string; meals: GeneratedMeal[] }
+type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number }
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10)
@@ -119,8 +119,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         mode,
       })
 
-      // Cache today's meals for free-tier daily limit
-      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated }))
+      // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes
+      const maxPrep = profile?.max_prep_minutes || 30
+      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep }))
 
       // images load progressively after meals are shown; errors must not block the UI
       // Fetch all images in parallel
@@ -158,10 +159,14 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
-          if (cached.date === todayStr() && cached.meals.length > 0) {
-            const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_'))
-            if (!isSeeded) {
-              setMeals(cached.meals)
+          // Old cache format has no maxPrepMinutes — treat as miss so it regenerates with correct prep constraint
+          if (cached.maxPrepMinutes === undefined) {
+            await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+          } else if (cached.date === todayStr() && cached.meals.length > 0) {
+            const validMeals = cached.meals.filter(m => !m.prepTime || Number(m.prepTime) <= cached.maxPrepMinutes!)
+            const isSeeded = validMeals.every(m => m.id?.startsWith('seeded_'))
+            if (validMeals.length > 0 && !isSeeded) {
+              setMeals(validMeals)
               setLoading(false)
               // Fetch any missing images for cached meals
               const cachedMeals = [...cached.meals]
@@ -234,11 +239,16 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
-        if (cached.date === todayStr() && cached.meals.length > 0) {
-          const isSeeded = cached.meals.every(m => m.id?.startsWith('seeded_')) // onboarding placeholder meals have no recipe data; clear them before real generation
-          if (!isSeeded) {
+        // Invalidate if no maxPrepMinutes stored (old cache format) — forces regeneration with correct prep constraint
+        if (cached.maxPrepMinutes === undefined) {
+          await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+        } else if (cached.date === todayStr() && cached.meals.length > 0) {
+          // Filter out any meals that somehow slipped past the prep cap
+          const validMeals = cached.meals.filter(m => !m.prepTime || Number(m.prepTime) <= cached.maxPrepMinutes!)
+          const isSeeded = validMeals.every(m => m.id?.startsWith('seeded_')) // onboarding placeholder meals have no recipe data; clear them before real generation
+          if (validMeals.length > 0 && !isSeeded) {
             // Real AI meals: show immediately, then fetch any missing images in background
-            setMeals(cached.meals)
+            setMeals(validMeals)
             if (cached.meals.some(m => !m.image)) {
               const cachedMeals = [...cached.meals]
               ;(async () => {

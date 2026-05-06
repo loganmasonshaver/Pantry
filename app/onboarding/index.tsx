@@ -1759,7 +1759,7 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
           mode: 'cookNow',
         })
         const today = new Date().toISOString().slice(0, 10)
-        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: data.dietStyle || 'Classic' }))
+        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: data.dietStyle || 'Classic', maxPrepMinutes: prepMaxMin }))
       } catch {}
     })()
 
@@ -2314,10 +2314,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     AsyncStorage.getItem('pantry_daily_meals_cookNow').then(raw => {
       if (raw) {
         const parsed = JSON.parse(raw)
-        // Discard cached meals if they were generated for a different diet — prevents
-        // Pescatarian users seeing Classic chicken dishes from a prior session
+        // Discard cached meals if diet or prep time changed — prevents stale meals showing
         const storedDiet = parsed?.dietStyle ?? 'Classic'
+        const storedPrep = parsed?.maxPrepMinutes ?? null
+        const currentPrep = data.prep === '10 min' ? 10 : data.prep === '20 min' ? 20 : data.prep === '60+ min' ? 90 : 30
         if (storedDiet !== (data.dietStyle || 'Classic')) return
+        if (storedPrep === null || storedPrep !== currentPrep) return
         const meals: any[] = parsed?.meals ?? []
         if (meals.length > 0) setAiMeals(meals.slice(0, parseInt(data.meals) || 3))
       }
