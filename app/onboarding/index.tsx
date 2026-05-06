@@ -1710,11 +1710,24 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
   const [pct, setPct] = useState(0)
   const [msgIdx, setMsgIdx] = useState(0)
 
+  const prepMaxMin = data.prep === '10 min' ? 10 : data.prep === '20 min' ? 20 : data.prep === '60+ min' ? 90 : 30
+  const mealsPerDay = parseInt(data.meals) || 3
+  const dietLabel = data.dietStyle || 'Classic'
+
+  const { cals, prot } = useMemo(() => {
+    const heightCm = (parseInt(data.ft || '5') * 12 + parseInt(data.inches || '9')) * 2.54
+    const weightKg = parseFloat(data.weight || '180') * 0.453592
+    const parsedAge = parseInt(data.age) || 25
+    const fitness = data.fitnessGoal || (data.goal === 'lose' ? 'lose' : data.goal === 'build' ? 'gain' : 'maintain')
+    const result = calculateGoals(parsedAge, data.gender || 'male', heightCm, weightKg, data.activityLevel || 'moderate', fitness)
+    return { cals: result.calories, prot: result.protein }
+  }, [data.ft, data.inches, data.weight, data.age, data.gender, data.activityLevel, data.fitnessGoal, data.goal])
+
   const messages = [
-    'Estimating your metabolic age...',
-    'Calculating your daily macros...',
-    'Optimizing for your preferences...',
-    'Finalizing your custom plan...',
+    `Analyzing your ${dietLabel} preferences...`,
+    `Building your ${prepMaxMin}-minute meal plan...`,
+    `Calculating your ${cals.toLocaleString()} kcal goal...`,
+    'Locking in your custom plan...',
   ]
 
   useEffect(() => {
@@ -1791,13 +1804,13 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
         </Text>
 
         <View style={{ marginTop: 24 }}>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF', marginBottom: 16 }}>Daily recommendation for</Text>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF', marginBottom: 16 }}>Personalizing your plan</Text>
           {[
-            { label: 'Calories', done: pct > 20 },
-            { label: 'Protein', done: pct > 45 },
-            { label: 'Carbs', done: pct > 65 },
-            { label: 'Fats', done: pct > 80 },
-            { label: 'Meal schedule', done: pct > 95 },
+            { label: `${dietLabel} diet style`, done: pct > 18 },
+            { label: `${prepMaxMin} min max prep`, done: pct > 38 },
+            { label: `${mealsPerDay} meal${mealsPerDay !== 1 ? 's' : ''}/day`, done: pct > 57 },
+            { label: `${cals.toLocaleString()} kcal/day`, done: pct > 75 },
+            { label: `${prot}g protein target`, done: pct > 92 },
           ].map((item, i) => (
             <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 }}>
               <Text style={{ fontSize: 15, color: item.done ? '#FFF' : MUTED }}>• {item.label}</Text>
@@ -1817,8 +1830,8 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
 }
 
 // Recomposition graph for "maintain" goal — fat curves down, muscle curves up, both animate L→R.
-function MaintainGraph() {
-  const W = 300, H = 140
+function MaintainGraph({ w = 300 }: { w?: number }) {
+  const W = w, H = Math.round(w * 0.47)
   const pad = { top: 38, right: 28, bottom: 34, left: 28 }
   const iW = W - pad.left - pad.right
   const iH = H - pad.top - pad.bottom
@@ -1831,7 +1844,7 @@ function MaintainGraph() {
   const fatPath    = `M ${xS} ${yT} C ${xS + iW * 0.62} ${yT}, ${xS + iW * 0.88} ${yB}, ${xE} ${yB}`
   const musclePath = `M ${xS} ${yB} C ${xS + iW * 0.62} ${yB}, ${xS + iW * 0.88} ${yT}, ${xE} ${yT}`
 
-  const LEN = 290
+  const LEN = Math.round(W * 0.97)
   const anim = useRef(new Animated.Value(0)).current
   const [off, setOff] = useState(LEN)
   const [done, setDone] = useState(false)
@@ -1887,12 +1900,12 @@ function MaintainGraph() {
 // Trajectory graph — smooth cubic-bezier curve from current weight to target.
 // Animates in left-to-right on mount via strokeDashoffset.
 function TrajectoryGraph({
-  currentLb, targetLb, startLabel = 'Today', endLabel,
+  currentLb, targetLb, startLabel = 'Today', endLabel, w = 300,
 }: {
-  currentLb: number; targetLb: number; startLabel?: string; endLabel: string
+  currentLb: number; targetLb: number; startLabel?: string; endLabel: string; w?: number
 }) {
-  const width = 300
-  const height = 130
+  const width = w
+  const height = Math.round(w * 0.43)
   const pad = { top: 32, right: 24, bottom: 28, left: 24 }
   const innerW = width - pad.left - pad.right
   const innerH = height - pad.top - pad.bottom
@@ -1967,8 +1980,8 @@ function TrajectoryGraph({
 }
 
 function PlanRing({ value, unit, label, color, delay = 0 }: { value: number; unit?: string; label: string; color: string; delay?: number }) {
-  const size = 92
-  const strokeWidth = 7
+  const size = 72
+  const strokeWidth = 6
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
   const progress = useRef(new Animated.Value(0)).current
@@ -1998,10 +2011,10 @@ function PlanRing({ value, unit, label, color, delay = 0 }: { value: number; uni
         />
       </Svg>
       <View style={{ position: 'absolute', alignItems: 'center' }}>
-        <Text style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6 }}>
+        <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 }}>
           {value.toLocaleString()}{unit ?? ''}
         </Text>
-        <Text style={{ fontSize: 9, fontWeight: '700', color, textTransform: 'uppercase', letterSpacing: 1.2, marginTop: 2 }}>
+        <Text style={{ fontSize: 8, fontWeight: '700', color, textTransform: 'uppercase', letterSpacing: 1.0, marginTop: 1 }}>
           {label}
         </Text>
       </View>
@@ -2010,8 +2023,10 @@ function PlanRing({ value, unit, label, color, delay = 0 }: { value: number; uni
 }
 
 function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: OnboardingData; onNext: () => void; onBack: () => void; isPrefetchOnly?: boolean }) {
-  // 5 sections reveal top-to-bottom: heading, trajectory card, macro rings, meal card, disclaimer
-  const sectionAnims = useRef([0, 1, 2, 3, 4].map(() => new Animated.Value(0))).current
+  // 4 sections reveal top-to-bottom: heading, trajectory card (includes macros), meal card, disclaimer
+  const sectionAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current
+  // Per-meal-card stagger anims (6 slots — more than any plan will ever show)
+  const mealCardAnims = useRef([0,1,2,3,4,5].map(() => new Animated.Value(0))).current
 
   const { cals, prot } = useMemo(() => {
     // Use sensible defaults for any missing onboarding field so Plan Reveal always shows useful numbers
@@ -2034,6 +2049,13 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     Animated.stagger(500, sectionAnims.map(anim =>
       Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) })
     )).start()
+    // Stagger individual meal cards starting when section 2 appears (~1100ms in)
+    Animated.sequence([
+      Animated.delay(1100),
+      Animated.stagger(90, mealCardAnims.map(anim =>
+        Animated.timing(anim, { toValue: 1, duration: 350, useNativeDriver: true, easing: Easing.out(Easing.quad) })
+      )),
+    ]).start()
   }, [isPrefetchOnly])
 
   const calPerMeal = Math.round(cals / mealsPerDay)
@@ -2100,6 +2122,9 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Beef and Broccoli Rice Bowl', Icon: Drumstick, tint: TEAL, contains: ['Beef', 'Soy'], skill: 'medium', prepMin: 20 },
         ],
         Dinner: [
+          { name: 'Turkey and Avocado Wrap', Icon: Drumstick, tint: '#60A5FA', contains: ['Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Chicken and Rice Microwave Bowl', Icon: Drumstick, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Tuna Salad Lettuce Wraps', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 8 },
           { name: 'Pan-Seared Chicken with Roasted Veggies', Icon: Drumstick, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Lemon Garlic Salmon with Asparagus', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 20 },
           { name: 'Herb Roasted Chicken Thighs and Potatoes', Icon: Drumstick, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 35 },
@@ -2112,6 +2137,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
         ],
         'Main Meal': [
+          { name: 'Turkey and Avocado Wrap', Icon: Drumstick, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Chicken and Rice Microwave Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
           { name: 'Grilled Chicken Rice Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Pan-Seared Chicken with Roasted Veggies', Icon: Drumstick, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
         ],
@@ -2132,6 +2159,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Lentil Soup with Crusty Bread', Icon: Salad, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 25 },
         ],
         Dinner: [
+          { name: 'Tuna and Avocado Rice Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 8 },
+          { name: 'Smoked Salmon Wrap', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten', 'Dairy'], skill: 'easy', prepMin: 5 },
           { name: 'Pan-Seared Salmon with Roasted Broccoli', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 20 },
           { name: 'Lemon Garlic Shrimp and Rice', Icon: Fish, tint: '#60A5FA', contains: ['Shellfish'], skill: 'easy', prepMin: 20 },
           { name: 'Baked Cod with Roasted Vegetables', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 25 },
@@ -2144,6 +2173,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
         ],
         'Main Meal': [
+          { name: 'Tuna and Avocado Rice Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 8 },
+          { name: 'Smoked Salmon Wrap', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten', 'Dairy'], skill: 'easy', prepMin: 5 },
           { name: 'Pan-Seared Salmon with Roasted Broccoli', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 20 },
           { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
         ],
@@ -2164,6 +2195,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Veggie Quinoa Bowl with Feta', Icon: Salad, tint: TEAL, contains: ['Dairy'], skill: 'medium', prepMin: 20 },
         ],
         Dinner: [
+          { name: 'Cottage Cheese and Veggie Wrap', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Caprese and Egg White Bowl', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Eggs'], skill: 'easy', prepMin: 8 },
           { name: 'Lentil Dal with Basmati Rice', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 25 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 15 },
           { name: 'Paneer Tikka Masala with Rice', Icon: Salad, tint: '#EF4444', contains: ['Dairy'], skill: 'medium', prepMin: 30 },
@@ -2176,6 +2209,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 10 },
         ],
         'Main Meal': [
+          { name: 'Cottage Cheese and Veggie Wrap', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Caprese and Egg White Bowl', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Eggs'], skill: 'easy', prepMin: 8 },
           { name: 'Lentil Dal with Basmati Rice', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 25 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 15 },
         ],
@@ -2197,6 +2232,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Spicy Tofu and Broccoli Bowl', Icon: Sprout, tint: TEAL, contains: ['Soy'], skill: 'medium', prepMin: 20 },
         ],
         Dinner: [
+          { name: 'Avocado and Black Bean Wrap', Icon: Salad, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Hummus and Veggie Wrap', Icon: Salad, tint: TEAL, contains: ['Gluten', 'Sesame'], skill: 'easy', prepMin: 5 },
           { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 15 },
           { name: 'Lentil Sweet Potato Curry', Icon: Salad, tint: TEAL, contains: [], skill: 'medium', prepMin: 30 },
@@ -2212,6 +2249,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Peanut Butter Apple Slices', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
         ],
         'Main Meal': [
+          { name: 'Avocado and Black Bean Wrap', Icon: Salad, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 15 },
         ],
@@ -2258,10 +2296,13 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
       // Pass 1: all filters + no name dup + no theme dup
       let chosen = bench.find(r => !pickedNames.has(r.name) && !pickedThemes.has(getTheme(r.name)) && passes(r))
-      // Pass 2: relax theme dedup (at least avoid exact name repeat)
+      // Pass 2: relax theme dedup
       if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && passes(r))
-      // Pass 3: just allergen + skill (last resort)
+      // Pass 3: relax all dedup but still respect allergens + prepMin
       if (!chosen) chosen = bench.find(r => passes(r))
+      // Pass 4: ignore skill/dislikes but always respect prepMin — never show a meal that takes longer than allowed
+      if (!chosen) chosen = bench.find(r => r.prepMin <= prepMin)
+      // Pass 5: true last resort — only if the entire pool has nothing under the cap
       if (!chosen) chosen = bench[0]
 
       pickedNames.add(chosen.name)
@@ -2375,7 +2416,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   return (
     <SafeAreaView style={s.safe}>
       <TopBar onBack={onBack} pct={PROGRESS[18]} />
-      <ScrollView contentContainerStyle={[s.scrollBody, { gap: 20 }]} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[s.scrollBody, { gap: 20, paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
         {/* Section 0 — Badge + heading */}
         <Animated.View style={{ opacity: sectionAnims[0], transform: [{ translateY: sectionAnims[0].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
@@ -2387,9 +2428,32 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           <Text style={{ fontSize: 30, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6, lineHeight: 36 }}>
             Here's how you'll{'\n'}
             <Text style={{ color: TEAL }}>
-              {data.goal === 'lose' ? 'lose weight' : data.goal === 'build' ? 'build muscle' : 'stay on track'}
+              {data.goal === 'lose' ? 'burn fat' : data.goal === 'build' ? 'build muscle' : 'recomp your body'}
             </Text>
           </Text>
+          {/* Stat strip — 4-column icon+label, no borders. Inputs only; kcal/protein live in the plan card. */}
+          {(() => {
+            const skillOpt = SKILL_OPTIONS.find(o => o.id === (data.cookingSkill || 'moderate')) ?? SKILL_OPTIONS[1]
+            const SkillIcon = skillOpt.Icon
+            const dietStyle = data.dietStyle || 'Classic'
+            const DietIcon = dietStyle === 'Pescatarian' ? Fish : dietStyle === 'Vegetarian' ? Sprout : dietStyle === 'Vegan' ? Sprout : Drumstick
+            const cols = [
+              { Icon: DietIcon,        color: '#F59E0B',           label: dietStyle },
+              { Icon: Clock,           color: '#60A5FA',           label: `${prepMin} min` },
+              { Icon: UtensilsCrossed, color: TEAL,                label: `${mealsPerDay} meals` },
+              { Icon: SkillIcon,       color: '#A78BFA',           label: skillOpt.label },
+            ]
+            return (
+              <View style={{ flexDirection: 'row', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#1E1E1E' }}>
+                {cols.map((col, i) => (
+                  <View key={i} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
+                    <col.Icon size={18} stroke={col.color} strokeWidth={2} />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: col.color, textAlign: 'center' }}>{col.label}</Text>
+                  </View>
+                ))}
+              </View>
+            )
+          })()}
         </Animated.View>
 
         {/* Section 1 — Trajectory card */}
@@ -2401,7 +2465,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                 {weightDelta > 0
                   ? (isGainDirection ? `Gaining ${weightDelta} lbs` : `Losing ${weightDelta} lbs`)
                   : data.goal === 'maintain'
-                    ? 'Maintaining your weight'
+                    ? 'Body recomposition'
                     : data.goal === 'build'
                       ? 'Building muscle'
                       : data.goal === 'lose'
@@ -2409,38 +2473,37 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                         : `Your Goal: ${goalLabel}`}
               </Text>
             </View>
-            {hasValidTarget ? (
-              <>
-                <TrajectoryGraph currentLb={currentLb} targetLb={targetLb} endLabel={targetDateStr} />
-                {timelineStr !== '' && (
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
-                    {timelineStr} · by {targetDateStr}
-                  </Text>
+            {/* Graph left, rings stacked right — saves ~80px vs stacked layout */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ flex: 1 }}>
+                {hasValidTarget ? (
+                  <>
+                    <TrajectoryGraph currentLb={currentLb} targetLb={targetLb} endLabel={targetDateStr} w={width - 36 - 8 - 88} />
+                    {timelineStr !== '' && (
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
+                        {timelineStr} · by {targetDateStr}
+                      </Text>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <MaintainGraph w={width - 36 - 8 - 88} />
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
+                      Same weight · better composition
+                    </Text>
+                  </>
                 )}
-              </>
-            ) : (
-              <>
-                <MaintainGraph />
-                <Text style={{ fontSize: 12, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
-                  Same weight · better body composition
-                </Text>
-              </>
-            )}
-          </View>
-        </Animated.View>
-
-        {/* Section 2 — Macro rings */}
-        <Animated.View style={{ opacity: sectionAnims[2], transform: [{ translateY: sectionAnims[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 20 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
-              <PlanRing value={cals} label="KCAL/DAY" color={TEAL} delay={400} />
-              <PlanRing value={prot} unit="g" label="PROTEIN" color="#60A5FA" delay={600} />
+              </View>
+              <View style={{ gap: 12, alignItems: 'center', paddingLeft: 4 }}>
+                <PlanRing value={cals} label="KCAL/DAY" color={TEAL} delay={400} />
+                <PlanRing value={prot} unit="g" label="PROTEIN" color="#60A5FA" delay={600} />
+              </View>
             </View>
           </View>
         </Animated.View>
 
-        {/* Section 3 — Meal plan card (images should be ready by now) */}
-        <Animated.View style={{ opacity: sectionAnims[3], transform: [{ translateY: sectionAnims[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
+        {/* Section 2 — Meal plan card (images should be ready by now) */}
+        <Animated.View style={{ opacity: sectionAnims[2], transform: [{ translateY: sectionAnims[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
           <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 14 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(74,222,128,0.15)', alignItems: 'center', justifyContent: 'center' }}>
@@ -2448,10 +2511,10 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 }}>
-                  {aiMeals.length > 0 ? 'Your first day' : 'Meals made for you'}
+                  {aiMeals.length > 0 ? 'Your first day' : `Your ${mealsPerDay}-meal day`}
                 </Text>
                 <Text style={{ fontSize: 12, color: MUTED, marginTop: 3, fontWeight: '500' }}>
-                  {aiMeals.length > 0 ? 'Generated from your goals' : 'Tailored to your goals'}
+                  {aiMeals.length > 0 ? 'Generated from your goals' : `${data.dietStyle || 'Classic'} · built around your goals`}
                 </Text>
               </View>
             </View>
@@ -2463,12 +2526,16 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
               const prepDisplay = isSwipedMeal ? (m as any).prepTime : (m as any).prepMin
               const SlotIcon = !isSwipedMeal ? (m as any).Icon : null
               const slotTint = !isSwipedMeal ? ((m as any).tint ?? TEAL) : TEAL
+              const cardAnim = mealCardAnims[Math.min(i, mealCardAnims.length - 1)]
               return (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 2 }}>
-                  {/* 72×72 image — matches dashboard MealCard exactly */}
-                  <View style={{ width: 72, height: 72, borderRadius: 12, overflow: 'hidden', backgroundColor: '#242424' }}>
+                <Animated.View key={i} style={{
+                  opacity: cardAnim,
+                  transform: [{ translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
+                }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 2 }}>
+                  <View style={{ width: 82, height: 82, borderRadius: 12, overflow: 'hidden', backgroundColor: '#242424' }}>
                     {imageUri
-                      ? <Image source={{ uri: imageUri }} style={{ width: 72, height: 72 }} resizeMode="cover" />
+                      ? <Image source={{ uri: imageUri }} style={{ width: 82, height: 82 }} resizeMode="cover" />
                       : SlotIcon
                         ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: `${slotTint}22` }}>
                             <SlotIcon size={26} stroke={slotTint} strokeWidth={1.8} />
@@ -2476,38 +2543,37 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                         : null
                     }
                   </View>
-                  <View style={{ flex: 1, gap: 5 }}>
+                  <View style={{ flex: 1, gap: 4 }}>
                     {(m as any).slot && (
                       <Text style={{ fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 1.5, textTransform: 'uppercase' }}>
                         {(m as any).slot}
                       </Text>
                     )}
-                    {/* Name — matches dashboard mealName style */}
-                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
-                    {/* Clock row — matches dashboard mealMeta */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Clock size={13} stroke={MUTED} strokeWidth={1.8} />
-                      <Text style={{ fontSize: 13, color: MUTED }}>{prepDisplay} min prep</Text>
-                    </View>
-                    {/* Macros — matches dashboard mealMacros */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Text style={{ fontSize: 13, color: '#999999' }}>
-                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{calDisplay} kcal</Text>
+                    {/* Name — single line with ellipsis */}
+                    <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
+                    {/* Single meta row: prep · kcal · protein */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Clock size={11} stroke={MUTED} strokeWidth={1.8} />
+                      <Text style={{ fontSize: 12, color: MUTED }}><Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{prepDisplay}</Text> min</Text>
+                      <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#444' }} />
+                      <Text style={{ fontSize: 12, color: '#999999' }}>
+                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{calDisplay}</Text> kcal
                       </Text>
-                      <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#555' }} />
-                      <Text style={{ fontSize: 13, color: '#999999' }}>
-                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{protDisplay}g</Text>{' Protein'}
+                      <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#444' }} />
+                      <Text style={{ fontSize: 12, color: '#999999' }}>
+                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{protDisplay}g</Text> protein
                       </Text>
                     </View>
                   </View>
                 </View>
+                </Animated.View>
               )
             })}
           </View>
         </Animated.View>
 
-        {/* Section 4 — Disclaimer */}
-        <Animated.View style={{ opacity: sectionAnims[4], transform: [{ translateY: sectionAnims[4].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
+        {/* Section 3 — Disclaimer */}
+        <Animated.View style={{ opacity: sectionAnims[3], transform: [{ translateY: sectionAnims[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
           <View style={{ borderTopWidth: 1, borderTopColor: '#1A1A1A', paddingTop: 16, marginTop: 4 }}>
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
               <ShieldCheck size={14} stroke={MUTED} strokeWidth={2} style={{ marginTop: 2 }} />
