@@ -2635,7 +2635,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                       </Text>
                     ) : null}
                     {/* Name — single line with ellipsis */}
-                    <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
                     {/* Meta row: prep time only — macros are individualized per user in the main app */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <Clock size={11} stroke={MUTED} strokeWidth={1.8} />
