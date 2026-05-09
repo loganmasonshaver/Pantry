@@ -2124,8 +2124,9 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Steak and Egg Power Scramble', Icon: Drumstick, tint: '#F59E0B', contains: ['Eggs', 'Beef'], skill: 'medium', prepMin: 15 },
         ],
         Lunch: [
-          { name: 'Grilled Chicken Rice Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Turkey and Avocado Lettuce Wraps', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
+          { name: 'Rotisserie Chicken and Avocado Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Grilled Chicken Rice Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Chicken Caesar Salad', Icon: Drumstick, tint: TEAL, contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 10 },
           { name: 'Ground Turkey Taco Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Beef and Broccoli Rice Bowl', Icon: Drumstick, tint: TEAL, contains: ['Beef', 'Soy'], skill: 'medium', prepMin: 20 },
@@ -2133,6 +2134,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Shrimp and Vegetable Stir-Fry', Icon: Drumstick, tint: TEAL, contains: ['Shellfish', 'Soy'], skill: 'medium', prepMin: 20 },
         ],
         Dinner: [
+          { name: 'Tuna and Avocado Rice Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 5 },
           { name: 'Pan-Seared Chicken with Roasted Veggies', Icon: Drumstick, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Lemon Garlic Salmon with Asparagus', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 20 },
           { name: 'Herb Roasted Chicken Thighs and Potatoes', Icon: Drumstick, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 35 },
@@ -2276,11 +2278,13 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
         ],
         Snack: [
+          { name: 'Mango Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
           { name: 'Peanut Butter Banana Smoothie', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
           { name: 'Apple with Almond Butter', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
-          { name: 'Mango Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
           { name: 'Edamame with Sea Salt', Icon: Sprout, tint: '#A78BFA', contains: ['Soy'], skill: 'easy', prepMin: 5 },
           { name: 'Peanut Butter Apple Slices', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
+          { name: 'Coconut Date Energy Bites', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Sliced Fruit with Tahini Drizzle', Icon: Sprout, tint: '#A78BFA', contains: ['Sesame'], skill: 'easy', prepMin: 5 },
         ],
         'Main Meal': [
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
@@ -2346,19 +2350,24 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         skillAllowed.includes(r.skill) &&
         r.prepMin <= prepMin
 
+      const noAllergen = (r: Recipe) => !r.contains.some(c => avoidSet.has(c))
       // Pass 1: all filters + no name dup + no theme overlap
       let chosen = bench.find(r => !pickedNames.has(r.name) && !getThemes(r.name).some(t => pickedThemes.has(t)) && passes(r))
       // Pass 2: relax theme dedup
       if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && passes(r))
-      // Pass 3: relax all dedup but still respect allergens + prepMin
+      // Pass 3: relax all dedup, still respect allergens + skill + prep
       if (!chosen) chosen = bench.find(r => passes(r))
-      // Pass 4: ignore skill/dislikes but always respect prepMin — never show a meal that takes longer than allowed
-      if (!chosen) chosen = bench.find(r => r.prepMin <= prepMin)
-      // Pass 5: true last resort — only if the entire pool has nothing under the cap
-      if (!chosen) chosen = bench[0]
+      // Pass 4: relax skill + dislikes — still enforce allergens + prepMin + no exact dup
+      if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && noAllergen(r) && r.prepMin <= prepMin)
+      // Pass 5: relax prep — allergen safety is the only hard constraint remaining
+      if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && noAllergen(r))
+      // Pass 6: absolute last resort — best available even if allergen/dup (better than crashing)
+      if (!chosen) chosen = bench.find(r => noAllergen(r)) ?? bench[0]
 
-      pickedNames.add(chosen.name)
-      getThemes(chosen.name).forEach(t => pickedThemes.add(t))
+      if (chosen) {
+        pickedNames.add(chosen.name)
+        getThemes(chosen.name).forEach(t => pickedThemes.add(t))
+      }
       return chosen
     }
 
@@ -2381,11 +2390,11 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         Snack:            { calPct: 0.13, protPct: 0.15 },
       },
       5: {
-        Breakfast:        { calPct: 0.22, protPct: 0.23 },
-        'Morning Snack':  { calPct: 0.10, protPct: 0.11 },
-        Lunch:            { calPct: 0.28, protPct: 0.28 },
-        Dinner:           { calPct: 0.30, protPct: 0.27 },
-        'Afternoon Snack':{ calPct: 0.10, protPct: 0.11 },
+        Breakfast:         { calPct: 0.22, protPct: 0.23 },
+        'Morning Snack':   { calPct: 0.10, protPct: 0.11 },
+        Lunch:             { calPct: 0.28, protPct: 0.28 },
+        'Afternoon Snack': { calPct: 0.10, protPct: 0.11 },
+        Dinner:            { calPct: 0.30, protPct: 0.27 },
       },
       6: {
         Breakfast:        { calPct: 0.20, protPct: 0.21 },
