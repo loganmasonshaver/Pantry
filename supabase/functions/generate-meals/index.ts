@@ -140,7 +140,7 @@ Deno.serve(async (req: Request) => {
       ? `\n- STRICT dietary requirements — NEVER violate these under any circumstances: ${restrictions}. Any meal that includes a forbidden ingredient for these restrictions must be discarded entirely.`
       : ""
     const dislikesLine = foodDislikes.length > 0
-      ? `\nThe user dislikes these ingredients — never include them: ${foodDislikes.join(", ")}.`
+      ? `\n- HARD EXCLUSIONS — these are allergens, intolerances, or foods the user must never eat. NEVER include them as ingredients, toppings, bases, sauces, or hidden components in any meal. Any meal containing any of these must be discarded entirely: ${foodDislikes.join(", ")}.`
       : ""
     const dislikedMealsLine = dislikedMeals.length > 0
       ? `\nThe user rated these meals poorly — do NOT suggest them or anything similar: ${dislikedMeals.join(", ")}.`

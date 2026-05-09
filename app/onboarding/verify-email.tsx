@@ -102,18 +102,30 @@ export default function VerifyEmailScreen() {
         inputs.current[0]?.focus()
       } else {
         await AsyncStorage.setItem('otp_verified', 'true')
-        // Sign-in flow: always go to tabs (they've done onboarding before)
-        if (isSignIn === 'true') {
-          await AsyncStorage.setItem('onboarding_complete', 'true')
-          router.replace('/(tabs)')
-          return
-        }
-        // Sign-up flow: check if onboarding is complete
         const onboardingDone = await AsyncStorage.getItem('onboarding_complete')
         if (onboardingDone === 'true') {
           router.replace('/(tabs)')
         } else {
-          router.replace({ pathname: '/onboarding', params: { step: '18' } })
+          // Local flag was cleared (reset or reinstall). Check Supabase profile to
+          // decide: real returning user → fast-path to tabs; fresh/reset account → full onboarding.
+          try {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (session?.user?.id) {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('calorie_goal')
+                .eq('id', session.user.id)
+                .single()
+              if (profile?.calorie_goal) {
+                // Has a real profile — returning user, send to app
+                await AsyncStorage.setItem('onboarding_complete', 'true')
+                router.replace('/(tabs)')
+                return
+              }
+            }
+          } catch {}
+          // No profile data — treat as genuinely new user, start onboarding from beginning
+          router.replace('/onboarding')
         }
       }
     } catch (e: any) {

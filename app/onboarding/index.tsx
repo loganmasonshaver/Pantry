@@ -15,6 +15,7 @@ import {
   Image,
   Pressable,
   PanResponder,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
@@ -46,9 +47,9 @@ const ABANDONMENT_PAYWALL_ENABLED = false
 
 // Progress percentages keyed by step number. Keep monotonic — values must increase as step increases.
 const PROGRESS: Record<number, number> = {
-  2: 5, 3: 10, 4: 15, 5: 20, 6: 25, 7: 30, 8: 35, 9: 42,
-  10: 50, 11: 55, 12: 60, 13: 63, 14: 67, 15: 74, 16: 82,
-  18: 88, 19: 93, 20: 96, 21: 100,
+  2: 5, 3: 9, 4: 14, 5: 18, 6: 23, 7: 27, 8: 32, 9: 39,
+  10: 48, 11: 52, 12: 57, 13: 61, 14: 65, 15: 69, 16: 73, 17: 78,
+  19: 87, 20: 92, 21: 96, 22: 100,
 }
 
 type OnboardingData = {
@@ -1606,7 +1607,7 @@ function SReferralCode({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[14]} />
+      <TopBar onBack={onBack} pct={PROGRESS[16]} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={{ alignItems: 'center', marginTop: 24, marginBottom: 28 }}>
@@ -1674,7 +1675,7 @@ function SGeneratingIntro({ onNext, onBack }: { onNext: () => void; onBack: () =
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[15]} />
+      <TopBar onBack={onBack} pct={PROGRESS[17]} />
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
         <Animated.View style={{ alignItems: 'center', opacity: fadeIn, transform: [{ scale }] }}>
           <View style={{
@@ -1732,12 +1733,18 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
 
   useEffect(() => {
     const listener = progress.addListener(({ value }) => setPct(Math.round(value * 100)))
-    const anim = Animated.timing(progress, { toValue: 1, duration: 4200, useNativeDriver: false })
+    // 3-phase exponential deceleration: rockets through first 70%, then crawls.
+    // Fast burst → rapid checkmark fires → slow tension build near end.
+    const anim = Animated.sequence([
+      Animated.timing(progress, { toValue: 0.70, duration: 1100, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(progress, { toValue: 0.91, duration: 1500, easing: Easing.out(Easing.quad), useNativeDriver: false }),
+      Animated.timing(progress, { toValue: 0.98, duration: 1600, easing: Easing.in(Easing.quad), useNativeDriver: false }),
+    ])
     anim.start(({ finished }) => { if (finished) setTimeout(onDone, 300) })
 
     const msgInterval = setInterval(() => {
       setMsgIdx(i => Math.min(i + 1, messages.length - 1))
-    }, 1050)
+    }, 800)
 
     // Generate personalized meals silently in the background while the animation plays.
     // The 4.2s animation masks the ~2-4s API call. Result stored in AsyncStorage so
@@ -2149,7 +2156,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Veggie Egg White Scramble', Icon: Sprout, tint: '#60A5FA', contains: ['Eggs'], skill: 'easy', prepMin: 10 },
           { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#60A5FA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 5 },
-          { name: 'Avocado Toast with Everything Seasoning', Icon: Sprout, tint: '#60A5FA', contains: ['Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Avocado Toast with Smoked Salmon', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten'], skill: 'easy', prepMin: 5 },
         ],
         Lunch: [
           { name: 'Tuna Poke Bowl', Icon: Fish, tint: TEAL, contains: ['Fish', 'Soy'], skill: 'easy', prepMin: 15 },
@@ -2157,6 +2164,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
           { name: 'Salmon and Quinoa Power Bowl', Icon: Fish, tint: TEAL, contains: ['Fish'], skill: 'medium', prepMin: 20 },
           { name: 'Lentil Soup with Crusty Bread', Icon: Salad, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 25 },
+          { name: 'Tuna and Avocado Salad Bowl', Icon: Fish, tint: TEAL, contains: ['Fish'], skill: 'easy', prepMin: 10 },
+          { name: 'Shrimp and Vegetable Soup', Icon: Fish, tint: TEAL, contains: ['Shellfish'], skill: 'easy', prepMin: 20 },
         ],
         Dinner: [
           { name: 'Tuna and Avocado Rice Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 8 },
@@ -2166,6 +2175,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Baked Cod with Roasted Vegetables', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 25 },
           { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Teriyaki Salmon Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Soy'], skill: 'easy', prepMin: 20 },
+          { name: 'Chickpea and Avocado Power Bowl', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 8 },
         ],
         Snack: [
           { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
@@ -2177,6 +2187,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Smoked Salmon Wrap', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten', 'Dairy'], skill: 'easy', prepMin: 5 },
           { name: 'Pan-Seared Salmon with Roasted Broccoli', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 20 },
           { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
+          { name: 'Chickpea and Avocado Power Bowl', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 8 },
         ],
       },
       Vegetarian: {
@@ -2184,15 +2195,18 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Avocado Toast with Poached Eggs', Icon: Sprout, tint: '#F59E0B', contains: ['Eggs', 'Gluten'], skill: 'easy', prepMin: 10 },
           { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#F59E0B', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Cottage Cheese Berry Power Bowl', Icon: Sprout, tint: '#F59E0B', contains: ['Dairy'], skill: 'easy', prepMin: 5 },
-          { name: 'Coconut Chia Pudding', Icon: Sprout, tint: '#F59E0B', contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Vanilla Protein Chia Pudding', Icon: Sprout, tint: '#F59E0B', contains: ['Dairy'], skill: 'easy', prepMin: 5 },
           { name: 'Veggie Egg White Omelette', Icon: Sprout, tint: '#F59E0B', contains: ['Eggs'], skill: 'medium', prepMin: 15 },
+          { name: 'Black Bean and Avocado Toast', Icon: Sprout, tint: '#F59E0B', contains: [], skill: 'easy', prepMin: 5 },
         ],
         Lunch: [
-          { name: 'Egg Fried Rice with Veggies', Icon: Sprout, tint: TEAL, contains: ['Eggs', 'Soy'], skill: 'easy', prepMin: 15 },
-          { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
-          { name: 'Caprese Grain Bowl', Icon: Salad, tint: TEAL, contains: ['Dairy'], skill: 'easy', prepMin: 10 },
-          { name: 'Black Bean and Rice Burrito Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
-          { name: 'Veggie Quinoa Bowl with Feta', Icon: Salad, tint: TEAL, contains: ['Dairy'], skill: 'medium', prepMin: 20 },
+          { name: 'Tofu and Edamame Power Bowl', Icon: Sprout, tint: TEAL, contains: ['Soy'], skill: 'easy', prepMin: 15 },
+          { name: 'Tempeh and Feta Quinoa Bowl', Icon: Sprout, tint: TEAL, contains: ['Soy', 'Dairy'], skill: 'medium', prepMin: 20 },
+          { name: 'Egg White and Veggie Stir-Fry', Icon: Sprout, tint: TEAL, contains: ['Eggs'], skill: 'easy', prepMin: 10 },
+          { name: 'Cottage Cheese and Roasted Veggie Bowl', Icon: Sprout, tint: TEAL, contains: ['Dairy'], skill: 'easy', prepMin: 8 },
+          { name: 'Greek Yogurt Chickpea Power Bowl', Icon: Sprout, tint: TEAL, contains: ['Dairy'], skill: 'easy', prepMin: 5 },
+          { name: 'Tofu Taco Bowl', Icon: Sprout, tint: TEAL, contains: ['Soy'], skill: 'easy', prepMin: 15 },
+          { name: 'Chickpea and Avocado Salad Bowl', Icon: Sprout, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
         ],
         Dinner: [
           { name: 'Cottage Cheese and Veggie Wrap', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
@@ -2202,10 +2216,11 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Paneer Tikka Masala with Rice', Icon: Salad, tint: '#EF4444', contains: ['Dairy'], skill: 'medium', prepMin: 30 },
           { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Baked Stuffed Bell Peppers with Rice and Beans', Icon: Salad, tint: '#EF4444', contains: [], skill: 'medium', prepMin: 35 },
+          { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 8 },
         ],
         Snack: [
           { name: 'Cottage Cheese Berry Power Bowl', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5 },
-          { name: 'Coconut Chia Pudding', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Vanilla Protein Chia Pudding', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5 },
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 10 },
         ],
         'Main Meal': [
@@ -2213,6 +2228,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Caprese and Egg White Bowl', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Eggs'], skill: 'easy', prepMin: 8 },
           { name: 'Lentil Dal with Basmati Rice', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 25 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 15 },
+          { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 8 },
         ],
       },
       Vegan: {
@@ -2240,6 +2256,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Roasted Veggie and Chickpea Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 25 },
           { name: 'Tofu and Broccoli Stir-Fry with Rice', Icon: Sprout, tint: TEAL, contains: ['Soy'], skill: 'medium', prepMin: 20 },
           { name: 'Black Bean and Corn Power Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 15 },
+          { name: 'Chickpea and Roasted Red Pepper Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
         ],
         Snack: [
           { name: 'Peanut Butter Banana Smoothie', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
@@ -2252,6 +2270,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Avocado and Black Bean Wrap', Icon: Salad, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 15 },
+          { name: 'Chickpea and Roasted Red Pepper Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
         ],
       },
     }
@@ -2323,18 +2343,34 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         Dinner:    { calPct: 0.38, protPct: 0.35 },
       },
       4: {
-        Breakfast: { calPct: 0.24, protPct: 0.25 },
-        Lunch:     { calPct: 0.31, protPct: 0.31 },
-        Dinner:    { calPct: 0.32, protPct: 0.29 },
-        Snack:     { calPct: 0.13, protPct: 0.15 },
+        Breakfast:        { calPct: 0.24, protPct: 0.25 },
+        Lunch:            { calPct: 0.31, protPct: 0.31 },
+        Dinner:           { calPct: 0.32, protPct: 0.29 },
+        Snack:            { calPct: 0.13, protPct: 0.15 },
+      },
+      5: {
+        Breakfast:        { calPct: 0.22, protPct: 0.23 },
+        'Morning Snack':  { calPct: 0.10, protPct: 0.11 },
+        Lunch:            { calPct: 0.28, protPct: 0.28 },
+        Dinner:           { calPct: 0.30, protPct: 0.27 },
+        'Afternoon Snack':{ calPct: 0.10, protPct: 0.11 },
+      },
+      6: {
+        Breakfast:        { calPct: 0.20, protPct: 0.21 },
+        'Morning Snack':  { calPct: 0.09, protPct: 0.10 },
+        Lunch:            { calPct: 0.26, protPct: 0.26 },
+        'Afternoon Snack':{ calPct: 0.09, protPct: 0.10 },
+        Dinner:           { calPct: 0.27, protPct: 0.24 },
+        'Evening Snack':  { calPct: 0.09, protPct: 0.09 },
       },
     }
 
     const diet = recipes[data.dietStyle] ? data.dietStyle : 'Classic'
-    const count = Math.min(Math.max(parseInt(data.meals) || 3, 1), 4)
+    const count = Math.min(Math.max(parseInt(data.meals) || 3, 1), 6)
     const distro = distributions[count]
     return Object.entries(distro).map(([slot, macro]) => {
-      const bench = recipes[diet][slot] ?? []
+      // Named snack slots (Morning Snack, Afternoon Snack, Evening Snack) reuse the Snack bench
+      const bench = recipes[diet][slot] ?? recipes[diet]['Snack'] ?? []
       const chosen = pickRecipe(bench)
       return {
         slot,
@@ -2415,7 +2451,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[18]} />
+      <TopBar onBack={onBack} pct={PROGRESS[19]} />
       <ScrollView contentContainerStyle={[s.scrollBody, { gap: 20, paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
         {/* Section 0 — Badge + heading */}
         <Animated.View style={{ opacity: sectionAnims[0], transform: [{ translateY: sectionAnims[0].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
@@ -2521,12 +2557,20 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             {mealsForDisplay.map((m, i) => {
               const imageUri = mealImages[m.name]
               const isSwipedMeal = 'calories' in m
-              const calDisplay = isSwipedMeal ? (m as any).calories : Math.round(cals * (m as any).calPct)
-              const protDisplay = isSwipedMeal ? (m as any).protein : Math.round(prot * (m as any).protPct)
               const prepDisplay = isSwipedMeal ? (m as any).prepTime : (m as any).prepMin
               const SlotIcon = !isSwipedMeal ? (m as any).Icon : null
               const slotTint = !isSwipedMeal ? ((m as any).tint ?? TEAL) : TEAL
               const cardAnim = mealCardAnims[Math.min(i, mealCardAnims.length - 1)]
+              // Derive slot label from position when meal doesn't carry one (AI-generated meals)
+              const SLOT_LABELS: Record<number, string[]> = {
+                1: ['Main Meal'],
+                2: ['Breakfast', 'Dinner'],
+                3: ['Breakfast', 'Lunch', 'Dinner'],
+                4: ['Breakfast', 'Lunch', 'Dinner', 'Snack'],
+                5: ['Breakfast', 'Morning Snack', 'Lunch', 'Afternoon Snack', 'Dinner'],
+                6: ['Breakfast', 'Morning Snack', 'Lunch', 'Afternoon Snack', 'Dinner', 'Evening Snack'],
+              }
+              const slotLabel = (m as any).slot || (SLOT_LABELS[mealsPerDay] ?? SLOT_LABELS[3])[i] || ''
               return (
                 <Animated.View key={i} style={{
                   opacity: cardAnim,
@@ -2544,25 +2588,17 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                     }
                   </View>
                   <View style={{ flex: 1, gap: 4 }}>
-                    {(m as any).slot && (
+                    {slotLabel ? (
                       <Text style={{ fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 1.5, textTransform: 'uppercase' }}>
-                        {(m as any).slot}
+                        {slotLabel}
                       </Text>
-                    )}
+                    ) : null}
                     {/* Name — single line with ellipsis */}
                     <Text numberOfLines={1} ellipsizeMode="tail" style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
-                    {/* Single meta row: prep · kcal · protein */}
+                    {/* Meta row: prep time only — macros are individualized per user in the main app */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <Clock size={11} stroke={MUTED} strokeWidth={1.8} />
                       <Text style={{ fontSize: 12, color: MUTED }}><Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{prepDisplay}</Text> min</Text>
-                      <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#444' }} />
-                      <Text style={{ fontSize: 12, color: '#999999' }}>
-                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{calDisplay}</Text> kcal
-                      </Text>
-                      <View style={{ width: 3, height: 3, borderRadius: 1.5, backgroundColor: '#444' }} />
-                      <Text style={{ fontSize: 12, color: '#999999' }}>
-                        <Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{protDisplay}g</Text> protein
-                      </Text>
                     </View>
                   </View>
                 </View>
@@ -2625,7 +2661,7 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   return (
     <SafeAreaView style={s.safe}>
       <View style={f.root}>
-        <TopBar onBack={onBack} pct={PROGRESS[18]} />
+        <TopBar onBack={onBack} pct={PROGRESS[20]} />
 
         <ScrollView contentContainerStyle={[f.scrollContent, { alignItems: 'center' }]} showsVerticalScrollIndicator={false} bounces={false}>
           {/* Badge */}
@@ -2640,19 +2676,33 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
             Unlock your personalized meal plan at no cost. Your kitchen. Your goals. Zero risk.
           </Text>
 
-          {/* Product preview — real home screen frame from the onboarding demo video */}
-          <Animated.View style={[f.phonePreview, {
+          {/* iPhone frame with actual pantry screenshot */}
+          <Animated.View style={{
             opacity: phoneAnim,
             transform: [{ translateY: phoneAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
-          }]}>
-            <Image
-              source={require('../../assets/home-screenshot.png')}
-              style={f.phonePreviewImage}
-              resizeMode="cover"
-            />
+            alignSelf: 'center',
+            marginTop: 16,
+          }}>
+            {/* Hardware buttons — left side (volume) */}
+            <View style={{ position: 'absolute', left: -4, top: 72, gap: 10, zIndex: 10 }}>
+              <View style={{ width: 4, height: 28, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+              <View style={{ width: 4, height: 28, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+            </View>
+            {/* Hardware button — right side (power) */}
+            <View style={{ position: 'absolute', right: -4, top: 96, zIndex: 10 }}>
+              <View style={{ width: 4, height: 48, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+            </View>
+            {/* Phone shell */}
+            <View style={f.phonePreview}>
+              <Image
+                source={require('../../assets/pantry-screenshot.png')}
+                style={{ width: '100%', height: '100%' }}
+                resizeMode="cover"
+              />
+            </View>
           </Animated.View>
 
-          <View style={{ height: 110 }} />
+          <View style={{ height: 150 }} />
         </ScrollView>
 
         {/* Bottom CTA */}
@@ -2673,10 +2723,31 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   )
 }
 
-function STrialReminder({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function STrialReminder({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
   const fadeIn = useRef(new Animated.Value(0)).current
   const bellScale = useRef(new Animated.Value(0.8)).current
   const bellRotate = useRef(new Animated.Value(0)).current
+  const [restoring, setRestoring] = useState(false)
+  const { registerPlacement, preloadPaywalls } = useSuperwall()
+  const { refresh: refreshSuperwallUser, getEntitlements, update: updateSuperwallUser } = useUser()
+
+  const handleRestore = async () => {
+    if (restoring) return
+    setRestoring(true)
+    try {
+      await refreshSuperwallUser()
+      const entitlements = await getEntitlements()
+      if (entitlements?.active && entitlements.active.length > 0) {
+        Alert.alert('Purchases Restored', 'Your subscription is active.', [{ text: 'OK', onPress: onNext }])
+      } else {
+        await registerPlacement('restore_purchases')
+      }
+    } catch (e: any) {
+      Alert.alert('Restore Failed', e?.message ?? 'Please try again.')
+    } finally {
+      setRestoring(false)
+    }
+  }
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }).start()
@@ -2694,6 +2765,23 @@ function STrialReminder({ onNext, onBack }: { onNext: () => void; onBack: () => 
       ])
     const loop = Animated.loop(ringSequence())
     const startDelay = setTimeout(() => loop.start(), 600)
+
+    // Preload paywall while user reads this screen so it renders instantly on tap
+    const goalLabel = data.goal === 'lose' ? 'fat-loss' : data.goal === 'build' ? 'muscle-building' : 'maintenance'
+    const goalCta = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'build' ? 'Maximize Muscle' : 'Body Recomp'
+    ;(async () => {
+      try {
+        await updateSuperwallUser({
+          goal: data.goal,
+          goal_label: goalLabel,
+          goal_cta: goalCta,
+          referral_code: data.referralCode || null,
+          has_referral_code: !!data.referralCode,
+        })
+      } catch {}
+      try { preloadPaywalls(['onboarding_paywall']) } catch {}
+    })()
+
     return () => { clearTimeout(startDelay); loop.stop() }
   }, [])
 
@@ -2705,69 +2793,104 @@ function STrialReminder({ onNext, onBack }: { onNext: () => void; onBack: () => 
   return (
     <SafeAreaView style={s.safe}>
       <View style={f.root}>
-        <TopBar onBack={onBack} pct={PROGRESS[19] ?? 93} />
+        <TopBar onBack={onBack} pct={PROGRESS[21] ?? 96} />
 
-        <ScrollView contentContainerStyle={[f.scrollContent, { alignItems: 'center', paddingTop: 8 }]} showsVerticalScrollIndicator={false} bounces={false}>
-          {/* Headline */}
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingHorizontal: 24, paddingTop: 28, paddingBottom: 8 }}>
           <Text style={f.reminderTitle}>
             We'll remind you{'\n'}before your <Text style={{ color: TEAL }}>trial ends</Text>
           </Text>
 
-          {/* Bell Icon */}
-          <Animated.View style={[f.bellContainer, { transform: [{ scale: bellScale }] }]}>
-            <Animated.View style={[f.bellInner, { transform: [{ rotate: bellRotateInterp }] }]}>
-              <Bell size={48} stroke={TEAL} strokeWidth={1.8} fill={TEAL} />
+          {/* Big bell with notification badge */}
+          <Animated.View style={{ transform: [{ scale: bellScale }], marginTop: 52, marginBottom: 56 }}>
+            <Animated.View style={{ transform: [{ rotate: bellRotateInterp }] }}>
+              <Bell size={160} stroke={TEAL} strokeWidth={1.2} fill={TEAL} />
             </Animated.View>
-            <View style={f.bellBadge} />
-          </Animated.View>
-
-          {/* Timeline */}
-          <Animated.View style={[f.timeline, { opacity: fadeIn }]}>
-            {/* Today */}
-            <View style={f.timelineRow}>
-              <View style={f.timelineDotActive}>
-                <Check size={12} stroke="#000" strokeWidth={3} />
-              </View>
-              <View>
-                <Text style={f.timelineLabel}>Today: Trial Starts</Text>
-                <Text style={f.timelineSub}>$0.00 due now</Text>
-              </View>
-            </View>
-
-            {/* Reminder */}
-            <View style={f.timelineRow}>
-              <View style={f.timelineDotPending}>
-                <View style={f.timelineDotInner} />
-              </View>
-              <View>
-                <Text style={f.timelineLabel}>Before it ends: Reminder</Text>
-                <Text style={f.timelineSub}>We'll notify you on your phone</Text>
-              </View>
-            </View>
-
-            {/* Trial ends */}
-            <View style={f.timelineRow}>
-              <View style={f.timelineDotFuture} />
-              <View>
-                <Text style={[f.timelineLabel, { color: '#888' }]}>Trial Ends</Text>
-                <Text style={f.timelineSub}>Cancel anytime before</Text>
-              </View>
+            <View style={{
+              position: 'absolute', top: -8, right: -14,
+              width: 44, height: 44, borderRadius: 22,
+              backgroundColor: '#EF4444',
+              alignItems: 'center', justifyContent: 'center',
+              borderWidth: 3, borderColor: '#000',
+            }}>
+              <Text style={{ color: '#fff', fontSize: 20, fontWeight: '800' }}>1</Text>
             </View>
           </Animated.View>
 
-          {/* Reassurance */}
           <Text style={f.reassureTitle}>Zero risk. Zero commitment.</Text>
           <Text style={f.reassureSub}>Complete control over your subscription.</Text>
-
-          <View style={{ height: 120 }} />
-        </ScrollView>
+        </View>
 
         {/* Bottom CTA */}
         <View style={f.bottomArea}>
-          <TouchableOpacity style={f.ctaGreen} onPress={onNext} activeOpacity={0.9}>
-            <Text style={f.ctaGreenText}>Try for $0.00</Text>
+          <Text style={f.noPaymentNow}>✓ No Payment Due Now</Text>
+          <TouchableOpacity style={f.ctaWhite} onPress={onNext} activeOpacity={0.9}>
+            <Text style={f.ctaWhiteText}>Continue for FREE</Text>
           </TouchableOpacity>
-          <Text style={f.cancelNote}>CANCEL ANYTIME IN SETTINGS</Text>
+          <TouchableOpacity onPress={handleRestore} activeOpacity={0.7} disabled={restoring}>
+            <Text style={f.alreadyPurchased}>{restoring ? 'Restoring…' : 'Already purchased?'}</Text>
+          </TouchableOpacity>
+          <Text style={f.billingNote}>
+            Billing starts at the end of your free trial unless you cancel. Plans auto-renew. Cancel via the app store.
+          </Text>
+          <View style={f.termsRow}>
+            <TouchableOpacity onPress={() => Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/')} activeOpacity={0.7}>
+              <Text style={f.termsLink}>Terms</Text>
+            </TouchableOpacity>
+            <Text style={f.termsDot}>·</Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://heypantry.app/privacy')} activeOpacity={0.7}>
+              <Text style={f.termsLink}>Privacy</Text>
+            </TouchableOpacity>
+            <Text style={f.termsDot}>·</Text>
+            <TouchableOpacity onPress={handleRestore} activeOpacity={0.7}>
+              <Text style={f.termsLink}>Restore</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </SafeAreaView>
+  )
+}
+
+function SNotificationPermission({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+  const requestPermission = async () => {
+    try {
+      const Notifications = await import('expo-notifications')
+      await Notifications.requestPermissionsAsync()
+    } catch {}
+    onNext()
+  }
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <View style={{ flex: 1 }}>
+        <TopBar onBack={onBack} pct={PROGRESS[15] ?? 72} />
+        <View style={{ flex: 1, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 }}>
+          <Text style={{ fontSize: 28, fontWeight: '800', color: '#FFF', textAlign: 'center', letterSpacing: -0.5, lineHeight: 36, marginBottom: 40 }}>
+            Stay on track with{'\n'}<Text style={{ color: TEAL }}>Pantry notifications</Text>
+          </Text>
+
+          {/* iOS-style permission dialog mockup */}
+          <View style={{
+            width: '100%', backgroundColor: '#1C1C1E', borderRadius: 14,
+            overflow: 'hidden',
+            shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 12,
+          }}>
+            <View style={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16, alignItems: 'center' }}>
+              <Text style={{ fontSize: 17, fontWeight: '600', color: '#FFF', textAlign: 'center', lineHeight: 22 }}>
+                "Pantry" Would Like to{'\n'}Send You Notifications
+              </Text>
+            </View>
+            <View style={{ height: 0.5, backgroundColor: '#3A3A3C' }} />
+            <View style={{ flexDirection: 'row' }}>
+              <TouchableOpacity style={{ flex: 1, paddingVertical: 14, alignItems: 'center' }} onPress={onNext} activeOpacity={0.6}>
+                <Text style={{ fontSize: 17, color: TEAL, fontWeight: '400' }}>Don't Allow</Text>
+              </TouchableOpacity>
+              <View style={{ width: 0.5, backgroundColor: '#3A3A3C' }} />
+              <TouchableOpacity style={{ flex: 1, paddingVertical: 14, alignItems: 'center' }} onPress={requestPermission} activeOpacity={0.6}>
+                <Text style={{ fontSize: 17, color: TEAL, fontWeight: '600' }}>Allow</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </View>
     </SafeAreaView>
@@ -2794,20 +2917,20 @@ const f = StyleSheet.create({
     shadowColor: TEAL, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.08, shadowRadius: 24,
   },
 
-  // Real home-screen preview — screenshot pulled from the onboarding demo video
+  // Real pantry-screen preview
   phonePreview: {
-    width: '80%',
-    aspectRatio: 9 / 19.5, // iPhone aspect
+    width: 285,
+    height: 620,
     backgroundColor: '#0A0A0A',
-    borderRadius: 28,
-    borderWidth: 1.5,
+    borderRadius: 36,
+    borderWidth: 2.5,
     borderColor: '#2A2A2A',
     overflow: 'hidden',
     alignSelf: 'center',
     marginBottom: 8,
-    shadowColor: TEAL,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
     shadowRadius: 24,
   },
   phonePreviewImage: {
@@ -2868,12 +2991,16 @@ const f = StyleSheet.create({
   reassureSub: { fontSize: 14, color: '#888', textAlign: 'center' },
 
   // Shared bottom
-  bottomArea: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 24, paddingBottom: 36, paddingTop: 16, backgroundColor: '#000' },
-  ctaWhite: { backgroundColor: '#FFF', borderRadius: 30, paddingVertical: 18, alignItems: 'center', marginBottom: 16 },
+  bottomArea: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 24, paddingBottom: 36, paddingTop: 24, backgroundColor: '#000' },
+  ctaWhite: { backgroundColor: '#FFF', borderRadius: 30, paddingVertical: 18, alignItems: 'center', marginBottom: 16, marginTop: 16 },
   ctaWhiteText: { fontSize: 17, fontWeight: '800', color: '#000' },
-  noPaymentNow: { fontSize: 13, fontWeight: '700', color: TEAL, textAlign: 'center', marginBottom: 14, letterSpacing: 0.3 },
+  noPaymentNow: { fontSize: 18, fontWeight: '800', color: TEAL, textAlign: 'center', marginBottom: 0, letterSpacing: 0.3 },
   alreadyPurchased: { fontSize: 13, fontWeight: '500', color: MUTED, textAlign: 'center', marginTop: 4 },
   priceSubtitle: { fontSize: 13, fontWeight: '500', color: MUTED, textAlign: 'center', marginTop: 8 },
+  billingNote: { fontSize: 11, color: MUTED, textAlign: 'center', marginTop: 8, lineHeight: 16, paddingHorizontal: 8 },
+  termsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10 },
+  termsLink: { fontSize: 13, color: MUTED, fontWeight: '500' },
+  termsDot: { fontSize: 13, color: MUTED },
   ctaGreen: { backgroundColor: TEAL, borderRadius: 30, paddingVertical: 18, alignItems: 'center', marginBottom: 12 },
   ctaGreenText: { fontSize: 17, fontWeight: '800', color: '#000' },
   verifiedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
@@ -2883,7 +3010,6 @@ const f = StyleSheet.create({
 
 function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
   const { registerPlacement } = useSuperwall()
-  const { update: updateSuperwallUser } = useUser()
   const purchasedRef = useRef(false)
 
   useSuperwallEvents({
@@ -2895,20 +3021,7 @@ function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () 
   useEffect(() => {
     trackPaywallViewed('onboarding')
     const run = async () => {
-      // Pass user goal as Superwall attribute so paywall template can personalize copy
-      // Reference in dashboard as {{ user.goal_label }} e.g. "Start your {{ user.goal_label }} plan"
-      const goalLabel = data.goal === 'lose' ? 'fat-loss' : data.goal === 'build' ? 'muscle-building' : 'maintenance'
-      const goalCta = data.goal === 'lose' ? 'Lose Weight' : data.goal === 'build' ? 'Maximize Muscle' : 'Body Recomp'
-      try {
-        await updateSuperwallUser({
-          goal: data.goal,
-          goal_label: goalLabel,
-          goal_cta: goalCta,
-          referral_code: data.referralCode || null,
-          has_referral_code: !!data.referralCode,
-        })
-      } catch {}
-
+      // User attributes + preload already handled by STrialReminder — go straight to presentation
       await registerPlacement('onboarding_paywall')
       if (ABANDONMENT_PAYWALL_ENABLED) {
         // Allow subscription status event to propagate before deciding
@@ -3332,7 +3445,7 @@ export default function Onboarding() {
   const { step: stepParam } = useLocalSearchParams<{ step?: string }>()
   const [step, setStep] = useState(1)
   const [stepLoaded, setStepLoaded] = useState(false)
-  const [finishing, setFinishing] = useState(false)
+  // finishing state removed — navigation is now immediate
   const fadeAnim = useRef(new Animated.Value(1)).current
   const [data, setData] = useState<OnboardingData>(DEFAULT_DATA)
 
@@ -3481,39 +3594,8 @@ export default function Onboarding() {
           return
         }
 
-        // If meals weren't pre-generated during account creation (e.g. email sign-up),
-        // generate them now and show a brief loading overlay.
-        const existingCache = await AsyncStorage.getItem('pantry_daily_meals_cookNow')
-        const todayStr = new Date().toISOString().slice(0, 10)
-        const cacheReady = existingCache
-          ? (() => { try { const c = JSON.parse(existingCache); return c.date === todayStr && c.meals?.length > 0 && (c.dietStyle ?? 'Classic') === (finalData.dietStyle || 'Classic') } catch { return false } })()
-          : false
-        if (!cacheReady) {
-          setFinishing(true)
-          try {
-            const meals = await generateMeals({
-              ingredients: [
-                'chicken breast', 'ground beef', 'eggs', 'rice', 'pasta',
-                'olive oil', 'butter', 'garlic', 'onion', 'salt', 'black pepper',
-                'soy sauce', 'hot sauce', 'lemon', 'lime', 'Italian seasoning',
-                'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili flakes',
-                'tomato sauce', 'chicken broth', 'parmesan cheese', 'broccoli', 'spinach',
-              ],
-              calorieGoal: computedCals ?? 2400,
-              proteinGoal: computedProt ?? 150,
-              mealsPerDay: parseInt(finalData.meals) || 3,
-              cookingSkill: finalData.cookingSkill || 'moderate',
-              maxPrepMinutes: prepToMinutes(finalData.prep),
-              dietaryRestrictions: mergedRestrictions,
-              foodDislikes: allDislikes,
-              cuisinePreferences: finalData.cuisinePreferences || [],
-              mode: 'cookNow',
-            })
-            await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: todayStr, meals, dietStyle: finalData.dietStyle || 'Classic' }))
-          } catch {
-            // Fail silently — home screen will generate on load
-          }
-        }
+        // Meals pre-generated during onboarding loading screen + prefetchMeals for OAuth.
+        // Never block navigation here — caused a 20-30s black screen. useMealSuggestions handles cache miss.
       }
 
       await AsyncStorage.removeItem('onboarding_data')
@@ -3521,7 +3603,6 @@ export default function Onboarding() {
       await AsyncStorage.setItem('onboarding_complete', 'true')
       router.replace('/(tabs)')
     } catch (error: any) {
-      setFinishing(false)
       Alert.alert('Error', error.message)
     }
   }
@@ -3540,23 +3621,14 @@ export default function Onboarding() {
     11: <SMealCadence meals={data.meals} prep={data.prep} onMeals={update('meals')} onPrep={update('prep')} onNext={next} onBack={back} />,
     12: <SDietStyle value={data.dietStyle} onChange={update('dietStyle')} onNext={next} onBack={back} />,
     14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={update('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
-    15: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onNext={next} onBack={back} />,
-    16: <SGeneratingIntro onNext={next} onBack={back} />,
-    17: <SPlanLoading data={data} onDone={next} />,
-    18: <SPlanReveal data={data} onNext={() => user ? navigate(19) : router.push('/onboarding/createaccount')} onBack={() => navigate(16)} />,
-    19: <STryFree onNext={next} onBack={back} />,
-    20: <STrialReminder onNext={next} onBack={back} />,
-    21: <S7Paywall data={data} onNext={finish} onBack={back} />,
-  }
-
-  if (finishing) {
-    return (
-      <View style={[s.root, { alignItems: 'center', justifyContent: 'center', gap: 20 }]}>
-        <ActivityIndicator size="large" color="#FFFFFF" />
-        <Text style={{ color: '#FFFFFF', fontSize: 17, fontWeight: '600' }}>Building your meal plan…</Text>
-        <Text style={{ color: '#888888', fontSize: 14 }}>This takes just a few seconds</Text>
-      </View>
-    )
+    15: <SNotificationPermission onNext={next} onBack={back} />,
+    16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onNext={next} onBack={back} />,
+    17: <SGeneratingIntro onNext={next} onBack={back} />,
+    18: <SPlanLoading data={data} onDone={next} />,
+    19: <SPlanReveal data={data} onNext={() => user ? navigate(20) : router.push('/onboarding/createaccount')} onBack={() => navigate(17)} />,
+    20: <STryFree onNext={next} onBack={back} />,
+    21: <STrialReminder data={data} onNext={next} onBack={back} />,
+    22: <S7Paywall data={data} onNext={finish} onBack={back} />,
   }
 
   return (
@@ -3578,7 +3650,7 @@ export default function Onboarding() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000000' },
   safe: { flex: 1, backgroundColor: '#000000' },
-  progressTrack: { height: 3, backgroundColor: '#1A1A1A', marginHorizontal: 24, marginTop: 12, marginBottom: 4, borderRadius: 2 },
+  progressTrack: { height: 3, backgroundColor: '#333333', marginHorizontal: 24, marginTop: 12, marginBottom: 4, borderRadius: 2 },
   topBarRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 8 },
   backArrowBtn: {
     width: 36, height: 36, borderRadius: 18, backgroundColor: '#1A1A1A',

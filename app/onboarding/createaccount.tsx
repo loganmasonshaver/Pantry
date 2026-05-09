@@ -85,7 +85,7 @@ export default function CreateAccountScreen() {
       }
       prefetchMeals()
       trackAccountCreated('apple')
-      router.replace({ pathname: '/onboarding', params: { step: '18' } })
+      router.replace({ pathname: '/onboarding', params: { step: '20' } })
     } catch (e: any) {
       if (e.code !== 'ERR_REQUEST_CANCELED') {
         Alert.alert('Apple Sign-In Failed', e.message)
@@ -136,7 +136,7 @@ export default function CreateAccountScreen() {
       }
       prefetchMeals()
       trackAccountCreated('google')
-      router.replace({ pathname: '/onboarding', params: { step: '18' } })
+      router.replace({ pathname: '/onboarding', params: { step: '20' } })
     } catch (e: any) {
       if (e.code !== '12501') { // SIGN_IN_CANCELLED
         Alert.alert('Google Sign-In Failed', e.message)

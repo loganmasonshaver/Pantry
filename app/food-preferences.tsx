@@ -23,16 +23,16 @@ import { trackFoodPreferencesUpdated } from '../lib/analytics'
 const TEAL = '#00C9A7'
 
 export const DISLIKE_CHIPS = [
-  'Shellfish',
-  'Dairy',
   'Gluten',
-  'Pork',
-  'Beef',
-  'Eggs',
+  'Dairy',
   'Nuts',
+  'Shellfish',
+  'Eggs',
   'Soy',
   'Fish',
-  'Spicy Food',
+  'Sesame',
+  'Pork',
+  'Beef',
 ]
 
 export default function FoodPreferencesScreen() {

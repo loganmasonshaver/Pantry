@@ -15,6 +15,7 @@ import { useRouter, useFocusEffect } from 'expo-router'
 import { ArrowLeft, Eye, EyeOff } from 'lucide-react-native'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../lib/supabase'
 import TurnstileWebView from '../../components/TurnstileWebView'
 
 const TEAL = '#4ADE80'
@@ -66,6 +67,26 @@ export default function SignInScreen() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // After OAuth sign-in: check local flag first, then Supabase profile.
+  // If onboarding was reset (dev testing or reinstall), treat as new user.
+  const routeAfterSignIn = async () => {
+    const done = await AsyncStorage.getItem('onboarding_complete')
+    if (done === 'true') { router.replace('/(tabs)'); return }
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles').select('calorie_goal').eq('id', session.user.id).single()
+        if (profile?.calorie_goal) {
+          await AsyncStorage.setItem('onboarding_complete', 'true')
+          router.replace('/(tabs)')
+          return
+        }
+      }
+    } catch {}
+    router.replace('/onboarding')
   }
 
   return (
@@ -131,8 +152,7 @@ export default function SignInScreen() {
               try {
                 setLoading(true)
                 await signInWithApple()
-                await AsyncStorage.setItem('onboarding_complete', 'true')
-                router.replace('/(tabs)')
+                await routeAfterSignIn()
               } catch (e: any) {
                 if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Apple Sign-In Failed', e.message)
               } finally { setLoading(false) }
@@ -147,8 +167,7 @@ export default function SignInScreen() {
               setLoading(true)
               await signInWithGoogle()
               // Google users skip OTP — already verified via Google
-              await AsyncStorage.setItem('onboarding_complete', 'true')
-              router.replace('/(tabs)')
+              await routeAfterSignIn()
             } catch (e: any) {
               if (e.code !== '12501') Alert.alert('Google Sign-In Failed', e.message)
             } finally { setLoading(false) }
