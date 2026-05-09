@@ -2290,21 +2290,19 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     const pickedNames = new Set<string>()
     const pickedThemes = new Set<string>()
 
-    const getTheme = (name: string): string => {
+    // Multi-theme: return ALL ingredient keywords found in the name so that
+    // "Beef and Broccoli Rice Bowl" blocks both beef AND broccoli in later slots.
+    const THEME_KEYWORDS = [
+      'chickpea', 'black bean', 'lentil', 'tofu', 'quinoa',
+      'salmon', 'chicken', 'turkey', 'shrimp', 'tuna', 'tilapia', 'cod', 'halibut',
+      'beef', 'steak', 'sirloin', 'ground beef', 'pork', 'lamb',
+      'egg', 'peanut', 'broccoli', 'avocado', 'sweet potato',
+      'cottage cheese', 'greek yogurt', 'tempeh', 'edamame', 'pasta',
+    ]
+    const getThemes = (name: string): string[] => {
       const n = name.toLowerCase()
-      if (n.includes('chickpea'))    return 'chickpea'
-      if (n.includes('black bean'))  return 'blackbean'
-      if (n.includes('lentil'))      return 'lentil'
-      if (n.includes('tofu'))        return 'tofu'
-      if (n.includes('quinoa'))      return 'quinoa'
-      if (n.includes('salmon'))      return 'salmon'
-      if (n.includes('chicken'))     return 'chicken'
-      if (n.includes('turkey'))      return 'turkey'
-      if (n.includes('shrimp'))      return 'shrimp'
-      if (n.includes('tuna'))        return 'tuna'
-      if (n.includes('egg'))         return 'egg'
-      if (n.includes('peanut'))      return 'peanut'
-      return n // unique fallback
+      const hits = THEME_KEYWORDS.filter(kw => n.includes(kw))
+      return hits.length > 0 ? hits : [n] // unique fallback
     }
 
     const pickRecipe = (bench: Recipe[]): Recipe => {
@@ -2314,8 +2312,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         skillAllowed.includes(r.skill) &&
         r.prepMin <= prepMin
 
-      // Pass 1: all filters + no name dup + no theme dup
-      let chosen = bench.find(r => !pickedNames.has(r.name) && !pickedThemes.has(getTheme(r.name)) && passes(r))
+      // Pass 1: all filters + no name dup + no theme overlap
+      let chosen = bench.find(r => !pickedNames.has(r.name) && !getThemes(r.name).some(t => pickedThemes.has(t)) && passes(r))
       // Pass 2: relax theme dedup
       if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && passes(r))
       // Pass 3: relax all dedup but still respect allergens + prepMin
@@ -2326,7 +2324,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       if (!chosen) chosen = bench[0]
 
       pickedNames.add(chosen.name)
-      pickedThemes.add(getTheme(chosen.name))
+      getThemes(chosen.name).forEach(t => pickedThemes.add(t))
       return chosen
     }
 
