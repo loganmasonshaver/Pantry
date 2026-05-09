@@ -54,7 +54,25 @@ Deno.serve(async (req: Request) => {
       return !sauceKeywords.some(k => lower.includes(k))
     })
     const ingredientList = visibleIngredients.length ? ` with ${visibleIngredients.join(', ')}` : ''
-    const prompt = `Professional food photography of ${mealName}${ingredientList}, complete and fully assembled dish exactly as served in a restaurant — buns on burgers, tortillas on tacos and wraps, rice in bowls, pasta in dishes — dark ceramic plate or appropriate vessel, glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra bowls, dark moody background, warm moody restaurant lighting, sharp focus, appetizing, photorealistic`
+
+    // Detect the correct vessel from meal name so the model doesn't default to a plate
+    const nameLower = mealName.toLowerCase()
+    const vessel = nameLower.includes('bowl')      ? 'deep ceramic bowl'
+                 : nameLower.includes('wrap')      ? 'flour tortilla wrap, folded and served on a board'
+                 : nameLower.includes('taco')      ? 'corn or flour taco shells'
+                 : nameLower.includes('burger')    ? 'toasted brioche bun, fully assembled'
+                 : nameLower.includes('sandwich')  ? 'toasted bread or bun, fully assembled'
+                 : nameLower.includes('smoothie')  ? 'tall glass with a straw'
+                 : nameLower.includes('oats')      ? 'ceramic bowl'
+                 : nameLower.includes('pudding')   ? 'glass jar or ceramic bowl'
+                 : nameLower.includes('salad')     ? 'wide ceramic bowl or plate'
+                 : nameLower.includes('soup')      ? 'deep ceramic bowl'
+                 : nameLower.includes('stir-fry') || nameLower.includes('stir fry') ? 'ceramic bowl with rice'
+                 : nameLower.includes('curry')     ? 'ceramic bowl with rice on the side'
+                 : nameLower.includes('toast')     ? 'dark ceramic plate'
+                 : 'dark ceramic plate'
+
+    const prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant — glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra vessels, dark moody background, warm moody restaurant lighting, sharp focus, appetizing, photorealistic`
 
     // Generate via FAL Flux 2
     for (let attempt = 0; attempt < 3; attempt++) {
