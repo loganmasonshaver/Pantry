@@ -3522,6 +3522,23 @@ export default function Onboarding() {
     return () => { cancelled = true }
   }, [])
 
+  // When stepParam changes on an already-mounted component (e.g. OAuth sign-in
+  // from createaccount.tsx calls router.replace with a new step), the [] useEffect
+  // above won't re-run. Instantly hide → swap → fade-in to prevent the old screen
+  // from flashing before the new one appears.
+  useEffect(() => {
+    if (!stepParam || !stepLoaded) return
+    const p = parseInt(stepParam, 10)
+    if (isNaN(p) || p === step) return
+    fadeAnim.setValue(0)
+    setStep(p)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        Animated.timing(fadeAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start()
+      })
+    })
+  }, [stepParam])
+
   // Persist current step so app re-open resumes where the user left off
   useEffect(() => {
     if (stepLoaded) {

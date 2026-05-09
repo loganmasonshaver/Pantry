@@ -65,6 +65,14 @@ function RootLayoutNav() {
       return
     }
 
+    // Don't interfere with the onboarding flow mid-session.
+    // Each onboarding screen (createaccount, verify-email, signin) handles
+    // its own routing after sign-in. _layout.tsx only needs to run on cold
+    // start (checking=true) — after that, let the onboarding screens drive.
+    if (!checking && pathname.startsWith('/onboarding')) {
+      return
+    }
+
     Promise.all([
       AsyncStorage.getItem('onboarding_complete'),
       AsyncStorage.getItem('otp_verified'),
@@ -76,17 +84,13 @@ function RootLayoutNav() {
         const otpVerified = otpValue === 'true' || isOAuthUser
 
         if (!otpVerified) {
-          // Needs email verification
           router.replace({ pathname: '/onboarding/verify-email', params: { email: session.user.email ?? '' } })
         } else if (onboardingValue === 'true') {
           router.replace('/(tabs)')
         } else {
-          // No step param — let onboarding resume from its own saved onboarding_step key.
-          // Hardcoding a step here broke when the step order changed (step 8 is now Goal, not Paywall).
           router.replace('/onboarding')
         }
       } else {
-        // Clear OTP flag on sign out
         AsyncStorage.removeItem('otp_verified')
         router.replace('/onboarding')
       }

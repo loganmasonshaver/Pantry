@@ -105,9 +105,10 @@ export default function VerifyEmailScreen() {
         const onboardingDone = await AsyncStorage.getItem('onboarding_complete')
         if (onboardingDone === 'true') {
           router.replace('/(tabs)')
-        } else {
-          // Local flag was cleared (reset or reinstall). Check Supabase profile to
-          // decide: real returning user → fast-path to tabs; fresh/reset account → full onboarding.
+        } else if (isSignIn === 'true') {
+          // Returning user signing back in — check Supabase profile to decide:
+          // real returning user (cleared local flag) → fast-path to tabs;
+          // reset account with no profile → full onboarding.
           try {
             const { data: { session } } = await supabase.auth.getSession()
             if (session?.user?.id) {
@@ -117,15 +118,18 @@ export default function VerifyEmailScreen() {
                 .eq('id', session.user.id)
                 .single()
               if (profile?.calorie_goal) {
-                // Has a real profile — returning user, send to app
                 await AsyncStorage.setItem('onboarding_complete', 'true')
                 router.replace('/(tabs)')
                 return
               }
             }
           } catch {}
-          // No profile data — treat as genuinely new user, start onboarding from beginning
           router.replace('/onboarding')
+        } else {
+          // New account sign-up — always forward to the paywall (step 20).
+          // Never profile-check here: calorie_goal from a previous run would
+          // incorrectly fast-path a fresh sign-up straight to the dashboard.
+          router.replace({ pathname: '/onboarding', params: { step: '20' } })
         }
       }
     } catch (e: any) {
