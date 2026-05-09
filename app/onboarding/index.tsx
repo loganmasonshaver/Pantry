@@ -2164,6 +2164,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#60A5FA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 5 },
           { name: 'Avocado Toast with Smoked Salmon', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Smoked Salmon Eggs Benedict', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Eggs', 'Dairy', 'Gluten'], skill: 'medium', prepMin: 20 },
+          { name: 'Seared Salmon and Egg Scramble', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Eggs'], skill: 'medium', prepMin: 15 },
         ],
         Lunch: [
           { name: 'Tuna Poke Bowl', Icon: Fish, tint: TEAL, contains: ['Fish', 'Soy'], skill: 'easy', prepMin: 15 },
@@ -2183,6 +2185,10 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Teriyaki Salmon Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Soy'], skill: 'easy', prepMin: 20 },
           { name: 'Chickpea and Avocado Power Bowl', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Pan-Seared Salmon Fillet with Asparagus', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'medium', prepMin: 25 },
+          { name: 'Herb-Crusted Cod with Roasted Vegetables', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'medium', prepMin: 25 },
+          { name: 'Garlic Butter Scallops with Cauliflower Rice', Icon: Fish, tint: '#60A5FA', contains: ['Shellfish', 'Dairy'], skill: 'medium', prepMin: 20 },
+          { name: 'Sesame Tuna Steak with Bok Choy', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Sesame', 'Soy'], skill: 'medium', prepMin: 20 },
         ],
         Snack: [
           { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
@@ -2191,10 +2197,11 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         ],
         'Main Meal': [
           { name: 'Tuna and Avocado Rice Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 8 },
-          { name: 'Smoked Salmon Wrap', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Gluten', 'Dairy'], skill: 'easy', prepMin: 5 },
-          { name: 'Pan-Seared Salmon with Roasted Broccoli', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 20 },
-          { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
           { name: 'Chickpea and Avocado Power Bowl', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Chickpea and Spinach Stir-Fry', Icon: Salad, tint: '#60A5FA', contains: [], skill: 'easy', prepMin: 20 },
+          { name: 'Pan-Seared Salmon Fillet with Asparagus', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'medium', prepMin: 25 },
+          { name: 'Herb-Crusted Cod with Roasted Vegetables', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'medium', prepMin: 25 },
+          { name: 'Garlic Butter Scallops with Cauliflower Rice', Icon: Fish, tint: '#60A5FA', contains: ['Shellfish', 'Dairy'], skill: 'medium', prepMin: 20 },
         ],
       },
       Vegetarian: {
@@ -2231,11 +2238,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 10 },
         ],
         'Main Meal': [
-          { name: 'Cottage Cheese and Veggie Wrap', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
-          { name: 'Caprese and Egg White Bowl', Icon: Salad, tint: '#EF4444', contains: ['Dairy', 'Eggs'], skill: 'easy', prepMin: 8 },
           { name: 'Lentil Dal with Basmati Rice', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 25 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 15 },
           { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Paneer Tikka Masala with Rice', Icon: Salad, tint: '#EF4444', contains: ['Dairy'], skill: 'medium', prepMin: 30 },
+          { name: 'Tempeh and Feta Quinoa Bowl', Icon: Sprout, tint: '#EF4444', contains: ['Soy', 'Dairy'], skill: 'medium', prepMin: 20 },
+          { name: 'Baked Stuffed Bell Peppers with Rice and Beans', Icon: Salad, tint: '#EF4444', contains: [], skill: 'medium', prepMin: 35 },
         ],
       },
       Vegan: {
@@ -2246,6 +2254,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Acai Smoothie Bowl', Icon: Sprout, tint: '#F59E0B', contains: [], skill: 'easy', prepMin: 5 },
           { name: 'Sweet Potato Toast with Peanut Butter', Icon: Sprout, tint: '#F59E0B', contains: ['Nuts'], skill: 'easy', prepMin: 15 },
           { name: 'Mango Berry Smoothie', Icon: Sprout, tint: '#F59E0B', contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Sweet Potato and Black Bean Hash', Icon: Salad, tint: '#F59E0B', contains: [], skill: 'medium', prepMin: 20 },
         ],
         Lunch: [
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
@@ -2274,11 +2283,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Peanut Butter Apple Slices', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
         ],
         'Main Meal': [
-          { name: 'Avocado and Black Bean Wrap', Icon: Salad, tint: TEAL, contains: ['Gluten'], skill: 'easy', prepMin: 5 },
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
           { name: 'Black Bean Taco Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 15 },
-          { name: 'Chickpea and Roasted Red Pepper Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
           { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
+          { name: 'Lentil Sweet Potato Curry', Icon: Salad, tint: TEAL, contains: [], skill: 'medium', prepMin: 30 },
+          { name: 'Spicy Tofu and Broccoli Bowl', Icon: Sprout, tint: TEAL, contains: ['Soy'], skill: 'medium', prepMin: 20 },
+          { name: 'Sweet Potato and Black Bean Hash', Icon: Salad, tint: TEAL, contains: [], skill: 'medium', prepMin: 20 },
         ],
       },
     }
