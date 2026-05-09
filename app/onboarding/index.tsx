@@ -2120,7 +2120,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Turkey Sausage and Egg Scramble', Icon: Drumstick, tint: '#F59E0B', contains: ['Eggs'], skill: 'easy', prepMin: 15 },
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#F59E0B', contains: [], skill: 'easy', prepMin: 5 },
           { name: 'Greek Yogurt Parfait with Granola', Icon: Sprout, tint: '#F59E0B', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
-          { name: 'Shakshuka with Fresh Herbs', Icon: Drumstick, tint: '#F59E0B', contains: ['Eggs'], skill: 'medium', prepMin: 20 },
+          { name: 'Smoked Salmon Scrambled Eggs', Icon: Fish, tint: '#F59E0B', contains: ['Eggs', 'Fish', 'Dairy'], skill: 'medium', prepMin: 10 },
           { name: 'Steak and Egg Power Scramble', Icon: Drumstick, tint: '#F59E0B', contains: ['Eggs', 'Beef'], skill: 'medium', prepMin: 15 },
         ],
         Lunch: [
