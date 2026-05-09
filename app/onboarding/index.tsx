@@ -2297,18 +2297,35 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     const pickedNames = new Set<string>()
     const pickedThemes = new Set<string>()
 
-    // Multi-theme: return ALL ingredient keywords found in the name so that
-    // "Beef and Broccoli Rice Bowl" blocks both beef AND broccoli in later slots.
-    const THEME_KEYWORDS = [
-      'chickpea', 'black bean', 'lentil', 'tofu', 'quinoa',
-      'salmon', 'chicken', 'turkey', 'shrimp', 'tuna', 'tilapia', 'cod', 'halibut',
-      'beef', 'steak', 'sirloin', 'ground beef', 'pork', 'lamb',
-      'egg', 'peanut', 'broccoli', 'avocado', 'sweet potato',
-      'cottage cheese', 'greek yogurt', 'tempeh', 'edamame', 'pasta',
-    ]
+    // Multi-theme: return canonical ingredient tokens for a meal name.
+    // Synonyms map to the same token so "beef" lunch blocks "steak" dinner, etc.
     const getThemes = (name: string): string[] => {
       const n = name.toLowerCase()
-      const hits = THEME_KEYWORDS.filter(kw => n.includes(kw))
+      const hits: string[] = []
+      if (n.includes('chicken'))                                          hits.push('chicken')
+      if (n.includes('turkey'))                                           hits.push('turkey')
+      if (n.includes('beef') || n.includes('steak') || n.includes('sirloin') || n.includes('ribeye')) hits.push('beef')
+      if (n.includes('pork') || n.includes('tenderloin') || n.includes('bacon')) hits.push('pork')
+      if (n.includes('lamb'))                                             hits.push('lamb')
+      if (n.includes('salmon'))                                           hits.push('salmon')
+      if (n.includes('tuna'))                                             hits.push('tuna')
+      if (n.includes('shrimp') || n.includes('scallop'))                 hits.push('shrimp')
+      if (n.includes('cod') || n.includes('halibut') || n.includes('tilapia')) hits.push('whitefish')
+      if (n.includes('egg'))                                              hits.push('egg')
+      if (n.includes('tofu'))                                             hits.push('tofu')
+      if (n.includes('tempeh'))                                           hits.push('tempeh')
+      if (n.includes('edamame'))                                          hits.push('edamame')
+      if (n.includes('chickpea'))                                         hits.push('chickpea')
+      if (n.includes('black bean'))                                       hits.push('blackbean')
+      if (n.includes('lentil'))                                           hits.push('lentil')
+      if (n.includes('quinoa'))                                           hits.push('quinoa')
+      if (n.includes('peanut'))                                           hits.push('peanut')
+      if (n.includes('broccoli'))                                         hits.push('broccoli')
+      if (n.includes('avocado'))                                          hits.push('avocado')
+      if (n.includes('sweet potato'))                                     hits.push('sweetpotato')
+      if (n.includes('cottage cheese'))                                   hits.push('cottagecheese')
+      if (n.includes('greek yogurt'))                                     hits.push('greekyogurt')
+      if (n.includes('pasta'))                                            hits.push('pasta')
       return hits.length > 0 ? hits : [n] // unique fallback
     }
 
