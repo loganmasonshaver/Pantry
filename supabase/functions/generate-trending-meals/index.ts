@@ -99,13 +99,22 @@ async function correctMealMacros(recipe: any): Promise<any> {
 }
 
 Deno.serve(async (req: Request) => {
-  // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
-  const user = await verifyUser(req)
-  if (!user) return unauthorizedResponse()
+  // Allow service-role-key callers (pg_cron daily job) to bypass user auth and rate limit.
+  // This is the only way cron can invoke an edge function — it has no user JWT.
+  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+  const authToken = (req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "")
+    .replace(/^Bearer\s+/i, "").trim()
+  const isServiceRole = SERVICE_ROLE_KEY !== "" && authToken === SERVICE_ROLE_KEY
 
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 3, 60000)
-  if (!allowed) return rateLimitResponse()
+  if (!isServiceRole) {
+    // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
+    const user = await verifyUser(req)
+    if (!user) return unauthorizedResponse()
+
+    const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
+    const { allowed } = rateLimit(ip, 3, 60000)
+    if (!allowed) return rateLimitResponse()
+  }
 
   const url = new URL(req.url)
   const forceRefresh = url.searchParams.get('refresh') === 'true'
