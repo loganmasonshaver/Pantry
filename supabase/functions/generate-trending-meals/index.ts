@@ -110,10 +110,17 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url)
   const forceRefresh = url.searchParams.get('refresh') === 'true'
 
-  // Return cached if already generated today
+  // Return cached only if today's YouTube batch was already generated. Scoping to
+  // trend_source='YouTube trending' is critical — without it, a creator posting a recipe
+  // today is enough to satisfy the cache check, so the YouTube generator never runs.
   if (!forceRefresh) {
-    const { data: existing } = await db.from('trending_meals').select('id').eq('generated_at', today()).limit(1)
+    const { data: existing } = await db.from('trending_meals')
+      .select('id')
+      .eq('generated_at', today())
+      .eq('trend_source', 'YouTube trending')
+      .limit(1)
     if (existing && existing.length > 0) {
+      // Return the full day's pool (creator + YouTube) so callers see everything.
       const { data: meals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
       return new Response(JSON.stringify({ cached: true, meals }), { headers: { 'Content-Type': 'application/json' } })
     }

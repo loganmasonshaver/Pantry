@@ -448,21 +448,43 @@ export default function HomeScreen() {
       trend_source: m.trend_source, vote_score: m.vote_score ?? 0, creator: null,
     }))
 
+    // After a regen succeeds we re-fetch with the creators join so newly-generated
+    // YouTube rows are mixed in alongside any creator recipes (the edge function's
+    // response payload doesn't include the creators relation).
+    const refetchAfterRegen = () => {
+      supabase.from('trending_meals')
+        .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
+        .gte('generated_at', thirtyDaysAgo)
+        .order('generated_at', { ascending: false })
+        .order('id')
+        .then(({ data }) => {
+          if (data && data.length > 0) setTrendingMeals(mapRows(data))
+        })
+    }
+
     const handleRows = (rows: any[]) => {
       const todayRows = rows.filter(r => r.generated_at === today)
       const olderRows = rows.filter(r => r.generated_at !== today)
+      const todayHasYouTube = todayRows.some(r => r.trend_source === 'YouTube trending')
 
       if (todayRows.length > 0) {
         const combined = todayRows.length >= 4 ? todayRows : [...todayRows, ...olderRows].slice(0, 10)
         setTrendingMeals(mapRows(combined))
+        // Creator-only today → kick off YouTube generation in the background so the
+        // feed fills out without the user having to navigate away and back.
+        if (!todayHasYouTube) {
+          supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
+            if (res?.meals && res.meals.length > 0) refetchAfterRegen()
+          })
+        }
       } else if (olderRows.length > 0) {
         setTrendingMeals(mapRows(olderRows.slice(0, 10)))
         supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
-          if (res?.meals && res.meals.length > 0) setTrendingMeals(mapEdgeRows(res.meals))
+          if (res?.meals && res.meals.length > 0) refetchAfterRegen()
         })
       } else {
         supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
-          if (res?.meals && res.meals.length > 0) setTrendingMeals(mapEdgeRows(res.meals))
+          if (res?.meals && res.meals.length > 0) refetchAfterRegen()
         })
       }
     }
