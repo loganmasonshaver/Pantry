@@ -862,11 +862,12 @@ export default function MealDetailScreen() {
                       style={[styles.ingredientPill, inPantry && styles.ingredientPillActive]}
                       onPress={() => toggleHaveIt(ing.name)}
                       activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     >
                       {inPantry ? (
                         <X size={13} stroke="#4ADE80" strokeWidth={2.5} />
                       ) : (
-                        <Check size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                        <Check size={13} stroke="#C8C8C8" strokeWidth={2} />
                       )}
                       <Text style={inPantry ? styles.ingredientPillTextActive : styles.ingredientPillText}>
                         {inPantry ? 'Remove' : 'Have it'}
@@ -876,8 +877,9 @@ export default function MealDetailScreen() {
                       style={[styles.ingredientPill, addedToGrocery.has(ing.name) && styles.ingredientPillActive]}
                       onPress={() => toggleGrocery(ing.name)}
                       activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     >
-                      <ShoppingCart size={13} stroke={addedToGrocery.has(ing.name) ? '#4ADE80' : COLORS.textMuted} strokeWidth={2} />
+                      <ShoppingCart size={13} stroke={addedToGrocery.has(ing.name) ? '#4ADE80' : '#C8C8C8'} strokeWidth={2} />
                       <Text style={addedToGrocery.has(ing.name) ? styles.ingredientPillTextActive : styles.ingredientPillText}>
                         {addedToGrocery.has(ing.name) ? 'In list' : 'Grocery'}
                       </Text>
@@ -1450,19 +1452,19 @@ const styles = StyleSheet.create({
   ingredientPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderRadius: 16,
-    backgroundColor: '#262626',
+    backgroundColor: '#2E2E2E',
   },
   ingredientPillActive: {
-    backgroundColor: 'rgba(74,222,128,0.12)',
+    backgroundColor: 'rgba(74,222,128,0.16)',
   },
   ingredientPillText: {
     fontSize: 12,
     fontWeight: '600',
-    color: COLORS.textMuted,
+    color: '#C8C8C8',
   },
   ingredientPillTextActive: {
     fontSize: 12,
@@ -1611,7 +1613,7 @@ const styles = StyleSheet.create({
   stepNumberText: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#00C9A7',
+    color: '#4ADE80',
   },
   stepText: {
     flex: 1,
