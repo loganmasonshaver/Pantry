@@ -52,9 +52,9 @@ export default function MealsSavedScreen() {
   const [meals, setMeals] = useState<MealItem[]>([])
   const [done, setDone] = useState(false)
 
-  const cardAnims = useRef<CardAnim[]>([
-    makeCardAnim(), makeCardAnim(), makeCardAnim(),
-  ]).current
+  // Allocated lazily once meals load so every meal gets its own set of anim values.
+  const cardAnimsRef = useRef<CardAnim[]>([])
+  const cardAnims = cardAnimsRef.current
 
   const bookmarkScale = useRef(new Animated.Value(1)).current
   const buttonOpacity = useRef(new Animated.Value(0)).current
@@ -93,8 +93,10 @@ export default function MealsSavedScreen() {
           if (!m.image && imgCache[m.name]) m.image = imgCache[m.name]
         })
 
-        // Animation only renders the top 3 cards (more would crowd the stack)
-        setMeals(planMeals.slice(0, 3).map(m => ({ name: m.name, image: m.image })))
+        // Animate every meal — users with 6 meals/day should see all 6 fly.
+        // Allocate one CardAnim per meal before render so the JSX can reference them.
+        cardAnimsRef.current = planMeals.map(() => makeCardAnim())
+        setMeals(planMeals.map(m => ({ name: m.name, image: m.image })))
 
         // Save ALL meals to DB, not just the 3 shown
         if (user && planMeals.length > 0) {
@@ -129,6 +131,9 @@ export default function MealsSavedScreen() {
     if (meals.length === 0) return
 
     const count = meals.length
+    // Cap total stagger so 6+ meals don't drag on. Up to 3 meals keep the original
+    // 430ms beat; past that, compress so the last card starts flying by ~1.5s.
+    const stagger = count <= 3 ? 430 : Math.max(180, Math.floor(1500 / count))
 
     Animated.timing(titleOpacity, {
       toValue: 1, duration: 400, useNativeDriver: true,
@@ -166,8 +171,8 @@ export default function MealsSavedScreen() {
       ])
 
     const allAnims = [
-      ...Array.from({ length: count }, (_, i) => flyCard(i, i * 430)),
-      ...Array.from({ length: count }, (_, i) => bounceIcon(i * 430)),
+      ...Array.from({ length: count }, (_, i) => flyCard(i, i * stagger)),
+      ...Array.from({ length: count }, (_, i) => bounceIcon(i * stagger)),
     ]
 
     Animated.parallel(allAnims).start(() => {
@@ -194,9 +199,13 @@ export default function MealsSavedScreen() {
           <Text style={s.sub}>Watch them land in Saved</Text>
         </Animated.View>
 
-        {/* Card stack */}
-        <View style={s.cardsWrap}>
-          {meals.map(({ name, image }, i) => (
+        {/* Card stack — height + offset adapt to meal count so 6+ cards don't crowd */}
+        {(() => {
+          const stackOffset = meals.length <= 4 ? 14 : 10
+          const wrapHeight = 76 + Math.max(0, meals.length - 1) * stackOffset
+          return (
+            <View style={[s.cardsWrap, { height: wrapHeight }]}>
+              {meals.map(({ name, image }, i) => (
             <Animated.View
               key={i}
               style={[
@@ -208,7 +217,7 @@ export default function MealsSavedScreen() {
                   ],
                   opacity: cardAnims[i].opacity,
                   zIndex: meals.length - i,
-                  top: i * 14,
+                  top: i * stackOffset,
                 },
               ]}
             >
@@ -220,6 +229,8 @@ export default function MealsSavedScreen() {
             </Animated.View>
           ))}
         </View>
+          )
+        })()}
       </View>
 
       {/* CTA — fades in above the tab bar */}
