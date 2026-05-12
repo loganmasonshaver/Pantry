@@ -898,7 +898,7 @@ export default function HomeScreen() {
               <ScanLine size={42} color="#4ADE80" strokeWidth={2.2} />
             </RNAnimated.View>
             <Text style={styles.scanHeroTitle}>Scan your pantry to start</Text>
-            <Text style={styles.scanHeroSub}>10 seconds. Personalized meals from what you already have.</Text>
+            <Text style={styles.scanHeroSub}>Takes about 2 minutes. Personalized meals from what you already have.</Text>
             <View style={styles.scanHeroBtn}>
               <Text style={styles.scanHeroBtnText}>Scan Now</Text>
             </View>
