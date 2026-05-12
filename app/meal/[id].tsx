@@ -339,7 +339,7 @@ export default function MealDetailScreen() {
     if ((meal as any).trend_source === 'creator' && id && !id.startsWith('mock')) {
       const delta = next === null ? -(prev ?? 0) : next - (prev ?? 0)
       if (delta !== 0) {
-        supabase.rpc('increment_vote_score', { meal_id: id, delta }).catch(() => {})
+        supabase.rpc('increment_vote_score', { meal_id: id, delta }).then(() => {}, () => {})
       }
     }
   }
