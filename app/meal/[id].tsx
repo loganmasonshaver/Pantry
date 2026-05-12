@@ -1615,14 +1615,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#4ADE80',
   },
-  stepText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#ABABAB',
-    lineHeight: 22,
-    fontWeight: '400',
-  },
-
   // Bottom bar
   bottomBar: {
     paddingHorizontal: 20,
