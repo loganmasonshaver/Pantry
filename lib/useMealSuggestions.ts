@@ -9,8 +9,12 @@ const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 
 type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number }
 
+// Local-timezone date string. Previously this used toISOString() which is UTC,
+// so reloading the app after ~7pm CT (00:00 UTC) treated cached meals as
+// stale and forced regeneration even though it was still "today" for the user.
 function todayStr() {
-  return new Date().toISOString().slice(0, 10)
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
@@ -237,16 +241,22 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     let cancelled = false // prevents setMeals on an unmounted component if the user navigates away
     ;(async () => {
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
+      console.log(`[MealCache:${mode}] mount enabled=${enabled} hasCache=${!!raw}`)
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
+        const today = todayStr()
+        console.log(`[MealCache:${mode}] cached.date=${cached.date} today=${today} maxPrep=${cached.maxPrepMinutes} mealCount=${cached.meals?.length ?? 0}`)
         // Invalidate if no maxPrepMinutes stored (old cache format) — forces regeneration with correct prep constraint
         if (cached.maxPrepMinutes === undefined) {
+          console.log(`[MealCache:${mode}] WIPE: old format (no maxPrepMinutes)`)
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
-        } else if (cached.date === todayStr() && cached.meals.length > 0) {
+        } else if (cached.date === today && cached.meals.length > 0) {
           // Filter out any meals that somehow slipped past the prep cap
           const validMeals = cached.meals.filter(m => !m.prepTime || Number(m.prepTime) <= cached.maxPrepMinutes!)
           const isSeeded = validMeals.every(m => m.id?.startsWith('seeded_')) // onboarding placeholder meals have no recipe data; clear them before real generation
+          console.log(`[MealCache:${mode}] filter validMeals=${validMeals.length}/${cached.meals.length} isSeeded=${isSeeded}`)
           if (validMeals.length > 0 && !isSeeded) {
+            console.log(`[MealCache:${mode}] HIT serving cached meals`)
             // Real AI meals: show immediately, then fetch any missing images in background
             setMeals(validMeals)
             if (cached.meals.some(m => !m.image)) {
@@ -271,10 +281,16 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             return
           }
           // Seeded: treat as cache miss — clear and generate real meals
+          console.log(`[MealCache:${mode}] WIPE: validMeals=0 or all seeded`)
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+        } else {
+          console.log(`[MealCache:${mode}] MISS: date mismatch or empty (cached.date=${cached.date} today=${todayStr()} mealCount=${cached.meals?.length ?? 0})`)
         }
       }
-      if (!cancelled) fetchAndGenerate()
+      if (!cancelled) {
+        console.log(`[MealCache:${mode}] REGEN triggered`)
+        fetchAndGenerate()
+      }
     })()
     return () => { cancelled = true }
   }, [userId, isPremium, mode, enabled])

@@ -74,6 +74,26 @@ const INITIAL_SLOTS: MealSlot[] = [
   { id: 'dinner', label: 'Dinner', entries: [] },
 ]
 
+// Trending lifecycle: YouTube-sourced meals are kept 3 days (gen function deletes older);
+// creator recipes get a 14-day base window, extended to 30 days if they've earned social
+// proof (vote_score >= 3 OR log_count >= 10). Module-level so every fetch path uses it.
+function isCreatorRecipeVisible(m: any): boolean {
+  const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
+  if (ageDays <= 14) return true
+  if (ageDays <= 30 && ((m.vote_score ?? 0) >= 3 || (m.log_count ?? 0) >= 10)) return true
+  return false
+}
+function isYouTubeRecipeVisible(m: any): boolean {
+  const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
+  return ageDays <= 3
+}
+function filterTrendingByLifecycle(rows: any[]): any[] {
+  return rows.filter(m => {
+    if (m.trend_source === 'creator' || m.creators) return isCreatorRecipeVisible(m)
+    return isYouTubeRecipeVisible(m)
+  })
+}
+
 function iconForSlot(label: string): React.ElementType {
   const l = label.toLowerCase()
   if (l.includes('breakfast') || l.includes('morning')) return Milk
@@ -395,12 +415,15 @@ export default function HomeScreen() {
   const [showCreatorModal, setShowCreatorModal] = useState(false)
   const [creatorMealToEdit, setCreatorMealToEdit] = useState<any>(null)
 
-  // Fetch trending meals from cache (generated daily, kept 3 days for fallback)
+  // Fetch trending meals. YouTube-sourced meals: 3-day window (gen function deletes older).
+  // Creator-sourced meals: 14-day base window, extended to 30 days if the recipe has earned
+  // social proof (vote_score >= 3 OR log_count >= 10). Keeps the feed fresh for casual posts
+  // while letting popular creator recipes live longer.
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
-    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
 
-    const mapRows = (rows: any[]) => rows
+    const mapRows = (rows: any[]) => filterTrendingByLifecycle(rows)
       .map(m => ({
         id: m.id, name: m.name, calories: m.calories, protein: m.protein,
         carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
@@ -409,6 +432,7 @@ export default function HomeScreen() {
         creator: m.creators ?? null,  // includes handle, avatar_url, instagram_url, tiktok_url, youtube_url
         vote_score: m.vote_score ?? 0,
         log_count: m.log_count ?? 0,
+        generated_at: m.generated_at,
       }))
       .sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0))
 
@@ -438,11 +462,11 @@ export default function HomeScreen() {
       }
     }
 
-    // Pull last 3 days' worth, newest first — gives us a deep enough pool even if today's
-    // generation was thin. We sort/order client-side to prioritize today's meals.
+    // Pull last 30 days — JS filter narrows YouTube to 3 days and applies the creator
+    // lifecycle (14d base + 30d if popular). 30 is the outer bound either source can use.
     supabase.from('trending_meals')
       .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
-      .gte('generated_at', threeDaysAgo)
+      .gte('generated_at', thirtyDaysAgo)
       .order('generated_at', { ascending: false })
       .order('id')
       .then(({ data, error }) => {
@@ -655,21 +679,22 @@ export default function HomeScreen() {
   useFocusEffect(useCallback(() => {
     fetchTodayLogs()
     // Re-sync trending so creator edits from meal detail are reflected on back-navigation
-    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
     supabase.from('trending_meals')
       .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
-      .gte('generated_at', threeDaysAgo)
+      .gte('generated_at', thirtyDaysAgo)
       .order('generated_at', { ascending: false })
       .order('id')
       .then(({ data }) => {
         if (data && data.length > 0) {
-          setTrendingMeals(data.map(m => ({
+          setTrendingMeals(filterTrendingByLifecycle(data).map(m => ({
             id: m.id, name: m.name, calories: m.calories, protein: m.protein,
             carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
             ingredients: m.ingredients, steps: m.steps, image: m.image,
             trend_source: m.trend_source, creator: (m as any).creators ?? null,
             vote_score: (m as any).vote_score ?? 0,
             log_count: (m as any).log_count ?? 0,
+            generated_at: m.generated_at,
           })).sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0)))
         }
       })
@@ -1381,13 +1406,14 @@ export default function HomeScreen() {
             .order('id')
             .then(({ data }) => {
               if (data && data.length > 0) {
-                setTrendingMeals(data.map(m => ({
+                setTrendingMeals(filterTrendingByLifecycle(data).map(m => ({
                   id: m.id, name: m.name, calories: m.calories, protein: m.protein,
                   carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
                   ingredients: m.ingredients, steps: m.steps, image: m.image,
                   trend_source: m.trend_source, creator: (m as any).creators ?? null,
                   vote_score: (m as any).vote_score ?? 0,
                   log_count: (m as any).log_count ?? 0,
+                  generated_at: m.generated_at,
                 })).sort((a, b) => b.vote_score - a.vote_score))
               }
             })
