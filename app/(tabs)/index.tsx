@@ -381,13 +381,19 @@ export default function HomeScreen() {
       })
   }, [user])
 
-  // Show scan CTA only after fetch completes and pantry is confirmed empty
+  // Hero "Scan your pantry" card pulses to draw the eye until the user scans for the
+  // first time. Runs only while the empty-state card is visible.
+  const scanHeroPulse = useRef(new RNAnimated.Value(1)).current
   useEffect(() => {
-    if (!pantryFetched) return
-    if (pantryNames.size > 0) { setShowScanCta(false); return }
-    AsyncStorage.getItem('pantry_scan_cta_dismissed').then(val => {
-      if (!val) setShowScanCta(true)
-    })
+    if (!pantryFetched || pantryNames.size > 0) return
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(scanHeroPulse, { toValue: 1.06, duration: 1100, useNativeDriver: true }),
+        RNAnimated.timing(scanHeroPulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
   }, [pantryFetched, pantryNames])
 
   const addStapleToPantry = async (name: string) => {
@@ -409,7 +415,6 @@ export default function HomeScreen() {
   }
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
-  const [showScanCta, setShowScanCta] = useState(false)
   const [showPantryScanFromHome, setShowPantryScanFromHome] = useState(false)
   const [trendingMeals, setTrendingMeals] = useState<any[]>([])
   const [showCreatorModal, setShowCreatorModal] = useState(false)
@@ -882,53 +887,25 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── First-time pantry scan CTA ── */}
-        {showScanCta && (
+        {/* ── Hero scan-your-pantry card — sits high on screen as the unmissable first action ── */}
+        {pantryFetched && pantryNames.size === 0 && (
           <TouchableOpacity
-            style={styles.scanCtaCard}
-            activeOpacity={0.85}
+            style={styles.scanHero}
+            activeOpacity={0.9}
             onPress={() => setShowPantryScanFromHome(true)}
           >
-            <View style={styles.scanCtaInner}>
-              <View style={styles.scanCtaIconWrap}>
-                <Camera size={22} stroke="#4ADE80" strokeWidth={2} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.scanCtaTitle}>See what you can cook tonight</Text>
-                <Text style={styles.scanCtaSub}>Scan your pantry in 10 seconds</Text>
-              </View>
-              <ChevronRight size={16} stroke="#4ADE80" strokeWidth={2} />
+            <RNAnimated.View style={[styles.scanHeroIconWrap, { transform: [{ scale: scanHeroPulse }] }]}>
+              <ScanLine size={42} color="#4ADE80" strokeWidth={2.2} />
+            </RNAnimated.View>
+            <Text style={styles.scanHeroTitle}>Scan your pantry to start</Text>
+            <Text style={styles.scanHeroSub}>10 seconds. Personalized meals from what you already have.</Text>
+            <View style={styles.scanHeroBtn}>
+              <Text style={styles.scanHeroBtnText}>Scan Now</Text>
             </View>
-            <TouchableOpacity
-              style={styles.scanCtaLaterWrap}
-              onPress={async (e) => {
-                e.stopPropagation()
-                setShowScanCta(false)
-                await AsyncStorage.setItem('pantry_scan_cta_dismissed', '1')
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.scanCtaLaterText}>Later</Text>
-            </TouchableOpacity>
           </TouchableOpacity>
         )}
 
-        {/* ── Suggested For You — Horizontal Scroll ── */}
-        {pantryFetched && pantryNames.size === 0 && (
-          <TouchableOpacity
-            style={{ marginHorizontal: 20, marginBottom: 28, backgroundColor: '#111', borderWidth: 1, borderColor: '#222', borderRadius: 16, padding: 20, alignItems: 'center', gap: 10 }}
-            onPress={() => setShowPantryScanFromHome(true)}
-            activeOpacity={0.8}
-          >
-            <ScanLine size={28} color="#4ADE80" />
-            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>Scan your pantry first</Text>
-            <Text style={{ color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 19 }}>Pantry scans your ingredients and builds personalized meal ideas from what you already have.</Text>
-            <View style={{ backgroundColor: '#4ADE80', borderRadius: 30, paddingVertical: 10, paddingHorizontal: 28, marginTop: 4 }}>
-              <Text style={{ color: '#000', fontWeight: '700', fontSize: 14 }}>Scan Now</Text>
-            </View>
-          </TouchableOpacity>
-        )}
+        {/* Suggested For You hides while pantry is empty — the scan hero above is the only CTA */}
         <View style={{ marginBottom: 28, display: pantryFetched && pantryNames.size === 0 ? 'none' : 'flex' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
             <Text style={styles.sectionTitle}>Suggested For You</Text>
@@ -1379,8 +1356,6 @@ export default function HomeScreen() {
         onClose={() => setShowPantryScanFromHome(false)}
         onItemsAdded={() => {
           setShowPantryScanFromHome(false)
-          setShowScanCta(false)
-          AsyncStorage.setItem('pantry_scan_cta_dismissed', '1')
         }}
       />
       <CreatorRecipeModal
@@ -1868,47 +1843,56 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // First-time pantry scan CTA
-  scanCtaCard: {
+  // Hero pantry-scan card — first-action moment for new users
+  scanHero: {
     marginHorizontal: 20,
-    marginBottom: 20,
-    backgroundColor: 'rgba(74,222,128,0.08)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.25)',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    gap: 10,
-  },
-  scanCtaInner: {
-    flexDirection: 'row',
+    marginBottom: 24,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(74,222,128,0.06)',
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(74,222,128,0.35)',
     alignItems: 'center',
-    gap: 14,
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
   },
-  scanCtaIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: 'rgba(74,222,128,0.12)',
+  scanHeroIconWrap: {
+    width: 76,
+    height: 76,
+    borderRadius: 22,
+    backgroundColor: 'rgba(74,222,128,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 14,
   },
-  scanCtaTitle: {
+  scanHeroTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.4,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  scanHeroSub: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 18,
+    paddingHorizontal: 8,
+  },
+  scanHeroBtn: {
+    backgroundColor: '#4ADE80',
+    borderRadius: 30,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+  },
+  scanHeroBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: COLORS.textWhite,
-    marginBottom: 2,
-  },
-  scanCtaSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
-  scanCtaLaterWrap: {
-    alignSelf: 'flex-end',
-  },
-  scanCtaLaterText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    fontWeight: '500',
+    color: '#000000',
   },
 })
