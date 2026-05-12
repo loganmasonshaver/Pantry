@@ -460,6 +460,10 @@ export default function MealDetailScreen() {
     meal = MOCK_MEAL_DETAILS[id ?? ''] ?? null
   }
 
+  const creator = (meal as any)?.creator ?? null
+  const isCreatorOwner = !!(creator?.user_id && creator.user_id === user?.id)
+  const canEditMeal = isUserCreated || isCreatorOwner
+
   const missingIngredients = meal?.ingredients.filter(
     i => !isAlreadyInList(i.name, pantryNames) && !COOKING_BASICS.has(i.name.toLowerCase())
   ) ?? []
@@ -643,8 +647,12 @@ export default function MealDetailScreen() {
           <ChevronLeft size={24} stroke={COLORS.textWhite} strokeWidth={2} />
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
-        {isUserCreated && (
-          <TouchableOpacity style={styles.headerBtn} onPress={() => setShowEditForm(true)} activeOpacity={0.7}>
+        {canEditMeal && (
+          <TouchableOpacity
+            style={styles.headerBtn}
+            onPress={() => (isCreatorOwner ? setShowCreatorEdit(true) : setShowEditForm(true))}
+            activeOpacity={0.7}
+          >
             <Pencil size={18} stroke={COLORS.textMuted} strokeWidth={2} />
           </TouchableOpacity>
         )}
@@ -725,23 +733,22 @@ export default function MealDetailScreen() {
         </View>
 
         {/* ── Creator attribution ── */}
-        {(meal as any).creator && (() => {
-          const c = (meal as any).creator
+        {creator && (() => {
+          const c = creator
           const socials: Array<{ key: string; url: string; bg: string; icon: JSX.Element }> = []
           if (c.instagram_url) socials.push({
             key: 'ig', url: c.instagram_url, bg: '#E1306C',
-            icon: <Instagram size={14} stroke="#fff" strokeWidth={2.4} />,
+            icon: <Instagram size={15} stroke="#fff" strokeWidth={2.4} />,
           })
           if (c.tiktok_url) socials.push({
             key: 'tt', url: c.tiktok_url, bg: '#000',
-            icon: <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900', lineHeight: 18 }}>♪</Text>,
+            icon: <Text style={{ color: '#fff', fontSize: 17, fontWeight: '900', lineHeight: 19 }}>♪</Text>,
           })
           if (c.youtube_url) socials.push({
             key: 'yt', url: c.youtube_url, bg: '#FF0000',
-            icon: <Youtube size={14} stroke="#fff" strokeWidth={2.4} fill="#fff" />,
+            icon: <Youtube size={15} stroke="#fff" strokeWidth={2.4} fill="#fff" />,
           })
           const primarySocial = socials[0]?.url
-          const isOwner = c.user_id && c.user_id === user?.id
           return (
             <View style={styles.creatorRow}>
               <TouchableOpacity
@@ -754,7 +761,7 @@ export default function MealDetailScreen() {
                   <Image source={{ uri: c.avatar_url }} style={styles.creatorAvatar} />
                 ) : (
                   <View style={styles.creatorAvatarFallback}>
-                    <User size={15} stroke="#888" strokeWidth={2.2} />
+                    <User size={16} stroke="#888" strokeWidth={2.2} />
                   </View>
                 )}
                 <Text style={styles.creatorByText} numberOfLines={1}>
@@ -762,26 +769,20 @@ export default function MealDetailScreen() {
                 </Text>
               </TouchableOpacity>
 
-              {socials.map(s => (
-                <TouchableOpacity
-                  key={s.key}
-                  onPress={() => Linking.openURL(s.url)}
-                  style={[styles.creatorSocialBtn, { backgroundColor: s.bg }]}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-                >
-                  {s.icon}
-                </TouchableOpacity>
-              ))}
-
-              {isOwner && (
-                <TouchableOpacity
-                  onPress={() => setShowCreatorEdit(true)}
-                  style={styles.creatorEditPill}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.creatorEditPillText}>Edit →</Text>
-                </TouchableOpacity>
+              {socials.length > 0 && (
+                <View style={styles.creatorSocialGroup}>
+                  {socials.map(s => (
+                    <TouchableOpacity
+                      key={s.key}
+                      onPress={() => Linking.openURL(s.url)}
+                      style={[styles.creatorSocialBtn, { backgroundColor: s.bg }]}
+                      activeOpacity={0.75}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      {s.icon}
+                    </TouchableOpacity>
+                  ))}
+                </View>
               )}
             </View>
           )
@@ -1169,43 +1170,41 @@ const styles = StyleSheet.create({
   creatorRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingBottom: 14,
-    paddingTop: 2,
+    paddingBottom: 16,
+    paddingTop: 6,
   },
   creatorIdentity: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    flex: 1,
+    flexShrink: 1,
   },
-  creatorAvatar: { width: 28, height: 28, borderRadius: 14 },
+  creatorAvatar: { width: 30, height: 30, borderRadius: 15 },
   creatorAvatarFallback: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#1A1A1A',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  creatorByText: { color: '#888', fontSize: 12, flexShrink: 1 },
+  creatorByText: { color: '#888', fontSize: 13, flexShrink: 1 },
   creatorHandle: { color: '#4ADE80', fontWeight: '600' },
+  creatorSocialGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 12,
+  },
   creatorSocialBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  creatorEditPill: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginLeft: 2,
-  },
-  creatorEditPillText: { color: '#4ADE80', fontSize: 12, fontWeight: '600' },
 
   // Macro bar
   macroBar: {
