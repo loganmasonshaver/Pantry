@@ -1593,19 +1593,23 @@ const styles = StyleSheet.create({
 
   // Steps
   stepList: {
-    gap: 24,
+    gap: 10,
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 16,
+    gap: 14,
+    backgroundColor: '#141414',
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
   stepNumber: {
-    width: 36,
+    width: 22,
     alignItems: 'center',
     justifyContent: 'flex-start',
     flexShrink: 0,
-    marginTop: 2,
+    marginTop: 1,
     backgroundColor: 'transparent',
     borderRadius: 0,
     height: 'auto',

@@ -23,14 +23,32 @@ Deno.serve(async (req: Request) => {
   if (!allowed) return rateLimitResponse()
 
   try {
-    const { description } = await req.json()
+    const { description, existingSteps } = await req.json()
     if (!description?.trim()) {
       return new Response(JSON.stringify({ error: 'Description is required' }), {
         status: 400, headers: { "Content-Type": "application/json" },
       })
     }
 
-    const prompt = `Generate a complete recipe for: "${description}"
+    // When existingSteps is provided, we only need prepTime + a short title per step
+    // (creator-recipe flow). Skip the full recipe generation.
+    const annotateMode = Array.isArray(existingSteps) && existingSteps.length > 0
+
+    const prompt = annotateMode ? `Recipe: "${description}"
+
+The recipe has these existing instruction steps written by the author:
+${existingSteps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}
+
+Generate (a) a short 2-4 word title for each step that captures what the step does, and
+(b) an estimated total prep + cook time in minutes for the whole recipe.
+
+Title rules: Title Case, no period, action-oriented (e.g. "Sear Chicken", "Whisk Eggs", "Bake & Cool"). Match titles to the steps in order — return exactly ${existingSteps.length} titles.
+
+Respond ONLY with valid JSON, no markdown:
+{
+  "prepTime": 25,
+  "titles": ["Title One", "Title Two", "Title Three"]
+}` : `Generate a complete recipe for: "${description}"
 
 Rules:
 - Create a practical, real recipe that people actually cook
@@ -66,8 +84,8 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       body: JSON.stringify({
         model: "gpt-4o-mini", // cheaper model; recipe generation doesn't need vision or top-tier reasoning
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.7, // moderate creativity for varied recipes without hallucinating ingredient combos
-        max_tokens: 2000,
+        temperature: annotateMode ? 0.3 : 0.7, // titles want consistency; full recipes want variety
+        max_tokens: annotateMode ? 500 : 2000,
       }),
     })
 

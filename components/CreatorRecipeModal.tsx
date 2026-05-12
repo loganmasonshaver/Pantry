@@ -210,7 +210,7 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
 
     const ingredients = ingredientsList.map(l => l.trim()).filter(Boolean)
     // Strip leading numbers ("1.", "01)", "Step 1:") so they don't double up with the rendered step badge.
-    const steps = stepsList.map(l =>
+    const rawSteps = stepsList.map(l =>
       l.trim()
         .replace(/^step\s*\d+\s*[:.)]?\s*/i, '')
         .replace(/^\d+\s*[.):\-]+\s*/, '')
@@ -224,29 +224,32 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
     let carb = parseInt(carbs) || 0
     let fat_ = parseInt(fat) || 0
     let prep = parseInt(prepTime) || 0
+    let stepTitles: string[] | null = null
 
     const macrosBlank = cal === 0 && pro === 0 && carb === 0 && fat_ === 0
     const prepBlank = prep === 0
+    const needTitles = rawSteps.length > 0
 
-    if ((macrosBlank || prepBlank) && ingredients.length > 0) {
+    if ((macrosBlank || prepBlank || needTitles) && ingredients.length > 0) {
       setSubmitLabel('Estimating...')
       const recipeDesc = [
         name.trim(),
         `Ingredients: ${ingredients.join(', ')}`,
-        steps.length > 0 ? `Steps: ${steps.join(' | ')}` : '',
+        rawSteps.length > 0 ? `Steps: ${rawSteps.join(' | ')}` : '',
       ].filter(Boolean).join('. ')
 
       // estimate-meal-macros uses GPT-4o + FatSecret cross-reference — much more accurate than
-      // generate-recipe's gpt-4o-mini guess. Run in parallel with prep-time fetch.
+      // generate-recipe's gpt-4o-mini guess. generate-recipe (annotate mode) gives us prepTime
+      // and short step titles in one call. Run them in parallel.
       const calls: Promise<any>[] = []
       if (macrosBlank) {
         calls.push(supabase.functions.invoke('estimate-meal-macros', {
           body: { mode: 'text', description: recipeDesc },
         }))
       }
-      if (prepBlank) {
+      if (prepBlank || needTitles) {
         calls.push(supabase.functions.invoke('generate-recipe', {
-          body: { description: recipeDesc },
+          body: { description: recipeDesc, existingSteps: rawSteps },
         }))
       }
       const results = await Promise.all(calls)
@@ -260,12 +263,23 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
           fat_ = Math.round(m.fat ?? 0)
         }
       }
-      if (prepBlank) {
+      if (prepBlank || needTitles) {
         const r = results[idx++]?.data
-        if (r && !r.error) prep = Math.round(r.prepTime ?? 0)
+        if (r && !r.error) {
+          if (prepBlank) prep = Math.round(r.prepTime ?? 0)
+          if (needTitles && Array.isArray(r.titles) && r.titles.length === rawSteps.length) {
+            stepTitles = r.titles.map((t: any) => String(t).trim())
+          }
+        }
       }
       setSubmitLabel(isEditMode ? 'Save Changes' : 'Post Recipe')
     }
+
+    // Save steps as {title, detail} when we have AI-generated titles, matching the
+    // format AI/scraped recipes use so the meal detail screen renders them identically.
+    const steps: any[] = stepTitles
+      ? rawSteps.map((detail, i) => ({ title: stepTitles![i], detail }))
+      : rawSteps
 
     // Upload new photo if selected, keep existing if not changed
     let imageUrl: string | null = existingImageUrl ?? null
