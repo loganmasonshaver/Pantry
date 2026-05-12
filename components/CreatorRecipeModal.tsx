@@ -53,6 +53,19 @@ function toStringArray(items: any[]): string[] {
   return (items ?? []).map(i => (typeof i === 'string' ? i : (i.name ?? i.detail ?? '')))
 }
 
+// Splits a pasted multi-line list into clean rows: strips bullets, leading numbers,
+// "Step N:" prefixes, and empty lines.
+function parseList(text: string): string[] {
+  return text.split(/\r?\n/)
+    .map(l => l.trim()
+      .replace(/^[-•*●▪‣–—]+\s*/, '')
+      .replace(/^step\s*\d+\s*[:.)]?\s*/i, '')
+      .replace(/^\d+\s*[.):\-]+\s*/, '')
+      .trim()
+    )
+    .filter(Boolean)
+}
+
 export default function CreatorRecipeModal({ visible, onClose, onSubmitted, mealToEdit }: Props) {
   const { user } = useAuth()
   const isEditMode = !!mealToEdit
@@ -79,6 +92,11 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
   const [prepTime, setPrepTime] = useState('')
   const [ingredientsList, setIngredientsList] = useState<string[]>([''])
   const [stepsList, setStepsList] = useState<string[]>([''])
+  const [ingredientsPaste, setIngredientsPaste] = useState('')
+  const [stepsPaste, setStepsPaste] = useState('')
+  // New recipes start in paste mode (one textarea per section). After Review,
+  // we flip to row mode so creators can fix individual lines. Edits skip paste.
+  const [pasteMode, setPasteMode] = useState(!isEditMode)
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [existingImageUrl, setExistingImageUrl] = useState<string | null>(null)
 
@@ -319,7 +337,18 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
 
     setName(''); setCalories(''); setProtein(''); setCarbs(''); setFat('')
     setPrepTime(''); setIngredientsList(['']); setStepsList(['']); setPhotoUri(null); setExistingImageUrl(null)
+    setIngredientsPaste(''); setStepsPaste(''); setPasteMode(!isEditMode)
     onSubmitted()
+  }
+
+  const handleReview = () => {
+    if (!name.trim()) { Alert.alert('Required', 'Recipe name is required.'); return }
+    const ing = parseList(ingredientsPaste)
+    const stp = parseList(stepsPaste)
+    if (ing.length === 0) { Alert.alert('Add ingredients', 'Paste at least one ingredient, one per line.'); return }
+    setIngredientsList(ing.length > 0 ? ing : [''])
+    setStepsList(stp.length > 0 ? stp : [''])
+    setPasteMode(false)
   }
 
   const updateIngredient = (i: number, val: string) => setIngredientsList(prev => prev.map((v, idx) => idx === i ? val : v))
@@ -484,6 +513,36 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
                 </View>
                 <Text style={s.macroHint}>Leave all blank — AI estimates from ingredients</Text>
 
+                {pasteMode ? (
+                  <>
+                    <Text style={s.sectionHeader}>INGREDIENTS</Text>
+                    <TextInput
+                      style={s.pasteArea}
+                      placeholder={'Paste your ingredient list, one per line.\n\n1/2 avocado\n2 tbsp cocoa powder\n1 large egg'}
+                      placeholderTextColor="#3A3A3A"
+                      value={ingredientsPaste}
+                      onChangeText={setIngredientsPaste}
+                      multiline
+                      textAlignVertical="top"
+                      editable={!atLimit}
+                    />
+                    <Text style={s.pasteHint}>One per line. Bullets, numbers, and dashes get cleaned up.</Text>
+
+                    <Text style={s.sectionHeader}>STEPS</Text>
+                    <TextInput
+                      style={s.pasteArea}
+                      placeholder={'Paste your steps, one per line.\n\nBlend all ingredients.\nPour into ramekin and bake at 350F for 20 min.'}
+                      placeholderTextColor="#3A3A3A"
+                      value={stepsPaste}
+                      onChangeText={setStepsPaste}
+                      multiline
+                      textAlignVertical="top"
+                      editable={!atLimit}
+                    />
+                    <Text style={s.pasteHint}>One per line. "1." / "Step 1:" prefixes are stripped automatically.</Text>
+                  </>
+                ) : (
+                  <>
                 {/* Ingredients */}
                 <Text style={s.sectionHeader}>INGREDIENTS</Text>
                 {ingredientsList.map((ing, i) => (
@@ -532,10 +591,23 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
                   <Text style={s.addText}>Add step</Text>
                 </TouchableOpacity>
 
+                {/* Back-to-paste link, only when the user landed here from a paste */}
+                {!isEditMode && (ingredientsPaste || stepsPaste) && (
+                  <TouchableOpacity
+                    onPress={() => setPasteMode(true)}
+                    style={{ alignSelf: 'flex-start', marginTop: 8, marginBottom: 4 }}
+                    hitSlop={8}
+                  >
+                    <Text style={{ color: '#888', fontSize: 13 }}>← Back to paste view</Text>
+                  </TouchableOpacity>
+                )}
+                  </>
+                )}
+
                 {/* Submit */}
                 <TouchableOpacity
                   style={[s.btn, atLimit && s.btnDisabled]}
-                  onPress={handleSubmit}
+                  onPress={pasteMode ? handleReview : handleSubmit}
                   disabled={submitting || atLimit}
                 >
                   {submitting
@@ -544,7 +616,7 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
                         <Text style={s.btnText}>{submitLabel}</Text>
                       </View>
                     : <Text style={[s.btnText, atLimit && { color: '#666' }]}>
-                        {isEditMode ? 'Save Changes' : 'Post Recipe'}
+                        {pasteMode ? 'Review →' : (isEditMode ? 'Save Changes' : 'Post Recipe')}
                       </Text>
                   }
                 </TouchableOpacity>
@@ -620,6 +692,21 @@ const s = StyleSheet.create({
   // Add row
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10, marginBottom: 8 },
   addText: { color: '#4ADE80', fontSize: 14, fontWeight: '600' },
+
+  // Paste textareas
+  pasteArea: {
+    backgroundColor: '#0D0D0D',
+    borderWidth: 1,
+    borderColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 15,
+    minHeight: 160,
+    lineHeight: 22,
+  },
+  pasteHint: { color: '#555', fontSize: 12, marginTop: 6, marginBottom: 4 },
 
   // Button
   btn: { backgroundColor: '#fff', borderRadius: 30, paddingVertical: 16, alignItems: 'center', marginTop: 28 },
