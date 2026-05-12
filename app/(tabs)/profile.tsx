@@ -568,7 +568,6 @@ export default function ProfileScreen() {
     await supabase.from('profiles').update({ dietary_restrictions: dietDraft }).eq('id', user.id)
     setProfile(p => p ? { ...p, dietary_restrictions: dietDraft } : p)
     // Clear meal cache so next home screen load regenerates with updated restrictions
-    console.log('[MealCache] WIPE from profile: diet restrictions changed')
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setShowDietModal(false)
   }

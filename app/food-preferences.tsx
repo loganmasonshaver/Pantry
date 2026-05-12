@@ -131,7 +131,6 @@ export default function FoodPreferencesScreen() {
       })
       .eq('id', user.id)
     // Clear meal cache so next home screen load regenerates without disliked ingredients
-    console.log('[MealCache] WIPE from food-preferences')
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setSaving(false)
     if (error) {
