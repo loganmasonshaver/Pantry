@@ -822,13 +822,38 @@ export default function ProfileScreen() {
   const resetOnboarding = () => {
     Alert.alert(
       'Reset to New User?',
-      'Clears all onboarding data and signs you out. Use this to test the full new-user flow.',
+      'WIPES your profile, pantry, saved meals, meal logs, ratings, grocery list, and creator recipes from the database. Auth account stays (Supabase blocks client-side user deletion) but on next sign-in your account will look brand new. Use to test the full new-user flow.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reset',
+          text: 'Wipe & Reset',
           style: 'destructive',
           onPress: async () => {
+            if (user) {
+              // Look up the user's creator row first — needed to scope trending_meals delete.
+              const { data: creatorRow } = await supabase
+                .from('creators')
+                .select('id')
+                .eq('user_id', user.id)
+                .maybeSingle()
+
+              // Child tables first to avoid FK conflicts. trending_meals references creators,
+              // so it goes before the creators row itself.
+              if (creatorRow?.id) {
+                await supabase.from('trending_meals').delete().eq('creator_id', creatorRow.id).then(() => {}, () => {})
+              }
+              await Promise.all([
+                supabase.from('saved_meals').delete().eq('user_id', user.id).then(() => {}, () => {}),
+                supabase.from('meal_logs').delete().eq('user_id', user.id).then(() => {}, () => {}),
+                supabase.from('meal_ratings').delete().eq('user_id', user.id).then(() => {}, () => {}),
+                supabase.from('grocery_items').delete().eq('user_id', user.id).then(() => {}, () => {}),
+                supabase.from('pantry_items').delete().eq('user_id', user.id).then(() => {}, () => {}),
+                supabase.from('creators').delete().eq('user_id', user.id).then(() => {}, () => {}),
+              ])
+              // Profile last — other tables may have FKs pointing to it.
+              await supabase.from('profiles').delete().eq('id', user.id).then(() => {}, () => {})
+            }
+
             await AsyncStorage.multiRemove([
               'onboarding_complete',
               'onboarding_step',
