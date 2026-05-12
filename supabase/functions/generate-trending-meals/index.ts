@@ -161,14 +161,19 @@ Deno.serve(async (req: Request) => {
       'cottage cheese dessert recipe',
       'healthy protein dessert',
     ]
-    const allQueries = [...mealQueries, ...snackQueries, ...dessertQueries]
     const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000)
-    // Pick one from each category per day — guarantees a mix of meals, snacks, and desserts
-    // regardless of how the query arrays are ordered.
+    // Pick TWO queries per category per day, offset by half the array length so the second
+    // pick is thematically opposite from the first. More candidate videos = more headroom for
+    // Groq to produce a varied set instead of converging on whatever YouTube's top result is.
+    const pickTwo = (arr: string[]) => {
+      const a = dayOfYear % arr.length
+      const b = (a + Math.floor(arr.length / 2)) % arr.length
+      return a === b ? [arr[a]] : [arr[a], arr[b]]
+    }
     const searchQueries = [
-      mealQueries[dayOfYear % mealQueries.length],
-      snackQueries[dayOfYear % snackQueries.length],
-      dessertQueries[dayOfYear % dessertQueries.length],
+      ...pickTwo(mealQueries),
+      ...pickTwo(snackQueries),
+      ...pickTwo(dessertQueries),
     ]
 
     // Fetch previous meal names to avoid repeats
@@ -214,14 +219,15 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "No YouTube results" }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
-    // Deduplicate by title similarity
+    // Deduplicate by title similarity, then cap. With 6 queries × 5 results we have ~30
+    // candidates; 25 gives Groq plenty of headroom to pick a varied 6 without bloating tokens.
     const seen = new Set<string>()
     const uniqueVideos = allVideos.filter(v => {
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
       if (seen.has(key)) return false
       seen.add(key)
       return true
-    }).slice(0, 15)
+    }).slice(0, 25)
 
     console.log(`Found ${uniqueVideos.length} unique YouTube videos`)
 
@@ -239,6 +245,11 @@ For each one, generate a recipe that ACCURATELY matches what the video describes
 
 RULES:
 - The recipe MUST match the video content — use the description to determine exact ingredients and method
+- VARIETY IS MANDATORY across the returned set:
+  - No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
+  - No two recipes may share the same primary protein source (e.g. don't return two chicken meals or two cottage-cheese-based snacks)
+  - If multiple candidate videos are too similar (e.g. several oatmeal videos), pick at most one and skip the rest
+  - Recipe names must all be distinct after normalization (don't return "Protein Oatmeal" and "High Protein Oatmeal Bowl" — they're the same dish)
 - ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion
 - Categorize each recipe as one of: "meal" (full meal 400-800 kcal, protein-rich), "snack" (light 150-350 kcal, still protein-forward), or "dessert" (protein-forward treat 200-500 kcal)
 - Protein targets by category:
@@ -296,11 +307,19 @@ Respond ONLY with a JSON array, no markdown:
         const clean = text.replace(/```json|```/g, "").trim()
         const parsed = JSON.parse(clean)
         if (Array.isArray(parsed) && parsed.length > 0) {
+          // Within-batch name dedup — Groq sometimes ignores the variety prompt
+          // and returns two recipes for the same dish (e.g. two oatmeal bowls)
+          const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+          const seenNames = new Set<string>()
           const filtered = parsed.filter((r: any) => {
             if (r.protein < 25) return false
+            const key = normalize(r.name)
+            if (!key || seenNames.has(key)) return false
             // Skip meals too similar to previous days
             const name = r.name.toLowerCase()
-            return !prevNames.some((prev: string) => name.includes(prev.split(' ')[0]) && name.includes(prev.split(' ').slice(-1)[0]))
+            if (prevNames.some((prev: string) => name.includes(prev.split(' ')[0]) && name.includes(prev.split(' ').slice(-1)[0]))) return false
+            seenNames.add(key)
+            return true
           }).slice(0, 6)
           if (!recipes || filtered.length > recipes.length) recipes = filtered
           if (recipes.length >= 6) break
@@ -359,9 +378,10 @@ Respond ONLY with a JSON array, no markdown:
     // Keep the last 3 days of trending meals as fallback if today generates few survivors.
     // Previously we wiped every run which left zero-meal days when filters rejected recipes.
     const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
-    await db.from('trending_meals').delete().lt('generated_at', threeDaysAgo)
-    // Remove any existing rows for today (in case of re-run) before inserting new ones
-    await db.from('trending_meals').delete().eq('generated_at', today())
+    await db.from('trending_meals').delete().lt('generated_at', threeDaysAgo).eq('trend_source', 'YouTube trending')
+    // Remove existing YouTube-source rows for today (in case of re-run) before inserting new
+    // ones. Scoped to YouTube source so creator recipes posted today aren't wiped.
+    await db.from('trending_meals').delete().eq('generated_at', today()).eq('trend_source', 'YouTube trending')
     const { error } = await db.from('trending_meals').insert(meals)
 
     if (error) {
