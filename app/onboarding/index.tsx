@@ -3667,36 +3667,15 @@ export default function Onboarding() {
           return
         }
 
-        // Save onboarding plan meals directly to saved_meals, then clear the cache
-        // so the home screen doesn't show them as recommendations until pantry is scanned.
-        try {
-          const raw = await AsyncStorage.getItem('pantry_daily_meals_cookNow')
-          if (raw && user) {
-            const cached = JSON.parse(raw)
-            const planMeals: any[] = cached.meals ?? []
-            await Promise.all(planMeals.map(m =>
-              supabase.rpc('insert_saved_meal', {
-                p_user_id: user.id,
-                p_name: m.name,
-                p_calories: m.calories ?? 0,
-                p_protein: m.protein ?? 0,
-                p_carbs: m.carbs ?? 0,
-                p_fat: m.fat ?? 0,
-                p_prep_time: m.prepTime ?? null,
-                p_ingredients: m.ingredients ?? [],
-                p_steps: m.steps ?? [],
-                p_image_url: m.image ?? null,
-              }).then(() => {})
-            ))
-            await AsyncStorage.removeItem('pantry_daily_meals_cookNow')
-          }
-        } catch {}
+        // Plan meals are saved + animated on /onboarding/meals-saved (the next screen).
+        // Cache is intentionally NOT cleared here — that screen reads it, persists every
+        // meal via insert_saved_meal, runs the fly-to-saved-tab animation, then clears it.
       }
 
       await AsyncStorage.removeItem('onboarding_data')
       await AsyncStorage.removeItem('onboarding_step')
       await AsyncStorage.setItem('onboarding_complete', 'true')
-      router.replace('/(tabs)')
+      router.replace('/onboarding/meals-saved')
     } catch (error: any) {
       Alert.alert('Error', error.message)
     }
