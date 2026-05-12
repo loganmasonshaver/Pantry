@@ -816,7 +816,10 @@ export default function HomeScreen() {
         </View>
 
         {/* ── Food preferences one-time banner ── */}
-        {showPrefBanner && (
+        {/* Only show once the user has scanned a pantry AND has real meal suggestions
+            visible — otherwise the "not loving your suggestions" copy lands before
+            there's anything to dislike yet. */}
+        {showPrefBanner && pantryNames.size > 0 && meals.length > 0 && (
           <TouchableOpacity
             style={styles.prefBanner}
             activeOpacity={0.85}
