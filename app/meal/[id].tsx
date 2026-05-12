@@ -19,7 +19,7 @@ const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown } from 'lucide-react-native'
+import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube } from 'lucide-react-native'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -92,17 +92,24 @@ function isAlreadyInList(itemName: string, existingNames: Set<string>): boolean 
   return false
 }
 
+// Strips creator-pasted leading numbers ("1.", "01)", "Step 1:") so they don't double up with the rendered step badge.
+function stripStepNumber(text: string): string {
+  return text
+    .replace(/^step\s*\d+\s*[:.)]?\s*/i, '')
+    .replace(/^\d+\s*[.):\-]+\s*/, '')
+    .trim()
+}
+
 function renderStepContent(step: string | { title: string; detail: string }) {
   if (typeof step === 'object' && step.title) {
     return (
       <View style={{ flex: 1, gap: 6 }}>
-        <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>{step.title}</Text>
+        <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>{stripStepNumber(step.title)}</Text>
         <Text style={{ fontSize: 14, color: '#ABABAB', lineHeight: 22 }}>{step.detail}</Text>
       </View>
     )
   }
-  // Legacy string format
-  const cleaned = (typeof step === 'string' ? step : '').replace(/^Step\s*\d+\s*:\s*/i, '')
+  const cleaned = stripStepNumber(typeof step === 'string' ? step : '')
   return (
     <View style={{ flex: 1 }}>
       <Text style={{ fontSize: 14, color: '#ABABAB', lineHeight: 22 }}>{cleaned}</Text>
@@ -720,40 +727,60 @@ export default function MealDetailScreen() {
         {/* ── Creator attribution ── */}
         {(meal as any).creator && (() => {
           const c = (meal as any).creator
-          const socialUrl = c.instagram_url || c.tiktok_url || c.youtube_url
+          const socials: Array<{ key: string; url: string; bg: string; icon: JSX.Element }> = []
+          if (c.instagram_url) socials.push({
+            key: 'ig', url: c.instagram_url, bg: '#E1306C',
+            icon: <Instagram size={14} stroke="#fff" strokeWidth={2.4} />,
+          })
+          if (c.tiktok_url) socials.push({
+            key: 'tt', url: c.tiktok_url, bg: '#000',
+            icon: <Text style={{ color: '#fff', fontSize: 16, fontWeight: '900', lineHeight: 18 }}>♪</Text>,
+          })
+          if (c.youtube_url) socials.push({
+            key: 'yt', url: c.youtube_url, bg: '#FF0000',
+            icon: <Youtube size={14} stroke="#fff" strokeWidth={2.4} fill="#fff" />,
+          })
+          const primarySocial = socials[0]?.url
           const isOwner = c.user_id && c.user_id === user?.id
           return (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingBottom: 14, paddingTop: 2 }}>
-              {c.avatar_url ? (
-                <Image source={{ uri: c.avatar_url }} style={{ width: 28, height: 28, borderRadius: 14 }} />
-              ) : (
-                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '700' }}>{c.handle?.[0]?.toUpperCase() ?? '?'}</Text>
-                </View>
-              )}
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: '#888', fontSize: 12 }}>
-                  Recipe by <Text style={{ color: '#4ADE80', fontWeight: '600' }}>@{c.handle}</Text>
+            <View style={styles.creatorRow}>
+              <TouchableOpacity
+                style={styles.creatorIdentity}
+                onPress={() => primarySocial && Linking.openURL(primarySocial)}
+                disabled={!primarySocial}
+                activeOpacity={primarySocial ? 0.7 : 1}
+              >
+                {c.avatar_url ? (
+                  <Image source={{ uri: c.avatar_url }} style={styles.creatorAvatar} />
+                ) : (
+                  <View style={styles.creatorAvatarFallback}>
+                    <User size={15} stroke="#888" strokeWidth={2.2} />
+                  </View>
+                )}
+                <Text style={styles.creatorByText} numberOfLines={1}>
+                  Recipe by <Text style={styles.creatorHandle}>@{c.handle}</Text>
                 </Text>
-              </View>
-              {socialUrl && (
+              </TouchableOpacity>
+
+              {socials.map(s => (
                 <TouchableOpacity
-                  onPress={() => Linking.openURL(socialUrl)}
-                  style={{ backgroundColor: '#1A1A1A', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
+                  key={s.key}
+                  onPress={() => Linking.openURL(s.url)}
+                  style={[styles.creatorSocialBtn, { backgroundColor: s.bg }]}
                   activeOpacity={0.7}
+                  hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
-                  <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '600' }}>
-                    {c.instagram_url ? 'Instagram' : c.tiktok_url ? 'TikTok' : 'YouTube'} →
-                  </Text>
+                  {s.icon}
                 </TouchableOpacity>
-              )}
+              ))}
+
               {isOwner && (
                 <TouchableOpacity
                   onPress={() => setShowCreatorEdit(true)}
-                  style={{ backgroundColor: '#1A1A1A', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
+                  style={styles.creatorEditPill}
                   activeOpacity={0.7}
                 >
-                  <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '600' }}>Edit →</Text>
+                  <Text style={styles.creatorEditPillText}>Edit →</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -869,7 +896,7 @@ export default function MealDetailScreen() {
             {meal.steps.map((step, i) => (
               <View key={i} style={styles.stepRow}>
                 <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>{String(i + 1).padStart(2, '0')}</Text>
+                  <Text style={styles.stepNumberText}>{i + 1}</Text>
                 </View>
                 {renderStepContent(step)}
               </View>
@@ -1137,6 +1164,48 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: COLORS.textMuted,
   },
+
+  // Creator attribution
+  creatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    paddingTop: 2,
+  },
+  creatorIdentity: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  creatorAvatar: { width: 28, height: 28, borderRadius: 14 },
+  creatorAvatarFallback: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#1A1A1A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creatorByText: { color: '#888', fontSize: 12, flexShrink: 1 },
+  creatorHandle: { color: '#4ADE80', fontWeight: '600' },
+  creatorSocialBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creatorEditPill: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginLeft: 2,
+  },
+  creatorEditPillText: { color: '#4ADE80', fontSize: 12, fontWeight: '600' },
 
   // Macro bar
   macroBar: {
@@ -1541,9 +1610,9 @@ const styles = StyleSheet.create({
     height: 'auto',
   },
   stepNumberText: {
-    fontSize: 26,
+    fontSize: 18,
     fontWeight: '800',
-    color: '#2A2A2A',
+    color: '#00C9A7',
   },
   stepText: {
     flex: 1,

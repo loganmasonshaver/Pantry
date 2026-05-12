@@ -209,7 +209,13 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
     }
 
     const ingredients = ingredientsList.map(l => l.trim()).filter(Boolean)
-    const steps = stepsList.map(l => l.trim()).filter(Boolean)
+    // Strip leading numbers ("1.", "01)", "Step 1:") so they don't double up with the rendered step badge.
+    const steps = stepsList.map(l =>
+      l.trim()
+        .replace(/^step\s*\d+\s*[:.)]?\s*/i, '')
+        .replace(/^\d+\s*[.):\-]+\s*/, '')
+        .trim()
+    ).filter(Boolean)
 
     setSubmitting(true)
 
@@ -229,17 +235,34 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
         `Ingredients: ${ingredients.join(', ')}`,
         steps.length > 0 ? `Steps: ${steps.join(' | ')}` : '',
       ].filter(Boolean).join('. ')
-      const { data: gen } = await supabase.functions.invoke('generate-recipe', {
-        body: { description: recipeDesc },
-      })
-      if (gen && !gen.error) {
-        if (macrosBlank) {
-          cal = Math.round(gen.calories ?? 0)
-          pro = Math.round(gen.protein ?? 0)
-          carb = Math.round(gen.carbs ?? 0)
-          fat_ = Math.round(gen.fat ?? 0)
+
+      // estimate-meal-macros uses GPT-4o + FatSecret cross-reference — much more accurate than
+      // generate-recipe's gpt-4o-mini guess. Run in parallel with prep-time fetch.
+      const calls: Promise<any>[] = []
+      if (macrosBlank) {
+        calls.push(supabase.functions.invoke('estimate-meal-macros', {
+          body: { mode: 'text', description: recipeDesc },
+        }))
+      }
+      if (prepBlank) {
+        calls.push(supabase.functions.invoke('generate-recipe', {
+          body: { description: recipeDesc },
+        }))
+      }
+      const results = await Promise.all(calls)
+      let idx = 0
+      if (macrosBlank) {
+        const m = results[idx++]?.data
+        if (m && !m.error) {
+          cal = Math.round(m.calories ?? 0)
+          pro = Math.round(m.protein ?? 0)
+          carb = Math.round(m.carbs ?? 0)
+          fat_ = Math.round(m.fat ?? 0)
         }
-        if (prepBlank) prep = Math.round(gen.prepTime ?? 0)
+      }
+      if (prepBlank) {
+        const r = results[idx++]?.data
+        if (r && !r.error) prep = Math.round(r.prepTime ?? 0)
       }
       setSubmitLabel(isEditMode ? 'Save Changes' : 'Post Recipe')
     }
