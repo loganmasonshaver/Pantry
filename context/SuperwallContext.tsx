@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 
 // AsyncStorage keys for tracking trial lifecycle across app restarts
 const TRIAL_STARTED_KEY = 'pantry_trial_started_at'
@@ -11,6 +13,9 @@ type SuperwallContextType = {
   isPremium: boolean
   loading: boolean
   trialExpired: boolean
+  promoActive: boolean
+  /** Dev-safe wrapper around registerPlacement — no-ops in __DEV__ builds. */
+  registerPlacement: (placement: string) => Promise<void>
   /** Use instead of registerPlacement for upgrade gates — auto-routes to trial_expired paywall when appropriate. */
   triggerUpgrade: (placement: string) => Promise<void>
 }
@@ -19,6 +24,8 @@ const SuperwallContext = createContext<SuperwallContextType>({
   isPremium: false,
   loading: true,
   trialExpired: false,
+  promoActive: false,
+  registerPlacement: async () => {},
   triggerUpgrade: async () => {},
 })
 
@@ -26,7 +33,7 @@ export function SuperwallContextProvider({ children }: { children: React.ReactNo
   // In dev, always premium — skip all Superwall checks
   if (__DEV__) {
     return (
-      <SuperwallContext.Provider value={{ isPremium: true, loading: false, trialExpired: false, triggerUpgrade: async () => {} }}>
+      <SuperwallContext.Provider value={{ isPremium: true, loading: false, trialExpired: false, promoActive: true, registerPlacement: async () => {}, triggerUpgrade: async () => {} }}>
         {children}
       </SuperwallContext.Provider>
     )
@@ -38,7 +45,19 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
   const [isPremium, setIsPremium] = useState(false)
   const [loading, setLoading] = useState(true)
   const [trialExpired, setTrialExpired] = useState(false)
-  const { subscriptionStatus, registerPlacement } = useSuperwall()
+  const [promoActive, setPromoActive] = useState(false)
+  const { session } = useAuth()
+  const { subscriptionStatus, registerPlacement: _registerPlacement } = useSuperwall()
+
+  useEffect(() => {
+    if (!session?.user?.id) return
+    supabase
+      .from('profiles')
+      .select('promo_active')
+      .eq('id', session.user.id)
+      .single()
+      .then(({ data }) => { if (data?.promo_active) setPromoActive(true) })
+  }, [session?.user?.id])
   // Seed with the current status so the very first onSubscriptionStatusChange event doesn't
   // treat an already-ACTIVE user as a brand-new trial start (prevStatus would otherwise be undefined)
   const prevStatusRef = useRef<string | undefined>(subscriptionStatus?.status)
@@ -52,10 +71,9 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     const status = subscriptionStatus?.status
-    // Superwall uses 'ACTIVE' to mean the user has a valid entitlement (trial or paid)
-    setIsPremium(status === 'ACTIVE')
+    setIsPremium(status === 'ACTIVE' || promoActive)
     setLoading(false)
-  }, [subscriptionStatus])
+  }, [subscriptionStatus, promoActive])
 
   useSuperwallEvents({
     onSubscriptionStatusChange: async (status) => {
@@ -101,16 +119,18 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
     },
   })
 
+  const registerPlacement = async (placement: string) => {
+    if (promoActive) return
+    try { await _registerPlacement(placement) } catch {}
+  }
+
   const triggerUpgrade = async (placement: string) => {
-    // Route trial-expired users to a dedicated win-back paywall
     const target = trialExpired ? 'trial_expired' : placement
-    try {
-      await registerPlacement(target)
-    } catch {}
+    await registerPlacement(target)
   }
 
   return (
-    <SuperwallContext.Provider value={{ isPremium, loading, trialExpired, triggerUpgrade }}>
+    <SuperwallContext.Provider value={{ isPremium, loading, trialExpired, promoActive, registerPlacement, triggerUpgrade }}>
       {children}
     </SuperwallContext.Provider>
   )

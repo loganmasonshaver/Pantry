@@ -15,6 +15,7 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -30,6 +31,7 @@ import { usePremium } from '../../context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated, trackMealRegenerated, trackUpgradePromptShown } from '../../lib/analytics'
 import AILogModal from '../../components/AILogModal'
+import CreatorRecipeModal from '../../components/CreatorRecipeModal'
 import FoodSearchModal from '../../components/FoodSearchModal'
 import EditPortionModal from '../../components/EditPortionModal'
 import PantryScanModal from '../../components/PantryScanModal'
@@ -329,11 +331,13 @@ function SlotCard({
 export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
-  const { isPremium, triggerUpgrade } = usePremium()
+  const { isPremium, triggerUpgrade, promoActive } = usePremium()
   const { registerPlacement } = useSuperwall()
   const [mealMode, setMealMode] = useState<'cookNow' | 'mealPlan'>('cookNow')
-  const cookNow = useMealSuggestions(user?.id, isPremium, 'cookNow')
-  const mealPlan = useMealSuggestions(user?.id, isPremium, 'mealPlan')
+  const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
+  const [pantryFetched, setPantryFetched] = useState(false)
+  const cookNow = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  const mealPlan = useMealSuggestions(user?.id, isPremium, 'mealPlan', pantryFetched && pantryNames.size > 0)
   const { meals, loading, error, regenerate } = mealMode === 'cookNow' ? cookNow : mealPlan
 
   const ESSENTIAL_STAPLES = [
@@ -341,8 +345,6 @@ export default function HomeScreen() {
     'soy sauce', 'eggs', 'rice', 'flour', 'sugar', 'milk',
     'paprika', 'cumin', 'chili powder', 'oregano', 'lemon', 'vinegar',
   ]
-  const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
-  const [pantryFetched, setPantryFetched] = useState(false)
   const [missingStaples, setMissingStaples] = useState<string[]>([])
   const [staplesDismissed, setStaplesDismissed] = useState(false)
 
@@ -390,62 +392,70 @@ export default function HomeScreen() {
   const [showScanCta, setShowScanCta] = useState(false)
   const [showPantryScanFromHome, setShowPantryScanFromHome] = useState(false)
   const [trendingMeals, setTrendingMeals] = useState<any[]>([])
+  const [showCreatorModal, setShowCreatorModal] = useState(false)
+  const [creatorMealToEdit, setCreatorMealToEdit] = useState<any>(null)
 
   // Fetch trending meals from cache (generated daily, kept 3 days for fallback)
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0]
     const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
 
-    const mapRows = (rows: any[]) => rows.map(m => ({
-      id: m.id, name: m.name, calories: m.calories, protein: m.protein,
-      carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
-      ingredients: m.ingredients, steps: m.steps, image: m.image,
-      trend_source: m.trend_source,
+    const mapRows = (rows: any[]) => rows
+      .map(m => ({
+        id: m.id, name: m.name, calories: m.calories, protein: m.protein,
+        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+        ingredients: m.ingredients, steps: m.steps, image: m.image,
+        trend_source: m.trend_source,
+        creator: m.creators ?? null,  // includes handle, avatar_url, instagram_url, tiktok_url, youtube_url
+        vote_score: m.vote_score ?? 0,
+      }))
+      .sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0))
+
+    const mapEdgeRows = (meals: any[]) => meals.map((m: any) => ({
+      id: m.id || String(Math.random()), name: m.name, calories: m.calories, protein: m.protein,
+      carbs: m.carbs, fat: m.fat, prepTime: m.prepTime || m.prep_time,
+      ingredients: m.ingredients, steps: m.steps, image: m.image || null,
+      trend_source: m.trend_source, vote_score: m.vote_score ?? 0, creator: null,
     }))
+
+    const handleRows = (rows: any[]) => {
+      const todayRows = rows.filter(r => r.generated_at === today)
+      const olderRows = rows.filter(r => r.generated_at !== today)
+
+      if (todayRows.length > 0) {
+        const combined = todayRows.length >= 4 ? todayRows : [...todayRows, ...olderRows].slice(0, 10)
+        setTrendingMeals(mapRows(combined))
+      } else if (olderRows.length > 0) {
+        setTrendingMeals(mapRows(olderRows.slice(0, 10)))
+        supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
+          if (res?.meals && res.meals.length > 0) setTrendingMeals(mapEdgeRows(res.meals))
+        })
+      } else {
+        supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
+          if (res?.meals && res.meals.length > 0) setTrendingMeals(mapEdgeRows(res.meals))
+        })
+      }
+    }
 
     // Pull last 3 days' worth, newest first — gives us a deep enough pool even if today's
     // generation was thin. We sort/order client-side to prioritize today's meals.
     supabase.from('trending_meals')
-      .select('*')
+      .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
       .gte('generated_at', threeDaysAgo)
       .order('generated_at', { ascending: false })
       .order('id')
-      .then(({ data }) => {
-        const todayRows = (data ?? []).filter(r => r.generated_at === today)
-        const olderRows = (data ?? []).filter(r => r.generated_at !== today)
-
-        if (todayRows.length > 0) {
-          // Show today's meals first; fall back to older days only if today has fewer than 4
-          const combined = todayRows.length >= 4
-            ? todayRows
-            : [...todayRows, ...olderRows].slice(0, 10)
-          setTrendingMeals(mapRows(combined))
-        } else if (olderRows.length > 0) {
-          // No meals for today yet — show yesterday's while we trigger fresh generation
-          setTrendingMeals(mapRows(olderRows.slice(0, 10)))
-          supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
-            if (res?.meals && res.meals.length > 0) {
-              setTrendingMeals(res.meals.map((m: any) => ({
-                id: m.id || String(Math.random()), name: m.name, calories: m.calories, protein: m.protein,
-                carbs: m.carbs, fat: m.fat, prepTime: m.prepTime || m.prep_time,
-                ingredients: m.ingredients, steps: m.steps, image: m.image || null,
-                trend_source: m.trend_source,
-              })))
-            }
-          })
-        } else {
-          // Completely empty — trigger fresh generation
-          supabase.functions.invoke('generate-trending-meals').then(({ data: res }) => {
-            if (res?.meals) {
-              setTrendingMeals(res.meals.map((m: any) => ({
-                id: m.id || String(Math.random()), name: m.name, calories: m.calories, protein: m.protein,
-                carbs: m.carbs, fat: m.fat, prepTime: m.prepTime || m.prep_time,
-                ingredients: m.ingredients, steps: m.steps, image: m.image || null,
-                trend_source: m.trend_source,
-              })))
-            }
-          })
+      .then(({ data, error }) => {
+        if (error) {
+          // FK join failed (schema cache miss) — fall back to plain select
+          supabase.from('trending_meals')
+            .select('*')
+            .gte('generated_at', threeDaysAgo)
+            .order('generated_at', { ascending: false })
+            .order('id')
+            .then(({ data: plain }) => handleRows(plain ?? []))
+          return
         }
+        handleRows(data ?? [])
       })
   }, [])
 
@@ -643,6 +653,24 @@ export default function HomeScreen() {
 
   useFocusEffect(useCallback(() => {
     fetchTodayLogs()
+    // Re-sync trending so creator edits from meal detail are reflected on back-navigation
+    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+    supabase.from('trending_meals')
+      .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
+      .gte('generated_at', threeDaysAgo)
+      .order('generated_at', { ascending: false })
+      .order('id')
+      .then(({ data }) => {
+        if (data && data.length > 0) {
+          setTrendingMeals(data.map(m => ({
+            id: m.id, name: m.name, calories: m.calories, protein: m.protein,
+            carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+            ingredients: m.ingredients, steps: m.steps, image: m.image,
+            trend_source: m.trend_source, creator: (m as any).creators ?? null,
+            vote_score: (m as any).vote_score ?? 0,
+          })).sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0)))
+        }
+      })
   }, [fetchTodayLogs]))
 
   const toggleSlot = (id: string) => {
@@ -868,7 +896,21 @@ export default function HomeScreen() {
         )}
 
         {/* ── Suggested For You — Horizontal Scroll ── */}
-        <View style={{ marginBottom: 28 }}>
+        {pantryFetched && pantryNames.size === 0 && (
+          <TouchableOpacity
+            style={{ marginHorizontal: 20, marginBottom: 28, backgroundColor: '#111', borderWidth: 1, borderColor: '#222', borderRadius: 16, padding: 20, alignItems: 'center', gap: 10 }}
+            onPress={() => setShowPantryScanFromHome(true)}
+            activeOpacity={0.8}
+          >
+            <ScanLine size={28} color="#4ADE80" />
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', textAlign: 'center' }}>Scan your pantry first</Text>
+            <Text style={{ color: '#888', fontSize: 13, textAlign: 'center', lineHeight: 19 }}>Pantry scans your ingredients and builds personalized meal ideas from what you already have.</Text>
+            <View style={{ backgroundColor: '#4ADE80', borderRadius: 30, paddingVertical: 10, paddingHorizontal: 28, marginTop: 4 }}>
+              <Text style={{ color: '#000', fontWeight: '700', fontSize: 14 }}>Scan Now</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+        <View style={{ marginBottom: 28, display: pantryFetched && pantryNames.size === 0 ? 'none' : 'flex' }}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
             <Text style={styles.sectionTitle}>Suggested For You</Text>
             <TouchableOpacity
@@ -954,9 +996,16 @@ export default function HomeScreen() {
           if (filteredTrending.length === 0) return null
           return (
         <View style={{ marginBottom: 28 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 20, marginBottom: 16 }}>
-            <Flame size={14} stroke="#EF4444" strokeWidth={2} fill="#EF4444" />
-            <Text style={styles.sectionTitle}>Trending</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 20, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Flame size={14} stroke="#EF4444" strokeWidth={2} fill="#EF4444" />
+              <Text style={styles.sectionTitle}>Trending</Text>
+            </View>
+            {promoActive && (
+              <TouchableOpacity onPress={() => setShowCreatorModal(true)} hitSlop={10}>
+                <Plus size={20} color="#4ADE80" strokeWidth={2.5} />
+              </TouchableOpacity>
+            )}
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 12 }}>
             {filteredTrending.map((meal, i) => (
@@ -972,6 +1021,20 @@ export default function HomeScreen() {
                   <View style={[styles.trendingImage, { backgroundColor: '#2A2A2A' }]} />
                 )}
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.85)']} locations={[0.2, 0.9]} style={styles.trendingGradient} />
+                {meal.creator && (() => {
+                  const socialUrl = meal.creator.instagram_url || meal.creator.tiktok_url || meal.creator.youtube_url
+                  const badge = (
+                    <View style={styles.creatorBadge}>
+                      {meal.creator.avatar_url ? (
+                        <Image source={{ uri: meal.creator.avatar_url }} style={styles.creatorAvatar} />
+                      ) : null}
+                      <Text style={styles.creatorHandle}>@{meal.creator.handle}</Text>
+                    </View>
+                  )
+                  return socialUrl
+                    ? <TouchableOpacity onPress={() => Linking.openURL(socialUrl)} activeOpacity={0.7}>{badge}</TouchableOpacity>
+                    : badge
+                })()}
                 <View style={styles.trendingContent}>
                   <Text style={styles.trendingName} numberOfLines={2}>{meal.name}</Text>
                   <View style={{ flexDirection: 'row', gap: 5, marginTop: 6 }}>
@@ -1294,6 +1357,32 @@ export default function HomeScreen() {
           setShowPantryScanFromHome(false)
           setShowScanCta(false)
           AsyncStorage.setItem('pantry_scan_cta_dismissed', '1')
+        }}
+      />
+      <CreatorRecipeModal
+        visible={showCreatorModal}
+        mealToEdit={creatorMealToEdit}
+        onClose={() => { setShowCreatorModal(false); setCreatorMealToEdit(null) }}
+        onSubmitted={() => {
+          setShowCreatorModal(false)
+          // Refetch trending — use 3-day window so creator meals from prior days are included
+          const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
+          supabase.from('trending_meals')
+            .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
+            .gte('generated_at', threeDaysAgo)
+            .order('generated_at', { ascending: false })
+            .order('id')
+            .then(({ data }) => {
+              if (data && data.length > 0) {
+                setTrendingMeals(data.map(m => ({
+                  id: m.id, name: m.name, calories: m.calories, protein: m.protein,
+                  carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+                  ingredients: m.ingredients, steps: m.steps, image: m.image,
+                  trend_source: m.trend_source, creator: (m as any).creators ?? null,
+                  vote_score: (m as any).vote_score ?? 0,
+                })).sort((a, b) => b.vote_score - a.vote_score))
+              }
+            })
         }}
       />
 
@@ -1753,6 +1842,28 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#4ADE80',
+  },
+  creatorBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  creatorAvatar: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+  },
+  creatorHandle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textWhite,
   },
 
   // Meal slot cards (MyFitnessPal style)

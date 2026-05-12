@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, Scan, ShoppingBasket, BarChart3, Sparkles } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
-import { useSuperwall } from 'expo-superwall'
+import { usePremium } from '@/context/SuperwallContext'
 import { trackPaywallViewed } from '../lib/analytics'
 
 const TEAL = '#4ADE80'
@@ -29,7 +29,7 @@ const FEATURES = [
 ]
 
 export default function PaywallBrowser({ visible, onClose, source = 'browse' }: Props) {
-  const { registerPlacement } = useSuperwall()
+  const { registerPlacement } = usePremium()
   const [selectedPlan, setSelectedPlan] = useState<'annual' | 'monthly'>('annual')
   const fadeAnim = useRef(new Animated.Value(0)).current
 

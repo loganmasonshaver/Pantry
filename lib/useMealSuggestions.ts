@@ -13,7 +13,7 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10)
 }
 
-export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow') {
+export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
   const { requestConsent } = useAIConsent()
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   const [loading, setLoading] = useState(false)
@@ -233,7 +233,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // On mode change, immediately load cached meals before async fetch.
   // Seeded meals (onboarding placeholders) are skipped — they have no recipe data.
   useEffect(() => {
-    if (!userId) return
+    if (!userId || !enabled) return
     let cancelled = false // prevents setMeals on an unmounted component if the user navigates away
     ;(async () => {
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
@@ -277,7 +277,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       if (!cancelled) fetchAndGenerate()
     })()
     return () => { cancelled = true }
-  }, [userId, isPremium, mode])
+  }, [userId, isPremium, mode, enabled])
 
   return { meals, loading, error, regenerate: () => fetchAndGenerate(true) }
 }

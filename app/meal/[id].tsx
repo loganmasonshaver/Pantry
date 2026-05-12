@@ -11,6 +11,7 @@ import {
   Dimensions,
   Image,
   Animated,
+  Linking,
 } from 'react-native'
 let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
@@ -20,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown } from 'lucide-react-native'
 import RecipeFormModal from '@/components/RecipeFormModal'
+import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { autoCategoryMatches } from '@/lib/categories'
@@ -43,6 +45,23 @@ function cleanIngredientName(name: string): string {
     .replace(/\s*\*\s*$/, '')          // strip trailing asterisk
     .replace(/^\d+[\s/.-]*/g, '')       // strip leading numbers ("4 eggs" → "eggs")
     .replace(/^[\d½¼¾⅓⅔]+\s*/g, '')   // strip unicode fractions
+    .trim()
+}
+
+// Strips quantities, units, and articles from any ingredient string for image lookup.
+// "1/2 an avocado" → "avocado", "200g chicken breast" → "chicken breast"
+function extractFoodName(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/\s*\*\s*$/, '')
+    // leading number + optional fraction + optional unit
+    .replace(/^\d+\s*\/\s*\d+\s*/g, '')   // "1/2 "
+    .replace(/^\d+[\s.,-]*/g, '')          // "200 ", "2. "
+    .replace(/^[\d½¼¾⅓⅔]+\s*/g, '')       // unicode fractions
+    // measurement units
+    .replace(/^(kg|g|oz|lb|lbs|ml|l|cup|cups|tbsp|tsp|tablespoon|teaspoon|handful|pinch|dash|slice|slices|piece|pieces|clove|cloves|can|bunch|sprig|sprigs|stalk|stalks|head|heads|sheet|sheets)\s+(of\s+)?/gi, '')
+    // leading articles and quantity words
+    .replace(/^(a|an|the|half|quarter|some|few)\s+(of\s+)?(an?\s+)?/gi, '')
     .trim()
 }
 
@@ -97,6 +116,18 @@ export default function MealDetailScreen() {
   const { user } = useAuth()
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
+  const SLOT_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
+  const ITEM_HEIGHT = 50
+  const getDefaultSlotIndex = () => {
+    const h = new Date().getHours()
+    if (h < 11) return 0
+    if (h < 15) return 1
+    if (h < 21) return 2
+    return 3
+  }
+  const [showSlotPicker, setShowSlotPicker] = useState(false)
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState(getDefaultSlotIndex())
+  const [customSlotName, setCustomSlotName] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [logging, setLogging] = useState(false)
@@ -105,7 +136,8 @@ export default function MealDetailScreen() {
   const [ratingToast, setRatingToast] = useState<string | null>(null)
   const ratingToastOpacity = useRef(new Animated.Value(0)).current
   const [showEditForm, setShowEditForm] = useState(false)
-  const [portionMode, setPortionMode] = useState<PortionMode>('Visual')
+  const [showCreatorEdit, setShowCreatorEdit] = useState(false)
+  const [portionMode, setPortionMode] = useState<PortionMode>('Grams')
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
@@ -207,7 +239,7 @@ export default function MealDetailScreen() {
   // Fetch ingredient images from library + generate missing ones on-demand
   useEffect(() => {
     if (!meal) return
-    const names = meal.ingredients.map(i => normalizeForImage(cleanIngredientName(i.name).toLowerCase()))
+    const names = meal.ingredients.map(i => normalizeForImage(extractFoodName(i.name)))
 
     // Fetch existing images
     supabase.from('ingredient_images').select('name, image_url').in('name', names)
@@ -282,7 +314,8 @@ export default function MealDetailScreen() {
 
   const rateMeal = async (rating: 1 | -1) => {
     if (!user || !meal) return
-    const next = userRating === rating ? null : rating
+    const prev = userRating
+    const next = prev === rating ? null : rating
     setUserRating(next)
     if (next === null) {
       await supabase.from('meal_ratings').delete()
@@ -294,6 +327,13 @@ export default function MealDetailScreen() {
         rating: next,
       }, { onConflict: 'user_id,meal_name' })
       showRatingToast(next === 1 ? "Got it — we'll suggest more like this" : "Noted — we'll skip this kind of meal")
+    }
+    // Update vote_score on trending meals for creator recipes
+    if ((meal as any).trend_source === 'creator' && id && !id.startsWith('mock')) {
+      const delta = next === null ? -(prev ?? 0) : next - (prev ?? 0)
+      if (delta !== 0) {
+        supabase.rpc('increment_vote_score', { meal_id: id, delta }).catch(() => {})
+      }
     }
   }
 
@@ -388,16 +428,23 @@ export default function MealDetailScreen() {
     try {
       const generated: any = JSON.parse(mealData)
       isUserCreated = generated.is_user_created === true
+      const rawIngredients: any[] = generated.ingredients ?? []
       meal = {
         ...generated,
-        ingredients: generated.ingredients.map((ing, i) => ({
-          id: String(i),
-          visual: ing.visual,
-          grams: ing.grams,
-          name: cleanIngredientName(ing.name),
-          inPantry: true,
-          needToBuy: isNeedToBuy(ing.name),
-        })),
+        ingredients: rawIngredients.map((ing, i) => {
+          // Plain strings (creator recipes) carry the full "1/2 avocado" text — preserve as-is.
+          // Objects (AI-generated meals) have quantity in .visual/.grams, so clean the name.
+          const isPlainString = typeof ing === 'string'
+          const raw = isPlainString ? ing : (ing.name ?? '')
+          return {
+            id: String(i),
+            visual: isPlainString ? undefined : ing.visual,
+            grams: isPlainString ? undefined : ing.grams,
+            name: isPlainString ? raw.replace(/\s*\*\s*$/, '').trim() : cleanIngredientName(raw),
+            inPantry: true,
+            needToBuy: isNeedToBuy(raw),
+          }
+        }),
       }
     } catch {
       meal = MOCK_MEAL_DETAILS[id ?? ''] ?? null
@@ -555,19 +602,6 @@ export default function MealDetailScreen() {
     }
   }
 
-  const SLOT_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
-  const ITEM_HEIGHT = 50
-  const [showSlotPicker, setShowSlotPicker] = useState(false)
-  // Default slot based on time of day: Breakfast <11am, Lunch 11am-3pm, Dinner 3pm-9pm, Snack otherwise
-  const getDefaultSlotIndex = () => {
-    const h = new Date().getHours()
-    if (h < 11) return 0 // Breakfast
-    if (h < 15) return 1 // Lunch
-    if (h < 21) return 2 // Dinner
-    return 3 // Snack
-  }
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState(getDefaultSlotIndex())
-  const [customSlotName, setCustomSlotName] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const slotScrollRef = useRef<ScrollView>(null)
   const lastHapticIndex = useRef(-1)
@@ -683,6 +717,49 @@ export default function MealDetailScreen() {
           </View>
         </View>
 
+        {/* ── Creator attribution ── */}
+        {(meal as any).creator && (() => {
+          const c = (meal as any).creator
+          const socialUrl = c.instagram_url || c.tiktok_url || c.youtube_url
+          const isOwner = c.user_id && c.user_id === user?.id
+          return (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingBottom: 14, paddingTop: 2 }}>
+              {c.avatar_url ? (
+                <Image source={{ uri: c.avatar_url }} style={{ width: 28, height: 28, borderRadius: 14 }} />
+              ) : (
+                <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '700' }}>{c.handle?.[0]?.toUpperCase() ?? '?'}</Text>
+                </View>
+              )}
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#888', fontSize: 12 }}>
+                  Recipe by <Text style={{ color: '#4ADE80', fontWeight: '600' }}>@{c.handle}</Text>
+                </Text>
+              </View>
+              {socialUrl && (
+                <TouchableOpacity
+                  onPress={() => Linking.openURL(socialUrl)}
+                  style={{ backgroundColor: '#1A1A1A', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '600' }}>
+                    {c.instagram_url ? 'Instagram' : c.tiktok_url ? 'TikTok' : 'YouTube'} →
+                  </Text>
+                </TouchableOpacity>
+              )}
+              {isOwner && (
+                <TouchableOpacity
+                  onPress={() => setShowCreatorEdit(true)}
+                  style={{ backgroundColor: '#1A1A1A', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '600' }}>Edit →</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )
+        })()}
+
         {/* ── Macro bar ── */}
         {(() => {
           const correctedCal = meal.calories
@@ -717,7 +794,7 @@ export default function MealDetailScreen() {
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Ingredients</Text>
             <View style={styles.pillToggle}>
-              {(['Visual', 'Grams'] as PortionMode[]).map(mode => (
+              {(['Grams', 'Visual'] as PortionMode[]).map(mode => (
                 <TouchableOpacity
                   key={mode}
                   style={[styles.pillOption, portionMode === mode && styles.pillOptionActive]}
@@ -739,8 +816,8 @@ export default function MealDetailScreen() {
               const needsBuy = (ing as any).needToBuy === true
               return (
                 <View key={ing.id} style={[styles.ingredientRow, i < meal.ingredients.length - 1 && styles.ingredientBorder]}>
-                  {ingredientImages[normalizeForImage(ing.name.toLowerCase())] ? (
-                    <Image source={{ uri: ingredientImages[normalizeForImage(ing.name.toLowerCase())] }} style={styles.ingredientThumb} />
+                  {ingredientImages[normalizeForImage(extractFoodName(ing.name))] ? (
+                    <Image source={{ uri: ingredientImages[normalizeForImage(extractFoodName(ing.name))] }} style={styles.ingredientThumb} />
                   ) : (
                     <View style={styles.ingredientThumbPlaceholder}>
                       <Text style={styles.ingredientThumbInitial}>{ing.name.charAt(0).toUpperCase()}</Text>
@@ -941,6 +1018,16 @@ export default function MealDetailScreen() {
           }}
         />
       )}
+      <CreatorRecipeModal
+        visible={showCreatorEdit}
+        mealToEdit={meal ? { id: meal.id ?? id ?? '', name: meal.name, calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat, prepTime: meal.prepTime, ingredients: meal.ingredients, steps: meal.steps, image: meal.image } : null}
+        onClose={() => setShowCreatorEdit(false)}
+        onSubmitted={() => {
+          setShowCreatorEdit(false)
+          // Navigate back so home screen re-fetches with updated meal
+          router.back()
+        }}
+      />
     </SafeAreaView>
   )
 }

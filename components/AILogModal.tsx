@@ -25,7 +25,6 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
-import { useSuperwall } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackMealLogged } from '@/lib/analytics'
 
@@ -76,8 +75,7 @@ type Props = {
 export default function AILogModal({ visible, slots, defaultSlot, onClose, onLogged }: Props) {
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
-  const { isPremium } = usePremium()
-  const { registerPlacement } = useSuperwall()
+  const { isPremium, registerPlacement } = usePremium()
   const [step, setStep] = useState<Step>('input')
   const [scanMode, setScanMode] = useState<ScanMode>('food')
   const [description, setDescription] = useState('')

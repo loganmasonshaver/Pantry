@@ -78,12 +78,13 @@ function RootLayoutNav() {
       AsyncStorage.getItem('otp_verified'),
     ]).then(([onboardingValue, otpValue]) => {
       if (session) {
-        // Check if email/password user needs OTP verification
         const provider = session.user?.app_metadata?.provider
         const isOAuthUser = provider === 'google' || provider === 'apple'
-        const otpVerified = otpValue === 'true' || isOAuthUser
+        const emailConfirmed = !!session.user?.email_confirmed_at
+        const otpVerified = otpValue === 'true' || isOAuthUser || emailConfirmed
 
         if (!otpVerified) {
+          // First-time sign-up only — email not yet confirmed
           router.replace({ pathname: '/onboarding/verify-email', params: { email: session.user.email ?? '' } })
         } else if (onboardingValue === 'true') {
           router.replace('/(tabs)')
@@ -91,7 +92,6 @@ function RootLayoutNav() {
           router.replace('/onboarding')
         }
       } else {
-        AsyncStorage.removeItem('otp_verified')
         router.replace('/onboarding')
       }
       setChecking(false)

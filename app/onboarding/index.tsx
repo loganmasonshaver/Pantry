@@ -33,6 +33,7 @@ import { supabase } from '../../lib/supabase'
 import { generateMeals } from '../../lib/meals'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
+import { usePremium } from '@/context/SuperwallContext'
 import { trackOnboardingStep, trackPaywallViewed, trackSubscriptionPurchased } from '../../lib/analytics'
 import { DISLIKE_CHIPS } from '../food-preferences'
 
@@ -73,6 +74,7 @@ type OnboardingData = {
   attribution: string
   birthday: string
   referralCode: string
+  grantsPromo: boolean
   targetWeight: string
   cuisinePreferences: string[]
 }
@@ -82,7 +84,7 @@ const DEFAULT_DATA: OnboardingData = {
   meals: '3', prep: '30 min', dietStyle: 'Classic', diet: [], cookingSkill: '',
   foodDislikes: [], foodDislikesText: '',
   age: '', gender: '', activityLevel: '', fitnessGoal: '',
-  attribution: '', birthday: '', referralCode: '', targetWeight: '',
+  attribution: '', birthday: '', referralCode: '', grantsPromo: false, targetWeight: '',
   cuisinePreferences: [],
 }
 
@@ -1557,9 +1559,10 @@ function SAllergies({
 
 
 function SReferralCode({
-  value, onChange, onNext, onBack,
+  value, onChange, onGrantsPromo, onNext, onBack,
 }: {
   value: string; onChange: (v: string) => void
+  onGrantsPromo: (v: boolean) => void
   onNext: () => void; onBack: () => void
 }) {
   const [checking, setChecking] = useState(false)
@@ -1570,12 +1573,14 @@ function SReferralCode({
   useEffect(() => {
     setValid(false)
     setError(null)
+    onGrantsPromo(false)
   }, [value])
 
   const handleContinue = async () => {
     // Empty = skip, allow pass-through
     if (!value.trim()) {
       onChange('')
+      onGrantsPromo(false)
       onNext()
       return
     }
@@ -1583,11 +1588,11 @@ function SReferralCode({
     setChecking(true)
     setError(null)
     try {
-      const { data, error: rpcError } = await supabase.rpc('validate_referral_code', { p_code: value })
+      const { data, error: rpcError } = await supabase.rpc('validate_referral_code_v2', { p_code: value })
       if (rpcError) throw rpcError
-      if (data === true) {
+      if (data?.valid) {
+        onGrantsPromo(!!data.grants_premium)
         setValid(true)
-        // Brief visual confirmation, then advance
         setTimeout(onNext, 450)
       } else {
         setError("That code isn't valid")
@@ -1625,20 +1630,30 @@ function SReferralCode({
           <Text style={[s.title, { textAlign: 'center' }]}>Have a referral code?</Text>
           <Text style={[s.subtitle, { textAlign: 'center' }]}>Enter one to unlock a special offer</Text>
 
-          <View style={[s.inputCard, { marginTop: 8, borderWidth: error ? 1 : 0, borderColor: error ? '#EF4444' : 'transparent' }]}>
-            <Text style={s.inputLabel}>Referral code</Text>
-            <TextInput
-              style={[s.input, { fontSize: 20, letterSpacing: 2, fontWeight: '700' }]}
-              placeholder="PANTRY20"
-              placeholderTextColor="#444444"
-              value={value}
-              onChangeText={(t) => onChange(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20))}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              returnKeyType="done"
-              editable={!checking && !valid}
-            />
-          </View>
+          <TextInput
+            style={{
+              marginTop: 8,
+              borderWidth: 1.5,
+              borderColor: error ? '#EF4444' : valid ? TEAL : '#00C9A7',
+              borderRadius: 14,
+              paddingHorizontal: 20,
+              paddingVertical: 18,
+              fontSize: 20,
+              letterSpacing: 3,
+              fontWeight: '700',
+              color: '#fff',
+              textAlign: 'center',
+              backgroundColor: '#0D0D0D',
+            }}
+            placeholder="TYPE CODE HERE"
+            placeholderTextColor="#333"
+            value={value}
+            onChangeText={(t) => onChange(t.toUpperCase().replace(/[^A-Z0-9_!]/g, '').slice(0, 20))}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            returnKeyType="done"
+            editable={!checking && !valid}
+          />
 
           {error && (
             <Text style={{ fontSize: 13, color: '#EF4444', textAlign: 'center', marginTop: 12, fontWeight: '600' }}>
@@ -3050,7 +3065,7 @@ const f = StyleSheet.create({
 })
 
 function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
-  const { registerPlacement } = useSuperwall()
+  const { registerPlacement } = usePremium()
   const purchasedRef = useRef(false)
 
   useSuperwallEvents({
@@ -3060,15 +3075,14 @@ function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () 
   })
 
   useEffect(() => {
+    // Skip paywall entirely for promo code holders
+    if (data.grantsPromo) { onNext(); return }
     trackPaywallViewed('onboarding')
     const run = async () => {
-      // User attributes + preload already handled by STrialReminder — go straight to presentation
       await registerPlacement('onboarding_paywall')
       if (ABANDONMENT_PAYWALL_ENABLED) {
-        // Allow subscription status event to propagate before deciding
         await new Promise(r => setTimeout(r, 400))
         if (!purchasedRef.current) {
-          // Abandonment offer (configured in Superwall dashboard as 60% off)
           await registerPlacement('onboarding_paywall_abandonment')
         }
       }
@@ -3644,6 +3658,7 @@ export default function Onboarding() {
           activity_level: finalData.activityLevel || null,
           fitness_goal: resolvedFitnessGoal,
           referral_code_used: finalData.referralCode ? finalData.referralCode.toUpperCase().trim() : null,
+          promo_active: !!finalData.grantsPromo,
           cuisine_preferences: finalData.cuisinePreferences || [],
         }).eq('id', user.id)
 
@@ -3652,8 +3667,30 @@ export default function Onboarding() {
           return
         }
 
-        // Meals pre-generated during onboarding loading screen + prefetchMeals for OAuth.
-        // Never block navigation here — caused a 20-30s black screen. useMealSuggestions handles cache miss.
+        // Save onboarding plan meals directly to saved_meals, then clear the cache
+        // so the home screen doesn't show them as recommendations until pantry is scanned.
+        try {
+          const raw = await AsyncStorage.getItem('pantry_daily_meals_cookNow')
+          if (raw && user) {
+            const cached = JSON.parse(raw)
+            const planMeals: any[] = cached.meals ?? []
+            await Promise.all(planMeals.map(m =>
+              supabase.rpc('insert_saved_meal', {
+                p_user_id: user.id,
+                p_name: m.name,
+                p_calories: m.calories ?? 0,
+                p_protein: m.protein ?? 0,
+                p_carbs: m.carbs ?? 0,
+                p_fat: m.fat ?? 0,
+                p_prep_time: m.prepTime ?? null,
+                p_ingredients: m.ingredients ?? [],
+                p_steps: m.steps ?? [],
+                p_image_url: m.image ?? null,
+              }).then(() => {})
+            ))
+            await AsyncStorage.removeItem('pantry_daily_meals_cookNow')
+          }
+        } catch {}
       }
 
       await AsyncStorage.removeItem('onboarding_data')
@@ -3680,7 +3717,7 @@ export default function Onboarding() {
     12: <SDietStyle value={data.dietStyle} onChange={update('dietStyle')} onNext={next} onBack={back} />,
     14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={update('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
     15: <SNotificationPermission onNext={next} onBack={back} />,
-    16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onNext={next} onBack={back} />,
+    16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onGrantsPromo={update('grantsPromo')} onNext={next} onBack={back} />,
     17: <SGeneratingIntro onNext={next} onBack={back} />,
     18: <SPlanLoading data={data} onDone={next} />,
     19: <SPlanReveal data={data} onNext={() => user ? navigate(20) : router.push('/onboarding/createaccount')} onBack={() => navigate(17)} />,
