@@ -766,6 +766,9 @@ export default function MealDetailScreen() {
                 )}
                 <Text style={styles.creatorByText} numberOfLines={1}>
                   Recipe by <Text style={styles.creatorHandle}>@{c.handle}</Text>
+                  {(meal as any).log_count >= 10 && (
+                    <Text style={styles.creatorByText}> · {(meal as any).log_count} cooked</Text>
+                  )}
                 </Text>
               </TouchableOpacity>
 

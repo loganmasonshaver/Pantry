@@ -408,6 +408,7 @@ export default function HomeScreen() {
         trend_source: m.trend_source,
         creator: m.creators ?? null,  // includes handle, avatar_url, instagram_url, tiktok_url, youtube_url
         vote_score: m.vote_score ?? 0,
+        log_count: m.log_count ?? 0,
       }))
       .sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0))
 
@@ -668,6 +669,7 @@ export default function HomeScreen() {
             ingredients: m.ingredients, steps: m.steps, image: m.image,
             trend_source: m.trend_source, creator: (m as any).creators ?? null,
             vote_score: (m as any).vote_score ?? 0,
+            log_count: (m as any).log_count ?? 0,
           })).sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0)))
         }
       })
@@ -1051,6 +1053,11 @@ export default function HomeScreen() {
                         <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{meal.protein}P</Text>
                       </View>
                     )}
+                    {meal.log_count >= 10 && (
+                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(0,201,167,0.15)', borderColor: 'rgba(0,201,167,0.25)' }]}>
+                        <Text style={[styles.heroMealPillText, { color: '#00C9A7' }]}>{meal.log_count} cooked</Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </TouchableOpacity>
@@ -1380,6 +1387,7 @@ export default function HomeScreen() {
                   ingredients: m.ingredients, steps: m.steps, image: m.image,
                   trend_source: m.trend_source, creator: (m as any).creators ?? null,
                   vote_score: (m as any).vote_score ?? 0,
+                  log_count: (m as any).log_count ?? 0,
                 })).sort((a, b) => b.vote_score - a.vote_score))
               }
             })
