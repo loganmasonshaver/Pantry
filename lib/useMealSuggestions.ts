@@ -144,7 +144,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             })
           }
         }))
-        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage }))
+        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep }))
       })()
 
       return generated
@@ -189,7 +189,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                       })
                     }
                   }))
-                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
+                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes }))
                 })()
               }
               return
@@ -275,7 +275,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                     })
                   }
                 }))
-                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals }))
+                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes }))
               })()
             }
             return
