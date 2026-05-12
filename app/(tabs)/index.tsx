@@ -484,7 +484,6 @@ export default function HomeScreen() {
       })
   }, [])
 
-  const [showIntroPopup, setShowIntroPopup] = useState(false)
   const [calorieGoal, setCalorieGoal] = useState(2400)
   const [proteinGoal, setProteinGoal] = useState(180)
   const [carbsGoal, setCarbsGoal] = useState(250)
@@ -530,12 +529,11 @@ export default function HomeScreen() {
     if (!user) return
     supabase
       .from('profiles')
-      .select('food_prefs_banner_dismissed, food_intro_popup_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal, food_dislikes, dietary_restrictions')
+      .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal, food_dislikes, dietary_restrictions')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
         if (!data?.food_prefs_banner_dismissed) setShowPrefBanner(true)
-        if (!data?.food_intro_popup_dismissed) setShowIntroPopup(true)
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
         if (data?.carbs_goal) setCarbsGoal(data.carbs_goal)
@@ -551,15 +549,6 @@ export default function HomeScreen() {
     await supabase
       .from('profiles')
       .update({ food_prefs_banner_dismissed: true })
-      .eq('id', user.id)
-  }
-
-  const dismissIntroPopup = async () => {
-    setShowIntroPopup(false)
-    if (!user) return
-    await supabase
-      .from('profiles')
-      .update({ food_intro_popup_dismissed: true })
       .eq('id', user.id)
   }
 
@@ -1420,35 +1409,6 @@ export default function HomeScreen() {
         }}
       />
 
-      {/* ── Food intro one-time popup ── */}
-      <Modal visible={showIntroPopup} transparent animationType="fade">
-        <View style={styles.introOverlay}>
-          <View style={styles.introCard}>
-            <Text style={styles.introEmoji}>🍽️</Text>
-            <Text style={styles.introTitle}>What foods do you hate?</Text>
-            <Text style={styles.introSub}>
-              Tell Pantry what to avoid and we'll never suggest it again.
-            </Text>
-            <TouchableOpacity
-              style={styles.introCtaBtn}
-              activeOpacity={0.85}
-              onPress={() => {
-                dismissIntroPopup()
-                router.push('/food-preferences')
-              }}
-            >
-              <Text style={styles.introCtaText}>Set Food Preferences</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.introSkipBtn}
-              activeOpacity={0.7}
-              onPress={dismissIntroPopup}
-            >
-              <Text style={styles.introSkipText}>Skip for now</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   )
 }
@@ -1669,65 +1629,6 @@ const styles = StyleSheet.create({
   logSlotChipActive: { backgroundColor: 'rgba(74,222,128,0.15)' },
   logSlotChipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
   logSlotChipTextActive: { color: '#4ADE80' },
-
-  // Food intro popup
-  introOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 28,
-  },
-  introCard: {
-    backgroundColor: '#111111',
-    borderRadius: 24,
-    padding: 28,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#2A2A2A',
-    width: '100%',
-    gap: 0,
-  },
-  introEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  introTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    letterSpacing: -0.4,
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  introSub: {
-    fontSize: 15,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 28,
-  },
-  introCtaBtn: {
-    backgroundColor: '#00C9A7',
-    borderRadius: 30,
-    paddingVertical: 16,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  introCtaText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#000000',
-  },
-  introSkipBtn: {
-    paddingVertical: 8,
-  },
-  introSkipText: {
-    fontSize: 14,
-    color: COLORS.textMuted,
-    fontWeight: '500',
-  },
 
   // Hero dashboard card
   dayNav: {
