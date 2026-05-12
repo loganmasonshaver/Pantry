@@ -105,14 +105,14 @@ function renderStepContent(step: string | { title: string; detail: string }) {
     return (
       <View style={{ flex: 1, gap: 6 }}>
         <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>{stripStepNumber(step.title)}</Text>
-        <Text style={{ fontSize: 14, color: '#E8E8E8', lineHeight: 22 }}>{step.detail}</Text>
+        <Text style={{ fontSize: 14, color: '#F5F5F5', lineHeight: 22 }}>{step.detail}</Text>
       </View>
     )
   }
   const cleaned = stripStepNumber(typeof step === 'string' ? step : '')
   return (
     <View style={{ flex: 1 }}>
-      <Text style={{ fontSize: 14, color: '#E8E8E8', lineHeight: 22 }}>{cleaned}</Text>
+      <Text style={{ fontSize: 14, color: '#F5F5F5', lineHeight: 22 }}>{cleaned}</Text>
     </View>
   )
 }
