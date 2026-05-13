@@ -16,6 +16,8 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  AppState,
+  RefreshControl,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -692,6 +694,47 @@ export default function HomeScreen() {
     setSlots(result)
   }, [user?.id, selectedDate])
 
+  // Single source of truth for refreshing the home tab's dynamic data: today's logs
+  // and the trending pool. Used by focus, AppState foreground transition, and
+  // pull-to-refresh — all of which need the same behavior.
+  const refreshHome = useCallback(async () => {
+    fetchTodayLogs()
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+    const { data } = await supabase.from('trending_meals')
+      .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
+      .gte('generated_at', thirtyDaysAgo)
+      .order('generated_at', { ascending: false })
+      .order('id')
+    if (data && data.length > 0) {
+      setTrendingMeals(filterTrendingByLifecycle(data).map(m => ({
+        id: m.id, name: m.name, calories: m.calories, protein: m.protein,
+        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+        ingredients: m.ingredients, steps: m.steps, image: m.image,
+        trend_source: m.trend_source, creator: (m as any).creators ?? null,
+        vote_score: (m as any).vote_score ?? 0,
+        log_count: (m as any).log_count ?? 0,
+        generated_at: m.generated_at,
+      })).sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0)))
+    }
+  }, [fetchTodayLogs])
+
+  // Pull-to-refresh state for the main ScrollView
+  const [refreshing, setRefreshing] = useState(false)
+  const onPullRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try { await refreshHome() } finally { setRefreshing(false) }
+  }, [refreshHome])
+
+  // Foreground refetch: when the user backgrounds the app and returns, pick up any
+  // overnight changes (cron-generated trending meals, server-side edits) without
+  // requiring a manual reload.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshHome()
+    })
+    return () => sub.remove()
+  }, [refreshHome])
+
   useFocusEffect(useCallback(() => {
     fetchTodayLogs()
     // Re-sync trending so creator edits from meal detail are reflected on back-navigation
@@ -821,7 +864,13 @@ export default function HomeScreen() {
           <Text style={styles.ratingToastText}>{ratingToastMessage}</Text>
         </RNAnimated.View>
       )}
-      <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor="#4ADE80" colors={['#4ADE80']} />}
+      >
 
         <View style={styles.header}>
           <View style={styles.headerTopRow}>
