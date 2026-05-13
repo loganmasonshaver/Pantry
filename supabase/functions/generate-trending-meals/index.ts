@@ -105,6 +105,15 @@ Deno.serve(async (req: Request) => {
   const authToken = (req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "")
     .replace(/^Bearer\s+/i, "").trim()
   const isServiceRole = SERVICE_ROLE_KEY !== "" && authToken === SERVICE_ROLE_KEY
+  console.log('[AUTH]', JSON.stringify({
+    env_key_len: SERVICE_ROLE_KEY.length,
+    env_key_prefix: SERVICE_ROLE_KEY.slice(0, 20),
+    env_key_suffix: SERVICE_ROLE_KEY.slice(-10),
+    token_len: authToken.length,
+    token_prefix: authToken.slice(0, 20),
+    token_suffix: authToken.slice(-10),
+    is_service_role: isServiceRole,
+  }))
 
   if (!isServiceRole) {
     // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
