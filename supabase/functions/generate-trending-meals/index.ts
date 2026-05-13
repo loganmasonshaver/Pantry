@@ -178,18 +178,31 @@ Deno.serve(async (req: Request) => {
       'healthy protein dessert',
     ]
     const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000)
-    // Pick TWO queries per category per day, offset by half the array length so the second
-    // pick is thematically opposite from the first. More candidate videos = more headroom for
-    // Groq to produce a varied set instead of converging on whatever YouTube's top result is.
-    const pickTwo = (arr: string[]) => {
+
+    // Mixed-signal candidate pool:
+    //   • Per category we run ONE relevance query (7-day window — fresh + on-topic) AND ONE
+    //     viewCount query (7-day window — what's actually viral this week, may surface stuff
+    //     our hardcoded queries wouldn't otherwise find).
+    //   • One extra 30-day viewCount call — "popular this month" tier catches recipes that
+    //     built momentum over weeks rather than days.
+    //   • One YouTube algorithmic mostPopular call against the Howto & Style category — pure
+    //     viral signal independent of our keyword bias, filtered to food titles.
+    type QueryConfig = { query: string; order: 'relevance' | 'viewCount'; windowDays: number }
+    const buildCategoryConfigs = (arr: string[]): QueryConfig[] => {
       const a = dayOfYear % arr.length
       const b = (a + Math.floor(arr.length / 2)) % arr.length
-      return a === b ? [arr[a]] : [arr[a], arr[b]]
+      if (a === b) return [{ query: arr[a], order: 'relevance', windowDays: 7 }]
+      return [
+        { query: arr[a], order: 'relevance', windowDays: 7 },
+        { query: arr[b], order: 'viewCount', windowDays: 7 },
+      ]
     }
-    const searchQueries = [
-      ...pickTwo(mealQueries),
-      ...pickTwo(snackQueries),
-      ...pickTwo(dessertQueries),
+    const queryConfigs: QueryConfig[] = [
+      ...buildCategoryConfigs(mealQueries),
+      ...buildCategoryConfigs(snackQueries),
+      ...buildCategoryConfigs(dessertQueries),
+      // Popular-this-month tier — rotated meal query, 30-day window, sort by views
+      { query: mealQueries[(dayOfYear + 3) % mealQueries.length], order: 'viewCount', windowDays: 30 },
     ]
 
     // Fetch previous meal names to avoid repeats
@@ -197,15 +210,20 @@ Deno.serve(async (req: Request) => {
     const prevNames = (prevMeals || []).map((m: any) => m.name.toLowerCase())
 
     const allVideos: { title: string; thumbnail: string; description: string }[] = []
+    // Used to filter chart=mostPopular results down to food content (the Howto & Style
+    // category includes DIY, beauty, fashion, tech tutorials — we only want recipes).
+    const isFoodTitle = (t: string) => /\b(recipe|cook|meal|food|dish|breakfast|lunch|dinner|snack|dessert|bake|grill|fry|roast|smoothie|salad|wrap|bowl|pasta|stir fry|pancake|cheesecake|brownie|cottage cheese|protein|anabolic)\b/i.test(t)
+    const isNotRecipeContent = (t: string) => /mukbang|asmr|review|what i ate|day of eating|vlog/i.test(t.toLowerCase())
 
-    for (const query of searchQueries) {
-      // Step 1a: Search for video IDs
-      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&order=relevance&maxResults=5&publishedAfter=${new Date(Date.now() - 7 * 86400000).toISOString()}&key=${youtubeKey}`
+    for (const config of queryConfigs) {
+      const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
+      // Step 1a: Search for video IDs with this query/sort/window combo
+      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=5&publishedAfter=${publishedAfter}&key=${youtubeKey}`
       const ytRes = await fetch(ytUrl)
       const ytData = await ytRes.json()
 
       if (ytData.error) {
-        console.log('YouTube search error:', ytData.error.message)
+        console.log(`YouTube search error (${config.query}, ${config.order}, ${config.windowDays}d):`, ytData.error.message)
         continue
       }
       if (!ytData.items) continue
@@ -224,26 +242,46 @@ Deno.serve(async (req: Request) => {
           const description = item.snippet.description || ''
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
           if (!title || !thumbnail) continue
-          // Skip videos that are clearly not recipes
-          if (/mukbang|asmr|review|what i ate|day of eating|vlog/i.test(title.toLowerCase())) continue
+          if (isNotRecipeContent(title)) continue
           allVideos.push({ title, thumbnail, description: description.substring(0, 1000) })
         }
       }
+    }
+
+    // YouTube algorithmic trending in Howto & Style (videoCategoryId=26) — what YouTube's own
+    // ranker considers viral RIGHT NOW. Independent of our keyword queries.
+    try {
+      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=15&key=${youtubeKey}`
+      const trendingRes = await fetch(trendingUrl)
+      const trendingData = await trendingRes.json()
+      if (trendingData.items) {
+        for (const item of trendingData.items) {
+          const title = item.snippet.title
+          const description = item.snippet.description || ''
+          const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
+          if (!title || !thumbnail) continue
+          if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
+          allVideos.push({ title, thumbnail, description: description.substring(0, 1000) })
+        }
+      }
+    } catch (e) {
+      console.log('YouTube mostPopular fetch failed:', e)
     }
 
     if (allVideos.length === 0) {
       return new Response(JSON.stringify({ error: "No YouTube results" }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
-    // Deduplicate by title similarity, then cap. With 6 queries × 5 results we have ~30
-    // candidates; 25 gives Groq plenty of headroom to pick a varied 6 without bloating tokens.
+    // Deduplicate by title similarity, then cap. We now pull from ~7 keyword queries × 5
+    // results + up to 15 from chart=mostPopular → up to ~50 raw candidates. 30 deduped is
+    // plenty of headroom for Groq to pick a varied final 6 without bloating tokens.
     const seen = new Set<string>()
     const uniqueVideos = allVideos.filter(v => {
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
       if (seen.has(key)) return false
       seen.add(key)
       return true
-    }).slice(0, 25)
+    }).slice(0, 30)
 
     console.log(`Found ${uniqueVideos.length} unique YouTube videos`)
 
