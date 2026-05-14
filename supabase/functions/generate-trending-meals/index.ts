@@ -269,7 +269,7 @@ Deno.serve(async (req: Request) => {
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
           if (!videoId || !title || !thumbnail) continue
           if (isNotRecipeContent(title)) continue
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 1000) })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500) })
         }
       }
     }
@@ -288,7 +288,7 @@ Deno.serve(async (req: Request) => {
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 1000) })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500) })
         }
       }
     } catch (e) {
@@ -313,7 +313,7 @@ Deno.serve(async (req: Request) => {
       if (seen.has(key)) return false
       seen.add(key)
       return true
-    }).slice(0, 100)
+    }).slice(0, 60)
 
     console.log(`Found ${uniqueVideos.length} unique YouTube videos (after ${recentVideoIds.size} recent-video-id rejections)`)
     stageLog('youtube fetch + dedup done')
@@ -407,14 +407,22 @@ Respond ONLY with a JSON array, no markdown:
     let recipes: any[] | null = null
 
     for (const provider of providers) {
+      stageLog(`LLM call start: ${provider.name}`)
       try {
+        // 60s hard timeout. Without this the fetch hangs indefinitely if the provider
+        // stalls — and on Free-tier edge functions a hanging Gemini call would silently
+        // burn through the entire ~150s wall budget without returning any logs.
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 60000)
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
           body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 6000 }),
-        })
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeoutId))
         const data = await res.json()
-        if (data.error) continue
+        stageLog(`LLM call done: ${provider.name}, response ${JSON.stringify(data).length} bytes`)
+        if (data.error) { stageLog(`LLM error: ${data.error?.message}`); continue }
         const text = data.choices?.[0]?.message?.content || "[]"
         const clean = text.replace(/```json|```/g, "").trim()
         const parsed = JSON.parse(clean)
@@ -462,7 +470,10 @@ Respond ONLY with a JSON array, no markdown:
           if (!recipes || filtered.length > recipes.length) recipes = filtered
           if (recipes.length >= 15) break
         }
-      } catch { continue }
+      } catch (e) {
+        stageLog(`LLM call threw: ${(e as Error).message}`)
+        continue
+      }
     }
 
     stageLog(`LLM yielded ${recipes?.length ?? 0} recipes`)
