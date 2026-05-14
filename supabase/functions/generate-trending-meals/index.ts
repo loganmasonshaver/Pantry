@@ -237,7 +237,7 @@ Deno.serve(async (req: Request) => {
     for (const config of queryConfigs) {
       const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
       // Step 1a: Search for video IDs with this query/sort/window combo
-      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=8&publishedAfter=${publishedAfter}&key=${youtubeKey}`
+      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=20&publishedAfter=${publishedAfter}&key=${youtubeKey}`
       const ytRes = await fetch(ytUrl)
       const ytData = await ytRes.json()
 
@@ -271,7 +271,7 @@ Deno.serve(async (req: Request) => {
     // YouTube algorithmic trending in Howto & Style (videoCategoryId=26) — what YouTube's own
     // ranker considers viral RIGHT NOW. Independent of our keyword queries.
     try {
-      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=15&key=${youtubeKey}`
+      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=25&key=${youtubeKey}`
       const trendingRes = await fetch(trendingUrl)
       const trendingData = await trendingRes.json()
       if (trendingData.items) {
@@ -295,8 +295,10 @@ Deno.serve(async (req: Request) => {
 
     // Deduplicate by title similarity, then drop videos we've already used in the last
     // 90 days (catches the same viral video resurfacing weeks later — produces a stealth
-    // repeat under a different name otherwise), then cap. ~50 raw candidates → ~30 after
-    // dedup gives the LLM plenty of headroom to pick a varied final 6.
+    // repeat under a different name otherwise), then cap. With ~150 raw candidates we
+    // expect ~50 after dedup, which gives the LLM enough headroom for the dedup history
+    // to grow over months without yield collapsing. Capped at 50 because beyond that the
+    // LLM's "pick the best" judgment starts diluting (too much noise).
     const seen = new Set<string>()
     const uniqueVideos = allVideos.filter(v => {
       if (recentVideoIds.has(v.videoId)) return false
@@ -304,7 +306,7 @@ Deno.serve(async (req: Request) => {
       if (seen.has(key)) return false
       seen.add(key)
       return true
-    }).slice(0, 30)
+    }).slice(0, 50)
 
     console.log(`Found ${uniqueVideos.length} unique YouTube videos (after ${recentVideoIds.size} recent-video-id rejections)`)
 
