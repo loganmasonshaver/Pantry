@@ -33,7 +33,7 @@ Return ONLY the raw JSON array, no markdown, no explanation.`
 
 async function parseWithGemini(base64: string): Promise<string> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${googleAiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${googleAiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -221,10 +221,9 @@ Respond ONLY with a JSON array, no markdown, no explanation:
   }
 ]`
 
-    // Priority: Groq (free) > Google (free) > OpenAI (paid)
+    // Priority: Google Gemini 3.1 Flash Lite (free, commercial-OK) > OpenAI gpt-4o-mini (paid fallback)
     const providers = [
-      groqApiKey && { url: "https://api.groq.com/openai/v1/chat/completions", key: groqApiKey, model: "llama-3.3-70b-versatile", name: "Groq" },
-      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-2.0-flash", name: "Google" },
+      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google" },
       openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI" },
     ].filter(Boolean) as { url: string; key: string; model: string; name: string }[]
 

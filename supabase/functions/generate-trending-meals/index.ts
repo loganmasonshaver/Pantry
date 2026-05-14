@@ -4,7 +4,7 @@ import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
-const groqApiKey = Deno.env.get("GROQ_API_KEY")
+const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -341,24 +341,23 @@ Respond ONLY with a JSON array, no markdown:
   }
 ]`
 
+    // Priority: Google Gemini 3.1 Flash Lite (free, commercial-OK) > OpenAI gpt-4o-mini (paid fallback)
     const providers = [
-      groqApiKey && { url: "https://api.groq.com/openai/v1/chat/completions", key: groqApiKey, model: "llama-3.3-70b-versatile" },
-      openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini" },
-    ].filter(Boolean) as { url: string; key: string; model: string }[]
+      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google" },
+      openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI" },
+    ].filter(Boolean) as { url: string; key: string; model: string; name: string }[]
 
     let recipes: any[] | null = null
 
     for (const provider of providers) {
-      const providerName = provider.url.includes('groq') ? 'groq' : 'openai'
       try {
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
           body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 6000 }),
         })
-        console.log(`[LLM] ${providerName} HTTP ${res.status}`)
         const data = await res.json()
-        if (data.error) { console.log(`[LLM] ${providerName} error:`, data.error.message ?? data.error); continue }
+        if (data.error) continue
         const text = data.choices?.[0]?.message?.content || "[]"
         const clean = text.replace(/```json|```/g, "").trim()
         const parsed = JSON.parse(clean)
