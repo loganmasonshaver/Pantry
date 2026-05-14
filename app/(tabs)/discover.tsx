@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   View,
   Text,
@@ -11,10 +11,12 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
-import { Search, Flame, Compass, Utensils } from 'lucide-react-native'
+import { Search, Flame, Compass, Utensils, Plus } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
+import { usePremium } from '@/context/SuperwallContext'
+import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 
 // Lifecycle filters mirror the home-tab logic so Discover shows the same trending
 // pool. They live here as a temporary duplicate; Phase 3b moves Trending out of
@@ -54,17 +56,49 @@ type DiscoverMeal = {
   generated_at: string
 }
 
-// Filter chips are visual-only in 3a — selection state changes pill styling but does
-// not yet narrow results. 3b wires real filtering from the trending pool against
-// derived signals (protein density, prep time bucket, dessert keyword match, etc.).
+// Filter chips narrow the trending pool against derived signals. "All" is a no-op.
 const FILTERS = ['All', 'High Protein', 'Quick', 'Desserts', 'Vegetarian'] as const
+type FilterKey = typeof FILTERS[number]
+
+// Keyword heuristics — fast, no extra columns required. Dessert reclassification is
+// the same fix flagged in the handoff (LLM mis-tags "Cottage Cheese Brownie Bake" as
+// meal). Vegetarian uses a deny-list because the trending pool doesn't carry a tag.
+const DESSERT_KEYWORDS = [
+  'brownie', 'cake', 'cheesecake', 'cookie', 'donut', 'doughnut', 'muffin',
+  'pudding', 'pie', 'ice cream', 'mousse', 'parfait', 'tart', 'scone',
+  'cupcake', 'tiramisu', 'custard', 'frosting', 'truffle',
+]
+const MEAT_KEYWORDS = [
+  'chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal',
+  'salmon', 'tuna', 'shrimp', 'crab', 'lobster', 'fish', 'anchovy',
+  'prosciutto', 'pepperoni', 'salami', 'ham', 'meat',
+]
+
+function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
+  if (filter === 'All') return true
+  const nameLower = meal.name.toLowerCase()
+  if (filter === 'Quick') return meal.prepTime > 0 && meal.prepTime <= 20
+  if (filter === 'High Protein') {
+    // Protein density ≥ 25% of calories — same bar the trending pipeline uses.
+    return meal.calories > 0 && (meal.protein * 4) / meal.calories >= 0.25
+  }
+  if (filter === 'Desserts') return DESSERT_KEYWORDS.some(k => nameLower.includes(k))
+  if (filter === 'Vegetarian') {
+    if (MEAT_KEYWORDS.some(k => nameLower.includes(k))) return false
+    const ingredientNames = (meal.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
+    return !ingredientNames.some(n => MEAT_KEYWORDS.some(k => n.includes(k)))
+  }
+  return true
+}
 
 export default function DiscoverScreen() {
   const router = useRouter()
+  const { promoActive } = usePremium()
   const [trending, setTrending] = useState<DiscoverMeal[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
-  const [activeFilter, setActiveFilter] = useState<typeof FILTERS[number]>('All')
+  const [activeFilter, setActiveFilter] = useState<FilterKey>('All')
+  const [showCreatorModal, setShowCreatorModal] = useState(false)
 
   const fetchTrending = useCallback(async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
@@ -97,8 +131,22 @@ export default function DiscoverScreen() {
   // are reflected without a manual reload.
   useFocusEffect(useCallback(() => { fetchTrending() }, [fetchTrending]))
 
-  const featured = trending[0]
-  const rail = trending.slice(1)
+  // Apply the active filter once, then split into source-typed rails. Featured is the
+  // top item from the combined filtered pool (already sorted by vote_score); each rail
+  // excludes whatever is currently the hero so cards never duplicate on screen.
+  const filtered = useMemo(
+    () => trending.filter(m => passesFilter(m, activeFilter)),
+    [trending, activeFilter]
+  )
+  const featured = filtered[0]
+  const youtubeRail = useMemo(
+    () => filtered.filter(m => m.id !== featured?.id && !m.creator),
+    [filtered, featured]
+  )
+  const creatorRail = useMemo(
+    () => filtered.filter(m => m.id !== featured?.id && !!m.creator),
+    [filtered, featured]
+  )
 
   const openMeal = (meal: DiscoverMeal) => {
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
@@ -184,63 +232,50 @@ export default function DiscoverScreen() {
           </TouchableOpacity>
         ) : null}
 
-        {/* Trending rail */}
-        {!loading && rail.length > 0 && (
+        {/* Trending Now rail — YouTube-sourced editorial-trendy recipes */}
+        {!loading && youtubeRail.length > 0 && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
               <Text style={styles.railTitle}>Trending Now</Text>
-              <Text style={styles.railSeeAll}>See all →</Text>
             </View>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}
             >
-              {rail.map(meal => (
-                <TouchableOpacity
-                  key={meal.id}
-                  style={styles.railCard}
-                  activeOpacity={0.85}
-                  onPress={() => openMeal(meal)}
-                >
-                  {meal.image && meal.image.startsWith('http') ? (
-                    <Image source={{ uri: meal.image }} style={styles.railImage} resizeMode="cover" />
-                  ) : (
-                    <View style={[styles.railImage, styles.featuredImagePlaceholder]}>
-                      <Utensils size={28} stroke="#444" strokeWidth={1.4} />
-                    </View>
-                  )}
-                  <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} locations={[0.3, 1]} style={styles.railGradient} />
-                  {meal.creator && (() => {
-                    const socialUrl = meal.creator.instagram_url || meal.creator.tiktok_url || meal.creator.youtube_url
-                    const badge = (
-                      <View style={styles.creatorBadge}>
-                        {meal.creator.avatar_url ? (
-                          <Image source={{ uri: meal.creator.avatar_url }} style={styles.creatorAvatar} />
-                        ) : null}
-                        <Text style={styles.creatorHandle}>@{meal.creator.handle}</Text>
-                      </View>
-                    )
-                    return socialUrl
-                      ? <TouchableOpacity onPress={() => Linking.openURL(socialUrl)} activeOpacity={0.7}>{badge}</TouchableOpacity>
-                      : badge
-                  })()}
-                  <View style={styles.railContent}>
-                    <Text style={styles.railName} numberOfLines={2}>{meal.name}</Text>
-                    <View style={{ flexDirection: 'row', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
-                      {meal.prepTime > 0 && <Pill label={`${meal.prepTime}m`} tint="amber" small />}
-                      <Pill label={`${meal.calories} CAL`} tint="white" small />
-                      {meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" small />}
-                      {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
-                    </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
+              {youtubeRail.map(meal => <RailCard key={meal.id} meal={meal} onPress={() => openMeal(meal)} />)}
             </ScrollView>
           </View>
         )}
 
-        {/* Empty state */}
+        {/* From Creators rail — user-submitted recipes. Admin "+" (promo flag) is the
+            entry point for posting new creator content; it lives here in 3b instead of
+            on Home, where it used to sit attached to the now-removed trending row. */}
+        {!loading && (creatorRail.length > 0 || promoActive) && (
+          <View style={{ marginTop: 28 }}>
+            <View style={styles.railHeader}>
+              <Text style={styles.railTitle}>From Creators</Text>
+              {promoActive && (
+                <TouchableOpacity onPress={() => setShowCreatorModal(true)} hitSlop={10} activeOpacity={0.7}>
+                  <Plus size={18} color="#4ADE80" strokeWidth={2.5} />
+                </TouchableOpacity>
+              )}
+            </View>
+            {creatorRail.length > 0 ? (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}
+              >
+                {creatorRail.map(meal => <RailCard key={meal.id} meal={meal} onPress={() => openMeal(meal)} />)}
+              </ScrollView>
+            ) : (
+              <Text style={styles.creatorRailEmpty}>No creator recipes yet — tap + to post one.</Text>
+            )}
+          </View>
+        )}
+
+        {/* Empty states — distinguish "nothing trending at all" from "filter narrowed to zero" */}
         {!loading && trending.length === 0 && (
           <View style={styles.emptyState}>
             <Compass size={36} stroke={COLORS.textMuted} strokeWidth={1.5} />
@@ -248,8 +283,67 @@ export default function DiscoverScreen() {
             <Text style={styles.emptySub}>Check back tomorrow — new picks drop daily.</Text>
           </View>
         )}
+        {!loading && trending.length > 0 && filtered.length === 0 && (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>No {activeFilter} recipes right now</Text>
+            <Text style={styles.emptySub}>Try a different filter — the daily pool changes every morning.</Text>
+            <TouchableOpacity onPress={() => setActiveFilter('All')} style={styles.emptyResetBtn} activeOpacity={0.8}>
+              <Text style={styles.emptyResetText}>Show all recipes</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
+
+      <CreatorRecipeModal
+        visible={showCreatorModal}
+        mealToEdit={null}
+        onClose={() => setShowCreatorModal(false)}
+        onSubmitted={() => {
+          setShowCreatorModal(false)
+          fetchTrending()
+        }}
+      />
     </SafeAreaView>
+  )
+}
+
+// Reusable rail card — same dimensions for both Trending Now and From Creators
+// rails so the two shelves visually rhyme.
+function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }) {
+  return (
+    <TouchableOpacity style={styles.railCard} activeOpacity={0.85} onPress={onPress}>
+      {meal.image && meal.image.startsWith('http') ? (
+        <Image source={{ uri: meal.image }} style={styles.railImage} resizeMode="cover" />
+      ) : (
+        <View style={[styles.railImage, styles.featuredImagePlaceholder]}>
+          <Utensils size={28} stroke="#444" strokeWidth={1.4} />
+        </View>
+      )}
+      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} locations={[0.3, 1]} style={styles.railGradient} />
+      {meal.creator && (() => {
+        const socialUrl = meal.creator.instagram_url || meal.creator.tiktok_url || meal.creator.youtube_url
+        const badge = (
+          <View style={styles.creatorBadge}>
+            {meal.creator.avatar_url ? (
+              <Image source={{ uri: meal.creator.avatar_url }} style={styles.creatorAvatar} />
+            ) : null}
+            <Text style={styles.creatorHandle}>@{meal.creator.handle}</Text>
+          </View>
+        )
+        return socialUrl
+          ? <TouchableOpacity onPress={() => Linking.openURL(socialUrl)} activeOpacity={0.7}>{badge}</TouchableOpacity>
+          : badge
+      })()}
+      <View style={styles.railContent}>
+        <Text style={styles.railName} numberOfLines={2}>{meal.name}</Text>
+        <View style={{ flexDirection: 'row', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+          {meal.prepTime > 0 && <Pill label={`${meal.prepTime}m`} tint="amber" small />}
+          <Pill label={`${meal.calories} CAL`} tint="white" small />
+          {meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" small />}
+          {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
+        </View>
+      </View>
+    </TouchableOpacity>
   )
 }
 
@@ -406,18 +500,19 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 14,
   },
+  creatorRailEmpty: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
   railTitle: {
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.textMuted,
     letterSpacing: 2,
     textTransform: 'uppercase',
-  },
-  railSeeAll: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#4ADE80',
-    letterSpacing: -0.1,
   },
   railCard: {
     width: 200,
@@ -512,5 +607,17 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 19,
+  },
+  emptyResetBtn: {
+    marginTop: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: COLORS.textWhite,
+  },
+  emptyResetText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000',
   },
 })
