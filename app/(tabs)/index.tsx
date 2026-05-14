@@ -958,6 +958,39 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* ── Snap & Log hero — primary tracking CTA. Photo-based macro logging is Pantry's
+            killer feature vs MyFitnessPal's manual entry; deserves prime real estate. ── */}
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+            backgroundColor: '#0A0A0A', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 18,
+            marginHorizontal: 20, marginBottom: 20,
+            borderWidth: 1.5, borderColor: 'rgba(74,222,128,0.4)',
+            shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 14,
+          }}
+          activeOpacity={0.85}
+          onPress={() => setShowAILogModal(true)}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+            <View style={{
+              width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.14)',
+              alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Camera size={20} stroke="#4ADE80" strokeWidth={2.5} />
+            </View>
+            <View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Snap & Log with AI</Text>
+              <Text style={{ fontSize: 12, color: '#888', marginTop: 2 }}>Point your camera at any food</Text>
+            </View>
+          </View>
+          <View style={{
+            width: 34, height: 34, borderRadius: 10, backgroundColor: 'rgba(74,222,128,0.15)',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <ScanLine size={16} stroke="#4ADE80" strokeWidth={2} />
+          </View>
+        </TouchableOpacity>
+
         {/* ── Hero scan-your-pantry card — sits high on screen as the unmissable first action ── */}
         {pantryFetched && pantryNames.size === 0 && (
           <TouchableOpacity
@@ -1165,37 +1198,7 @@ export default function HomeScreen() {
         <View style={styles.logSection}>
           <Text style={styles.logTitle}>Daily Meal Log</Text>
 
-          <TouchableOpacity
-            style={{
-              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-              backgroundColor: '#0A0A0A', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 18, marginTop: 14,
-              borderWidth: 1.5, borderColor: 'rgba(74,222,128,0.4)',
-              shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.15, shadowRadius: 12,
-            }}
-            activeOpacity={0.8}
-            onPress={() => setShowAILogModal(true)}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{
-                width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(74,222,128,0.12)',
-                alignItems: 'center', justifyContent: 'center',
-              }}>
-                <Camera size={18} stroke="#4ADE80" strokeWidth={2.5} />
-              </View>
-              <View>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>Snap & Log with AI</Text>
-                <Text style={{ fontSize: 11, color: '#888', marginTop: 1 }}>Point your camera at any food</Text>
-              </View>
-            </View>
-            <View style={{
-              width: 32, height: 32, borderRadius: 8, backgroundColor: 'rgba(74,222,128,0.15)',
-              alignItems: 'center', justifyContent: 'center',
-            }}>
-              <ScanLine size={16} stroke="#4ADE80" strokeWidth={2} />
-            </View>
-          </TouchableOpacity>
-
-          <View style={{ marginTop: 12, gap: 10 }}>
+          <View style={{ marginTop: 14, gap: 10 }}>
             {slots.map((slot) => {
               const hasEntries = slot.entries.length > 0
               const slotCal = slot.entries.reduce((s, e) => s + e.calories, 0)
