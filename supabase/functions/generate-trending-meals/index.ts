@@ -343,9 +343,23 @@ DENSITY GATE IS A SKIP RULE, NOT AN ENGINEER RULE:
 - If a candidate's stated/calculated macros DON'T hit the bar, SKIP IT entirely. Pick a different video. Do not modify the recipe to make it pass.
 - Better to return fewer recipes than to serve modified ones that diverge from the source video.
 
-VARIETY IS MANDATORY across the returned set:
+VARIETY IS MANDATORY — TREAT THIS AS A HARD CONSTRAINT, NOT A SUGGESTION:
+
+Step 1 — when picking candidates, label each recipe's PRIMARY PROTEIN SOURCE. Examples of distinct sources: chicken, beef, ground turkey, pork, salmon, tuna, shrimp, eggs, cottage cheese, paneer, tofu, tempeh, greek yogurt, skyr, lentils, beans, chickpeas, protein powder.
+
+Step 2 — group your selections by primary protein source. If ANY group has more than 1 recipe, drop all but the highest-quality one from that group and replace with a recipe using a DIFFERENT protein source from your candidate pool. Repeat until every group has exactly 1 recipe.
+
+Step 3 — your final 15-20 picks must span AT LEAST 6 distinct primary protein sources. If the candidate pool doesn't allow this, return fewer recipes — never duplicate a source to hit 15.
+
+PROTEIN-SOURCE QUOTA — required minimum balance across the final set:
+- At least 3 recipes must use a primary ANIMAL protein (chicken / beef / turkey / pork / salmon / tuna / shrimp / eggs as PRIMARY anchor — not just present)
+- At least 2 recipes may use a primary DAIRY or PLANT-FORWARD protein (cottage cheese / paneer / greek yogurt / skyr / tofu / tempeh / lentils / chickpeas / protein powder)
+- Remaining slots are open
+
+Why: an all-dairy or all-meat slate looks weird and narrow. The user expects a fitness-recipe feed to span obvious categories. If you can't hit the animal-protein quota from the candidate pool, return fewer recipes rather than padding.
+
+ALSO MANDATORY:
 - No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
-- No two recipes may share the same primary protein source (e.g. don't return two chicken meals or two cottage-cheese-based snacks)
 - If multiple candidate videos are too similar, pick at most one and skip the rest
 - Recipe names must all be distinct after normalization
 
