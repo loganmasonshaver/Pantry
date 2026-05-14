@@ -291,35 +291,38 @@ Deno.serve(async (req: Request) => {
       return `${i + 1}. "${v.title}"${desc}`
     }).join('\n\n')
 
-    const prompt = `Here are ${uniqueVideos.length} trending YouTube recipe videos. Use both the title AND description to understand exactly what the recipe is.
+    const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to pick and present the recipes that will make a fitness-focused user actually want to cook — not to transcribe every video literally. Quality of curation matters more than coverage.
+
+Here are ${uniqueVideos.length} trending YouTube recipe videos. Use both the title AND description to understand what each recipe is.
 
 ${videoList}
 
-For each one, generate a recipe that ACCURATELY matches what the video describes. Use ingredients and details from the description when available.
+For each video you choose to feature, generate a recipe that accurately reflects what the video describes — but presented at Pantry's brand standard.
 
 RULES:
-- The recipe MUST match the video content — use the description to determine exact ingredients and method
+- The recipe must match the underlying dish from the video — use the description to determine exact ingredients and method. You may polish presentation (naming, plating cues) but never invent a different dish.
 - VARIETY IS MANDATORY across the returned set:
   - No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
   - No two recipes may share the same primary protein source (e.g. don't return two chicken meals or two cottage-cheese-based snacks)
   - If multiple candidate videos are too similar (e.g. several oatmeal videos), pick at most one and skip the rest
   - Recipe names must all be distinct after normalization (don't return "Protein Oatmeal" and "High Protein Oatmeal Bowl" — they're the same dish)
-- ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion
+- ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion.
 - Categorize each recipe as one of: "meal" (full meal 400-800 kcal, protein-rich), "snack" (light 150-350 kcal, still protein-forward), or "dessert" (protein-forward treat 200-500 kcal)
 - Protein targets by category:
   - meal: at least 30g protein
   - snack: at least 10g protein
   - dessert: at least 10g protein
-  If the original recipe is lower protein, add a protein source (protein powder, cottage cheese, Greek yogurt, egg whites) but keep the core dish the same
+  If the original recipe is lower protein, add a protein source (protein powder, cottage cheese, Greek yogurt, egg whites) but keep the core dish the same.
 - Calorie ranges by category:
   - meal: 400-800 kcal
   - snack: 150-350 kcal
   - dessert: 200-500 kcal
-- MACROS MUST BE CALCULATED FROM THE INGREDIENTS. Add up the calories, protein, carbs, and fat from each ingredient at the listed gram weight. The totals MUST match — do not estimate macros separately from ingredients
-- If the video isn't clearly a recipe or food, skip it
-- Use the actual dish name from the title (cleaned up, no channel name or emoji)
-- "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual
-- "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only
+- MACROS MUST BE CALCULATED FROM THE INGREDIENTS. Add up the calories, protein, carbs, and fat from each ingredient at the listed gram weight. The totals MUST match — do not estimate macros separately from ingredients.
+- APPEAL TEST: Before finalizing each recipe, ask: "Would a food photographer be excited to shoot this? Would someone actually order this on DoorDash?" If the answer is no, discard the candidate and pick a different video from the list.
+- NAMING: Recipe names must read like a restaurant menu item or a magazine recipe headline, not a YouTube clickbait title. Strip "ULTIMATE", "VIRAL", "I tried...", channel names, emojis, capital-shout words. Use culinary terms ("Miso-Glazed", "Chipotle Lime", "Thai Basil", "Sun-Dried Tomato", "Brown Butter"). Bad: "Chicken Rice Broccoli Bowl", "Viral High Protein Pasta!!". Good: "Thai Basil Chicken Rice Bowl", "Lemon Garlic Shrimp Pasta".
+- If the video isn't clearly a recipe or food, skip it.
+- "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual.
+- "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only.
 
 Respond ONLY with a JSON array, no markdown:
 [
