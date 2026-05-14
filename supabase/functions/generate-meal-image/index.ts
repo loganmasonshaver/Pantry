@@ -162,30 +162,44 @@ Deno.serve(async (req: Request) => {
           continue
         }
 
-        // Upload to Supabase Storage for permanent caching
+        // Upload to Supabase Storage for permanent caching. Retry once on failure
+        // (transient blips between Edge Function and Storage are the most common
+        // failure mode — a 1.5s wait usually clears them). Only cache the URL if
+        // upload succeeded — caching the FAL fallback URL bites later because FAL
+        // CDN URLs expire ~24 hr and the cached row would then serve a 404 forever.
         const imageRes = await fetch(imageUrl)
         const blob = await imageRes.blob()
         const filename = `${cacheKey.replace(/\s+/g, '-')}.jpg`
 
-        const { error: uploadErr } = await db.storage.from('meal-images').upload(filename, blob, {
+        let { error: uploadErr } = await db.storage.from('meal-images').upload(filename, blob, {
           contentType: 'image/jpeg',
           upsert: true,
         })
-
-        let permanentUrl = imageUrl // fallback to FAL URL if upload fails
-        if (!uploadErr) {
-          const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
-          permanentUrl = urlData.publicUrl
-        } else {
-          console.log('Storage upload failed, using FAL URL:', uploadErr.message)
+        if (uploadErr) {
+          console.log('Storage upload attempt 1 failed:', uploadErr.message, '— retrying in 1.5s')
+          await new Promise(r => setTimeout(r, 1500))
+          const retry = await db.storage.from('meal-images').upload(filename, blob, {
+            contentType: 'image/jpeg',
+            upsert: true,
+          })
+          uploadErr = retry.error
+          if (uploadErr) console.log('Storage upload retry also failed:', uploadErr.message, '— returning FAL URL without caching')
+          else console.log('Storage upload succeeded on retry')
         }
 
-        // Cache in DB
-        const { error: cacheErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: permanentUrl }, { onConflict: 'meal_key' })
-        if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
-        else console.log('Cached OK:', cacheKey)
+        if (!uploadErr) {
+          const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
+          const permanentUrl = urlData.publicUrl
+          const { error: cacheErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: permanentUrl }, { onConflict: 'meal_key' })
+          if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
+          else console.log('Cached OK:', cacheKey)
+          return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
+        }
 
-        return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
+        // Both upload attempts failed — return the FAL URL so the caller has SOMETHING
+        // to render right now, but skip the cache write so the next request retries
+        // from scratch instead of pinning everyone to a soon-to-expire URL.
+        return new Response(JSON.stringify({ image: imageUrl }), { headers: jsonHeaders })
       } catch (e) {
         console.log(`Attempt ${attempt + 1} error:`, e)
         await new Promise(r => setTimeout(r, 2000))
