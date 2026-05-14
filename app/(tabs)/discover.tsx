@@ -11,10 +11,11 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
-import { Search, Flame, Compass, Utensils, Plus } from 'lucide-react-native'
+import { Search, Flame, Compass, Utensils, Plus, X } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 
@@ -74,6 +75,40 @@ const MEAT_KEYWORDS = [
   'prosciutto', 'pepperoni', 'salami', 'ham', 'meat',
 ]
 
+// Dietary restriction → forbidden ingredient substrings. Ported from the now-deleted
+// trendingMealPassesFilters that used to live on Home — Phase 3b moved Trending to
+// Discover but didn't carry this filter, leaving a regression where vegan / nut-allergy
+// users could see meals they can't eat. Same structure, applied centrally on Discover.
+const RESTRICTION_KEYWORDS: Record<string, string[]> = {
+  vegetarian: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'pepperoni', 'prosciutto', 'salami', 'anchovies', 'tuna', 'salmon', 'shrimp', 'crab', 'lobster', 'fish', 'meat'],
+  vegan: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'fish', 'shrimp', 'tuna', 'salmon', 'crab', 'lobster', 'meat', 'egg', 'eggs', 'milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'honey'],
+  'gluten-free': ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumbs', 'croutons', 'tortilla', 'noodles', 'ramen', 'udon', 'couscous'],
+  'dairy-free': ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta'],
+  'nut-free': ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter'],
+  'nut allergy': ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter'],
+  'peanut allergy': ['peanut', 'peanut butter', 'peanut sauce'],
+  pescatarian: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal'],
+  halal: ['pork', 'bacon', 'ham', 'prosciutto', 'lard', 'pepperoni', 'salami'],
+  kosher: ['pork', 'bacon', 'ham', 'shrimp', 'lobster', 'crab', 'shellfish'],
+}
+
+function passesDietary(meal: DiscoverMeal, dislikes: string[], restrictions: string[]): boolean {
+  const ingredientNames = (meal.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
+  const nameLower = meal.name.toLowerCase()
+  for (const dislike of dislikes) {
+    const d = dislike.toLowerCase().trim()
+    if (!d) continue
+    if (ingredientNames.some(n => n.includes(d)) || nameLower.includes(d)) return false
+  }
+  for (const restriction of restrictions) {
+    const keywords = RESTRICTION_KEYWORDS[restriction.toLowerCase()] ?? []
+    for (const kw of keywords) {
+      if (ingredientNames.some(n => n.includes(kw)) || nameLower.includes(kw)) return false
+    }
+  }
+  return true
+}
+
 function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
   if (filter === 'All') return true
   const nameLower = meal.name.toLowerCase()
@@ -93,12 +128,32 @@ function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
 
 export default function DiscoverScreen() {
   const router = useRouter()
+  const { user } = useAuth()
   const { promoActive } = usePremium()
   const [trending, setTrending] = useState<DiscoverMeal[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<FilterKey>('All')
   const [showCreatorModal, setShowCreatorModal] = useState(false)
+  const [foodDislikes, setFoodDislikes] = useState<string[]>([])
+  const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
+
+  // Profile-based dietary filters apply to every Discover view (always-on safety
+  // filter — users with nut allergies should never see almond recipes regardless
+  // of which chip they have selected). Chip filter narrows further on top.
+  useEffect(() => {
+    if (!user) return
+    supabase.from('profiles')
+      .select('food_dislikes, dietary_restrictions')
+      .eq('id', user.id)
+      .single()
+      .then(({ data }) => {
+        if (data?.food_dislikes) setFoodDislikes(data.food_dislikes ?? [])
+        if (data?.dietary_restrictions) {
+          setDietaryRestrictions((data.dietary_restrictions ?? []).filter((r: string) => r !== 'None'))
+        }
+      })
+  }, [user])
 
   const fetchTrending = useCallback(async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
@@ -131,13 +186,24 @@ export default function DiscoverScreen() {
   // are reflected without a manual reload.
   useFocusEffect(useCallback(() => { fetchTrending() }, [fetchTrending]))
 
-  // Apply the active filter once, then split into source-typed rails. Featured is the
-  // top item from the combined filtered pool (already sorted by vote_score); each rail
-  // excludes whatever is currently the hero so cards never duplicate on screen.
-  const filtered = useMemo(
-    () => trending.filter(m => passesFilter(m, activeFilter)),
-    [trending, activeFilter]
-  )
+  // Three-stage filter, applied in this order:
+  //   1. Dietary safety (profile dietary_restrictions + food_dislikes — always on).
+  //   2. Search query (text match against name + ingredients — empty query = no-op).
+  //   3. Active chip (All / High Protein / Quick / Desserts / Vegetarian).
+  // Featured is then the top item from the combined filtered pool (already sorted by
+  // vote_score); each rail excludes whatever is currently the hero.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return trending
+      .filter(m => passesDietary(m, foodDislikes, dietaryRestrictions))
+      .filter(m => {
+        if (!q) return true
+        if (m.name.toLowerCase().includes(q)) return true
+        const ingredientNames = (m.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
+        return ingredientNames.some(n => n.includes(q))
+      })
+      .filter(m => passesFilter(m, activeFilter))
+  }, [trending, activeFilter, query, foodDislikes, dietaryRestrictions])
   const featured = filtered[0]
   const youtubeRail = useMemo(
     () => filtered.filter(m => m.id !== featured?.id && !m.creator),
@@ -160,7 +226,8 @@ export default function DiscoverScreen() {
           <Text style={styles.title}>Discover</Text>
         </View>
 
-        {/* Search bar — visual scaffold for now; 3c wires real search */}
+        {/* Search bar — text match against meal name + ingredient names. Combined with
+            chip filter and dietary filter via the filtered useMemo. */}
         <View style={styles.searchBar}>
           <Search size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
           <TextInput
@@ -170,7 +237,14 @@ export default function DiscoverScreen() {
             placeholderTextColor={COLORS.textMuted}
             style={styles.searchInput}
             returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
           />
+          {query.length > 0 && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={10} activeOpacity={0.7}>
+              <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Filter chips */}
@@ -285,9 +359,19 @@ export default function DiscoverScreen() {
         )}
         {!loading && trending.length > 0 && filtered.length === 0 && (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No {activeFilter} recipes right now</Text>
-            <Text style={styles.emptySub}>Try a different filter — the daily pool changes every morning.</Text>
-            <TouchableOpacity onPress={() => setActiveFilter('All')} style={styles.emptyResetBtn} activeOpacity={0.8}>
+            <Text style={styles.emptyTitle}>
+              {query.trim() ? `No matches for "${query.trim()}"` : `No ${activeFilter} recipes right now`}
+            </Text>
+            <Text style={styles.emptySub}>
+              {query.trim()
+                ? 'Try a different word, or clear the search to browse everything.'
+                : 'Try a different filter — the daily pool changes every morning.'}
+            </Text>
+            <TouchableOpacity
+              onPress={() => { setQuery(''); setActiveFilter('All') }}
+              style={styles.emptyResetBtn}
+              activeOpacity={0.8}
+            >
               <Text style={styles.emptyResetText}>Show all recipes</Text>
             </TouchableOpacity>
           </View>
