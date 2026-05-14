@@ -313,14 +313,15 @@ RULES:
   - "meal" — a sit-down meal (anywhere from 400 to 1200+ kcal — bigger meal-prep portions are fine for bulkers/athletes)
   - "snack" — a quick bite between meals (typically 150-400 kcal, but can go higher if protein-dense)
   - "dessert" — a sweet treat (typically 150-500 kcal, can go higher)
-- PROTEIN DENSITY IS THE PRIMARY GATEKEEPER, NOT CALORIE COUNT. Every recipe MUST hit at least 8g protein per 100 kcal (~32% of calories from protein). This means:
-  - 500 kcal meal → at least 40g protein
-  - 800 kcal meal → at least 64g protein
-  - 1000 kcal big-batch meal → at least 80g protein
-  - 300 kcal snack → at least 24g protein
-  - 250 kcal dessert → at least 20g protein
-  If a real recipe doesn't hit 8g/100kcal naturally, ADD a high-protein supplement (protein powder, cottage cheese, Greek yogurt, egg whites) to bring it over. Better to skip the candidate than serve a low-protein-density recipe.
-- Desserts may dip slightly lower (7g/100kcal minimum) since dessert protein density is harder to engineer — but never below that.
+- PROTEIN DENSITY IS THE PRIMARY GATEKEEPER, NOT CALORIE COUNT. Every recipe MUST hit at least 25% of calories from protein (≈6.25g protein per 100 kcal). This is the bar for "high-protein" content people will trust. Worked examples:
+  - 500 kcal meal → at least 31g protein
+  - 700 kcal meal → at least 44g protein
+  - 800 kcal meal → at least 50g protein
+  - 1000 kcal big-batch meal → at least 63g protein
+  - 300 kcal snack → at least 19g protein
+  - 250 kcal dessert → at least 13g protein (dessert bar slightly lower — see below)
+  If a real recipe doesn't hit 25% naturally, ADD a high-protein supplement (protein powder, cottage cheese, Greek yogurt, egg whites) to bring it over. Better to skip the candidate than serve a low-protein-density recipe.
+- Desserts may dip slightly lower (20% of calories from protein, ≈5g/100kcal) since dessert protein density is genuinely harder to engineer — but never below that.
 - MACROS MUST BE CALCULATED FROM THE INGREDIENTS. Add up the calories, protein, carbs, and fat from each ingredient at the listed gram weight. The totals MUST match — do not estimate macros separately from ingredients.
 - APPEAL TEST: Before finalizing each recipe, ask: "Would a food photographer be excited to shoot this? Would someone actually want to try this after seeing it scroll past?" If the answer is no, discard the candidate and pick a different video from the list.
 - NAMING (trending-specific voice): Pantry's user lives on TikTok/Instagram food content — they know what's trending and want names that reflect WHY a dish is having a moment, NOT generic restaurant prose AND NOT YouTube clickbait. The dish's format usually IS the trend (cottage cheese in unexpected places, viral folded sandwich, dense bean salad, etc.) — name it honestly and let the novelty carry the energy.
@@ -384,13 +385,14 @@ Respond ONLY with a JSON array, no markdown:
           const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
           const seenNames = new Set<string>()
           const filtered = parsed.filter((r: any) => {
-            // Pre-FatSecret quality gate: density-based, not absolute. Lets a 250 kcal /
-            // 22g protein snack pass while still killing a 700 kcal / 18g protein meal.
+            // Pre-FatSecret quality gate: density-based, not absolute. 25% of calories from
+            // protein for meals/snacks, 20% for desserts (dessert protein density is genuinely
+            // harder to engineer). Lets bigger meal-prep portions through as long as ratio holds.
             const protein = Number(r.protein) || 0
             const calories = Number(r.calories) || 0
             if (calories <= 0) return false
             const ratio = (protein * 4) / calories
-            const minRatio = r.category === 'dessert' ? 0.28 : 0.32
+            const minRatio = r.category === 'dessert' ? 0.20 : 0.25
             if (ratio < minRatio) return false
             const key = normalize(r.name)
             if (!key || seenNames.has(key)) return false
@@ -416,13 +418,12 @@ Respond ONLY with a JSON array, no markdown:
     if (fsKey && fsSecret) {
       console.log('Correcting macros via FatSecret...')
       recipes = await Promise.all(recipes.map((r: any) => correctMealMacros(r)))
-      // Re-filter by protein density — 8g protein per 100 kcal = 32% of calories from protein.
-      // This is the brand bar for "high-protein" content. Scales naturally with meal size:
-      // a 500 kcal meal needs 40g protein, a 1000 kcal big-batch needs 80g — both pass at the
-      // same density. Desserts get a slight pass (7g/100kcal) since dessert protein density is
-      // genuinely harder to engineer. Calorie ceiling is gone — protein density is the gate.
-      const MEAL_SNACK_RATIO_MIN = 0.32  // 8g protein per 100 kcal
-      const DESSERT_RATIO_MIN = 0.28      // 7g protein per 100 kcal
+      // Re-filter by protein density — 25% of calories from protein for meals/snacks (≈6.25g
+      // per 100 kcal), 20% for desserts (≈5g per 100 kcal). Scales naturally with meal size:
+      // 500 kcal needs 31g protein, 1000 kcal big-batch needs 63g — both pass at the same
+      // density. No calorie ceiling — density alone is the gate.
+      const MEAL_SNACK_RATIO_MIN = 0.25  // 25% cal from protein ≈ 6.25g per 100 kcal
+      const DESSERT_RATIO_MIN = 0.20     // 20% cal from protein ≈ 5g per 100 kcal
       recipes = recipes.filter((r: any) => {
         const protein = Number(r.protein) || 0
         const calories = Number(r.calories) || 0
@@ -431,7 +432,7 @@ Respond ONLY with a JSON array, no markdown:
         const min = r.category === 'dessert' ? DESSERT_RATIO_MIN : MEAL_SNACK_RATIO_MIN
         return ratio >= min
       })
-      console.log(`${recipes.length} meals after macro correction (8g/100kcal meals/snacks, 7g/100kcal desserts)`)
+      console.log(`${recipes.length} meals after macro correction (25% cal-from-protein meals/snacks, 20% desserts)`)
     }
 
     // Step 4: Match recipes back to YouTube thumbnails
