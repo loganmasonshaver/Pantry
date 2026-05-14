@@ -220,7 +220,7 @@ Deno.serve(async (req: Request) => {
     for (const config of queryConfigs) {
       const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
       // Step 1a: Search for video IDs with this query/sort/window combo
-      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=5&publishedAfter=${publishedAfter}&key=${youtubeKey}`
+      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=8&publishedAfter=${publishedAfter}&key=${youtubeKey}`
       const ytRes = await fetch(ytUrl)
       const ytData = await ytRes.json()
 
@@ -385,14 +385,15 @@ Respond ONLY with a JSON array, no markdown:
           const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
           const seenNames = new Set<string>()
           const filtered = parsed.filter((r: any) => {
-            // Pre-FatSecret quality gate: density-based, not absolute. 25% of calories from
-            // protein for meals/snacks, 20% for desserts (dessert protein density is genuinely
-            // harder to engineer). Lets bigger meal-prep portions through as long as ratio holds.
+            // Pre-FatSecret quality gate: density-based, not absolute. 25% cal-from-protein
+            // for meals, 22% for snacks (dropped from 25% — snacks have less calorie budget
+            // to hit ratios; was killing the whole tier), 20% for desserts (dessert protein
+            // density is genuinely harder to engineer). Scales with portion size.
             const protein = Number(r.protein) || 0
             const calories = Number(r.calories) || 0
             if (calories <= 0) return false
             const ratio = (protein * 4) / calories
-            const minRatio = r.category === 'dessert' ? 0.20 : 0.25
+            const minRatio = r.category === 'dessert' ? 0.20 : r.category === 'snack' ? 0.22 : 0.25
             if (ratio < minRatio) return false
             const key = normalize(r.name)
             if (!key || seenNames.has(key)) return false
@@ -418,21 +419,24 @@ Respond ONLY with a JSON array, no markdown:
     if (fsKey && fsSecret) {
       console.log('Correcting macros via FatSecret...')
       recipes = await Promise.all(recipes.map((r: any) => correctMealMacros(r)))
-      // Re-filter by protein density — 25% of calories from protein for meals/snacks (≈6.25g
-      // per 100 kcal), 20% for desserts (≈5g per 100 kcal). Scales naturally with meal size:
-      // 500 kcal needs 31g protein, 1000 kcal big-batch needs 63g — both pass at the same
-      // density. No calorie ceiling — density alone is the gate.
-      const MEAL_SNACK_RATIO_MIN = 0.25  // 25% cal from protein ≈ 6.25g per 100 kcal
-      const DESSERT_RATIO_MIN = 0.20     // 20% cal from protein ≈ 5g per 100 kcal
+      // Re-filter by protein density — 25% cal-from-protein for meals (≈6.25g per 100 kcal),
+      // 22% for snacks (smaller calorie budget to hit ratios with), 20% for desserts (genuinely
+      // harder to engineer). Scales naturally with meal size: 500 kcal meal needs 31g protein,
+      // 1000 kcal big-batch needs 63g — both pass at the same density. No calorie ceiling.
+      const MEAL_RATIO_MIN = 0.25
+      const SNACK_RATIO_MIN = 0.22
+      const DESSERT_RATIO_MIN = 0.20
       recipes = recipes.filter((r: any) => {
         const protein = Number(r.protein) || 0
         const calories = Number(r.calories) || 0
         if (calories <= 0) return false
         const ratio = (protein * 4) / calories
-        const min = r.category === 'dessert' ? DESSERT_RATIO_MIN : MEAL_SNACK_RATIO_MIN
+        const min = r.category === 'dessert' ? DESSERT_RATIO_MIN
+                  : r.category === 'snack'   ? SNACK_RATIO_MIN
+                  : MEAL_RATIO_MIN
         return ratio >= min
       })
-      console.log(`${recipes.length} meals after macro correction (25% cal-from-protein meals/snacks, 20% desserts)`)
+      console.log(`${recipes.length} meals after macro correction (25% meals / 22% snacks / 20% desserts)`)
     }
 
     // Step 4: Match recipes back to YouTube thumbnails
