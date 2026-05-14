@@ -349,14 +349,16 @@ Respond ONLY with a JSON array, no markdown:
     let recipes: any[] | null = null
 
     for (const provider of providers) {
+      const providerName = provider.url.includes('groq') ? 'groq' : 'openai'
       try {
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
           body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 6000 }),
         })
+        console.log(`[LLM] ${providerName} HTTP ${res.status}`)
         const data = await res.json()
-        if (data.error) continue
+        if (data.error) { console.log(`[LLM] ${providerName} error:`, data.error.message ?? data.error); continue }
         const text = data.choices?.[0]?.message?.content || "[]"
         const clean = text.replace(/```json|```/g, "").trim()
         const parsed = JSON.parse(clean)
