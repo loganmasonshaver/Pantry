@@ -517,39 +517,33 @@ Respond ONLY with a JSON array, no markdown:
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
-    // Generate AI images for trending meals (different style than suggested meals)
-    const falApiKey = Deno.env.get("FAL_API_KEY")
-    if (falApiKey) {
-      console.log('Generating AI images for trending meals...')
-      const { data: inserted } = await db.from('trending_meals').select('id, name, ingredients').eq('generated_at', today())
-      if (inserted) {
-        for (const meal of inserted) {
-          try {
-            const topIngredients = (meal.ingredients || []).slice(0, 4).map((i: any) => i.name).join(', ')
-            const prompt = `Eye-level close-up food photography of ${meal.name} with ${topIngredients}, vivid vibrant colors, shallow depth of field, warm golden natural light, steam rising, fresh ingredients visible, bright and appetizing, food magazine cover style, photorealistic, 8k`
-
-            const res = await fetch("https://fal.run/fal-ai/flux-2", {
-              method: "POST",
-              headers: { "Authorization": `Key ${falApiKey}`, "Content-Type": "application/json" },
-              body: JSON.stringify({ prompt, image_size: "square", num_images: 1, output_format: "jpeg" }),
-            })
-            const data = await res.json()
-            const imageUrl = data.images?.[0]?.url
-            if (!imageUrl) { console.log(`No image for ${meal.name}`); continue }
-
-            // Upload to Supabase Storage
-            const imageRes = await fetch(imageUrl)
-            const blob = await imageRes.blob()
-            const filename = `trending-${meal.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-')}.jpg`
-            await db.storage.from('meal-images').upload(filename, blob, { contentType: 'image/jpeg', upsert: true })
-            const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
-
-            // Update trending meal with AI image
-            await db.from('trending_meals').update({ image: urlData.publicUrl }).eq('id', meal.id)
-            console.log(`AI image generated for: ${meal.name}`)
-
-            await new Promise(r => setTimeout(r, 1000)) // Rate limit between generations
-          } catch (e) { console.log(`Image gen failed for ${meal.name}:`, e) }
+    // Generate Flux images via the shared two-stage pipeline (Gemini visual description
+    // → Flux render). Routing through generate-meal-image instead of an inline Flux call
+    // means trending gets the SAME imagery treatment as recommended pantry meals: vessel
+    // selection from the dish description, no raw ingredients in scene, no steam plumes
+    // on cold dishes, no hallucinated text on labels. Also uses the global image_cache,
+    // so any cached dish name (across the whole app) returns instantly at $0.
+    console.log('Generating two-stage Flux images for trending meals...')
+    const { data: inserted } = await db.from('trending_meals').select('id, name, ingredients').eq('generated_at', today())
+    if (inserted) {
+      for (const meal of inserted) {
+        try {
+          const ingredientNames = (meal.ingredients || []).map((i: any) => i.name)
+          const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames }),
+          })
+          const imgData = await imgRes.json()
+          if (imgData.image) {
+            await db.from('trending_meals').update({ image: imgData.image }).eq('id', meal.id)
+            console.log(`Image generated for: ${meal.name}`)
+          } else {
+            console.log(`No image returned for ${meal.name} — keeping YouTube thumbnail fallback`)
+          }
+          await new Promise(r => setTimeout(r, 500)) // Modest pacing — generate-meal-image has its own rate limit
+        } catch (e) {
+          console.log(`Image gen failed for ${meal.name}:`, e)
         }
       }
     }
