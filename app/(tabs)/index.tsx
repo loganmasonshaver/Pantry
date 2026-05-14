@@ -31,7 +31,7 @@ import { COLORS } from '@/constants/colors'
 import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
-import { trackMealsGenerated, trackMealRegenerated, trackUpgradePromptShown } from '../../lib/analytics'
+import { trackMealsGenerated } from '../../lib/analytics'
 import AILogModal from '../../components/AILogModal'
 import CreatorRecipeModal from '../../components/CreatorRecipeModal'
 import FoodSearchModal from '../../components/FoodSearchModal'
@@ -353,14 +353,13 @@ function SlotCard({
 export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
-  const { isPremium, triggerUpgrade, promoActive } = usePremium()
+  const { isPremium, promoActive } = usePremium()
   const { registerPlacement } = useSuperwall()
-  const [mealMode, setMealMode] = useState<'cookNow' | 'mealPlan'>('cookNow')
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [pantryFetched, setPantryFetched] = useState(false)
-  const cookNow = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
-  const mealPlan = useMealSuggestions(user?.id, isPremium, 'mealPlan', pantryFetched && pantryNames.size > 0)
-  const { meals, loading, error, regenerate } = mealMode === 'cookNow' ? cookNow : mealPlan
+  // Home shows just the top suggested meal as a compact tease; the full suggested-meal list
+  // lives in the Pantry tab (next IA phase). MealPlan mode isn't used on Home — drop the hook.
+  const { meals, loading } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
 
   const ESSENTIAL_STAPLES = [
     'salt', 'pepper', 'olive oil', 'garlic', 'butter', 'onion',
@@ -1009,86 +1008,63 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Suggested For You hides while pantry is empty — the scan hero above is the only CTA */}
-        <View style={{ marginBottom: 28, display: pantryFetched && pantryNames.size === 0 ? 'none' : 'flex' }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
-            <Text style={styles.sectionTitle}>Suggested For You</Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (!isPremium) {
-                  trackUpgradePromptShown('regen_limit')
-                  Alert.alert('Upgrade to Premium', 'Free accounts get 1 set of suggestions per day.', [
-                    { text: 'Not now', style: 'cancel' },
-                    { text: 'Upgrade', onPress: () => triggerUpgrade('regen_limit') },
-                  ])
-                  return
-                }
-                trackMealRegenerated()
-                regenerate()
-              }}
-              activeOpacity={0.7}
-            >
-              <RefreshCw size={16} stroke="#4ADE80" strokeWidth={2} />
-            </TouchableOpacity>
-          </View>
-
-          {loading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#4ADE80" size="large" />
-              <Text style={styles.loadingText}>Finding meals from your pantry...</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.loadingContainer}>
-              <Text style={styles.errorText}>Failed to generate meals</Text>
-              <TouchableOpacity style={styles.regenButton} onPress={regenerate} activeOpacity={0.8}>
-                <RefreshCw size={18} stroke="#000" strokeWidth={2} />
-                <Text style={styles.regenText}>Try Again</Text>
+        {/* ── Compact "Cook from your pantry" tease — Phase 2a of the IA refactor.
+            Full suggested-meal browse will live in the Pantry tab (Phase 2b). For now we
+            show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
+        {pantryFetched && pantryNames.size > 0 && (
+          <View style={{ marginBottom: 28 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}>
+              <Text style={styles.sectionTitle}>Cook from your pantry</Text>
+              <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
+                <Text style={{ color: '#4ADE80', fontSize: 13, fontWeight: '600' }}>See all →</Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}>
-              {meals.map((meal) => (
-                <TouchableOpacity
-                  key={meal.id}
-                  style={styles.heroMealCard}
-                  activeOpacity={0.85}
-                  onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
-                >
-                  {meal.image && meal.image.startsWith('http') ? (
-                    <Image source={{ uri: meal.image }} style={styles.heroMealImage} resizeMode="cover" />
-                  ) : (
-                    <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
-                      <Utensils size={32} stroke="#555" strokeWidth={1.5} />
-                    </View>
-                  )}
-                  <LinearGradient
-                    colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
-                    locations={[0.3, 0.6, 1]}
-                    style={styles.heroMealGradient}
-                  />
-                  <View style={styles.heroMealContent}>
-                    <Text style={styles.heroMealName} numberOfLines={2}>{meal.name}</Text>
-                    <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
-                      {meal.prepTime > 0 && (
-                        <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
-                          <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{meal.prepTime} MIN</Text>
-                        </View>
-                      )}
-                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                        <Text style={styles.heroMealPillText}>{meal.calories} CAL</Text>
-                      </View>
-                      {meal.protein > 0 && (
-                        <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
-                          <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{meal.protein}P</Text>
-                        </View>
-                      )}
-                    </View>
+
+            {loading ? (
+              <View style={[styles.heroMealCard, { marginHorizontal: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' }]}>
+                <ActivityIndicator color="#4ADE80" />
+                <Text style={[styles.loadingText, { marginTop: 12 }]}>Finding a meal from your pantry…</Text>
+              </View>
+            ) : meals.length > 0 ? (
+              <TouchableOpacity
+                style={[styles.heroMealCard, { marginHorizontal: 20 }]}
+                activeOpacity={0.85}
+                onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meals[0].id, mealData: JSON.stringify(meals[0]) } })}
+              >
+                {meals[0].image && meals[0].image.startsWith('http') ? (
+                  <Image source={{ uri: meals[0].image }} style={styles.heroMealImage} resizeMode="cover" />
+                ) : (
+                  <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
+                    <Utensils size={32} stroke="#555" strokeWidth={1.5} />
                   </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          )}
-        </View>
+                )}
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                  locations={[0.3, 0.6, 1]}
+                  style={styles.heroMealGradient}
+                />
+                <View style={styles.heroMealContent}>
+                  <Text style={styles.heroMealName} numberOfLines={2}>{meals[0].name}</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                    {meals[0].prepTime > 0 && (
+                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
+                        <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{meals[0].prepTime} MIN</Text>
+                      </View>
+                    )}
+                    <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                      <Text style={styles.heroMealPillText}>{meals[0].calories} CAL</Text>
+                    </View>
+                    {meals[0].protein > 0 && (
+                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
+                        <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{meals[0].protein}P</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
 
         {/* ── Trending Now ── */}
         {(() => {
@@ -1552,44 +1528,7 @@ const styles = StyleSheet.create({
   mealMacroText: { fontSize: 13, color: COLORS.textDim, fontWeight: '400' },
   mealMacroBold: { fontWeight: '700', color: COLORS.textWhite },
   macroDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: COLORS.textMuted },
-  regenButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#4ADE80', borderRadius: 30, paddingVertical: 16, shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 12 },
-  regenText: { color: '#000000', fontSize: 16, fontWeight: '800', letterSpacing: 0.2 },
-
-  mealModeToggle: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: 24,
-    padding: 3,
-    marginBottom: 6,
-  },
-  mealModeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 22,
-    alignItems: 'center',
-  },
-  mealModeBtnActive: {
-    backgroundColor: '#4ADE80',
-  },
-  mealModeBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.5)',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  mealModeBtnTextActive: {
-    color: '#000000',
-  },
-  mealModeSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  loadingContainer: { alignItems: 'center', paddingVertical: 40, gap: 16 },
   loadingText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
-  errorText: { fontSize: 14, color: '#EF4444', textAlign: 'center' },
   staplesCard: {
     marginHorizontal: 20,
     marginTop: 20,
