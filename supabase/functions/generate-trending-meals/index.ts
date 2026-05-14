@@ -118,8 +118,12 @@ Deno.serve(async (req: Request) => {
     if (!allowed) return rateLimitResponse()
   }
 
+  const fnStart = Date.now()
+  const stageLog = (label: string) => console.log(`[stage] ${label} — t+${Date.now() - fnStart}ms`)
+
   const url = new URL(req.url)
   const forceRefresh = url.searchParams.get('refresh') === 'true'
+  stageLog('start')
 
   // Return cached only if today's YouTube batch was already generated. Scoping to
   // trend_source='YouTube trending' is critical — without it, a creator posting a recipe
@@ -228,6 +232,8 @@ Deno.serve(async (req: Request) => {
       .not('video_id', 'is', null)
     const recentVideoIds = new Set((recentVideoRows || []).map((r: any) => r.video_id))
 
+    stageLog(`dedup history loaded: ${prevNames.length} prev names, ${recentVideoIds.size} prev video_ids`)
+
     const allVideos: { videoId: string; title: string; thumbnail: string; description: string }[] = []
     // Used to filter chart=mostPopular results down to food content (the Howto & Style
     // category includes DIY, beauty, fashion, tech tutorials — we only want recipes).
@@ -310,6 +316,7 @@ Deno.serve(async (req: Request) => {
     }).slice(0, 100)
 
     console.log(`Found ${uniqueVideos.length} unique YouTube videos (after ${recentVideoIds.size} recent-video-id rejections)`)
+    stageLog('youtube fetch + dedup done')
 
     // Step 2: Send video titles + descriptions to Groq to generate accurate recipes
     const videoList = uniqueVideos.map((v, i) => {
@@ -458,6 +465,8 @@ Respond ONLY with a JSON array, no markdown:
       } catch { continue }
     }
 
+    stageLog(`LLM yielded ${recipes?.length ?? 0} recipes`)
+
     if (!recipes || recipes.length === 0) {
       return new Response(JSON.stringify({ error: "Failed to generate recipes from video titles" }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
@@ -525,6 +534,7 @@ Respond ONLY with a JSON array, no markdown:
 
     // Final cap — display target is 6 meals on Discover. Anything beyond gets cut.
     recipes = recipes.slice(0, 6)
+    stageLog(`final survivor count: ${recipes.length}`)
 
     // Step 4: Match recipes back to YouTube thumbnails + persist video_id so future
     // cron runs can dedup against this video for the next 90 days.
@@ -559,21 +569,22 @@ Respond ONLY with a JSON array, no markdown:
     // ones. Scoped to YouTube source so creator recipes posted today aren't wiped.
     await db.from('trending_meals').delete().eq('generated_at', today()).eq('trend_source', 'YouTube trending')
     const { error } = await db.from('trending_meals').insert(meals)
+    stageLog(`db insert done — error: ${error?.message ?? 'none'}`)
 
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
     // Generate Flux images via the shared two-stage pipeline (Gemini visual description
-    // → Flux render). Routing through generate-meal-image instead of an inline Flux call
-    // means trending gets the SAME imagery treatment as recommended pantry meals: vessel
-    // selection from the dish description, no raw ingredients in scene, no steam plumes
-    // on cold dishes, no hallucinated text on labels. Also uses the global image_cache,
-    // so any cached dish name (across the whole app) returns instantly at $0.
-    console.log('Generating two-stage Flux images for trending meals...')
+    // → Flux render). Parallelized — was sequential, but each image takes 20-60s and 6
+    // serially blew past the edge function timeout. Promise.all means the slowest single
+    // image determines total time (~30s) rather than 6× ~30s. generate-meal-image has its
+    // own internal rate limit so concurrent calls are safe.
+    console.log('Stage: image generation (parallel)')
+    const imgStart = Date.now()
     const { data: inserted } = await db.from('trending_meals').select('id, name, ingredients').eq('generated_at', today())
     if (inserted) {
-      for (const meal of inserted) {
+      await Promise.all(inserted.map(async (meal) => {
         try {
           const ingredientNames = (meal.ingredients || []).map((i: any) => i.name)
           const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
@@ -584,16 +595,16 @@ Respond ONLY with a JSON array, no markdown:
           const imgData = await imgRes.json()
           if (imgData.image) {
             await db.from('trending_meals').update({ image: imgData.image }).eq('id', meal.id)
-            console.log(`Image generated for: ${meal.name}`)
+            console.log(`Image OK: ${meal.name}`)
           } else {
-            console.log(`No image returned for ${meal.name} — keeping YouTube thumbnail fallback`)
+            console.log(`No image returned for ${meal.name}`)
           }
-          await new Promise(r => setTimeout(r, 500)) // Modest pacing — generate-meal-image has its own rate limit
         } catch (e) {
           console.log(`Image gen failed for ${meal.name}:`, e)
         }
-      }
+      }))
     }
+    console.log(`Stage: image generation done in ${Date.now() - imgStart}ms`)
 
     // Re-fetch from DB so the response includes AI-generated image URLs (not YouTube thumbnails)
     const { data: finalMeals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
