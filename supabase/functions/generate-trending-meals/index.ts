@@ -207,11 +207,28 @@ Deno.serve(async (req: Request) => {
       { query: mealQueries[(dayOfYear + 3) % mealQueries.length], order: 'viewCount', windowDays: 30 },
     ]
 
-    // Fetch previous meal names to avoid repeats
-    const { data: prevMeals } = await db.from('trending_meals').select('name').neq('generated_at', today())
+    // Time-bound dedup history. The previous query had no time bound, so as the
+    // catalog grew the cross-day name check would compare against everything ever
+    // generated — slow and would eventually false-reject most candidates ("any meal
+    // with 'Chicken' as first word" gets rejected). 60 days is enough recency for
+    // "feels fresh" while keeping the comparison set bounded.
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0]
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
+    const { data: prevMeals } = await db.from('trending_meals')
+      .select('name, video_id')
+      .neq('generated_at', today())
+      .gte('generated_at', sixtyDaysAgo)
     const prevNames = (prevMeals || []).map((m: any) => m.name.toLowerCase())
 
-    const allVideos: { title: string; thumbnail: string; description: string }[] = []
+    // Recently-used video IDs (90-day window — catches the same viral video resurfacing
+    // weeks later). Pre-filtered against candidates so we don't waste LLM tokens on dupes.
+    const { data: recentVideoRows } = await db.from('trending_meals')
+      .select('video_id')
+      .gte('generated_at', ninetyDaysAgo)
+      .not('video_id', 'is', null)
+    const recentVideoIds = new Set((recentVideoRows || []).map((r: any) => r.video_id))
+
+    const allVideos: { videoId: string; title: string; thumbnail: string; description: string }[] = []
     // Used to filter chart=mostPopular results down to food content (the Howto & Style
     // category includes DIY, beauty, fashion, tech tutorials — we only want recipes).
     const isFoodTitle = (t: string) => /\b(recipe|cook|meal|food|dish|breakfast|lunch|dinner|snack|dessert|bake|grill|fry|roast|smoothie|salad|wrap|bowl|pasta|stir fry|pancake|cheesecake|brownie|cottage cheese|protein|anabolic)\b/i.test(t)
@@ -240,12 +257,13 @@ Deno.serve(async (req: Request) => {
 
       if (detailData.items) {
         for (const item of detailData.items) {
+          const videoId = item.id
           const title = item.snippet.title
           const description = item.snippet.description || ''
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
-          if (!title || !thumbnail) continue
+          if (!videoId || !title || !thumbnail) continue
           if (isNotRecipeContent(title)) continue
-          allVideos.push({ title, thumbnail, description: description.substring(0, 1000) })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 1000) })
         }
       }
     }
@@ -258,12 +276,13 @@ Deno.serve(async (req: Request) => {
       const trendingData = await trendingRes.json()
       if (trendingData.items) {
         for (const item of trendingData.items) {
+          const videoId = item.id
           const title = item.snippet.title
           const description = item.snippet.description || ''
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
-          if (!title || !thumbnail) continue
+          if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
-          allVideos.push({ title, thumbnail, description: description.substring(0, 1000) })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 1000) })
         }
       }
     } catch (e) {
@@ -274,18 +293,20 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "No YouTube results" }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
-    // Deduplicate by title similarity, then cap. We now pull from ~7 keyword queries × 5
-    // results + up to 15 from chart=mostPopular → up to ~50 raw candidates. 30 deduped is
-    // plenty of headroom for Groq to pick a varied final 6 without bloating tokens.
+    // Deduplicate by title similarity, then drop videos we've already used in the last
+    // 90 days (catches the same viral video resurfacing weeks later — produces a stealth
+    // repeat under a different name otherwise), then cap. ~50 raw candidates → ~30 after
+    // dedup gives the LLM plenty of headroom to pick a varied final 6.
     const seen = new Set<string>()
     const uniqueVideos = allVideos.filter(v => {
+      if (recentVideoIds.has(v.videoId)) return false
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
       if (seen.has(key)) return false
       seen.add(key)
       return true
     }).slice(0, 30)
 
-    console.log(`Found ${uniqueVideos.length} unique YouTube videos`)
+    console.log(`Found ${uniqueVideos.length} unique YouTube videos (after ${recentVideoIds.size} recent-video-id rejections)`)
 
     // Step 2: Send video titles + descriptions to Groq to generate accurate recipes
     const videoList = uniqueVideos.map((v, i) => {
@@ -397,9 +418,26 @@ Respond ONLY with a JSON array, no markdown:
             if (ratio < minRatio) return false
             const key = normalize(r.name)
             if (!key || seenNames.has(key)) return false
-            // Skip meals too similar to previous days
-            const name = r.name.toLowerCase()
-            if (prevNames.some((prev: string) => name.includes(prev.split(' ')[0]) && name.includes(prev.split(' ').slice(-1)[0]))) return false
+            // Cross-day similarity check via Jaccard word overlap (≥50% shared meaningful
+            // words = reject). Replaces the previous "first AND last word match" heuristic
+            // which was both too loose (Crispy Chicken Wings vs Soy Glazed Chicken Bowl
+            // didn't trigger — both pass) and too strict at scale (anything with 'High'
+            // first word got rejected). Stopwords are dropped from both sides so common
+            // brand-voice words ("high", "protein", "recipe") don't dominate the overlap.
+            const STOPWORDS = new Set(['high', 'protein', 'recipe', 'easy', 'quick', 'best', 'the', 'a', 'an', 'with', 'and', 'of', 'for', 'low', 'macro', 'friendly', 'healthy'])
+            const wordsOf = (s: string) => new Set(
+              s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
+            )
+            const candWords = wordsOf(r.name)
+            const tooSimilar = prevNames.some((prev: string) => {
+              const prevWords = wordsOf(prev)
+              if (candWords.size === 0 || prevWords.size === 0) return false
+              let overlap = 0
+              candWords.forEach(w => { if (prevWords.has(w)) overlap++ })
+              const union = new Set([...candWords, ...prevWords]).size
+              return (overlap / union) >= 0.5
+            })
+            if (tooSimilar) return false
             seenNames.add(key)
             return true
           }).slice(0, 6)
@@ -439,7 +477,8 @@ Respond ONLY with a JSON array, no markdown:
       console.log(`${recipes.length} meals after macro correction (25% meals / 22% snacks / 20% desserts)`)
     }
 
-    // Step 4: Match recipes back to YouTube thumbnails
+    // Step 4: Match recipes back to YouTube thumbnails + persist video_id so future
+    // cron runs can dedup against this video for the next 90 days.
     const meals = recipes.map((r: any) => {
       const videoIdx = (r.video_index || 1) - 1
       const video = uniqueVideos[videoIdx] || uniqueVideos[0]
@@ -455,6 +494,7 @@ Respond ONLY with a JSON array, no markdown:
         fat: r.fat,
         prep_time: r.prepTime,
         image: video?.thumbnail || null,
+        video_id: video?.videoId || null,
         trend_source: 'YouTube trending',
         ingredients: r.ingredients,
         steps: r.steps,
