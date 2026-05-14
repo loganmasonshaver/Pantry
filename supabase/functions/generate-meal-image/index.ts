@@ -3,12 +3,62 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const falApiKey = Deno.env.get("FAL_API_KEY")
+const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
+const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const db = createClient(supabaseUrl, supabaseServiceKey)
 
 function normalizeKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+// Stage 1 of the two-stage Flux pipeline: ask an LLM to describe how the FINISHED dish
+// looks when plated. Without this, Flux gets a generic "professional food photo of {name}"
+// template and has to guess the visual form — which is why fusion dishes (cottage cheese
+// brownie) end up as stacked components and cold dishes get steam plumes. Gemini Flash
+// Lite is essentially free; OpenAI fallback is cheap. If both fail, the caller falls back
+// to the original static template so image generation never hard-stops.
+async function generateVisualDescription(mealName: string, ingredients: string[]): Promise<string | null> {
+  const sysPrompt = `You are a food stylist. In ONE concise sentence (under 35 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate. Do NOT list ingredients. Do NOT mention cooking process.
+
+Examples:
+- "Cottage Cheese Brownie Bake" -> "A dense baked chocolate brownie square with a slightly cracked golden top, served on a wooden cutting board."
+- "Strawberry Protein Smoothie" -> "A thick pink smoothie in a tall clear glass, topped with a yogurt swirl and a strawberry slice."
+- "Greek Chicken Salad" -> "A wide ceramic bowl of mixed greens with grilled chicken slices, feta crumbles, and olives, drizzled with olive oil."`
+
+  const userPrompt = `Now describe: ${mealName}${ingredients.length ? ` — ingredients: ${ingredients.join(', ')}` : ''}`
+
+  const providers = [
+    googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite" },
+    openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini" },
+  ].filter(Boolean) as { url: string; key: string; model: string }[]
+
+  for (const provider of providers) {
+    try {
+      const res = await fetch(provider.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
+          temperature: 0.3,
+          max_tokens: 120,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) { console.log(`[visualDesc] ${provider.model} error:`, data.error?.message); continue }
+      const text = (data.choices?.[0]?.message?.content || '').trim()
+        .replace(/^["']/, '').replace(/["']$/, '') // strip surrounding quotes if model added them
+      if (text.length > 0 && text.length < 400) {
+        console.log(`[visualDesc] ${provider.model}: "${text}"`)
+        return text
+      }
+    } catch (e) {
+      console.log(`[visualDesc] ${provider.model} threw:`, e)
+    }
+  }
+  return null
 }
 
 const jsonHeaders = { "Content-Type": "application/json" }
@@ -44,35 +94,44 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ image: null, error: 'no FAL key' }), { headers: jsonHeaders })
     }
 
-    // Build prompt with ingredients for visual accuracy.
-    // Filter out sauces/oils/seasonings from the ingredient list — the model treats
-    // them as separate plated items (bowls of oil next to the dish) instead of integrating
-    // them into the food. They're emphasized via "glossy, sauced" language instead.
-    const sauceKeywords = ['oil', 'sauce', 'vinegar', 'dressing', 'syrup', 'butter', 'seasoning', 'spice', 'paste', 'glaze', 'marinade', 'mayo', 'mayonnaise', 'ketchup', 'mustard', 'sriracha', 'soy sauce']
-    const visibleIngredients = ingredients.filter((i: string) => {
-      const lower = i.toLowerCase()
-      return !sauceKeywords.some(k => lower.includes(k))
-    })
-    const ingredientList = visibleIngredients.length ? ` with ${visibleIngredients.join(', ')}` : ''
+    // STAGE 1: ask an LLM to visually describe the finished dish. If it succeeds we use
+    // that as the basis for the Flux prompt; if it fails we fall back to a static template
+    // built from keyword heuristics so image generation never hard-stops.
+    const description = await generateVisualDescription(mealName, ingredients)
 
-    // Detect the correct vessel from meal name so the model doesn't default to a plate
-    const nameLower = mealName.toLowerCase()
-    const vessel = nameLower.includes('bowl')      ? 'deep ceramic bowl'
-                 : nameLower.includes('wrap')      ? 'flour tortilla wrap, folded and served on a board'
-                 : nameLower.includes('taco')      ? 'corn or flour taco shells'
-                 : nameLower.includes('burger')    ? 'toasted brioche bun, fully assembled'
-                 : nameLower.includes('sandwich')  ? 'toasted bread or bun, fully assembled'
-                 : nameLower.includes('smoothie')  ? 'tall glass with a straw'
-                 : nameLower.includes('oats')      ? 'ceramic bowl'
-                 : nameLower.includes('pudding')   ? 'glass jar or ceramic bowl'
-                 : nameLower.includes('salad')     ? 'wide ceramic bowl or plate'
-                 : nameLower.includes('soup')      ? 'deep ceramic bowl'
-                 : nameLower.includes('stir-fry') || nameLower.includes('stir fry') ? 'ceramic bowl with rice'
-                 : nameLower.includes('curry')     ? 'ceramic bowl with rice on the side'
-                 : nameLower.includes('toast')     ? 'dark ceramic plate'
-                 : 'dark ceramic plate'
-
-    const prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant — glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra vessels, dark moody background, warm moody restaurant lighting, sharp focus, appetizing, photorealistic`
+    let prompt: string
+    if (description) {
+      // STAGE 2 (preferred): description-led prompt with photography direction layered on.
+      // The negative-prompt trailer is embedded in the prompt body since Flux 2's API
+      // doesn't accept a separate negative_prompt field — this is best-effort guidance.
+      prompt = `${description}. Professional overhead or 3/4-angle food photography, natural daylight from upper left, sharp focus on subject, shallow depth of field, shot on Sony A7R IV with 50mm f/2.8 prime, photorealistic raw photo aesthetic, soft natural shadows. Negative prompt: text, watermark, logo, signage, label, blurry, oversaturated, artificial steam plume, cartoon, illustration, plastic-looking, stacked separate components, hallucinated ingredients not in the dish, weird AI artifacts, multiple plates, deconstructed.`
+    } else {
+      // FALLBACK: original static template (keyword-detected vessel + sauce-filtered
+      // ingredients). Worse than the LLM-guided version but never breaks image gen.
+      console.log(`[visualDesc] no LLM description for "${mealName}" — falling back to static template`)
+      const sauceKeywords = ['oil', 'sauce', 'vinegar', 'dressing', 'syrup', 'butter', 'seasoning', 'spice', 'paste', 'glaze', 'marinade', 'mayo', 'mayonnaise', 'ketchup', 'mustard', 'sriracha', 'soy sauce']
+      const visibleIngredients = ingredients.filter((i: string) => {
+        const lower = i.toLowerCase()
+        return !sauceKeywords.some(k => lower.includes(k))
+      })
+      const ingredientList = visibleIngredients.length ? ` with ${visibleIngredients.join(', ')}` : ''
+      const nameLower = mealName.toLowerCase()
+      const vessel = nameLower.includes('bowl')      ? 'deep ceramic bowl'
+                   : nameLower.includes('wrap')      ? 'flour tortilla wrap, folded and served on a board'
+                   : nameLower.includes('taco')      ? 'corn or flour taco shells'
+                   : nameLower.includes('burger')    ? 'toasted brioche bun, fully assembled'
+                   : nameLower.includes('sandwich')  ? 'toasted bread or bun, fully assembled'
+                   : nameLower.includes('smoothie')  ? 'tall glass with a straw'
+                   : nameLower.includes('oats')      ? 'ceramic bowl'
+                   : nameLower.includes('pudding')   ? 'glass jar or ceramic bowl'
+                   : nameLower.includes('salad')     ? 'wide ceramic bowl or plate'
+                   : nameLower.includes('soup')      ? 'deep ceramic bowl'
+                   : nameLower.includes('stir-fry') || nameLower.includes('stir fry') ? 'ceramic bowl with rice'
+                   : nameLower.includes('curry')     ? 'ceramic bowl with rice on the side'
+                   : nameLower.includes('toast')     ? 'dark ceramic plate'
+                   : 'dark ceramic plate'
+      prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant — glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra vessels, dark moody background, warm moody restaurant lighting, sharp focus, appetizing, photorealistic`
+    }
 
     // Generate via FAL Flux 2
     for (let attempt = 0; attempt < 3; attempt++) {
