@@ -318,8 +318,18 @@ RULES:
   - snack: 150-350 kcal
   - dessert: 200-500 kcal
 - MACROS MUST BE CALCULATED FROM THE INGREDIENTS. Add up the calories, protein, carbs, and fat from each ingredient at the listed gram weight. The totals MUST match — do not estimate macros separately from ingredients.
-- APPEAL TEST: Before finalizing each recipe, ask: "Would a food photographer be excited to shoot this? Would someone actually order this on DoorDash?" If the answer is no, discard the candidate and pick a different video from the list.
-- NAMING: Recipe names must read like a restaurant menu item or a magazine recipe headline, not a YouTube clickbait title. Strip "ULTIMATE", "VIRAL", "I tried...", channel names, emojis, capital-shout words. Use culinary terms ("Miso-Glazed", "Chipotle Lime", "Thai Basil", "Sun-Dried Tomato", "Brown Butter"). Bad: "Chicken Rice Broccoli Bowl", "Viral High Protein Pasta!!". Good: "Thai Basil Chicken Rice Bowl", "Lemon Garlic Shrimp Pasta".
+- APPEAL TEST: Before finalizing each recipe, ask: "Would a food photographer be excited to shoot this? Would someone actually want to try this after seeing it scroll past?" If the answer is no, discard the candidate and pick a different video from the list.
+- NAMING (trending-specific voice): Pantry's user lives on TikTok/Instagram food content — they know what's trending and want names that reflect WHY a dish is having a moment, NOT generic restaurant prose AND NOT YouTube clickbait. The dish's format usually IS the trend (cottage cheese in unexpected places, viral folded sandwich, dense bean salad, etc.) — name it honestly and let the novelty carry the energy.
+  ✅ Allowed:
+    - Honest format names that capture the trend: "Cottage Cheese Pizza Bowl", "Dense Bean Salad", "Folded Egg Sandwich", "Cottage Cheese Brownie Bake"
+    - Light cultural cues: "TikTok-Style Carbonara", "The Internet's Favorite Cottage Cheese Toast", "Viral Salmon Bowl" (one cultural cue max — not every name)
+    - Culinary terms when natural: "Miso-Glazed Salmon Rice Bowl", "Thai Basil Chicken Bowl"
+  ❌ Forbidden:
+    - ALL CAPS or shout words ("INSANE", "ULTIMATE", "CRAZY", "MUST TRY")
+    - Multiple exclamation marks, emoji in names, channel-name attribution
+    - First-person clickbait: "I tried...", "I made..."
+    - Generic uncreative names: "Chicken Rice Broccoli Bowl", "Protein Bowl"
+  Imagine a confident top fitness creator's caption — current, credible, not shouty. That's the bar.
 - If the video isn't clearly a recipe or food, skip it.
 - "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual.
 - "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only.
