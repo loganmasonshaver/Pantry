@@ -297,8 +297,9 @@ Deno.serve(async (req: Request) => {
     // 90 days (catches the same viral video resurfacing weeks later — produces a stealth
     // repeat under a different name otherwise), then cap. With ~150 raw candidates we
     // expect ~50 after dedup, which gives the LLM enough headroom for the dedup history
-    // to grow over months without yield collapsing. Capped at 50 because beyond that the
-    // LLM's "pick the best" judgment starts diluting (too much noise).
+    // to grow over months without yield collapsing. Capped at 100 — Gemini Flash Lite
+    // handles a 100-video selection problem fine, and the bigger pool helps after the
+    // density-skip rule (recipes that don't naturally hit 25% get rejected upstream).
     const seen = new Set<string>()
     const uniqueVideos = allVideos.filter(v => {
       if (recentVideoIds.has(v.videoId)) return false
@@ -306,7 +307,7 @@ Deno.serve(async (req: Request) => {
       if (seen.has(key)) return false
       seen.add(key)
       return true
-    }).slice(0, 50)
+    }).slice(0, 100)
 
     console.log(`Found ${uniqueVideos.length} unique YouTube videos (after ${recentVideoIds.size} recent-video-id rejections)`)
 
@@ -316,36 +317,42 @@ Deno.serve(async (req: Request) => {
       return `${i + 1}. "${v.title}"${desc}`
     }).join('\n\n')
 
-    const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to pick and present the recipes that will make a fitness-focused user actually want to cook — not to transcribe every video literally. Quality of curation matters more than coverage.
+    const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
 
 Here are ${uniqueVideos.length} trending YouTube recipe videos. Use both the title AND description to understand what each recipe is.
 
 ${videoList}
 
-For each video you choose to feature, generate a recipe that accurately reflects what the video describes — but presented at Pantry's brand standard.
+For each video you select, output the recipe AS THE CREATOR PRESENTED IT.
 
-RULES:
-- The recipe must match the underlying dish from the video — use the description to determine exact ingredients and method. You may polish presentation (naming, plating cues) but never invent a different dish.
-- VARIETY IS MANDATORY across the returned set:
-  - No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
-  - No two recipes may share the same primary protein source (e.g. don't return two chicken meals or two cottage-cheese-based snacks)
-  - If multiple candidate videos are too similar (e.g. several oatmeal videos), pick at most one and skip the rest
-  - Recipe names must all be distinct after normalization (don't return "Protein Oatmeal" and "High Protein Oatmeal Bowl" — they're the same dish)
-- ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion.
+CORE FIDELITY RULES — do not violate these:
+- READ macros from the video description first. Most fitness creators list calories/protein/carbs/fat directly. If they listed numbers, USE THEM VERBATIM. Do not recalculate.
+- READ ingredients and quantities from the description verbatim. Preserve the creator's portions exactly. Do not scale, round, or substitute.
+- NEVER add ingredients (protein powder, cottage cheese, Greek yogurt, egg whites, etc.) to engineer a recipe into a higher protein density. The recipe is what the creator made — period.
+- If the description doesn't list explicit macros, calculate ONLY from the ingredients exactly as the creator listed them — don't invent quantities.
+
+DENSITY GATE IS A SKIP RULE, NOT AN ENGINEER RULE:
+- The recipe must naturally hit 25% of calories from protein (≈6.25g per 100 kcal). 20% for desserts.
+- If a candidate's stated/calculated macros DON'T hit the bar, SKIP IT entirely. Pick a different video. Do not modify the recipe to make it pass.
+- Better to return fewer recipes than to serve modified ones that diverge from the source video.
+
+VARIETY IS MANDATORY across the returned set:
+- No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
+- No two recipes may share the same primary protein source (e.g. don't return two chicken meals or two cottage-cheese-based snacks)
+- If multiple candidate videos are too similar, pick at most one and skip the rest
+- Recipe names must all be distinct after normalization
+
+PORTION + MACRO DETAILS:
+- ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion CLEANLY (don't change ratios).
 - Categorize each recipe by INTENT, not calorie cap:
   - "meal" — a sit-down meal (anywhere from 400 to 1200+ kcal — bigger meal-prep portions are fine for bulkers/athletes)
   - "snack" — a quick bite between meals (typically 150-400 kcal, but can go higher if protein-dense)
   - "dessert" — a sweet treat (typically 150-500 kcal, can go higher)
-- PROTEIN DENSITY IS THE PRIMARY GATEKEEPER, NOT CALORIE COUNT. Every recipe MUST hit at least 25% of calories from protein (≈6.25g protein per 100 kcal). This is the bar for "high-protein" content people will trust. Worked examples:
-  - 500 kcal meal → at least 31g protein
-  - 700 kcal meal → at least 44g protein
-  - 800 kcal meal → at least 50g protein
-  - 1000 kcal big-batch meal → at least 63g protein
-  - 300 kcal snack → at least 19g protein
-  - 250 kcal dessert → at least 13g protein (dessert bar slightly lower — see below)
-  If a real recipe doesn't hit 25% naturally, ADD a high-protein supplement (protein powder, cottage cheese, Greek yogurt, egg whites) to bring it over. Better to skip the candidate than serve a low-protein-density recipe.
-- Desserts may dip slightly lower (20% of calories from protein, ≈5g/100kcal) since dessert protein density is genuinely harder to engineer — but never below that.
-- MACROS MUST BE CALCULATED FROM THE INGREDIENTS. Add up the calories, protein, carbs, and fat from each ingredient at the listed gram weight. The totals MUST match — do not estimate macros separately from ingredients.
+- Density worked examples (these are SKIP THRESHOLDS, not targets to hit by adding ingredients):
+  - 500 kcal meal needs at least 31g protein to qualify (else SKIP)
+  - 800 kcal meal needs at least 50g protein (else SKIP)
+  - 300 kcal snack needs at least 19g protein (else SKIP)
+  - 250 kcal dessert needs at least 13g protein (else SKIP)
 - APPEAL TEST: Before finalizing each recipe, ask: "Would a food photographer be excited to shoot this? Would someone actually want to try this after seeing it scroll past?" If the answer is no, discard the candidate and pick a different video from the list.
 - NAMING (trending-specific voice): Pantry's user lives on TikTok/Instagram food content — they know what's trending and want names that reflect WHY a dish is having a moment, NOT generic restaurant prose AND NOT YouTube clickbait. The dish's format usually IS the trend (cottage cheese in unexpected places, viral folded sandwich, dense bean salad, etc.) — name it honestly and let the novelty carry the energy.
   ✅ Allowed:
@@ -361,6 +368,8 @@ RULES:
 - If the video isn't clearly a recipe or food, skip it.
 - "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual.
 - "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only.
+
+OUTPUT TARGET: Aim for 15-20 recipes total. We expect a meaningful number to be skipped due to the density gate, name dedup, or low appeal — outputting 15-20 candidates gives downstream filters enough to land at our 6-meal display target. Don't pad with weak picks just to hit 20; quality > quantity. But err on the higher side when in doubt.
 
 Respond ONLY with a JSON array, no markdown:
 [
@@ -442,9 +451,9 @@ Respond ONLY with a JSON array, no markdown:
             if (tooSimilar) return false
             seenNames.add(key)
             return true
-          }).slice(0, 6)
+          }).slice(0, 20)
           if (!recipes || filtered.length > recipes.length) recipes = filtered
-          if (recipes.length >= 6) break
+          if (recipes.length >= 15) break
         }
       } catch { continue }
     }
@@ -455,14 +464,49 @@ Respond ONLY with a JSON array, no markdown:
       })
     }
 
-    // Step 3: Correct macros using FatSecret nutrition data
+    // Step 3: FatSecret as a SANITY CHECK, not a macro override.
+    // The LLM was instructed to read macros from the video description verbatim (creators
+    // usually list them). Overriding those numbers with FatSecret database lookups was
+    // killing 50% of recipes — the LLM-claimed macros and FatSecret-recomputed macros
+    // disagree by 5-15% routinely, which is normal noise but failed our density gate.
+    // New behavior: we still call FatSecret to recompute, but only REJECT a recipe if
+    // the protein number is wildly off (>30% diff = likely clickbait or LLM hallucination).
+    // Otherwise we restore the LLM/creator macros and trust them.
     if (fsKey && fsSecret) {
-      console.log('Correcting macros via FatSecret...')
-      recipes = await Promise.all(recipes.map((r: any) => correctMealMacros(r)))
-      // Re-filter by protein density — 25% cal-from-protein for meals (≈6.25g per 100 kcal),
-      // 22% for snacks (smaller calorie budget to hit ratios with), 20% for desserts (genuinely
-      // harder to engineer). Scales naturally with meal size: 500 kcal meal needs 31g protein,
-      // 1000 kcal big-batch needs 63g — both pass at the same density. No calorie ceiling.
+      console.log('Running FatSecret sanity check (Option B)...')
+      const TOLERANCE = 0.30 // 30% — anything beyond is treated as clickbait
+      let killedAsClickbait = 0
+      const checked = await Promise.all(recipes.map(async (r: any) => {
+        const llmCalories = Number(r.calories) || 0
+        const llmProtein = Number(r.protein) || 0
+        const llmCarbs = Number(r.carbs) || 0
+        const llmFat = Number(r.fat) || 0
+        await correctMealMacros(r) // mutates r.calories/protein/carbs/fat with FatSecret values
+        const fsProtein = Number(r.protein) || 0
+        // Sanity check: if FatSecret thinks the creator's protein is wildly off, reject.
+        // Skip the check if the lookup didn't actually run (correctMealMacros leaves the
+        // original values when it can't look up enough ingredients — that's already a
+        // "trust the LLM" signal).
+        if (llmProtein > 0 && fsProtein > 0) {
+          const diff = Math.abs(fsProtein - llmProtein) / llmProtein
+          if (diff > TOLERANCE) {
+            killedAsClickbait++
+            return null // reject — likely clickbait inflation
+          }
+        }
+        // Within tolerance — restore the creator's claimed macros (preserves their portions
+        // and avoids density-gate failures from FatSecret's conservative database numbers).
+        r.calories = llmCalories
+        r.protein = llmProtein
+        r.carbs = llmCarbs
+        r.fat = llmFat
+        return r
+      }))
+      recipes = checked.filter(Boolean)
+      console.log(`${recipes.length} recipes survived sanity check (rejected ${killedAsClickbait} as clickbait)`)
+
+      // Re-confirm density on the restored LLM macros (catches any LLM-claim that was
+      // already below the bar — should be rare since the prompt tells the LLM to skip).
       const MEAL_RATIO_MIN = 0.25
       const SNACK_RATIO_MIN = 0.22
       const DESSERT_RATIO_MIN = 0.20
@@ -476,8 +520,11 @@ Respond ONLY with a JSON array, no markdown:
                   : MEAL_RATIO_MIN
         return ratio >= min
       })
-      console.log(`${recipes.length} meals after macro correction (25% meals / 22% snacks / 20% desserts)`)
+      console.log(`${recipes.length} meals after density confirm (25% meals / 22% snacks / 20% desserts)`)
     }
+
+    // Final cap — display target is 6 meals on Discover. Anything beyond gets cut.
+    recipes = recipes.slice(0, 6)
 
     // Step 4: Match recipes back to YouTube thumbnails + persist video_id so future
     // cron runs can dedup against this video for the next 90 days.
