@@ -4,14 +4,13 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   StyleSheet,
   Image,
   Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
-import { Search, Flame, Compass, Utensils, Plus, X } from 'lucide-react-native'
+import { Flame, Compass, Utensils, Plus } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
@@ -132,7 +131,6 @@ export default function DiscoverScreen() {
   const { promoActive } = usePremium()
   const [trending, setTrending] = useState<DiscoverMeal[]>([])
   const [loading, setLoading] = useState(true)
-  const [query, setQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<FilterKey>('All')
   const [showCreatorModal, setShowCreatorModal] = useState(false)
   const [foodDislikes, setFoodDislikes] = useState<string[]>([])
@@ -186,31 +184,30 @@ export default function DiscoverScreen() {
   // are reflected without a manual reload.
   useFocusEffect(useCallback(() => { fetchTrending() }, [fetchTrending]))
 
-  // Three-stage filter, applied in this order:
+  // Two-stage filter:
   //   1. Dietary safety (profile dietary_restrictions + food_dislikes — always on).
-  //   2. Search query (text match against name + ingredients — empty query = no-op).
-  //   3. Active chip (All / High Protein / Quick / Desserts / Vegetarian).
+  //   2. Active chip (All / High Protein / Quick / Desserts / Vegetarian).
   // Featured is then the top item from the combined filtered pool (already sorted by
-  // vote_score); each rail excludes whatever is currently the hero.
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return trending
+  // vote_score); each rail excludes whatever is currently the hero. Search filtering
+  // was wired in 3c but removed pre-launch — see v2 todo for restoration trigger.
+  const filtered = useMemo(
+    () => trending
       .filter(m => passesDietary(m, foodDislikes, dietaryRestrictions))
-      .filter(m => {
-        if (!q) return true
-        if (m.name.toLowerCase().includes(q)) return true
-        const ingredientNames = (m.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
-        return ingredientNames.some(n => n.includes(q))
-      })
-      .filter(m => passesFilter(m, activeFilter))
-  }, [trending, activeFilter, query, foodDislikes, dietaryRestrictions])
+      .filter(m => passesFilter(m, activeFilter)),
+    [trending, activeFilter, foodDislikes, dietaryRestrictions]
+  )
   const featured = filtered[0]
+  // Rail caps keep the editorial density right (Spotify/NYT-ish ~6-8 per shelf) and
+  // prevent the rails from feeling like a long random scroll once the trending pool
+  // grows past a dozen items. Overflow goes to the future v2 vertical "Discover more"
+  // grid below the rails.
+  const RAIL_CAPS = { youtube: 8, creator: 6 }
   const youtubeRail = useMemo(
-    () => filtered.filter(m => m.id !== featured?.id && !m.creator),
+    () => filtered.filter(m => m.id !== featured?.id && !m.creator).slice(0, RAIL_CAPS.youtube),
     [filtered, featured]
   )
   const creatorRail = useMemo(
-    () => filtered.filter(m => m.id !== featured?.id && !!m.creator),
+    () => filtered.filter(m => m.id !== featured?.id && !!m.creator).slice(0, RAIL_CAPS.creator),
     [filtered, featured]
   )
 
@@ -224,27 +221,6 @@ export default function DiscoverScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Discover</Text>
-        </View>
-
-        {/* Search bar — text match against meal name + ingredient names. Combined with
-            chip filter and dietary filter via the filtered useMemo. */}
-        <View style={styles.searchBar}>
-          <Search size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search recipes…"
-            placeholderTextColor={COLORS.textMuted}
-            style={styles.searchInput}
-            returnKeyType="search"
-            autoCorrect={false}
-            autoCapitalize="none"
-          />
-          {query.length > 0 && (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={10} activeOpacity={0.7}>
-              <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
-            </TouchableOpacity>
-          )}
         </View>
 
         {/* Filter chips */}
@@ -359,16 +335,10 @@ export default function DiscoverScreen() {
         )}
         {!loading && trending.length > 0 && filtered.length === 0 && (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>
-              {query.trim() ? `No matches for "${query.trim()}"` : `No ${activeFilter} recipes right now`}
-            </Text>
-            <Text style={styles.emptySub}>
-              {query.trim()
-                ? 'Try a different word, or clear the search to browse everything.'
-                : 'Try a different filter — the daily pool changes every morning.'}
-            </Text>
+            <Text style={styles.emptyTitle}>No {activeFilter} recipes right now</Text>
+            <Text style={styles.emptySub}>Try a different filter — the daily pool changes every morning.</Text>
             <TouchableOpacity
-              onPress={() => { setQuery(''); setActiveFilter('All') }}
+              onPress={() => setActiveFilter('All')}
               style={styles.emptyResetBtn}
               activeOpacity={0.8}
             >
@@ -466,26 +436,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.textWhite,
     letterSpacing: -0.5,
-  },
-
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 20,
-    marginBottom: 14,
-    backgroundColor: '#141414',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    color: COLORS.textWhite,
-    padding: 0,
   },
 
   chipsRow: {
