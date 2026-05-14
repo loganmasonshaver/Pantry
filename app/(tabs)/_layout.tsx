@@ -5,7 +5,6 @@ import {
   Home,
   UtensilsCrossed,
   Bookmark,
-  ShoppingCart,
   User,
 } from 'lucide-react-native'
 
@@ -62,12 +61,13 @@ export default function TabLayout() {
           ),
         }}
       />
+      {/* Grocery is reachable only via the sub-tab toggle on the Pantry screen
+          (Phase 4 of the IA refactor). href: null hides it from the bottom bar
+          while keeping the route navigable so router.replace('/grocery') works. */}
       <Tabs.Screen
         name="grocery"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={ShoppingCart} focused={focused} />
-          ),
+          href: null,
         }}
       />
       <Tabs.Screen

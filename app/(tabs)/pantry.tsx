@@ -28,6 +28,7 @@ import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import { trackMealRegenerated, trackUpgradePromptShown } from '@/lib/analytics'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
+import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -392,7 +393,7 @@ export default function PantryScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header (fixed) ── */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Pantry</Text>
+        <PantryGroceryTabs active="pantry" />
         <TouchableOpacity style={styles.manualEntryBtn} onPress={() => setShowAddModal(true)} activeOpacity={0.7}>
           <Plus size={14} stroke="#000000" strokeWidth={2.5} />
           <Text style={styles.manualEntryText}>Manual Entry</Text>
@@ -669,7 +670,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
   },
-  headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
   manualEntryBtn: {
     flexDirection: 'row',
     alignItems: 'center',

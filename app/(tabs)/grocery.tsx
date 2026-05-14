@@ -19,6 +19,7 @@ import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { STORE_CATEGORIES, autoCategoryMatches } from '@/lib/categories'
+import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -404,13 +405,7 @@ export default function GroceryScreen() {
 
       {/* ── Header ── */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Grocery List</Text>
-          <Text style={styles.headerSub}>
-            {items.length} item{items.length !== 1 ? 's' : ''}
-            {uniqueMeals.length > 0 ? ` from ${uniqueMeals.length} meal${uniqueMeals.length !== 1 ? 's' : ''}` : ''}
-          </Text>
-        </View>
+        <PantryGroceryTabs active="grocery" />
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={[styles.iconBtn, !checkedCount && styles.iconBtnDisabled]}
@@ -649,8 +644,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
   },
-  headerTitle: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
-  headerSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 3, fontWeight: '400' },
   headerActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
   iconBtn: {
     width: 40,
