@@ -4,6 +4,7 @@ import { COLORS } from '@/constants/colors'
 import {
   Home,
   UtensilsCrossed,
+  Compass,
   Bookmark,
   User,
 } from 'lucide-react-native'
@@ -50,6 +51,14 @@ export default function TabLayout() {
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon Icon={UtensilsCrossed} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="discover"
+        options={{
+          tabBarIcon: ({ focused }) => (
+            <TabIcon Icon={Compass} focused={focused} />
           ),
         }}
       />
