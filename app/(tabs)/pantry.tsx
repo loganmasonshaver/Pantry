@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist'
 import {
   View,
@@ -11,16 +11,21 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect } from 'expo-router'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical } from 'lucide-react-native'
+import { useFocusEffect, useRouter } from 'expo-router'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Utensils } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
+import { usePremium } from '@/context/SuperwallContext'
 import { supabase } from '@/lib/supabase'
 import { STORE_CATEGORIES, autoCategoryMatches } from '@/lib/categories'
+import { useMealSuggestions } from '@/lib/useMealSuggestions'
+import { trackMealRegenerated, trackUpgradePromptShown } from '@/lib/analytics'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 
@@ -191,6 +196,8 @@ function CategorySection({
 
 export default function PantryScreen() {
   const { user } = useAuth()
+  const router = useRouter()
+  const { isPremium, triggerUpgrade } = usePremium()
   const [categories, setCategories] = useState<Category[]>([])
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(['protein']))
   const [searchQuery, setSearchQuery] = useState('')
@@ -201,6 +208,60 @@ export default function PantryScreen() {
   const [addSaving, setAddSaving] = useState(false)
   const [disambigChoices, setDisambigChoices] = useState<string[]>([])
   const searchRef = useRef<TextInput>(null)
+
+  // Cook Tonight — moved from Home tab in Phase 2b of the IA refactor. Lives here
+  // because "what to cook from my pantry" is a kitchen task, not a tracking task.
+  // Visually distinct from the Discover tab (cinematic horizontal browse): compact
+  // action-rows with missing-ingredient surfacing, anchored to actual pantry contents.
+  const hasPantryItems = categories.some(c => c.ingredients.length > 0)
+  const { meals, loading: mealsLoading, error: mealsError, regenerate } = useMealSuggestions(
+    user?.id, isPremium, 'cookNow', hasPantryItems
+  )
+
+  // Lower-cased pantry names for fuzzy substring matching against meal ingredients.
+  const pantryNameSet = useMemo(() => {
+    return new Set(
+      categories.flatMap(c => c.ingredients.map(i => i.name.toLowerCase()))
+    )
+  }, [categories])
+
+  // Staples we assume every kitchen has — keeps "Need: …" honest by not flagging
+  // salt/pepper/oil for every meal. Mirrors the ESSENTIAL_STAPLES list on Home.
+  const STAPLES = new Set([
+    'salt', 'pepper', 'olive oil', 'oil', 'water', 'butter', 'garlic',
+    'onion', 'sugar', 'flour', 'soy sauce', 'vinegar', 'lemon', 'lime',
+    'paprika', 'cumin', 'oregano', 'chili powder', 'cooking spray',
+  ])
+
+  const missingFor = (mealIngs: { name: string }[] | undefined): string[] => {
+    if (!mealIngs) return []
+    const missing: string[] = []
+    for (const ing of mealIngs) {
+      const n = ing.name.toLowerCase()
+      if (STAPLES.has(n)) continue
+      // Two-way substring match — pantry "chicken breast" covers meal "chicken",
+      // and pantry "chicken" covers meal "chicken breast".
+      let have = false
+      for (const p of pantryNameSet) {
+        if (p === n || p.includes(n) || n.includes(p)) { have = true; break }
+      }
+      if (!have) missing.push(ing.name)
+    }
+    return missing
+  }
+
+  const handleRegenerate = () => {
+    if (!isPremium) {
+      trackUpgradePromptShown('regen_limit')
+      Alert.alert('Upgrade to Premium', 'Free accounts get 1 set of suggestions per day.', [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Upgrade', onPress: () => triggerUpgrade('regen_limit') },
+      ])
+      return
+    }
+    trackMealRegenerated()
+    regenerate()
+  }
 
   const fetchItems = useCallback(async () => {
     if (!user) return
@@ -401,6 +462,78 @@ export default function PantryScreen() {
                   <View><Text style={styles.scanCardTitle}>Scan Receipt</Text><Text style={styles.scanCardSub}>Import purchases</Text></View>
                 </TouchableOpacity>
               </View>
+
+              {/* ── Cook Tonight — utility-framed action list (NOT the cinematic browse
+                  experience that lives in the Discover tab). Compact rows surface
+                  what's missing per meal so the section is unmistakably pantry-anchored. ── */}
+              {hasPantryItems && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={styles.cookTonightHeader}>
+                    <View>
+                      <Text style={styles.cookTonightTitle}>Cook tonight</Text>
+                      <Text style={styles.cookTonightSub}>From what you have</Text>
+                    </View>
+                    <TouchableOpacity onPress={handleRegenerate} hitSlop={10} activeOpacity={0.7} style={styles.cookTonightRegen}>
+                      <RefreshCw size={14} stroke="#4ADE80" strokeWidth={2.2} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {mealsLoading ? (
+                    <View style={styles.cookTonightLoading}>
+                      <ActivityIndicator color="#4ADE80" />
+                      <Text style={styles.cookTonightLoadingText}>Finding meals from your pantry…</Text>
+                    </View>
+                  ) : mealsError ? (
+                    <View style={styles.cookTonightLoading}>
+                      <Text style={styles.cookTonightErrorText}>Couldn't generate meals</Text>
+                      <TouchableOpacity onPress={regenerate} activeOpacity={0.7}>
+                        <Text style={styles.cookTonightRetryText}>Try again →</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : meals.length > 0 ? (
+                    <View style={{ gap: 10 }}>
+                      {meals.slice(0, 3).map((meal) => {
+                        const missing = missingFor(meal.ingredients)
+                        return (
+                          <TouchableOpacity
+                            key={meal.id}
+                            style={styles.cookTonightRow}
+                            activeOpacity={0.7}
+                            onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
+                          >
+                            {meal.image && meal.image.startsWith('http') ? (
+                              <Image source={{ uri: meal.image }} style={styles.cookTonightThumb} resizeMode="cover" />
+                            ) : (
+                              <View style={[styles.cookTonightThumb, styles.cookTonightThumbPlaceholder]}>
+                                <Utensils size={22} stroke="#555" strokeWidth={1.6} />
+                              </View>
+                            )}
+                            <View style={{ flex: 1, gap: 4 }}>
+                              <Text style={styles.cookTonightName} numberOfLines={1}>{meal.name}</Text>
+                              <Text style={styles.cookTonightMeta} numberOfLines={1}>
+                                {meal.prepTime > 0 ? `${meal.prepTime} min` : null}
+                                {meal.prepTime > 0 ? '  ·  ' : ''}
+                                {meal.calories} cal
+                                {meal.protein > 0 ? `  ·  ${meal.protein}g protein` : ''}
+                              </Text>
+                              {missing.length === 0 ? (
+                                <View style={styles.cookTonightHaveRow}>
+                                  <Check size={11} stroke="#4ADE80" strokeWidth={2.5} />
+                                  <Text style={styles.cookTonightHaveText}>Got everything</Text>
+                                </View>
+                              ) : (
+                                <Text style={styles.cookTonightNeedText} numberOfLines={1}>
+                                  Need: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}
+                                </Text>
+                              )}
+                            </View>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </View>
+                  ) : null}
+                </View>
+              )}
 
               {/* Search bar */}
               <View style={[styles.searchBar, { marginHorizontal: 0 }]}>
@@ -856,4 +989,90 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.textWhite,
   },
   addBtnText: { color: '#000000', fontSize: 15, fontWeight: '700' },
+
+  // Cook Tonight — compact action-row list (Phase 2b). Visually distinct from the
+  // Discover tab's cinematic browse so users feel the difference between "what to
+  // make right now" and "what to explore."
+  cookTonightHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  cookTonightTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.3,
+  },
+  cookTonightSub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  cookTonightRegen: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.2)',
+  },
+  cookTonightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#141414',
+    borderRadius: 14,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.04)',
+  },
+  cookTonightThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+  },
+  cookTonightThumbPlaceholder: {
+    backgroundColor: '#2A2A2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cookTonightName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    letterSpacing: -0.1,
+  },
+  cookTonightMeta: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
+  cookTonightHaveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cookTonightHaveText: {
+    fontSize: 11,
+    color: '#4ADE80',
+    fontWeight: '700',
+  },
+  cookTonightNeedText: {
+    fontSize: 11,
+    color: '#F59E0B',
+    fontWeight: '600',
+  },
+  cookTonightLoading: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    gap: 10,
+  },
+  cookTonightLoadingText: { fontSize: 13, color: COLORS.textMuted },
+  cookTonightErrorText: { fontSize: 13, color: '#EF4444' },
+  cookTonightRetryText: { fontSize: 13, color: '#4ADE80', fontWeight: '700' },
 })
