@@ -2730,7 +2730,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                     <TrajectoryGraph currentLb={currentLb} targetLb={targetLb} endLabel={targetDateStr} w={width - 36 - 8 - 88} />
                     {timelineStr !== '' && (
                       <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
-                        {timelineStr} · by {targetDateStr}
+                        {timelineStr}
                       </Text>
                     )}
                   </>
