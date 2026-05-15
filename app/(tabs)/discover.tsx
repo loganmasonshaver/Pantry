@@ -7,6 +7,8 @@ import {
   StyleSheet,
   Image,
   Linking,
+  AppState,
+  RefreshControl,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
@@ -191,6 +193,25 @@ export default function DiscoverScreen() {
   // are reflected without a manual reload.
   useFocusEffect(useCallback(() => { fetchTrending() }, [fetchTrending]))
 
+  // Foreground refetch: useFocusEffect doesn't re-fire when the app is backgrounded
+  // and resumed (the tab is still "focused" the whole time), so without this users
+  // would see yesterday's batch until they force-quit and relaunch. Mirrors the
+  // pattern Home uses for its own dynamic data.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') fetchTrending()
+    })
+    return () => sub.remove()
+  }, [fetchTrending])
+
+  // Pull-to-refresh: manual escape hatch when the user wants to force a refetch
+  // without waiting for tab-switch or app-resume. Matches Home's pull-to-refresh UX.
+  const [refreshing, setRefreshing] = useState(false)
+  const onPullRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try { await fetchTrending() } finally { setRefreshing(false) }
+  }, [fetchTrending])
+
   // Two-stage filter:
   //   1. Dietary safety (profile dietary_restrictions + food_dislikes — always on).
   //   2. Active chip (All / High Protein / Quick / Desserts / Vegetarian).
@@ -224,7 +245,11 @@ export default function DiscoverScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 40 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor="#4ADE80" colors={['#4ADE80']} />}
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Discover</Text>
