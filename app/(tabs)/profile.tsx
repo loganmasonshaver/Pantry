@@ -1268,6 +1268,24 @@ export default function ProfileScreen() {
           </TouchableOpacity>
         )}
 
+        {__DEV__ && (
+          <TouchableOpacity
+            style={styles.resetOnboarding}
+            activeOpacity={0.7}
+            onPress={async () => {
+              const { count } = await supabase
+                .from('saved_meals')
+                .select('id', { count: 'exact', head: true })
+                .eq('user_id', user?.id ?? '')
+              const n = Math.min(count ?? 0, 6) || 3
+              await AsyncStorage.setItem('pantry_onboarding_plan_ready', String(n))
+              Alert.alert('Plan-ready flag set', `Open Home to see the card (${n} meals).`)
+            }}
+          >
+            <Text style={styles.resetOnboardingText}>Test "Your plan is ready" card</Text>
+          </TouchableOpacity>
+        )}
+
       </ScrollView>
     </SafeAreaView>
   )

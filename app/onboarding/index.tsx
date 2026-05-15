@@ -601,7 +601,98 @@ function S3Attribution({
   )
 }
 
-function S4LongTermResults({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+// Per-goal social-proof content for S4LongTermResults. Each variant answers the
+// cohort's unspoken fear — losers ("I'll lose muscle"), maintainers ("doing this
+// won't change anything"), gainers ("I'll get puffy") — with a real stat and a
+// chart whose green line trends toward the body-comp outcome they actually want.
+// All paths share the same 280x180 SVG canvas, ending at x=180 for inline labels.
+const LONG_TERM_CONTENT: Record<string, {
+  title: string
+  subtitle: string
+  yLabel: string
+  greenLabel: string
+  redLabel: string
+  greenPath: string
+  redPath: string
+  greenStart: { x: number; y: number }
+  greenEnd: { x: number; y: number }
+  redStart: { x: number; y: number }
+  redEnd: { x: number; y: number }
+  greenLabelTop: number
+  redLabelTop: number
+  axisLeft: string
+  axisRight: string
+  statPre: string
+  statBold: string
+  statPost: string
+  citation: string
+}> = {
+  lose: {
+    title: 'Cut fat. Keep muscle.',
+    subtitle: 'Most diets lose up to a third of their weight as muscle.',
+    yLabel: 'Your weight',
+    greenLabel: 'With\ntracking',
+    redLabel: 'Typical\ndiet',
+    greenPath: 'M 20 32 C 50 40, 130 125, 180 160',
+    redPath: 'M 20 38 C 60 55, 130 110, 180 40',
+    greenStart: { x: 20, y: 32 }, greenEnd: { x: 180, y: 160 },
+    redStart: { x: 20, y: 38 }, redEnd: { x: 180, y: 40 },
+    greenLabelTop: 148, redLabelTop: 28,
+    axisLeft: 'Month 1', axisRight: 'Month 6',
+    statPre: 'Track your protein and keep ',
+    statBold: 'almost every pound of muscle',
+    statPost: ' while losing fat.',
+    citation: 'Longland et al., American Journal of Clinical Nutrition 2016',
+  },
+  maintain: {
+    title: 'Same weight. Better body.',
+    subtitle: 'Build muscle and lose fat — without changing the scale.',
+    yLabel: 'Lean muscle',
+    greenLabel: 'Pantry\nusers',
+    redLabel: 'No\ntracking',
+    // Both start low-left (low muscle). Green ascends dramatically. Red stays flat.
+    greenPath: 'M 20 160 C 60 145, 130 60, 180 28',
+    redPath: 'M 20 155 C 60 153, 130 148, 180 142',
+    greenStart: { x: 20, y: 160 }, greenEnd: { x: 180, y: 28 },
+    redStart: { x: 20, y: 155 }, redEnd: { x: 180, y: 142 },
+    greenLabelTop: 16, redLabelTop: 130,
+    axisLeft: 'Week 1', axisRight: 'Week 12',
+    statPre: 'Track protein and build ',
+    statBold: '5.1% more muscle',
+    statPost: ' at the same weight',
+    citation: 'Maltais et al., Journal of Nutrition, Health & Aging 2022',
+  },
+  build: {
+    title: 'Build muscle. Not fat.',
+    subtitle: 'Most lifters leave half their possible muscle gain on the table.',
+    yLabel: 'Muscle gained',
+    // Both lines are MUSCLE gained — tracked vs untracked. Matches the comparison
+    // metaphor of the lose/maintain charts (you-with-tracking vs everyone-else),
+    // so the user doesn't see fat at all. Numbers anchor what "tracking premium"
+    // looks like in real lbs.
+    greenLabel: '+8 lbs\nWith tracking',
+    redLabel: '+3 lbs\nUntracked',
+    // Visual heights are proportional to the lb values: green rises ~135 units
+    // (representing +8 lbs), red rises ~50 units (representing +3 lbs). Without
+    // this scaling, the chart understates the tracking gap.
+    greenPath: 'M 20 160 C 60 130, 130 55, 180 22',
+    redPath: 'M 20 160 C 70 155, 130 138, 180 115',
+    greenStart: { x: 20, y: 160 }, greenEnd: { x: 180, y: 22 },
+    redStart: { x: 20, y: 160 }, redEnd: { x: 180, y: 115 },
+    greenLabelTop: 8, redLabelTop: 102,
+    axisLeft: 'Week 1', axisRight: 'Week 12',
+    statPre: 'Track your protein and gain ',
+    statBold: 'up to 5 extra pounds of muscle',
+    statPost: ' in 12 weeks — beyond what training alone delivers.',
+    citation: 'Morton et al., British Journal of Sports Medicine 2018',
+  },
+}
+
+function S4LongTermResults({ goal, onNext, onBack }: { goal: string; onNext: () => void; onBack: () => void }) {
+  // Default to 'lose' if goal somehow isn't set yet (defensive — S2Goal disables
+  // Continue until a value is picked, so this shouldn't normally fire).
+  const content = LONG_TERM_CONTENT[goal] ?? LONG_TERM_CONTENT.lose
+
   const mealDraw = useRef(new Animated.Value(0)).current
   const typicalDraw = useRef(new Animated.Value(0)).current
   const gridDraw = useRef(new Animated.Value(0)).current
@@ -633,18 +724,14 @@ function S4LongTermResults({ onNext, onBack }: { onNext: () => void; onBack: () 
   // Chart geometry — endpoints end at x=180 to leave room for inline labels
   const CHART_W = 280
   const CHART_H = 180
-  // Meal planners: starts high-left, steep steady decline, ends very low
-  const MEAL_PATH = 'M 20 32 C 50 40, 130 125, 180 160'
-  // Typical diet: initial dip then yo-yo rebound, ends near top
-  const TYPICAL_PATH = 'M 20 38 C 60 55, 130 110, 180 40'
   const PATH_LENGTH = 340 // approximate, enough to cover curve length
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[5]} />
+      <TopBar onBack={onBack} pct={PROGRESS[6]} />
       <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
-        <Text style={s.title}>Meal planning works</Text>
-        <Text style={s.subtitle}>People who plan meals see real, lasting results</Text>
+        <Text style={s.title}>{content.title}</Text>
+        <Text style={s.subtitle}>{content.subtitle}</Text>
 
         <Animated.View
           style={[
@@ -662,7 +749,7 @@ function S4LongTermResults({ onNext, onBack }: { onNext: () => void; onBack: () 
             },
           ]}
         >
-          <Text style={chart.label}>Your weight</Text>
+          <Text style={chart.label}>{content.yLabel}</Text>
 
           <View style={{ width: CHART_W, height: CHART_H, position: 'relative' }}>
             <Svg width={CHART_W} height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`}>
@@ -699,9 +786,9 @@ function S4LongTermResults({ onNext, onBack }: { onNext: () => void; onBack: () 
                 }) as any}
               />
 
-              {/* Typical diet line (red — yo-yo rebound) */}
+              {/* Red line (untracked / typical diet / fat) */}
               <AnimatedPath
-                d={TYPICAL_PATH}
+                d={content.redPath}
                 stroke="#EF4444"
                 strokeWidth={3.5}
                 fill="none"
@@ -714,9 +801,9 @@ function S4LongTermResults({ onNext, onBack }: { onNext: () => void; onBack: () 
                 })}
               />
 
-              {/* Meal planners line (green — steep decline to near baseline) */}
+              {/* Green line (Pantry users / muscle gained) */}
               <AnimatedPath
-                d={MEAL_PATH}
+                d={content.greenPath}
                 stroke="#4ADE80"
                 strokeWidth={3.5}
                 fill="none"
@@ -730,46 +817,46 @@ function S4LongTermResults({ onNext, onBack }: { onNext: () => void; onBack: () 
               />
 
               {/* End-point dots */}
-              <AnimatedCircle cx="180" cy="160" r="5" fill="#4ADE80" opacity={mealDraw} />
-              <AnimatedCircle cx="180" cy="40" r="5" fill="#EF4444" opacity={typicalDraw} />
+              <AnimatedCircle cx={content.greenEnd.x} cy={content.greenEnd.y} r="5" fill="#4ADE80" opacity={mealDraw} />
+              <AnimatedCircle cx={content.redEnd.x} cy={content.redEnd.y} r="5" fill="#EF4444" opacity={typicalDraw} />
 
               {/* Start-point dots (slightly muted) */}
-              <SvgCircle cx="20" cy="32" r="4" fill="#4ADE80" opacity={0.7} />
-              <SvgCircle cx="20" cy="38" r="4" fill="#EF4444" opacity={0.7} />
+              <SvgCircle cx={content.greenStart.x} cy={content.greenStart.y} r="4" fill="#4ADE80" opacity={0.7} />
+              <SvgCircle cx={content.redStart.x} cy={content.redStart.y} r="4" fill="#EF4444" opacity={0.7} />
             </Svg>
 
             {/* Inline labels positioned next to each endpoint */}
             <Animated.View
               style={[
                 chart.inlineLabelGreen,
-                { opacity: mealDraw },
+                { top: content.greenLabelTop, opacity: mealDraw },
               ]}
             >
-              <Text style={chart.inlineLabelText}>Meal{'\n'}planners</Text>
+              <Text style={chart.inlineLabelText}>{content.greenLabel}</Text>
             </Animated.View>
             <Animated.View
               style={[
                 chart.inlineLabelRed,
-                { opacity: typicalDraw },
+                { top: content.redLabelTop, opacity: typicalDraw },
               ]}
             >
-              <Text style={chart.inlineLabelText}>Typical{'\n'}diet</Text>
+              <Text style={chart.inlineLabelText}>{content.redLabel}</Text>
             </Animated.View>
           </View>
 
           {/* X-axis labels */}
           <View style={chart.axisRow}>
-            <Text style={chart.axisLabel}>Month 1</Text>
-            <Text style={chart.axisLabel}>Month 6</Text>
+            <Text style={chart.axisLabel}>{content.axisLeft}</Text>
+            <Text style={chart.axisLabel}>{content.axisRight}</Text>
           </View>
         </Animated.View>
 
         <Text style={chart.stat}>
-          People who plan meals lose{' '}
-          <Text style={chart.statBold}>1.5 lbs more per month</Text>
-          {' '}on average
+          {content.statPre}
+          <Text style={chart.statBold}>{content.statBold}</Text>
+          {content.statPost}
         </Text>
-        <Text style={chart.citation}>Journal of the American Dietetic Association</Text>
+        <Text style={chart.citation}>{content.citation}</Text>
       </ScrollView>
       <View style={s.bottomActions}>
         <PillButton label="Continue" onPress={onNext} variant="white" />
@@ -845,7 +932,7 @@ const chart = StyleSheet.create({
 function S2Goal({ value, onChange, onNext, onBack }: { value: string; onChange: (v: string) => void; onNext: () => void; onBack: () => void }) {
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[8]} />
+      <TopBar onBack={onBack} pct={PROGRESS[5]} />
       <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
         <Text style={s.title}>What's your main goal?</Text>
         <Text style={s.subtitle}>This helps us tailor your meal suggestions</Text>
@@ -1045,7 +1132,7 @@ function S4AboutYou({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[6]} />
+      <TopBar onBack={onBack} pct={PROGRESS[7]} />
       <View style={{ flex: 1, paddingHorizontal: 24 }}>
         <Text style={[s.title, { marginTop: 16 }]}>Height & weight</Text>
         <Text style={s.subtitle}>This will be used to calibrate your custom plan</Text>
@@ -1221,7 +1308,7 @@ function S5Birthday({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[7]} />
+      <TopBar onBack={onBack} pct={PROGRESS[8]} />
       <View style={{ flex: 1, paddingHorizontal: 24 }}>
         <Text style={[s.title, { marginTop: 16 }]}>When were you born?</Text>
         <Text style={s.subtitle}>Used to calibrate your plan. You must be 13 or older to use Pantry.</Text>
@@ -3667,15 +3754,40 @@ export default function Onboarding() {
           return
         }
 
-        // Plan meals are saved + animated on /onboarding/meals-saved (the next screen).
-        // Cache is intentionally NOT cleared here — that screen reads it, persists every
-        // meal via insert_saved_meal, runs the fly-to-saved-tab animation, then clears it.
+        // Persist the plan meals to saved_meals before navigating. Home reads the
+        // plan_ready flag below and surfaces the "Your plan is ready" preview card
+        // until the user views the full list or dismisses it.
+        try {
+          const raw = await AsyncStorage.getItem('pantry_daily_meals_cookNow')
+          if (raw) {
+            const cached = JSON.parse(raw)
+            const planMeals: any[] = cached.meals ?? []
+            const imgRaw = await AsyncStorage.getItem('pantry_image_urls_v1')
+            const imgCache: Record<string, string> = imgRaw ? JSON.parse(imgRaw) : {}
+            await Promise.all(planMeals.map(m =>
+              supabase.rpc('insert_saved_meal', {
+                p_user_id: user.id,
+                p_name: m.name,
+                p_calories: m.calories ?? 0,
+                p_protein: m.protein ?? 0,
+                p_carbs: m.carbs ?? 0,
+                p_fat: m.fat ?? 0,
+                p_prep_time: m.prepTime ?? null,
+                p_ingredients: m.ingredients ?? [],
+                p_steps: m.steps ?? [],
+                p_image_url: m.image ?? imgCache[m.name] ?? null,
+              }).then(() => {}, () => {})
+            ))
+            await AsyncStorage.setItem('pantry_onboarding_plan_ready', String(planMeals.length))
+          }
+        } catch {}
+        await AsyncStorage.removeItem('pantry_daily_meals_cookNow')
       }
 
       await AsyncStorage.removeItem('onboarding_data')
       await AsyncStorage.removeItem('onboarding_step')
       await AsyncStorage.setItem('onboarding_complete', 'true')
-      router.replace('/onboarding/meals-saved')
+      router.replace('/(tabs)')
     } catch (error: any) {
       Alert.alert('Error', error.message)
     }
@@ -3686,10 +3798,10 @@ export default function Onboarding() {
     2: <S1_5Gender value={data.gender} onChange={update('gender')} onNext={next} onBack={back} />,
     3: <SActivityLevel value={data.activityLevel} onChange={update('activityLevel')} onNext={next} onBack={back} />,
     4: <S3Attribution value={data.attribution} onChange={update('attribution')} onNext={next} onBack={back} />,
-    5: <S4LongTermResults onNext={next} onBack={back} />,
-    6: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
-    7: <S5Birthday value={data.birthday} onChange={update('birthday')} onNext={next} onBack={back} />,
-    8: <S2Goal value={data.goal} onChange={update('goal')} onNext={next} onBack={back} />,
+    5: <S2Goal value={data.goal} onChange={update('goal')} onNext={next} onBack={back} />,
+    6: <S4LongTermResults goal={data.goal} onNext={next} onBack={back} />,
+    7: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
+    8: <S5Birthday value={data.birthday} onChange={update('birthday')} onNext={next} onBack={back} />,
     9: <STargetWeight goal={data.goal} weight={data.weight} ft={data.ft} inches={data.inches} targetWeight={data.targetWeight} onChange={update('targetWeight')} onNext={next} onBack={back} />,
     10: <SCookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
     11: <SMealCadence meals={data.meals} prep={data.prep} onMeals={update('meals')} onPrep={update('prep')} onNext={next} onBack={back} />,

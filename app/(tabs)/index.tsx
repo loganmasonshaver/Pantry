@@ -396,6 +396,50 @@ export default function HomeScreen() {
   const [showPrefBanner, setShowPrefBanner] = useState(false)
   const [showPantryScanFromHome, setShowPantryScanFromHome] = useState(false)
 
+  // "Your plan is ready" preview card — set by onboarding finish() once meals are
+  // persisted to saved_meals. Shows a horizontal scroll of 3 thumbnails plus a
+  // "View all" link to the Saved tab. Persists until user taps the X.
+  const [planReadyCount, setPlanReadyCount] = useState<number>(0)
+  const [planMeals, setPlanMeals] = useState<{ id: string; name: string; image_url: string | null }[]>([])
+  const planFadeOpacity = useRef(new RNAnimated.Value(0)).current
+  // Use useFocusEffect so the flag is re-checked every time the Home tab gains focus —
+  // not just on initial mount. This lets the debug button on Profile (or any flag set
+  // elsewhere) be picked up without a full app reload.
+  useFocusEffect(useCallback(() => {
+    if (!user) return
+    let cancelled = false
+    ;(async () => {
+      const flag = await AsyncStorage.getItem('pantry_onboarding_plan_ready')
+      if (!flag) return
+      const count = parseInt(flag, 10) || 0
+      if (count <= 0) return
+      const { data } = await supabase
+        .from('saved_meals')
+        .select('id, name, image_url')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(count)
+      if (cancelled) return
+      if (data && data.length > 0) {
+        setPlanReadyCount(count)
+        setPlanMeals(data)
+        RNAnimated.timing(planFadeOpacity, {
+          toValue: 1, duration: 500, delay: 200, useNativeDriver: true,
+        }).start()
+      }
+    })()
+    return () => { cancelled = true }
+  }, [user]))
+  const dismissPlanReady = async () => {
+    await AsyncStorage.removeItem('pantry_onboarding_plan_ready')
+    RNAnimated.timing(planFadeOpacity, {
+      toValue: 0, duration: 250, useNativeDriver: true,
+    }).start(() => {
+      setPlanReadyCount(0)
+      setPlanMeals([])
+    })
+  }
+
   const [calorieGoal, setCalorieGoal] = useState(2400)
   const [proteinGoal, setProteinGoal] = useState(180)
   const [carbsGoal, setCarbsGoal] = useState(250)
@@ -694,6 +738,56 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* ── "Your plan is ready" — first-run preview after onboarding paywall ── */}
+        {planReadyCount > 0 && planMeals.length > 0 && (
+          <RNAnimated.View style={[styles.planReadyCard, { opacity: planFadeOpacity }]}>
+            <View style={styles.planReadyHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.planReadyTitle}>Your plan is ready</Text>
+                <Text style={styles.planReadySub}>{planReadyCount} meals personalized for you</Text>
+              </View>
+              <TouchableOpacity
+                onPress={dismissPlanReady}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                activeOpacity={0.7}
+              >
+                <X size={18} stroke={COLORS.textMuted} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 10, paddingHorizontal: 16 }}
+              style={{ marginTop: 14 }}
+            >
+              {planMeals.slice(0, 3).map(m => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={styles.planReadyThumb}
+                  activeOpacity={0.85}
+                  onPress={() => router.push({ pathname: '/meal/[id]', params: { id: m.id } })}
+                >
+                  {m.image_url ? (
+                    <Image source={{ uri: m.image_url }} style={styles.planReadyImage} resizeMode="cover" />
+                  ) : (
+                    <View style={[styles.planReadyImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
+                      <Utensils size={20} stroke="#555" strokeWidth={1.5} />
+                    </View>
+                  )}
+                  <Text style={styles.planReadyThumbName} numberOfLines={2}>{m.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/saved')}
+              style={styles.planReadyCTA}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.planReadyCTAText}>View all {planReadyCount} →</Text>
+            </TouchableOpacity>
+          </RNAnimated.View>
+        )}
+
         {/* ── Food preferences one-time banner ── */}
         {/* Only show once the user has scanned a pantry AND has real meal suggestions
             visible — otherwise the "not loving your suggestions" copy lands before
@@ -804,8 +898,14 @@ export default function HomeScreen() {
             <RNAnimated.View style={[styles.scanHeroIconWrap, { transform: [{ scale: scanHeroPulse }] }]}>
               <ScanLine size={42} color="#4ADE80" strokeWidth={2.2} />
             </RNAnimated.View>
-            <Text style={styles.scanHeroTitle}>Scan your pantry to start</Text>
-            <Text style={styles.scanHeroSub}>Takes about 2 minutes. Personalized meals from what you already have.</Text>
+            <Text style={styles.scanHeroTitle}>
+              {planReadyCount > 0 ? 'Scan to start cooking your plan' : 'Scan your pantry to start'}
+            </Text>
+            <Text style={styles.scanHeroSub}>
+              {planReadyCount > 0
+                ? `Match your ${planReadyCount} meals to what you already have.`
+                : 'Takes about 2 minutes. Personalized meals from what you already have.'}
+            </Text>
             <View style={styles.scanHeroBtn}>
               <Text style={styles.scanHeroBtnText}>Scan Now</Text>
             </View>
@@ -1163,6 +1263,67 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+
+  planReadyCard: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    backgroundColor: '#0F0F0F',
+    borderRadius: 18,
+    paddingTop: 16,
+    paddingBottom: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.25)',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  planReadyHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 18,
+  },
+  planReadyTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.3,
+  },
+  planReadySub: {
+    fontSize: 12,
+    color: '#4ADE80',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  planReadyThumb: {
+    width: 110,
+  },
+  planReadyImage: {
+    width: 110,
+    height: 110,
+    borderRadius: 12,
+  },
+  planReadyThumbName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textWhite,
+    marginTop: 6,
+    lineHeight: 15,
+  },
+  planReadyCTA: {
+    marginTop: 12,
+    marginHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderRadius: 12,
+  },
+  planReadyCTAText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4ADE80',
+    letterSpacing: 0.1,
   },
   prefBannerText: { flex: 1, gap: 2 },
   prefBannerTitle: {

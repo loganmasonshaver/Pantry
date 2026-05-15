@@ -1,5 +1,14 @@
 {
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true
+  },
+  "permissions": {
+    "allow": [
+      "mcp__Claude_in_Chrome__find",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__computer-use__screenshot",
+      "mcp__computer-use__request_access",
+      "mcp__plugin_claude-mem_mcp-search__get_observations"
+    ]
   }
 }
