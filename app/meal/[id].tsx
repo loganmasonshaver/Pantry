@@ -512,8 +512,6 @@ export default function MealDetailScreen() {
     )
   }
 
-  const showProteinWarning = meal.protein < 30
-
   async function handleSave() {
     if (!user) {
       Alert.alert('Sign in required', 'Please sign in to save meals.')
@@ -812,13 +810,6 @@ export default function MealDetailScreen() {
         })()}
 
         {/* Prep time shown in title section above */}
-
-        {/* ── Protein warning ── */}
-        {showProteinWarning && (
-          <View style={styles.warningBanner}>
-            <Text style={styles.warningText}>⚠ Add a protein source — this meal is light on protein</Text>
-          </View>
-        )}
 
         {/* ── Ingredients ── */}
         <View style={styles.section}>
@@ -1257,22 +1248,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textMuted,
     fontWeight: '500',
-  },
-
-  // Protein warning
-  warningBanner: {
-    marginHorizontal: 20,
-    marginTop: 14,
-    backgroundColor: '#2A1F00',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-  },
-  warningText: {
-    color: '#FFB020',
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
   },
 
   // Sections

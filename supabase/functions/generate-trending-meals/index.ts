@@ -423,11 +423,13 @@ Respond ONLY with a JSON array, no markdown:
     for (const provider of providers) {
       stageLog(`LLM call start: ${provider.name}`)
       try {
-        // 60s hard timeout. Without this the fetch hangs indefinitely if the provider
+        // 90s hard timeout. Without this the fetch hangs indefinitely if the provider
         // stalls — and on Free-tier edge functions a hanging Gemini call would silently
-        // burn through the entire ~150s wall budget without returning any logs.
+        // burn through the entire ~150s wall budget without returning any logs. 90s
+        // gives Gemini room to handle the larger prompt with variety rules + 60-video
+        // candidate pool while still leaving 60s for FatSecret + image generation.
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 60000)
+        const timeoutId = setTimeout(() => controller.abort(), 90000)
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
@@ -508,7 +510,12 @@ Respond ONLY with a JSON array, no markdown:
     // Otherwise we restore the LLM/creator macros and trust them.
     if (fsKey && fsSecret) {
       console.log('Running FatSecret sanity check (Option B)...')
-      const TOLERANCE = 0.30 // 30% — anything beyond is treated as clickbait
+      const TOLERANCE = 0.50 // 50% — only reject WILDLY divergent macros. Two nutrition
+      // databases (LLM-claimed vs FatSecret) routinely disagree by 30-50% on the same
+      // dish (different cut of chicken, fat % of ground beef, brand of yogurt, etc.) —
+      // 30% was killing 60-70% of recipes as false-positive clickbait. 50% catches actual
+      // inflation cases (LLM says 40g protein, FatSecret says 18g) while letting normal
+      // noise through.
       let killedAsClickbait = 0
       const checked = await Promise.all(recipes.map(async (r: any) => {
         const llmCalories = Number(r.calories) || 0
