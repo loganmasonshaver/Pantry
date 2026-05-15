@@ -22,9 +22,9 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
-import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell } from 'lucide-react-native'
+import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, Sparkles, BarChart3 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
-import Svg, { Circle as SvgCircle } from 'react-native-svg'
+import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '../../context/AuthContext'
@@ -360,15 +360,18 @@ export default function HomeScreen() {
       })
   }, [user])
 
-  // Hero "Scan your pantry" card pulses to draw the eye until the user scans for the
-  // first time. Runs only while the empty-state card is visible.
-  const scanHeroPulse = useRef(new RNAnimated.Value(1)).current
+  // Hero "Scan your pantry" card animations. Two loops run together to sell the
+  // "actively scanning + identifying items" idea: a horizontal beam sweeps top→bottom
+  // (read: "the camera is scanning") and the food icons gently pulse in sequence as
+  // the beam passes their position (read: "items being detected"). Only run while
+  // the empty-state card is mounted.
+  const scanHeroBeam = useRef(new RNAnimated.Value(0)).current
   useEffect(() => {
     if (!pantryFetched || pantryNames.size > 0) return
     const loop = RNAnimated.loop(
       RNAnimated.sequence([
-        RNAnimated.timing(scanHeroPulse, { toValue: 1.06, duration: 1100, useNativeDriver: true }),
-        RNAnimated.timing(scanHeroPulse, { toValue: 1, duration: 1100, useNativeDriver: true }),
+        RNAnimated.timing(scanHeroBeam, { toValue: 1, duration: 2200, useNativeDriver: true, easing: Easing.linear }),
+        RNAnimated.timing(scanHeroBeam, { toValue: 0, duration: 0, useNativeDriver: true }),
       ])
     )
     loop.start()
@@ -856,7 +859,10 @@ export default function HomeScreen() {
         </View>
 
         {/* ── Snap & Log hero — primary tracking CTA. Photo-based macro logging is Pantry's
-            killer feature vs MyFitnessPal's manual entry; deserves prime real estate. ── */}
+            killer feature vs MyFitnessPal's manual entry; deserves prime real estate.
+            Hidden for empty-pantry users — they have no plan to track against yet, and
+            the green Snap card competes visually with the green Scan-Pantry hero below. ── */}
+        {pantryFetched && pantryNames.size > 0 && (
         <TouchableOpacity
           style={{
             flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -887,6 +893,7 @@ export default function HomeScreen() {
             <ScanLine size={16} stroke="#4ADE80" strokeWidth={2} />
           </View>
         </TouchableOpacity>
+        )}
 
         {/* ── Hero scan-your-pantry card — sits high on screen as the unmissable first action ── */}
         {pantryFetched && pantryNames.size === 0 && (
@@ -895,17 +902,122 @@ export default function HomeScreen() {
             activeOpacity={0.9}
             onPress={() => setShowPantryScanFromHome(true)}
           >
-            <RNAnimated.View style={[styles.scanHeroIconWrap, { transform: [{ scale: scanHeroPulse }] }]}>
-              <ScanLine size={42} color="#4ADE80" strokeWidth={2.2} />
-            </RNAnimated.View>
+            {/* Pantry-cabinet illustration in SVG: 3 shelves with visible depth,
+                9 varied items (jar / can / cereal box / oil bottle / tuna tin /
+                egg carton / milk carton / jam jar / pasta box). A scan beam sweeps
+                top→bottom over the scene. Camera-viewfinder corners frame the view. */}
+            <View style={styles.scanHeroVisual}>
+              <Svg width={240} height={150} viewBox="0 0 240 150">
+                {/* ──── Shelves: 3px-tall fill + a sharper edge line below.
+                    The pair reads as a shelf cross-section, not a stray line. ──── */}
+                {[50, 95, 140].map(y => (
+                  <SvgG key={y}>
+                    <SvgRect x={10} y={y - 2} width={220} height={3} fill="rgba(74,222,128,0.18)" />
+                    <SvgLine x1={10} y1={y + 1} x2={230} y2={y + 1} stroke="#4ADE80" strokeWidth={1.4} opacity={0.55} />
+                  </SvgG>
+                ))}
+
+                {/* ──── SHELF 1 ──── */}
+
+                {/* Peanut butter jar */}
+                <SvgG>
+                  <SvgRect x={30} y={15} width={22} height={4} rx={1} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.15)" />
+                  <SvgRect x={32} y={19} width={18} height={29} rx={2} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgRect x={33} y={29} width={16} height={10} fill="rgba(0,201,167,0.30)" />
+                </SvgG>
+
+                {/* Soup can */}
+                <SvgG>
+                  <SvgRect x={108} y={22} width={22} height={2.5} rx={0.5} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.2)" />
+                  <SvgRect x={108} y={24.5} width={22} height={23.5} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgRect x={108} y={31} width={22} height={10} fill="rgba(0,201,167,0.30)" />
+                </SvgG>
+
+                {/* Cereal box */}
+                <SvgG>
+                  <SvgRect x={180} y={17} width={28} height={31} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgLine x1={182} y1={22} x2={206} y2={22} stroke="#4ADE80" strokeWidth={1} opacity={0.5} />
+                  <SvgRect x={183} y={30} width={22} height={4} fill="rgba(0,201,167,0.30)" />
+                  <SvgRect x={184} y={37} width={20} height={6} fill="rgba(74,222,128,0.20)" />
+                </SvgG>
+
+                {/* ──── SHELF 2 ──── */}
+
+                {/* Olive oil bottle */}
+                <SvgG>
+                  <SvgRect x={39} y={59} width={6} height={3} fill="#4ADE80" />
+                  <SvgRect x={40} y={62} width={4} height={5} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.15)" />
+                  <SvgPath d="M 36 70 L 40 67 L 44 67 L 48 70 L 48 93 L 36 93 Z" stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.06)" />
+                  <SvgRect x={37} y={78} width={10} height={9} fill="rgba(0,201,167,0.30)" />
+                </SvgG>
+
+                {/* Tuna tin */}
+                <SvgG>
+                  <SvgRect x={100} y={73} width={36} height={2} rx={0.5} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.2)" />
+                  <SvgRect x={100} y={75} width={36} height={18} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgRect x={100} y={80} width={36} height={8} fill="rgba(0,201,167,0.30)" />
+                </SvgG>
+
+                {/* Egg carton */}
+                <SvgG>
+                  <SvgRect x={170} y={82} width={42} height={11} rx={2} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.10)" />
+                  {[178, 188, 198, 208].map(cx => (
+                    <SvgEllipse key={cx} cx={cx} cy={82} rx={3} ry={3.5} stroke="#4ADE80" strokeWidth={1.2} fill="rgba(74,222,128,0.15)" />
+                  ))}
+                </SvgG>
+
+                {/* ──── SHELF 3 ──── */}
+
+                {/* Milk carton with peaked top */}
+                <SvgG>
+                  <SvgRect x={30} y={110} width={24} height={28} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgPath d="M 30 110 L 30 105 L 42 100 L 54 105 L 54 110 Z" stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.10)" />
+                  <SvgRect x={31} y={120} width={22} height={9} fill="rgba(0,201,167,0.30)" />
+                </SvgG>
+
+                {/* Squat jam jar */}
+                <SvgG>
+                  <SvgRect x={102} y={110} width={26} height={4} rx={1} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.2)" />
+                  <SvgRect x={104} y={114} width={22} height={24} rx={3} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgRect x={104} y={122} width={22} height={12} fill="rgba(0,201,167,0.30)" />
+                </SvgG>
+
+                {/* Pasta box */}
+                <SvgG>
+                  <SvgRect x={168} y={118} width={48} height={20} stroke="#4ADE80" strokeWidth={1.4} fill="rgba(74,222,128,0.05)" />
+                  <SvgRect x={168} y={126} width={48} height={6} fill="rgba(0,201,167,0.30)" />
+                  <SvgLine x1={216} y1={118} x2={216} y2={138} stroke="#4ADE80" strokeWidth={1} opacity={0.3} />
+                </SvgG>
+              </Svg>
+
+              {/* Camera-style corner brackets (overlay) */}
+              <View style={[styles.scanCorner, styles.scanCornerTL]} />
+              <View style={[styles.scanCorner, styles.scanCornerTR]} />
+              <View style={[styles.scanCorner, styles.scanCornerBL]} />
+              <View style={[styles.scanCorner, styles.scanCornerBR]} />
+
+              {/* Sweeping scan beam — sweeps over the whole pantry scene */}
+              <RNAnimated.View
+                pointerEvents="none"
+                style={[
+                  styles.scanBeam,
+                  {
+                    transform: [{
+                      translateY: scanHeroBeam.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [4, 140],
+                      }),
+                    }],
+                  },
+                ]}
+              />
+            </View>
             <Text style={styles.scanHeroTitle}>
-              {planReadyCount > 0 ? 'Scan to start cooking your plan' : 'Scan your pantry to start'}
-            </Text>
-            <Text style={styles.scanHeroSub}>
               {planReadyCount > 0
-                ? `Match your ${planReadyCount} meals to what you already have.`
-                : 'Takes about 2 minutes. Personalized meals from what you already have.'}
+                ? 'Cook tonight without a store run.'
+                : 'Unlock recipes built around what you already have.'}
             </Text>
+
             <View style={styles.scanHeroBtn}>
               <Text style={styles.scanHeroBtnText}>Scan Now</Text>
             </View>
@@ -1652,22 +1764,46 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 24,
   },
-  scanHeroIconWrap: {
-    width: 76,
-    height: 76,
-    borderRadius: 22,
-    backgroundColor: 'rgba(74,222,128,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 14,
+  scanHeroVisual: {
+    width: 240,
+    height: 150,
+    marginBottom: 18,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  // Camera-viewfinder corners: each is a 22×22 square with two thick green borders
+  // creating an L shape. Together the four read as a viewfinder framing the items.
+  scanCorner: {
+    position: 'absolute',
+    width: 22,
+    height: 22,
+    borderColor: '#4ADE80',
+  },
+  scanCornerTL: { top: 0, left: 0, borderTopWidth: 2.5, borderLeftWidth: 2.5 },
+  scanCornerTR: { top: 0, right: 0, borderTopWidth: 2.5, borderRightWidth: 2.5 },
+  scanCornerBL: { bottom: 0, left: 0, borderBottomWidth: 2.5, borderLeftWidth: 2.5 },
+  scanCornerBR: { bottom: 0, right: 0, borderBottomWidth: 2.5, borderRightWidth: 2.5 },
+  // Horizontal beam — semi-transparent green line that sweeps top→bottom on a loop
+  scanBeam: {
+    position: 'absolute',
+    left: 4,
+    right: 4,
+    height: 2,
+    backgroundColor: '#4ADE80',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 8,
   },
   scanHeroTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '800',
     color: COLORS.textWhite,
     letterSpacing: -0.4,
     textAlign: 'center',
-    marginBottom: 6,
+    lineHeight: 28,
+    marginBottom: 22,
+    paddingHorizontal: 12,
   },
   scanHeroSub: {
     fontSize: 14,

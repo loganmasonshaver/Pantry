@@ -30,7 +30,6 @@ const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle)
 const AnimatedLine = Animated.createAnimatedComponent(Line)
 import { ActivityIndicator } from 'react-native'
 import { supabase } from '../../lib/supabase'
-import { generateMeals } from '../../lib/meals'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
@@ -76,6 +75,10 @@ type OnboardingData = {
   referralCode: string
   grantsPromo: boolean
   targetWeight: string
+  // Set by SGoalDelta right after the social-proof chart, only for lose/build users.
+  // Stored as a positive lb number ('10' = 10 lbs). Sign is derived from goal in
+  // finish() — lose makes it negative, build positive. Maintain users skip this.
+  targetWeightDelta: string
   cuisinePreferences: string[]
 }
 
@@ -85,6 +88,7 @@ const DEFAULT_DATA: OnboardingData = {
   foodDislikes: [], foodDislikesText: '',
   age: '', gender: '', activityLevel: '', fitnessGoal: '',
   attribution: '', birthday: '', referralCode: '', grantsPromo: false, targetWeight: '',
+  targetWeightDelta: '',
   cuisinePreferences: [],
 }
 
@@ -958,14 +962,91 @@ function S2Goal({ value, onChange, onNext, onBack }: { value: string; onChange: 
   )
 }
 
+// Wheel-picker delta selection right after the social-proof chart. Captures the
+// user's specific target ("I want to lose 15 lbs" / "put on 10 lbs of muscle") so
+// the emotional momentum from the chart doesn't dissipate over height/weight/
+// birthday screens. Maintain users have no delta — useEffect auto-advances them.
+function SGoalDelta({ goal, value, onChange, onNext, onBack }: {
+  goal: string
+  value: string
+  onChange: (v: string) => void
+  onNext: () => void
+  onBack: () => void
+}) {
+  const isLose = goal === 'lose'
+
+  // Lose: 5–100 lbs (covers everyone from light cut to major weight loss)
+  // Build: 5–50 lbs (newbie gains cap around 20-25 lb/year; 50 is the credible ceiling)
+  const MAX = isLose ? 100 : 50
+  const options = useMemo(
+    () => Array.from({ length: MAX - 4 }, (_, i) => `${i + 5} lb${i + 5 === 1 ? '' : 's'}`),
+    [MAX]
+  )
+
+  // Seed default so the picker isn't sitting on nothing and so STargetWeight has
+  // a value if the user just taps Continue without scrolling. Navigation in the
+  // parent skips this screen entirely for maintain users so no auto-skip needed
+  // here (avoids the back-navigation bounce loop).
+  const DEFAULT_LB = isLose ? 15 : 10
+  useEffect(() => {
+    if (!value && goal !== 'maintain') onChange(String(DEFAULT_LB))
+  }, [])
+
+  if (goal === 'maintain') return null
+
+  const currentLb = parseInt(value || String(DEFAULT_LB), 10)
+  const selectedIdx = Math.max(0, Math.min(options.length - 1, currentLb - 5))
+
+  const title = isLose ? 'How much do you want to lose?' : 'How much muscle do you want to put on?'
+  const subtitle = "We'll build your plan around this target."
+  const bigVerb = isLose ? '−' : '+'
+
+  return (
+    <SafeAreaView style={s.safe}>
+      <TopBar onBack={onBack} pct={PROGRESS[7]} />
+      <View style={{ flex: 1, paddingHorizontal: 24 }}>
+        <Text style={[s.title, { marginTop: 16 }]}>{title}</Text>
+        <Text style={s.subtitle}>{subtitle}</Text>
+
+        <View style={{ alignItems: 'center', marginTop: 32 }}>
+          <Text style={{ fontSize: 48, fontWeight: '800', color: TEAL, letterSpacing: -1 }}>
+            {bigVerb}{currentLb} lbs
+          </Text>
+          <Text style={{ fontSize: 13, color: MUTED, marginTop: 4 }}>
+            {isLose ? 'from your current weight' : 'of lean muscle'}
+          </Text>
+        </View>
+
+        <View style={{ alignItems: 'center', marginTop: 28 }}>
+          <WheelPicker
+            data={options}
+            selectedIndex={selectedIdx}
+            onChange={(i) => onChange(String(5 + i))}
+            width={180}
+          />
+        </View>
+      </View>
+      <View style={s.bottomActions}>
+        <PillButton label="Continue" onPress={onNext} variant="white" />
+      </View>
+    </SafeAreaView>
+  )
+}
+
 function STargetWeight({
-  goal, weight, ft, inches, targetWeight, onChange, onNext, onBack,
+  goal, weight, ft, inches, targetWeight, targetWeightDelta, onChange, onNext, onBack,
 }: {
-  goal: string; weight: string; ft: string; inches: string; targetWeight: string
+  goal: string; weight: string; ft: string; inches: string; targetWeight: string; targetWeightDelta: string
   onChange: (v: string) => void
   onNext: () => void; onBack: () => void
 }) {
   const currentLb = parseInt(weight || '180', 10)
+  // Navigation in the parent skips this screen for lose/build (they committed via
+  // SGoalDelta). targetWeight is computed from delta + current weight in finish().
+  // The early-return below is just a defensive guard in case the screen is reached
+  // accidentally — back-navigation bouncing previously trapped users here.
+  if (goal !== 'maintain' && !!targetWeightDelta) return null
+
   // Default target reflects goal direction so picker starts on a non-zero delta
   const defaultDelta = goal === 'lose' ? -10 : goal === 'build' ? 10 : 0
   const smartDefault = currentLb + defaultDelta
@@ -995,7 +1076,7 @@ function STargetWeight({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[9]} />
+      <TopBar onBack={onBack} pct={PROGRESS[10]} />
       <View style={{ flex: 1, paddingHorizontal: 24 }}>
         <Text style={[s.title, { marginTop: 16 }]}>
           {goal === 'lose' ? "What's your goal weight?" : goal === 'build' ? "What's your target weight?" : 'Target weight'}
@@ -1132,7 +1213,7 @@ function S4AboutYou({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[7]} />
+      <TopBar onBack={onBack} pct={PROGRESS[8]} />
       <View style={{ flex: 1, paddingHorizontal: 24 }}>
         <Text style={[s.title, { marginTop: 16 }]}>Height & weight</Text>
         <Text style={s.subtitle}>This will be used to calibrate your custom plan</Text>
@@ -1308,7 +1389,7 @@ function S5Birthday({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[8]} />
+      <TopBar onBack={onBack} pct={PROGRESS[9]} />
       <View style={{ flex: 1, paddingHorizontal: 24 }}>
         <Text style={[s.title, { marginTop: 16 }]}>When were you born?</Text>
         <Text style={s.subtitle}>Used to calibrate your plan. You must be 13 or older to use Pantry.</Text>
@@ -1384,7 +1465,7 @@ const SKILL_OPTIONS = [
 function SCookingSkill({ value, onChange, onNext, onBack }: { value: string; onChange: (v: string) => void; onNext: () => void; onBack: () => void }) {
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[10]} />
+      <TopBar onBack={onBack} pct={PROGRESS[11]} />
       <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
         <Text style={s.title}>How comfortable are you cooking?</Text>
         <Text style={s.subtitle}>We'll match recipes to your skill level</Text>
@@ -1440,7 +1521,7 @@ function SMealCadence({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[11]} />
+      <TopBar onBack={onBack} pct={PROGRESS[12]} />
       <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
         <Text style={s.title}>Your daily rhythm</Text>
         <Text style={s.subtitle}>How many meals, how long to cook</Text>
@@ -1494,7 +1575,7 @@ const DIET_STYLE_CARDS = [
 function SDietStyle({ value, onChange, onNext, onBack }: { value: string; onChange: (v: string) => void; onNext: () => void; onBack: () => void }) {
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[12]} />
+      <TopBar onBack={onBack} pct={PROGRESS[13]} />
       <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false}>
         <Text style={s.title}>Which diet fits you?</Text>
         <Text style={s.subtitle}>We'll only suggest meals that match</Text>
@@ -1576,7 +1657,7 @@ function SAllergies({
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[13]} />
+      <TopBar onBack={onBack} pct={PROGRESS[14]} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={s.scrollBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <View style={{ alignItems: 'center', marginBottom: 20 }}>
@@ -1621,20 +1702,28 @@ function SAllergies({
             ))}
           </View>
 
-          <Pressable style={[s.inputCard, { marginTop: 20 }]} onPress={() => dislikesInputRef.current?.focus()}>
-            <Text style={s.inputLabel}>Anything else?</Text>
-            <TextInput
-              ref={dislikesInputRef}
-              style={[s.input, { fontSize: 16, paddingVertical: 10 }]}
-              placeholder="e.g. Mushrooms, Cilantro"
-              placeholderTextColor="#888888"
-              value={inputText}
-              onChangeText={setInputText}
-              autoCapitalize="words"
-              returnKeyType="done"
-              onSubmitEditing={addCustomChip}
-            />
-          </Pressable>
+          <TextInput
+            ref={dislikesInputRef}
+            style={{
+              marginTop: 24,
+              backgroundColor: '#0D0D0D',
+              borderRadius: 16,
+              borderWidth: 1.5,
+              borderColor: '#00C9A7',
+              paddingHorizontal: 20,
+              paddingVertical: 18,
+              fontSize: 17,
+              fontWeight: '600',
+              color: '#FFFFFF',
+            }}
+            placeholder="Add your own — Mushrooms, etc."
+            placeholderTextColor="#666666"
+            value={inputText}
+            onChangeText={setInputText}
+            autoCapitalize="words"
+            returnKeyType="done"
+            onSubmitEditing={addCustomChip}
+          />
         </ScrollView>
       </KeyboardAvoidingView>
       <View style={s.bottomActions}>
@@ -1726,7 +1815,7 @@ function SReferralCode({
               paddingHorizontal: 20,
               paddingVertical: 18,
               fontSize: 20,
-              letterSpacing: 3,
+              letterSpacing: 1,
               fontWeight: '700',
               color: '#fff',
               textAlign: 'center',
@@ -1848,42 +1937,10 @@ function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => vo
       setMsgIdx(i => Math.min(i + 1, messages.length - 1))
     }, 800)
 
-    // Generate personalized meals silently in the background while the animation plays.
-    // The 4.2s animation masks the ~2-4s API call. Result stored in AsyncStorage so
-    // SPlanReveal and the home screen both read it immediately on mount.
-    ;(async () => {
-      try {
-        const heightCm = (parseInt(data.ft || '5') * 12 + parseInt(data.inches || '9')) * 2.54
-        const weightKg = parseFloat(data.weight || '180') * 0.453592
-        const parsedAge = parseInt(data.age) || 25
-        const fitness = data.fitnessGoal || (data.goal === 'lose' ? 'lose' : data.goal === 'build' ? 'gain' : 'maintain')
-        const goals = calculateGoals(parsedAge, data.gender || 'male', heightCm, weightKg, data.activityLevel || 'moderate', fitness)
-        const prepMaxMin = data.prep === '10 min' ? 10 : data.prep === '20 min' ? 20 : data.prep === '60+ min' ? 90 : 30
-        const foodDislikes = [
-          ...(data.foodDislikes || []),
-          ...(data.foodDislikesText || '').split(',').map(s => s.trim()).filter(Boolean),
-        ]
-        const meals = await generateMeals({
-          ingredients: [
-            'chicken breast', 'ground beef', 'eggs', 'rice', 'pasta',
-            'olive oil', 'butter', 'garlic', 'onion', 'salt', 'black pepper',
-            'soy sauce', 'hot sauce', 'lemon', 'lime', 'Italian seasoning',
-            'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili flakes',
-            'tomato sauce', 'chicken broth', 'parmesan cheese', 'broccoli', 'spinach',
-          ],
-          calorieGoal: goals.calories,
-          proteinGoal: goals.protein,
-          mealsPerDay: parseInt(data.meals) || 3,
-          cookingSkill: data.cookingSkill || 'moderate',
-          maxPrepMinutes: prepMaxMin,
-          dietaryRestrictions: data.dietStyle && data.dietStyle !== 'Classic' ? [data.dietStyle] : [],
-          foodDislikes,
-          mode: 'cookNow',
-        })
-        const today = new Date().toISOString().slice(0, 10)
-        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: data.dietStyle || 'Classic', maxPrepMinutes: prepMaxMin }))
-      } catch {}
-    })()
+    // No AI call here — SPlanReveal owns the curated meal set (deterministic filtering of
+    // the 94-recipe bank). It writes the chosen meals to AsyncStorage on mount; finish()
+    // persists them to saved_meals. Eliminates the prior race between the animation timer
+    // and a parallel AI call (which caused displayed names ≠ saved names).
 
     return () => {
       progress.removeListener(listener)
@@ -2527,27 +2584,34 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     })
   }, [data.dietStyle, data.meals, data.goal, data.foodDislikes, data.foodDislikesText, data.cookingSkill, prepMin])
 
-  // AI-generated meals — written to AsyncStorage by SPlanLoading in the background.
-  // Use these if ready; fall back to curated sampleMeals (also diet-aware) otherwise.
-  const [aiMeals, setAiMeals] = useState<any[]>([])
+  // Persist the curated meal picks to AsyncStorage so finish() can save them to
+  // saved_meals. Display ALWAYS uses sampleMeals (the curated source of truth) —
+  // no AI fallback path means no name mismatch between shown and saved.
+  //
+  // Macros per meal are derived from the user's daily goals (calculateGoals) times
+  // the slot distribution percentages. Ingredients/steps are left empty — meal-detail
+  // screen will lazy-expand them via AI on first open and cache the result back.
   useEffect(() => {
-    AsyncStorage.getItem('pantry_daily_meals_cookNow').then(raw => {
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        // Discard cached meals if diet or prep time changed — prevents stale meals showing
-        const storedDiet = parsed?.dietStyle ?? 'Classic'
-        const storedPrep = parsed?.maxPrepMinutes ?? null
-        const currentPrep = data.prep === '10 min' ? 10 : data.prep === '20 min' ? 20 : data.prep === '60+ min' ? 90 : 30
-        if (storedDiet !== (data.dietStyle || 'Classic')) return
-        if (storedPrep === null || storedPrep !== currentPrep) return
-        const meals: any[] = parsed?.meals ?? []
-        if (meals.length > 0) setAiMeals(meals.slice(0, parseInt(data.meals) || 3))
-      }
-    }).catch(() => {})
-  }, [])
+    const payload = {
+      date: new Date().toISOString().slice(0, 10),
+      dietStyle: data.dietStyle || 'Classic',
+      maxPrepMinutes: prepMin,
+      meals: sampleMeals.map(m => ({
+        name: m.name,
+        prepTime: m.prepMin,
+        calories: Math.round(cals * m.calPct),
+        protein: Math.round(prot * m.protPct),
+        carbs: 0,
+        fat: 0,
+        ingredients: [],
+        steps: [],
+        image: null,
+      })),
+    }
+    AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify(payload)).catch(() => {})
+  }, [sampleMeals, cals, prot, prepMin, data.dietStyle])
 
-  // Prefer AI-generated meals (personalized); fall back to curated sample if not ready
-  const mealsForDisplay = aiMeals.length > 0 ? aiMeals : sampleMeals
+  const mealsForDisplay = sampleMeals
 
   // Load AI-generated images for each meal.
   // Checks device AsyncStorage first (instant), falls back to Supabase edge function (network).
@@ -2690,10 +2754,10 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 }}>
-                  {aiMeals.length > 0 ? 'Your first day' : `Your ${mealsPerDay}-meal day`}
+                  {`Your ${mealsPerDay}-meal day`}
                 </Text>
                 <Text style={{ fontSize: 12, color: MUTED, marginTop: 3, fontWeight: '500' }}>
-                  {aiMeals.length > 0 ? 'Generated from your goals' : `${data.dietStyle || 'Classic'} · built around your goals`}
+                  {`${data.dietStyle || 'Classic'} · built around your goals`}
                 </Text>
               </View>
             </View>
@@ -3672,13 +3736,16 @@ export default function Onboarding() {
   }
 
   const next = () => {
-    if (step === 12) return navigate(14)                          // step 13 (meal swipe) removed
-    if (step === 8 && data.goal === 'maintain') return navigate(10) // body recomp skips target weight
+    // Skip SGoalDelta (step 7) for maintain users — they have no delta target
+    if (step === 6 && data.goal === 'maintain') return navigate(8)
+    // Skip STargetWeight (step 10) for lose/build users — they already committed via delta
+    if (step === 9 && data.goal !== 'maintain') return navigate(11)
     navigate(step + 1)
   }
   const back = () => {
-    if (step === 14) return navigate(12)                          // step 13 removed — 14 goes back to 12
-    if (step === 10 && data.goal === 'maintain') return navigate(8) // body recomp skips back over target weight
+    // Mirror the forward skips so back navigation doesn't land on an auto-skipped screen
+    if (step === 8 && data.goal === 'maintain') return navigate(6)
+    if (step === 11 && data.goal !== 'maintain') return navigate(9)
     navigate(step - 1)
   }
 
@@ -3731,7 +3798,20 @@ export default function Onboarding() {
           protein_goal: computedProt,
           height_cm: heightCm || null,
           weight_kg: weightKg || null,
-          target_weight_kg: finalData.targetWeight ? Math.round(parseFloat(finalData.targetWeight) * 0.453592 * 10) / 10 : null,
+          // Resolve target weight from delta if lose/build (they skipped STargetWeight in
+          // favor of the SGoalDelta picker). Maintain users set targetWeight directly.
+          target_weight_kg: (() => {
+            const explicitTarget = parseFloat(finalData.targetWeight || '0')
+            if (explicitTarget > 0) return Math.round(explicitTarget * 0.453592 * 10) / 10
+            const deltaLb = parseFloat(finalData.targetWeightDelta || '0')
+            const currentLb = parseFloat(finalData.weight || '0')
+            if (deltaLb > 0 && currentLb > 0 && finalData.goal !== 'maintain') {
+              const sign = finalData.goal === 'lose' ? -1 : 1
+              const targetLb = currentLb + sign * deltaLb
+              return Math.round(targetLb * 0.453592 * 10) / 10
+            }
+            return null
+          })(),
           dietary_restrictions: mergedRestrictions,
           meals_per_day: parseInt(finalData.meals),
           cooking_skill: finalData.cookingSkill || null,
@@ -3800,12 +3880,13 @@ export default function Onboarding() {
     4: <S3Attribution value={data.attribution} onChange={update('attribution')} onNext={next} onBack={back} />,
     5: <S2Goal value={data.goal} onChange={update('goal')} onNext={next} onBack={back} />,
     6: <S4LongTermResults goal={data.goal} onNext={next} onBack={back} />,
-    7: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
-    8: <S5Birthday value={data.birthday} onChange={update('birthday')} onNext={next} onBack={back} />,
-    9: <STargetWeight goal={data.goal} weight={data.weight} ft={data.ft} inches={data.inches} targetWeight={data.targetWeight} onChange={update('targetWeight')} onNext={next} onBack={back} />,
-    10: <SCookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
-    11: <SMealCadence meals={data.meals} prep={data.prep} onMeals={update('meals')} onPrep={update('prep')} onNext={next} onBack={back} />,
-    12: <SDietStyle value={data.dietStyle} onChange={update('dietStyle')} onNext={next} onBack={back} />,
+    7: <SGoalDelta goal={data.goal} value={data.targetWeightDelta} onChange={update('targetWeightDelta')} onNext={next} onBack={back} />,
+    8: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
+    9: <S5Birthday value={data.birthday} onChange={update('birthday')} onNext={next} onBack={back} />,
+    10: <STargetWeight goal={data.goal} weight={data.weight} ft={data.ft} inches={data.inches} targetWeight={data.targetWeight} targetWeightDelta={data.targetWeightDelta} onChange={update('targetWeight')} onNext={next} onBack={back} />,
+    11: <SCookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
+    12: <SMealCadence meals={data.meals} prep={data.prep} onMeals={update('meals')} onPrep={update('prep')} onNext={next} onBack={back} />,
+    13: <SDietStyle value={data.dietStyle} onChange={update('dietStyle')} onNext={next} onBack={back} />,
     14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={update('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
     15: <SNotificationPermission onNext={next} onBack={back} />,
     16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onGrantsPromo={update('grantsPromo')} onNext={next} onBack={back} />,
