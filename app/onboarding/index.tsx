@@ -2228,16 +2228,22 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   const protPerMeal = Math.round(prot / mealsPerDay)
 
   // Self-healing weight display: fall back to sane defaults if onboarding data is partial.
-  // Also apply goal-based default target when user skipped the target wheel or left it at current.
+  // Lose/build users commit to a delta via SGoalDelta (and skip STargetWeight entirely),
+  // so we prefer that delta when computing the displayed target. Maintain users have no
+  // delta — fall back to data.targetWeight (or current weight if neither is set).
   const currentLb = parseInt(data.weight || '180', 10)
   const rawTarget = parseInt(data.targetWeight || '0', 10)
+  const deltaLb = parseInt(data.targetWeightDelta || '0', 10)
   const defaultDelta = data.goal === 'lose' ? -10 : data.goal === 'build' ? 10 : 0
-  // Body Recomp skips the target weight step — always treat as "no change" regardless of stale data
   const targetLb = data.goal === 'maintain'
     ? currentLb
-    : (rawTarget > 0 && rawTarget !== currentLb)
-      ? rawTarget
-      : currentLb + defaultDelta
+    // Lose/build: derive target from the SGoalDelta wheel pick (sign by goal)
+    : deltaLb > 0
+      ? currentLb + (data.goal === 'lose' ? -deltaLb : deltaLb)
+      // Fallback when delta isn't set yet — use absolute target if picked, else default
+      : (rawTarget > 0 && rawTarget !== currentLb)
+        ? rawTarget
+        : currentLb + defaultDelta
   const hasValidTarget = targetLb !== currentLb
   const weightDelta = hasValidTarget ? Math.abs(targetLb - currentLb) : 0
   const isGainDirection = hasValidTarget && targetLb > currentLb
