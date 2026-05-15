@@ -412,10 +412,15 @@ Respond ONLY with a JSON array, no markdown:
   }
 ]`
 
-    // Priority: Google Gemini 3.1 Flash Lite (free, commercial-OK) > OpenAI gpt-4o-mini (paid fallback)
+    // Gemini-only. Logan's call: previous OpenAI fallback was producing visibly worse
+    // recipes (ignored brand-voice rules, ignored variety constraints, kept slipping
+    // "High Protein" / "Recipe" patterns into names that the prompt explicitly forbids).
+    // Whenever Gemini yielded a small batch we'd fall through to OpenAI which would win
+    // on count and clobber Gemini's better picks. Gemini 3.1 Flash Lite is free and
+    // reliable enough that a single-provider setup is fine; if it fails outright we'll
+    // see 0 yield that day and the cron retries naturally tomorrow.
     const providers = [
       googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google" },
-      openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI" },
     ].filter(Boolean) as { url: string; key: string; model: string; name: string }[]
 
     let recipes: any[] | null = null
@@ -484,7 +489,7 @@ Respond ONLY with a JSON array, no markdown:
             return true
           }).slice(0, 20)
           if (!recipes || filtered.length > recipes.length) recipes = filtered
-          if (recipes.length >= 15) break
+          if (recipes.length >= 6) break // single provider; just need enough survivors for the final 6 cap
         }
       } catch (e) {
         stageLog(`LLM call threw: ${(e as Error).message}`)
@@ -498,6 +503,67 @@ Respond ONLY with a JSON array, no markdown:
       return new Response(JSON.stringify({ error: "Failed to generate recipes from video titles" }), {
         status: 500, headers: { 'Content-Type': 'application/json' },
       })
+    }
+
+    // Step 2.5: Post-LLM cleanup — enforce variety + clean names deterministically.
+    // The LLM keeps treating brand-voice + variety rules as soft suggestions despite
+    // explicit hard-constraint phrasing. Code is cheaper than another prompt iteration.
+
+    // Identify the primary protein source from the recipe name + first ingredient.
+    // Order matters — more specific terms first so "chicken thigh" matches "chicken"
+    // not "thigh", and "ground beef" matches "beef" cleanly.
+    const PROTEIN_KEYWORDS = [
+      'chicken', 'turkey', 'beef', 'pork', 'lamb', 'bacon', 'ham',
+      'salmon', 'tuna', 'shrimp', 'crab', 'lobster', 'cod', 'tilapia', 'fish',
+      'cottage cheese', 'paneer', 'greek yogurt', 'skyr', 'feta', 'ricotta', 'mozzarella',
+      'tofu', 'tempeh', 'seitan',
+      'lentil', 'chickpea', 'black bean', 'kidney bean', 'edamame', 'soy',
+      'protein powder', 'whey',
+      'egg', // last resort — many dishes have eggs but not as primary
+    ]
+    function detectPrimaryProtein(recipe: any): string {
+      const haystack = `${recipe.name ?? ''} ${(recipe.ingredients || []).slice(0, 3).map((i: any) => i.name ?? '').join(' ')}`.toLowerCase()
+      for (const kw of PROTEIN_KEYWORDS) {
+        if (haystack.includes(kw)) return kw
+      }
+      return 'other'
+    }
+
+    // Strip brand-voice fluff that the LLM keeps slipping back in. Order matters —
+    // strip the more specific patterns first.
+    function cleanName(raw: string): string {
+      return raw
+        .replace(/^\s*high[\s-]?protein[,:\s-]+/i, '')   // "High Protein " / "High-Protein "
+        .replace(/^\s*\d+g?\s+protein[,:\s-]+/i, '')     // "40g Protein " / "30 protein"
+        .replace(/^\s*the\s+/i, '')                       // "The Best..."
+        .replace(/^\s*best\s+/i, '')                      // "Best..."
+        .replace(/^\s*easy\s+/i, '')                      // "Easy..."
+        .replace(/^\s*quick\s+/i, '')                     // "Quick..."
+        .replace(/^\s*healthy\s+/i, '')                   // "Healthy..."
+        .replace(/^\s*low[\s-]?carb[,:\s-]+/i, '')        // "Low Carb..." (not always wrong, but often noisy)
+        .replace(/[,:\s-]+recipe\s*\.?\s*$/i, '')         // trailing " Recipe"
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^./, c => c.toUpperCase()) // capitalize first letter after stripping
+    }
+
+    // Variety enforcement: group by primary protein, keep the FIRST recipe per group
+    // (LLM-ordered = highest priority), drop subsequent duplicates. If we end up under
+    // the 6-meal target, we ship fewer rather than padding with duplicates.
+    const beforeVariety = recipes.length
+    const seenProteins = new Set<string>()
+    recipes = recipes.filter((r: any) => {
+      const protein = detectPrimaryProtein(r)
+      if (seenProteins.has(protein)) return false
+      seenProteins.add(protein)
+      return true
+    })
+    stageLog(`variety dedup: ${beforeVariety} → ${recipes.length} (proteins: ${[...seenProteins].join(', ')})`)
+
+    // Apply name cleanup
+    for (const r of recipes) {
+      const cleaned = cleanName(r.name ?? '')
+      if (cleaned && cleaned !== r.name) r.name = cleaned
     }
 
     // Step 3: FatSecret as a SANITY CHECK, not a macro override.
