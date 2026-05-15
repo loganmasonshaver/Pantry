@@ -489,7 +489,7 @@ Respond ONLY with a JSON array, no markdown:
             return true
           }).slice(0, 20)
           if (!recipes || filtered.length > recipes.length) recipes = filtered
-          if (recipes.length >= 6) break // single provider; just need enough survivors for the final 6 cap
+          if (recipes.length >= 8) break // single provider; need ~8 to absorb dedup + density + sanity check losses and still hit the final 6 cap
         }
       } catch (e) {
         stageLog(`LLM call threw: ${(e as Error).message}`)
