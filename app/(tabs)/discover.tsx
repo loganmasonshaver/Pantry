@@ -29,7 +29,7 @@ function isCreatorRecipeVisible(m: any): boolean {
 }
 function isYouTubeRecipeVisible(m: any): boolean {
   const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
-  return ageDays <= 3
+  return ageDays <= 2
 }
 function filterTrendingByLifecycle(rows: any[]): any[] {
   return rows.filter(m => {
@@ -174,7 +174,14 @@ export default function DiscoverScreen() {
         log_count: (m as any).log_count ?? 0,
         generated_at: m.generated_at,
       }))
-      .sort((a, b) => (b.vote_score ?? 0) - (a.vote_score ?? 0))
+      // Sort by recency first (newest day → oldest), then by vote_score within each
+      // day. So today's freshly-curated batch sits at the front of the rail and
+      // yesterday's leftovers shift to the end.
+      .sort((a, b) => {
+        const dateDiff = new Date(b.generated_at).getTime() - new Date(a.generated_at).getTime()
+        if (dateDiff !== 0) return dateDiff
+        return (b.vote_score ?? 0) - (a.vote_score ?? 0)
+      })
     setTrending(mapped)
     setLoading(false)
   }, [])

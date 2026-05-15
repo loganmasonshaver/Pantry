@@ -834,10 +834,9 @@ export default function MealDetailScreen() {
           <View style={styles.ingredientList}>
             {meal.ingredients.map((ing, i) => {
               const inPantry = isAlreadyInList(ing.name, pantryNames)
-              const isBasic = COOKING_BASICS.has(ing.name.toLowerCase())
-              const needsBuy = (ing as any).needToBuy === true
+              const portion = portionMode === 'Visual' ? ing.visual : ing.grams
               return (
-                <View key={ing.id} style={[styles.ingredientRow, i < meal.ingredients.length - 1 && styles.ingredientBorder]}>
+                <View key={ing.id} style={styles.ingredientRow}>
                   {ingredientImages[normalizeForImage(extractFoodName(ing.name))] ? (
                     <Image source={{ uri: ingredientImages[normalizeForImage(extractFoodName(ing.name))] }} style={styles.ingredientThumb} />
                   ) : (
@@ -845,38 +844,27 @@ export default function MealDetailScreen() {
                       <Text style={styles.ingredientThumbInitial}>{ing.name.charAt(0).toUpperCase()}</Text>
                     </View>
                   )}
-                  <View style={styles.ingredientRight}>
-                    <Text style={styles.ingredientName}>{ing.name}</Text>
-                    <Text style={styles.ingredientPortion}>
-                      {portionMode === 'Visual' ? ing.visual : ing.grams}
-                    </Text>
-                  </View>
+                  <Text style={styles.ingredientLine} numberOfLines={1}>
+                    <Text style={styles.ingredientPortionInline}>{portion}</Text>
+                    <Text>  </Text>
+                    <Text style={styles.ingredientNameInline}>{ing.name}</Text>
+                  </Text>
                   <View style={styles.ingredientActions}>
                     <TouchableOpacity
-                      style={[styles.ingredientPill, inPantry && styles.ingredientPillActive]}
+                      style={[styles.ingredientIconBtnSmall, inPantry && styles.ingredientIconBtnActiveBg]}
                       onPress={() => toggleHaveIt(ing.name)}
                       activeOpacity={0.7}
-                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                     >
-                      {inPantry ? (
-                        <X size={13} stroke="#4ADE80" strokeWidth={2.5} />
-                      ) : (
-                        <Check size={13} stroke="#C8C8C8" strokeWidth={2} />
-                      )}
-                      <Text style={inPantry ? styles.ingredientPillTextActive : styles.ingredientPillText}>
-                        {inPantry ? 'Remove' : 'Have it'}
-                      </Text>
+                      <Check size={14} stroke={inPantry ? '#4ADE80' : '#888'} strokeWidth={2.2} />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.ingredientPill, addedToGrocery.has(ing.name) && styles.ingredientPillActive]}
+                      style={[styles.ingredientIconBtnSmall, addedToGrocery.has(ing.name) && styles.ingredientIconBtnActive]}
                       onPress={() => toggleGrocery(ing.name)}
                       activeOpacity={0.7}
-                      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                     >
-                      <ShoppingCart size={13} stroke={addedToGrocery.has(ing.name) ? '#4ADE80' : '#C8C8C8'} strokeWidth={2} />
-                      <Text style={addedToGrocery.has(ing.name) ? styles.ingredientPillTextActive : styles.ingredientPillText}>
-                        {addedToGrocery.has(ing.name) ? 'In list' : 'Grocery'}
-                      </Text>
+                      <ShoppingCart size={14} stroke={addedToGrocery.has(ing.name) ? '#4ADE80' : '#888'} strokeWidth={2.2} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1295,36 +1283,49 @@ const styles = StyleSheet.create({
 
   // Ingredients
   ingredientList: {
-    gap: 6,
+    gap: 4,
   },
   ingredientRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    gap: 10,
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    gap: 12,
     backgroundColor: '#191919',
-    borderRadius: 14,
+    borderRadius: 12,
   },
   ingredientBorder: {},
   ingredientThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#262626',
   },
   ingredientThumbPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#262626',
     alignItems: 'center',
     justifyContent: 'center',
   },
   ingredientThumbInitial: {
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
     color: COLORS.textMuted,
+  },
+  ingredientLine: {
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  ingredientPortionInline: {
+    color: COLORS.textMuted,
+    fontWeight: '600',
+  },
+  ingredientNameInline: {
+    color: COLORS.textWhite,
+    fontWeight: '500',
   },
   ingredientPortion: {
     fontSize: 13,
@@ -1335,6 +1336,17 @@ const styles = StyleSheet.create({
   ingredientRight: {
     flex: 1,
     gap: 0,
+  },
+  ingredientIconBtnSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#262626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ingredientIconBtnActiveBg: {
+    backgroundColor: 'rgba(74,222,128,0.16)',
   },
   ingredientNameRow: {
     flexDirection: 'row',
