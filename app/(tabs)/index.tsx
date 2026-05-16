@@ -460,21 +460,28 @@ export default function HomeScreen() {
     if (!loading && meals.length > 0) trackMealsGenerated(meals.length)
   }, [loading])
 
-  useEffect(() => {
+  // Use useFocusEffect so the profile re-fetches every time Home gains focus —
+  // critical for the post-onboarding flow where Home was already mounted as a tab
+  // and finish() just updated the user's profile. Without this, Home keeps showing
+  // stale state (or hardcoded useState defaults) instead of the values just saved.
+  useFocusEffect(useCallback(() => {
     if (!user) return
+    let cancelled = false
     supabase
       .from('profiles')
       .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
+        if (cancelled) return
         if (!data?.food_prefs_banner_dismissed) setShowPrefBanner(true)
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
         if (data?.carbs_goal) setCarbsGoal(data.carbs_goal)
         if (data?.fat_goal) setFatGoal(data.fat_goal)
       })
-  }, [user])
+    return () => { cancelled = true }
+  }, [user]))
 
   const dismissBanner = async () => {
     setShowPrefBanner(false)

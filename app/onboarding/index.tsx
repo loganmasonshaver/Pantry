@@ -3822,6 +3822,19 @@ export default function Onboarding() {
           computedCals = computedCals ?? result.calories
           computedProt = computedProt ?? result.protein
         }
+        // Derive carbs/fat from the calorie target. Without this, Home falls back to
+        // hardcoded 250g carbs / 80g fat defaults that have nothing to do with the
+        // user's actual goal. Split: 27% of calories from fat (within ISSN range),
+        // remainder after protein → carbs.
+        let computedCarbs: number | null = null
+        let computedFat: number | null = null
+        if (computedCals && computedProt) {
+          const fatCals = computedCals * 0.27
+          computedFat = Math.round(fatCals / 9)
+          const proteinCals = computedProt * 4
+          const carbCals = Math.max(0, computedCals - proteinCals - fatCals)
+          computedCarbs = Math.round(carbCals / 4)
+        }
 
         // Derive age from birthday (field never set during onboarding)
         const derivedAge = finalData.birthday ? computeAge(finalData.birthday) : parseInt(finalData.age) || null
@@ -3829,9 +3842,15 @@ export default function Onboarding() {
         const resolvedFitnessGoal = finalData.fitnessGoal
           || (finalData.goal === 'lose' ? 'lose' : finalData.goal === 'build' ? 'gain' : finalData.goal === 'maintain' ? 'maintain' : null)
 
-        const { error } = await supabase.from('profiles').update({
+        // Upsert (not update) — the resetOnboarding flow on Profile DELETES the
+        // profile row, so a plain .update() silently no-ops for users who reset.
+        // Upserting ensures the row gets recreated cleanly with the new values.
+        const { error } = await supabase.from('profiles').upsert({
+          id: user.id,
           calorie_goal: computedCals,
           protein_goal: computedProt,
+          carbs_goal: computedCarbs,
+          fat_goal: computedFat,
           height_cm: heightCm || null,
           weight_kg: weightKg || null,
           // Resolve target weight from delta if lose/build (they skipped STargetWeight in
@@ -3863,7 +3882,7 @@ export default function Onboarding() {
           referral_code_used: finalData.referralCode ? finalData.referralCode.toUpperCase().trim() : null,
           promo_active: !!finalData.grantsPromo,
           cuisine_preferences: finalData.cuisinePreferences || [],
-        }).eq('id', user.id)
+        }, { onConflict: 'id' })
 
         if (error) {
           Alert.alert('Save Error', error.message)
