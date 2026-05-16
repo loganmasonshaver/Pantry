@@ -3333,11 +3333,7 @@ function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () 
   return (
     <SafeAreaView style={s.safe}>
       <ProgressBar pct={PROGRESS[20]} />
-      <View style={s.centerFlex}>
-        <TouchableOpacity style={s.textLink} onPress={onNext} activeOpacity={0.7}>
-          <Text style={s.textLinkText}>Continue with limited free access</Text>
-        </TouchableOpacity>
-      </View>
+      <View style={s.centerFlex} />
     </SafeAreaView>
   )
 }

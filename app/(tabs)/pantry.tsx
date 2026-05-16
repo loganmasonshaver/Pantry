@@ -493,11 +493,11 @@ export default function PantryScreen() {
                     </View>
                   ) : meals.length > 0 ? (
                     <View style={{ gap: 10 }}>
-                      {meals.slice(0, 3).map((meal) => {
+                      {meals.slice(0, 3).map((meal, idx) => {
                         const missing = missingFor(meal.ingredients)
                         return (
                           <TouchableOpacity
-                            key={meal.id}
+                            key={`${meal.id}-${idx}`}
                             style={styles.cookTonightRow}
                             activeOpacity={0.7}
                             onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}

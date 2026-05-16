@@ -792,7 +792,7 @@ export default function HomeScreen() {
                       <Utensils size={20} stroke="#555" strokeWidth={1.5} />
                     </View>
                   )}
-                  <Text style={styles.planReadyThumbName} numberOfLines={2}>{m.name}</Text>
+                  <Text style={styles.planReadyThumbName}>{m.name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>

@@ -24,6 +24,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import { useSuperwall, useUser } from 'expo-superwall'
+import { usePremium } from '@/context/SuperwallContext'
 import { trackWeightLogged } from '@/lib/analytics'
 
 const { width } = Dimensions.get('window')
@@ -503,6 +504,7 @@ export default function ProfileScreen() {
   const { acceptedAt, revokeConsent } = useAIConsent()
   const { registerPlacement } = useSuperwall()
   const { refresh: refreshSuperwallUser, getEntitlements } = useUser()
+  const { isPremium, promoActive, triggerUpgrade } = usePremium()
   const [darkMode, setDarkMode] = useState(true)
   const [restoring, setRestoring] = useState(false)
   const [profile, setProfile] = useState<Profile | null>(null)
@@ -1207,25 +1209,45 @@ export default function ProfileScreen() {
         <Text style={styles.sectionTitle}>Subscription</Text>
         <View style={styles.card}>
           <View style={styles.subRow}>
-            <Text style={styles.rowLabel}>Pantry Free</Text>
-            <TouchableOpacity style={styles.upgradeBtn} activeOpacity={0.8}>
-              <Text style={styles.upgradeBtnText}>Upgrade</Text>
-            </TouchableOpacity>
+            <Text style={styles.rowLabel}>
+              {isPremium ? (promoActive ? 'Pantry Pro · Promo' : 'Pantry Pro') : 'Subscribe to Pantry Pro'}
+            </Text>
+            {isPremium ? (
+              <TouchableOpacity
+                style={styles.upgradeBtn}
+                activeOpacity={0.8}
+                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+              >
+                <Text style={styles.upgradeBtnText}>Manage</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.upgradeBtn}
+                activeOpacity={0.8}
+                onPress={() => triggerUpgrade('profile_subscribe')}
+              >
+                <Text style={styles.upgradeBtnText}>Subscribe</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <Text style={styles.subDetails}>
-            1 meal suggestion per day · 5 saved meals
+            {isPremium
+              ? (promoActive
+                  ? 'All features unlocked via promo access.'
+                  : 'All features unlocked. Cancel anytime in the App Store.')
+              : 'Unlock unlimited AI meal suggestions, pantry scans, and saved recipes.'}
           </Text>
         </View>
 
         {/* ── Settings ── */}
         <Text style={styles.sectionTitle}>Settings</Text>
         <View style={styles.card}>
+          {/* Single Food Preferences row covers allergies + dislikes (chip selector
+              with custom input). The old "Dietary Restrictions" row was removed
+              because its modal mixed allergen-frees (Dairy-free, Gluten-free) with
+              the chips screen, creating duplicate concepts. Diet style (Vegetarian
+              etc.) is set during onboarding only. */}
           <SettingsRow label="Food Preferences" onPress={() => router.push('/food-preferences')} />
-          <SettingsRow
-            label="Dietary Restrictions"
-            value={(profile?.dietary_restrictions ?? []).filter(d => d !== 'None').join(', ') || 'None'}
-            onPress={openDietModal}
-          />
           <SettingsRow label="Notifications" />
           <SettingsRow
             label="Dark Mode"
