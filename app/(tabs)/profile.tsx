@@ -821,6 +821,59 @@ export default function ProfileScreen() {
     ])
   }
 
+  // Apple Guideline 5.1.1(v): account deletion must be available in-app.
+  // Two-step confirm — first dialog warns + lists what gets deleted, second
+  // dialog forces an irreversible re-confirmation before invoking the edge
+  // function. Server uses service-role to wipe auth.users (cascades to
+  // profile, saved_meals, pantry_items, etc.).
+  const [deletingAccount, setDeletingAccount] = useState(false)
+  const deleteAccount = () => {
+    if (deletingAccount) return
+    Alert.alert(
+      'Delete your account?',
+      'This permanently removes your profile, pantry, saved meals, meal logs, grocery list, and ratings. If you have an active subscription, cancel it in Settings → Apple ID → Subscriptions first — deleting the account here does NOT cancel an Apple subscription.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Are you sure?',
+              'This action cannot be undone.',
+              [
+                { text: 'Keep account', style: 'cancel' },
+                {
+                  text: 'Delete forever',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setDeletingAccount(true)
+                    try {
+                      const { error } = await supabase.functions.invoke('delete-account')
+                      if (error) throw error
+                      // Server-side delete succeeded — clear local storage + sign out so
+                      // the UI doesn't try to refetch profile data for a now-dead user.
+                      await AsyncStorage.multiRemove([
+                        'onboarding_complete',
+                        'pantry_onboarding_plan_ready',
+                        'pantry_daily_meals_cookNow',
+                        'pantry_daily_meals_mealPlan',
+                      ])
+                      await authSignOut()
+                    } catch (e: any) {
+                      setDeletingAccount(false)
+                      Alert.alert('Delete failed', e?.message ?? 'Could not delete account. Please try again or contact support.')
+                    }
+                  },
+                },
+              ]
+            )
+          },
+        },
+      ]
+    )
+  }
+
   const resetOnboarding = () => {
     Alert.alert(
       'Reset to New User?',
@@ -1284,27 +1337,16 @@ export default function ProfileScreen() {
           <Text style={styles.signOutText}>Sign Out</Text>
         </TouchableOpacity>
 
+        {/* ── Delete account (Apple Guideline 5.1.1(v) requirement) ── */}
+        <TouchableOpacity style={styles.deleteAccount} onPress={deleteAccount} activeOpacity={0.7} disabled={deletingAccount}>
+          <Text style={styles.deleteAccountText}>
+            {deletingAccount ? 'Deleting…' : 'Delete Account'}
+          </Text>
+        </TouchableOpacity>
+
         {__DEV__ && (
           <TouchableOpacity style={styles.resetOnboarding} onPress={resetOnboarding} activeOpacity={0.7}>
             <Text style={styles.resetOnboardingText}>Reset Onboarding</Text>
-          </TouchableOpacity>
-        )}
-
-        {__DEV__ && (
-          <TouchableOpacity
-            style={styles.resetOnboarding}
-            activeOpacity={0.7}
-            onPress={async () => {
-              const { count } = await supabase
-                .from('saved_meals')
-                .select('id', { count: 'exact', head: true })
-                .eq('user_id', user?.id ?? '')
-              const n = Math.min(count ?? 0, 6) || 3
-              await AsyncStorage.setItem('pantry_onboarding_plan_ready', String(n))
-              Alert.alert('Plan-ready flag set', `Open Home to see the card (${n} meals).`)
-            }}
-          >
-            <Text style={styles.resetOnboardingText}>Test "Your plan is ready" card</Text>
           </TouchableOpacity>
         )}
 
@@ -1540,6 +1582,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: '#EF4444',
+  },
+  deleteAccount: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  deleteAccountText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    textDecorationLine: 'underline',
   },
 
   resetOnboarding: {

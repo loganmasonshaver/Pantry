@@ -58,7 +58,33 @@ export default function SignInScreen() {
       setLoading(true)
       await signIn(email, password, captchaToken ?? undefined)
       setFailCount(0)
-      router.replace({ pathname: '/onboarding/verify-email', params: { email, isSignIn: 'true' } })
+      // Skip the OTP gate for users who have already confirmed their email
+      // (Supabase sets email_confirmed_at after a successful prior OTP). First-time
+      // sign-ins still hit OTP. Apple App Review demo account is manually confirmed
+      // in Supabase Auth so reviewers bypass this entirely.
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user?.email_confirmed_at) {
+        await AsyncStorage.setItem('otp_verified', 'true')
+        // Returning users have onboarding_complete wiped on sign-out, so check
+        // the Supabase profile to decide where to land. If profile has goals,
+        // they're a real returning user — fast-path to tabs. If no profile,
+        // route through onboarding so they set up.
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('calorie_goal')
+            .eq('id', user.id)
+            .single()
+          if (profile?.calorie_goal) {
+            await AsyncStorage.setItem('onboarding_complete', 'true')
+            router.replace('/(tabs)')
+            return
+          }
+        } catch {}
+        router.replace('/onboarding')
+      } else {
+        router.replace({ pathname: '/onboarding/verify-email', params: { email, isSignIn: 'true' } })
+      }
     } catch (error: any) {
       setFailCount(f => f + 1)
       setCaptchaToken(null)
