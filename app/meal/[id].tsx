@@ -26,6 +26,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { autoCategoryMatches } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
+import { templates as recipeTemplates } from '@/lib/recipeTemplates'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
@@ -435,9 +436,35 @@ export default function MealDetailScreen() {
     try {
       const generated: any = JSON.parse(mealData)
       isUserCreated = generated.is_user_created === true
-      const rawIngredients: any[] = generated.ingredients ?? []
+      let rawIngredients: any[] = generated.ingredients ?? []
+      let rawSteps: any[] = generated.steps ?? []
+      // Backfill from recipe template if the saved row is missing recipe data
+      // (legacy/broken meals from before the SPlanReveal scaling fix landed).
+      // Scale ingredient grams to match the saved row's calorie count so portions
+      // stay consistent with the macros the user already sees on the card.
+      const needsBackfill = rawIngredients.length === 0 || rawSteps.length === 0
+      const template = needsBackfill ? recipeTemplates[generated.name] : null
+      if (template) {
+        const savedCal = Number(generated.calories) || template.calories
+        const scale = savedCal / (template.calories || savedCal)
+        if (rawIngredients.length === 0) {
+          rawIngredients = template.ingredients.map(ing => {
+            const baseGrams = parseFloat(String(ing.grams).replace(/[^0-9.]/g, '')) || 0
+            const unit = String(ing.grams).replace(/[0-9. ]/g, '') || 'g'
+            return { name: ing.name, visual: ing.visual, grams: `${Math.round(baseGrams * scale)}${unit}` }
+          })
+        }
+        if (rawSteps.length === 0) rawSteps = template.steps
+        // Also backfill macros that may have been saved as 0 (carbs/fat in the
+        // first batch of onboarding meals before the fix shipped).
+        if (!generated.carbs) generated.carbs = Math.round((template.carbs || 0) * scale)
+        if (!generated.fat) generated.fat = Math.round((template.fat || 0) * scale)
+      }
       meal = {
         ...generated,
+        carbs: generated.carbs,
+        fat: generated.fat,
+        steps: rawSteps,
         ingredients: rawIngredients.map((ing, i) => {
           // Plain strings (creator recipes) carry the full "1/2 avocado" text — preserve as-is.
           // Objects (AI-generated meals) have quantity in .visual/.grams, so clean the name.

@@ -30,6 +30,7 @@ const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle)
 const AnimatedLine = Animated.createAnimatedComponent(Line)
 import { ActivityIndicator } from 'react-native'
 import { supabase } from '../../lib/supabase'
+import { templates as recipeTemplates } from '../../lib/recipeTemplates'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
@@ -2594,25 +2595,54 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   // saved_meals. Display ALWAYS uses sampleMeals (the curated source of truth) —
   // no AI fallback path means no name mismatch between shown and saved.
   //
-  // Macros per meal are derived from the user's daily goals (calculateGoals) times
-  // the slot distribution percentages. Ingredients/steps are left empty — meal-detail
-  // screen will lazy-expand them via AI on first open and cache the result back.
+  // For each curated meal pick, look up its template in lib/recipeTemplates.ts
+  // and scale the ingredients + macros linearly to the user's per-meal calorie
+  // target (derived from daily goal × slot distribution %). Full data persists
+  // to saved_meals at finish() time — meal-detail screen renders instantly.
   useEffect(() => {
+    const meals = sampleMeals.map(m => {
+      const targetCal = Math.round(cals * m.calPct)
+      const targetProt = Math.round(prot * m.protPct)
+      const template = recipeTemplates[m.name]
+      if (!template) {
+        // No template found for this name (should be rare — bank and templates are
+        // kept in sync). Fall back to name + scaled cal/prot only.
+        return {
+          name: m.name, prepTime: m.prepMin,
+          calories: targetCal, protein: targetProt, carbs: 0, fat: 0,
+          ingredients: [], steps: [], image: null,
+        }
+      }
+      const baseCal = template.calories || targetCal
+      const scale = targetCal / baseCal
+      // Scale every ingredient's grams by the same factor — preserves macro ratios
+      // while hitting the per-meal calorie target. "150g" → "210g" for scale 1.4.
+      const ingredients = template.ingredients.map(ing => {
+        const baseGrams = parseFloat(String(ing.grams).replace(/[^0-9.]/g, '')) || 0
+        const unit = String(ing.grams).replace(/[0-9. ]/g, '') || 'g'
+        return {
+          name: ing.name,
+          visual: ing.visual,
+          grams: `${Math.round(baseGrams * scale)}${unit}`,
+        }
+      })
+      return {
+        name: m.name,
+        prepTime: template.prepTime ?? m.prepMin,
+        calories: targetCal,
+        protein: Math.round((template.protein || 0) * scale),
+        carbs: Math.round((template.carbs || 0) * scale),
+        fat: Math.round((template.fat || 0) * scale),
+        ingredients,
+        steps: template.steps,
+        image: null, // saved_meals row will be populated from image_cache on Home/Saved fetch
+      }
+    })
     const payload = {
       date: new Date().toISOString().slice(0, 10),
       dietStyle: data.dietStyle || 'Classic',
       maxPrepMinutes: prepMin,
-      meals: sampleMeals.map(m => ({
-        name: m.name,
-        prepTime: m.prepMin,
-        calories: Math.round(cals * m.calPct),
-        protein: Math.round(prot * m.protPct),
-        carbs: 0,
-        fat: 0,
-        ingredients: [],
-        steps: [],
-        image: null,
-      })),
+      meals,
     }
     AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify(payload)).catch(() => {})
   }, [sampleMeals, cals, prot, prepMin, data.dietStyle])
