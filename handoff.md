@@ -1,226 +1,144 @@
-# Handoff — IA refactor done, trending pipeline overhauled
+# Handoff — Snap & Log cut, profile pipeline fixed, recipe templates wired
 
-## Where we left off
+## TL;DR
 
-The full **IA refactor is complete** (Phases 1, 2a, 2b, 3a, 3b, 3c, 4) and the entire **trending pipeline has been overhauled** end-to-end. Bottom nav is now **5 tabs** (Home / Pantry / Discover / Saved / Profile), Pantry has a **My Pantry / Grocery sub-tab toggle**, and Discover is up with filter chips + Featured hero + Trending Now rail + From Creators rail.
+This session closed the loop on the deterministic onboarding architecture (templates wired into persistence + backfill for legacy rows), shipped a real-pantry SVG illustration on the Home scan card, cut "Snap & Log with AI" from v1 per council vote, and fixed a chain of profile-data bugs that caused calorie/macro goals on Home to silently fall back to hardcoded defaults after onboarding reset.
 
-The trending function went through ~10 iterations today and now:
-- Routes images through the two-stage Flux pipeline (Gemini → Flux)
-- Reads macros from creator descriptions instead of fabricating them
-- Hits ~5-6 yield/day with strong variety (one recipe per protein source)
-- Costs ~$15/mo steady-state
+**5 commits pushed to `main` since last handoff:**
 
----
+| # | Commit | What |
+|---|--------|------|
+| 1 | [`56cf4d3`](https://github.com/loganmasonshaver/Pantry/commit/56cf4d3) | Plan reveal honors SGoalDelta wheel pick (not hardcoded ±10) |
+| 2 | [`f3ab850`](https://github.com/loganmasonshaver/Pantry/commit/f3ab850) | Drop duplicate target date from plan reveal caption |
+| 3 | [`511324e`](https://github.com/loganmasonshaver/Pantry/commit/511324e) | Wire recipeTemplates into onboarding persistence + lazy backfill |
+| 4 | [`4095b96`](https://github.com/loganmasonshaver/Pantry/commit/4095b96) | Cut Snap & Log photo-to-macros from v1 (positioning over feature) |
+| 5 | [`5f8f405`](https://github.com/loganmasonshaver/Pantry/commit/5f8f405) | Profile data silently lost after onboarding reset |
 
-## Phase plan — all complete ✅
-
-| Phase | Status |
-|---|---|
-| 1 — Snap & Log hero on Home | ✅ |
-| 2a — Home compact "Cook from your pantry" tease | ✅ |
-| 2b — Pantry tab "Cook tonight" rows | ✅ |
-| 3a — Discover scaffold (NYT-Cooking hybrid) | ✅ |
-| 3b — Wire filters + split rails + gut Trending from Home | ✅ |
-| 3c — Dietary safety filter on Discover (search wired then removed) | ✅ |
-| 4 — Grocery merged into Pantry as sub-tab | ✅ |
-
-Plus shipped today: `__DEV__` gate on Reset Onboarding button.
+Previous session shipped 2 commits ([`91d8188`](https://github.com/loganmasonshaver/Pantry/commit/91d8188) goal-aware chart + plan-ready card, [`0007b7a`](https://github.com/loganmasonshaver/Pantry/commit/0007b7a) curated templates + pantry SVG visual).
 
 ---
 
-## Trending pipeline — current state
+## Architectural decision: Snap & Log cut from v1
 
-**Architecture (after today's overhaul):**
-1. `pg_cron` daily at 5am UTC (migration `20260512000012`)
-2. Calls `generate-trending-meals` with service role from Supabase Vault
-3. Pulls ~150 raw YouTube candidates, dedupes to 60 unique (after recent video_id rejection)
-4. **Gemini 3.1 Flash Lite** (single provider — OpenAI fallback removed) generates recipes
-5. **Post-LLM variety dedup**: group by primary protein, drop duplicates
-6. **Post-LLM name cleanup**: strip "High Protein"/"Recipe"/"Easy" patterns
-7. **FatSecret sanity check** (50% tolerance — only catches actual clickbait)
-8. **Density confirm** (25% meals, 22% snacks, 20% desserts)
-9. Final cap: 6 meals
-10. **Parallel** image generation via `generate-meal-image` (two-stage Flux)
+Ran the council. 4 of 5 advisors voted cut. Chairman ruled cut. Reasoning:
 
-**Yield characteristics:**
-- Target: 5-6 meals/day
-- Last few runs: 5, 4, 5 (consistent)
-- Bad-day floor: ~3-4
-- Names are clean editorial-trendy (no "High Protein" prefixes anymore)
-- Variety: 6 distinct primary protein sources per batch
+> A camera-bracket on a cook-focused app blurs identity at the exact moment pre-launch positioning needs to be sharp. Going head-to-head with Cal AI's $50M/yr moat on their turf with an untuned GPT-4o vision wrapper is the fastest path to one-star "wrong macros" reviews — and those reviews tank the App Store ranking that Pantry's actual differentiator (pantry-scan → personalized meal planning) needs to get discovered.
 
-**Image pipeline:**
-- Both trending AND recommended pantry meals route through `generate-meal-image`
-- Gemini writes a one-sentence visual description of the finished dish
-- Flux renders from that description + photography direction + negative prompts
-- Falls back to vessel-keyword static template if Gemini fails
-- Storage upload retries once on failure
-- **Bug**: Edge SDK occasionally fails uploads where manual `curl` succeeds (logged for v2)
+**Implementation:** `ENABLE_AI_PHOTO_LOG = false` constant at top of [app/(tabs)/index.tsx](app/(tabs)/index.tsx). The green Snap & Log card on Home and the AILogModal mount are both gated behind it. Component, edge function (`estimate-meal-macros`), and modal code are all intact — flip the flag to `true` to bring it back in v2.
 
-**Discover lifecycle:**
-- YouTube content kept 2 days (was 3)
-- Sorted by recency (today first, yesterday tails)
-- Creator content: 14 days base, 30 days if `vote_score ≥ 3` OR `log_count ≥ 10`
+**New marketing positioning:** *the macro app for people who actually cook.* Home is now visually 100% cook-from-pantry: scan card + saved meals + manual log via FoodSearchModal. No camera-bracket ambiguity.
 
-**Cost:**
-- Today: ~$15/mo (Flux × 6 meals/day)
-- After v2 cached-pool recycling (~6 months out): ~$0/mo
+**V2 revival path:** logged in `~/my-briefing/todos/active.md` with the council reasoning, the flag location, and the Optimist's suggestion to add confidence ranges ("~420-510 cal") to differentiate from Cal AI's "hide the uncertainty" UX when reviving.
 
 ---
 
-## Trending dedup hardening
+## Recipe templates fully wired
 
-| Layer | What it does |
-|---|---|
-| video_id 90-day | Rejects same YouTube video resurfacing weeks later |
-| Jaccard ≥0.5 word similarity | Catches paraphrase dupes ("Chocolate Cake" vs "Triple Chocolate Cake") with stopword filter for "high"/"protein"/"recipe" |
-| prevNames bounded to 60 days | Prevents false-positive avalanche as catalog grows |
-| Post-LLM variety dedup (in code) | Groups by primary protein, keeps one per source — deterministic enforcement of what the LLM keeps treating as soft suggestion |
+Previous session created `lib/recipeTemplates.ts` (94 entries, all images cached in Supabase Storage). This session WIRED IT INTO THE PERSISTENCE FLOW — last session's commit had stub `ingredients: [], steps: [], carbs: 0, fat: 0` left in `SPlanReveal`.
 
----
+**Current flow:**
 
-## Discover refresh paths (all 4 wired)
+```
+SPlanReveal mounts
+├── pickRecipe() filters curated 94-meal bank by allergens/dislikes/skill/prep
+├── For each pick: look up recipeTemplates[name]
+├── Scale: ratio = userPerMealCal / template.base_calories
+├── Apply scale to every ingredient's grams AND all 4 macros
+└── Write COMPLETE meals to AsyncStorage
 
-- Mount (app launch)
-- Tab focus (switching tabs)
-- **AppState foreground (NEW today)** — refetches when app comes back from background
-- **Pull-to-refresh (NEW today)** — green spinner, manual escape hatch
+finish() at paywall
+└── insert_saved_meal RPC → saved_meals row has real ingredients,
+    real steps, scaled macros (not 0s)
 
----
-
-## Misdiagnoses to remember (lessons from today)
-
-1. **pg_net `status_code: NULL`** does NOT mean the function failed. pg_net only waits a few seconds; functions taking >10s show NULL but complete server-side. Check function logs in dashboard, not pg_net response.
-
-2. **PostgREST silent rejects on RLS** — `curl -X PATCH` returns 204 with empty body whether the row was actually updated or not. **Always use `curl -i` and check `content-range: */N`** — `*/0` means RLS blocked it.
-
-3. **There were TWO Flux paths in the codebase** — `generate-meal-image` AND an inline duplicate in `generate-trending-meals`. Fixing one but not the other meant trending kept showing old broken images for hours while I assumed the fix had landed.
-
-4. **Don't ship "fixes" without auditing the deployed code FIRST** — `supabase functions download` confirms what's actually running before assuming.
-
----
-
-## Open bugs / known issues
-
-1. **Edge SDK Storage upload occasionally fails** for specific filenames (e.g. `mediterranean-beef-and-cucumber-bowl.jpg`) where manual `curl` to the same path returns 200. Mitigated by retry + don't-cache-fallback, but ~5-15% of trending images may fall back to FAL URL.
-
-2. **"Protein" word slips into mid-name positions** — e.g. "Hung Curd Protein Balls", "Greek Yogurt Protein Bagels". The `cleanName` regex strips leading "High Protein" but not standalone "Protein" mid-name (because that's a legit dish category for "protein balls"). Could refine but risks over-stripping.
-
-3. **Variety dedup detects "other" protein bucket** when a recipe doesn't match the 30-keyword protein list. Worth expanding the list (lentils, beans, quinoa, oats) if "other" appears often.
-
-4. **Yield is 5 not 6 reliably yet** — depends on day's YouTube content quality. If consistently below 5 over the next week, consider relaxing density tier or expanding candidate pool back to 100.
-
----
-
-## v2 list (logged in active.md)
-
-- Diet-aware "Featured for you" hero (trigger: pool ≥ 50)
-- Diet-specific YouTube queries to grow vegan/gluten-free/dairy-free segments
-- Restore search bar on Discover (trigger: pool ≥ 50)
-- Vertical "Discover more" grid below rails
-- Recycle from cached pool daily instead of generating new (trigger: pool ≥ 150-200)
-- Edge SDK Storage upload bug — investigate why specific files fail in Function but succeed via curl
-
----
-
-## Quick reference — useful SQL
-
-```sql
--- Trigger trending regen (idempotent, safe to re-run)
-SELECT net.http_post(
-  url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true',
-  headers := jsonb_build_object(
-    'Content-Type', 'application/json',
-    'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'cron_service_role_key' LIMIT 1)
-  ),
-  body := '{}'::jsonb
-);
-
--- Watch progress
-SELECT id, status_code, created FROM net._http_response ORDER BY created DESC LIMIT 5;
--- (NULL status_code = function ran longer than pg_net wait window — check dashboard logs instead)
-
--- Inspect today's trending pool with density math
-SELECT name, category, calories, protein, prep_time, video_id,
-       ROUND((protein * 4.0 * 100 / calories)::numeric, 1) AS pct_cal_from_protein,
-       image
-FROM trending_meals
-WHERE generated_at = CURRENT_DATE AND trend_source = 'YouTube trending'
-ORDER BY id DESC;
-
--- Force-update a specific trending row's image (use when manual re-render is needed)
-UPDATE trending_meals
-SET image = 'https://fdafjnkqqtpsjtddbfdz.supabase.co/storage/v1/object/public/meal-images/{filename}.jpg'
-WHERE name = 'Meal Name Here' AND generated_at = CURRENT_DATE;
-
--- Wipe trending cache (one-off, ~$0.50 in re-renders, only YouTube — preserves creators)
-DELETE FROM trending_meals WHERE trend_source = 'YouTube trending';
-DELETE FROM image_cache; -- optional, forces fresh two-stage Flux on next call
-
--- Check cron schedule
-SELECT * FROM cron.job WHERE jobname = 'trending-meals-daily';
+Home/Saved tap a meal
+└── meal/[id].tsx renders instantly from the saved row's data
 ```
 
----
+**Defensive backfill** added to [app/meal/[id].tsx](app/meal/[id].tsx) — if ANY saved meal opens with empty `ingredients` or `steps`, look up the template by name and backfill at render time (scaled to the saved row's calorie count). Handles legacy rows from users who completed onboarding between the AI-removal commit (`0007b7a`) and the templates-wired commit (`511324e`).
 
-## Key file paths touched today
-
-- `app/(tabs)/_layout.tsx` — added Discover tab, hid Grocery from bar
-- `app/(tabs)/index.tsx` — gutted of trending (~395 lines removed)
-- `app/(tabs)/pantry.tsx` — added Cook tonight section + sub-tab toggle
-- `app/(tabs)/discover.tsx` — entire screen, including AppState refetch + pull-to-refresh
-- `app/(tabs)/grocery.tsx` — added sub-tab toggle, hidden from nav
-- `app/meal/[id].tsx` — compact ingredient list, removed low-protein warning, `__DEV__` gate (profile.tsx)
-- `components/PantryGroceryTabs.tsx` — new shared sub-tab component
-- `supabase/functions/generate-trending-meals/index.ts` — heavily overhauled
-- `supabase/functions/generate-meal-image/index.ts` — two-stage pipeline + retry
-- `supabase/migrations/20260514000001_trending_video_id.sql` — new column for dedup
+**Verified:** all 94 unique recipe names in the curated bank have matching entries in `recipeTemplates.ts`. No name will ever fall through to the empty-data fallback for a new user.
 
 ---
 
-## What got shipped this session (committed + pushed)
+## Profile pipeline fixes
 
-Major commits in roughly chronological order:
-- `01a7177` Phase 2b — Pantry "Cook tonight" + dev-gate reset
-- `e31bf72` Phase 4 — Grocery becomes a sub-tab inside Pantry
-- `ba5f182` Phase 3a — Discover tab scaffold (NYT-Cooking hybrid)
-- `991cf6f` Phase 3b — wire Discover filters, split rails, gut Trending from Home
-- `559f059` Two-stage Flux pipeline — Gemini describes, then Flux renders
-- `4b4ae3b` Trending volume bump + snack density tier
-- `9f3af73` Phase 3c — Discover dietary safety filter + working search
-- `4a6b57b` Cap rails, pull search until pool is deeper
-- `7f16eb8` Trending dedup hardening — video_id tracking + Jaccard
-- `0ffd0aa` Widen trending candidate pool
-- `4156928` Trending images now route through two-stage Flux pipeline
-- `b03b496` generate-meal-image — retry Storage upload, don't cache FAL fallback
-- `646621b` Trending pipeline overhaul — fidelity, headroom, sanity check
-- `67a5b48` Parallelize trending image generation + add stage timing logs
-- `aced4ef` Trending function — LLM timeout, smaller descriptions, candidate cap
-- `fc5bfde` Hard variety rule + protein-source quota
-- `0071243` Loosen FatSecret tolerance to 50%, bump LLM timeout, drop protein warning
-- `9b0e583` Gemini-only + post-LLM variety dedup + name cleanup
-- `4386064` Raise LLM break threshold 6 → 8
-- `20d3531` 2-day trending window + compact ingredient list
-- `f39fa02` Discover refetches on app foreground + pull-to-refresh
+Logan noticed: after reset onboarding, the calorie/macro goals shown on Home didn't match what the plan reveal screen displayed. Three independent bugs in one cascade:
 
-Branch: `claude/agitated-chaplygin-09a8a0` (merged to main)
+### Bug 1: `finish()` did `.update()` on a deleted row (silent no-op)
+
+`resetOnboarding` on Profile **deletes the profile row entirely** (`supabase.from('profiles').delete().eq('id', user.id)`). The subsequent onboarding's `finish()` then did `.update()` on a row that no longer existed. PostgreSQL returned 0 rows affected. Supabase didn't raise an error. Onboarding data silently vanished.
+
+**Fix:** switched to `.upsert({...}, { onConflict: 'id' })` — recreates the row if missing.
+
+### Bug 2: `finish()` never computed `carbs_goal` / `fat_goal`
+
+Even for users who never reset, only `calorie_goal` and `protein_goal` got persisted. Home's macro card fell back to hardcoded `useState(250)` for carbs and `useState(80)` for fat — completely disconnected from the user's calorie target.
+
+**Fix:** `finish()` now derives both from the calorie target:
+- `fat_grams = (calories * 0.27) / 9` — 27% of calories from fat (within ISSN range)
+- `carbs_grams = (calories - protein*4 - fat*9) / 4` — remainder after protein
+
+A 1330 kcal cutter now sees **129g protein / 114g carbs / 40g fat** on Home — matching the plan reveal numbers, not random defaults.
+
+### Bug 3: Home's profile fetch used `useEffect([user])`
+
+Fires only when user identity changes. After `finish()` updated the profile and `router.replace('/(tabs)')` navigated back, Home was already mounted as a tab — the effect didn't re-fire. Even successful profile updates wouldn't reach the UI until next cold start.
+
+**Fix:** swapped to `useFocusEffect` — re-runs every time Home gains focus. Post-finish navigation now immediately reflects the new values.
+
+---
+
+## Other polish shipped this session
+
+- **SGoalDelta wheel-pick honored in plan reveal** ([`56cf4d3`](https://github.com/loganmasonshaver/Pantry/commit/56cf4d3)): SPlanReveal was reading `data.targetWeight` (set by STargetWeight) which lose/build users skip — it always showed ±10 lbs regardless of what they picked. Now reads `data.targetWeightDelta` for lose/build, falls back to `targetWeight` for maintain.
+- **Duplicate target date** ([`f3ab850`](https://github.com/loganmasonshaver/Pantry/commit/f3ab850)): chart endpoint already labels target date. Caption no longer repeats it — shows just the duration ("~7 months").
+- **Real pantry visual on scan card** (from `0007b7a` last session): 3 shelves with depth + 9 varied SVG items (jar, can, cereal box, oil bottle, tuna tin, egg carton, milk carton, jam jar, pasta box) + sweeping scan beam.
+- **Scan card copy collapsed**: single confident headline ("Cook tonight without a store run." / "Unlock recipes built around what you already have.") instead of title+subtitle.
 
 ---
 
 ## Things to verify on device next session
 
-1. **Discover background → foreground refresh** — open app, switch to another app for a few minutes, come back, verify trending updated (no force-quit needed)
-2. **Pull-to-refresh on Discover** — pull down, see green spinner, fresh fetch
-3. **Compact ingredient list** — open any meal detail, verify rows are tighter (single-line "55g all purpose flour" instead of stacked name + portion)
-4. **Trending naming** — verify no "High Protein" or "Recipe" prefixes/suffixes anymore
-5. **Variety** — verify each new daily batch has 5-6 distinct protein sources
+1. **Reset → re-onboard end-to-end test:**
+   - Profile → Reset Onboarding
+   - Sign back in, walk through fresh with lose 30 lbs + specific height/weight/age
+   - **Plan Reveal calories/protein numbers**: write them down
+   - Get past paywall
+   - **Home macro card numbers should match** (calories, protein, carbs, fat all consistent with plan reveal)
+   - **Profile → goals row should match**
+
+2. **Tap a saved onboarding meal:**
+   - Should open instantly with real ingredients (scaled grams) + cooking steps
+   - No "blank Tuna Poke Bowl" experience anymore
+
+3. **Snap & Log card should be gone** from Home regardless of pantry state.
+
+4. **All 3 goal variants** (lose / maintain / build):
+   - Each goes through SGoalDelta correctly (maintain auto-skips)
+   - STargetWeight auto-skipped for lose/build, shown for maintain
+   - Plan reveal headline matches their goal ("burn fat" / "recomp your body" / "build muscle")
+   - Plan reveal weight delta matches their wheel pick
 
 ---
 
-## Next steps in priority order
+## File pointers
 
-1. **Watch trending yield 3-5 days** — confirm it lands consistently at 5-6. If routinely below 5, tune density tier or candidate pool.
-2. **Pre-launch checklist in active.md** — Apple Dev verification is the hard external blocker; everything else is parallel-actionable.
-3. **Edge SDK Storage upload bug** — investigate why specific filenames fail in Function but succeed via curl. Could be losing 5-15% of trending image renders.
-4. **Influencer outreach prep** — drafts for Instagram DMs, post-launch.
-5. **v2 items** when content pool is deep enough to justify them.
+- [lib/recipeTemplates.ts](lib/recipeTemplates.ts) — 94 entries, auto-generated, re-runnable via `/tmp/seed_recipe_templates.py`
+- [app/onboarding/index.tsx](app/onboarding/index.tsx) — SPlanReveal template scaling at ~2600, finish() upsert + carbs/fat at ~3795
+- [app/(tabs)/index.tsx](app/(tabs)/index.tsx) — `ENABLE_AI_PHOTO_LOG` flag at line 52, useFocusEffect profile fetch at ~463
+- [app/meal/[id].tsx](app/meal/[id].tsx) — defensive template backfill in the mealData parse block (~line 432)
+- [supabase/functions/seed-recipe-template/](supabase/functions/seed-recipe-template/) — temp one-shot admin function for seeding. **Delete after final seeding is done:** `supabase functions delete seed-recipe-template`
+
+---
+
+## Known limitations / v2 todos
+
+- **Snap & Log** — logged in active.md with full revival instructions
+- **Template quality** — what Gemini gave us. May need a manual taste-pass.
+- **Linear macro scaling** preserves the template's protein ratio. Doesn't bias toward 45% protein for cutters specifically. Fine for v1 since the bank is high-protein authored.
+- **94 unique recipes only** for onboarding — less variety than infinite AI generation, but consistent + curated. V2 candidates: expand bank, rate templates, expand SVG item set on scan card.
+- **Pre-existing TS errors** at `app/onboarding/index.tsx:393` and `app/(tabs)/index.tsx:196/1064` (the `startsWith` ones) — not introduced this session, not blocking, but worth a future cleanup pass.
+
+---
+
+Branch: `claude/awesome-pare-0f1d0b` (all commits fast-forwarded to `main`)
