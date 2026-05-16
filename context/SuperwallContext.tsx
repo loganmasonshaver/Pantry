@@ -9,6 +9,12 @@ import { useAuth } from '@/context/AuthContext'
 const TRIAL_STARTED_KEY = 'pantry_trial_started_at'
 const TRIAL_EXPIRED_KEY = 'pantry_trial_expired'
 
+// Flip to TRUE in dev to test the real Superwall paywall flow.
+// Bypasses the __DEV__ "always premium" shortcut below so registerPlacement
+// actually presents the paywall modal. Must be FALSE for normal dev work or
+// every screen will throw paywalls at you. Has no effect in release builds.
+const DEV_FORCE_PAYWALL = false
+
 type SuperwallContextType = {
   isPremium: boolean
   loading: boolean
@@ -30,8 +36,9 @@ const SuperwallContext = createContext<SuperwallContextType>({
 })
 
 export function SuperwallContextProvider({ children }: { children: React.ReactNode }) {
-  // In dev, always premium — skip all Superwall checks
-  if (__DEV__) {
+  // In dev, always premium — skip all Superwall checks. Flip DEV_FORCE_PAYWALL
+  // above to TRUE to bypass this shortcut and exercise the real paywall flow.
+  if (__DEV__ && !DEV_FORCE_PAYWALL) {
     return (
       <SuperwallContext.Provider value={{ isPremium: true, loading: false, trialExpired: false, promoActive: true, registerPlacement: async () => {}, triggerUpgrade: async () => {} }}>
         {children}

@@ -430,11 +430,30 @@ export default function MealDetailScreen() {
     else addToPantry(ingredientName)
   }
 
+  // Fallback DB lookup: when callers route via `{ id }` only (e.g. the home
+  // "Your plan is ready" card), fetch the full row from saved_meals so we can
+  // render without requiring serialized mealData on every tap path.
+  const [fetchedMealData, setFetchedMealData] = useState<string | null>(null)
+  const [fetchingMeal, setFetchingMeal] = useState(false)
+  useEffect(() => {
+    if (mealData || !id || !user) return
+    let cancelled = false
+    setFetchingMeal(true)
+    supabase.from('saved_meals').select('*').eq('id', id).eq('user_id', user.id).maybeSingle()
+      .then(({ data }) => {
+        if (cancelled) return
+        if (data) setFetchedMealData(JSON.stringify(data))
+        setFetchingMeal(false)
+      })
+    return () => { cancelled = true }
+  }, [id, mealData, user])
+  const effectiveMealData = mealData || fetchedMealData
+
   let meal: MealDetail | null = null
   let isUserCreated = false
-  if (mealData) {
+  if (effectiveMealData) {
     try {
-      const generated: any = JSON.parse(mealData)
+      const generated: any = JSON.parse(effectiveMealData)
       isUserCreated = generated.is_user_created === true
       let rawIngredients: any[] = generated.ingredients ?? []
       let rawSteps: any[] = generated.steps ?? []
@@ -534,7 +553,7 @@ export default function MealDetailScreen() {
   if (!meal) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Text style={styles.notFound}>Meal not found.</Text>
+        <Text style={styles.notFound}>{fetchingMeal ? 'Loading…' : 'Meal not found.'}</Text>
       </SafeAreaView>
     )
   }

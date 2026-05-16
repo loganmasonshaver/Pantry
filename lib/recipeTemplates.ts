@@ -5865,5 +5865,133 @@ export const templates: Record<string, RecipeTemplate> = {
         "detail": "Place the bites on a tray and refrigerate for 15 minutes to firm up before serving."
       }
     ]
+  },
+  "Cottage Cheese Berry Bowl with Honey & Cinnamon": {
+    "name": "Cottage Cheese Berry Bowl with Honey & Cinnamon",
+    "prepTime": 5,
+    "calories": 500,
+    "protein": 50,
+    "carbs": 48,
+    "fat": 12,
+    "ingredients": [
+      { "name": "low-fat cottage cheese", "visual": "1 cup", "grams": "200g" },
+      { "name": "vanilla whey protein powder", "visual": "1 scoop", "grams": "30g" },
+      { "name": "mixed berries", "visual": "1 cup", "grams": "150g" },
+      { "name": "honey", "visual": "1 tbsp", "grams": "21g" },
+      { "name": "chia seeds", "visual": "1 tbsp", "grams": "12g" },
+      { "name": "ground cinnamon", "visual": "1/4 tsp", "grams": "1g" }
+    ],
+    "steps": [
+      { "title": "Mix Base", "detail": "Spoon the cottage cheese into a bowl and stir in the vanilla protein powder until smooth and fully combined." },
+      { "title": "Add Toppings", "detail": "Scatter the mixed berries over the cottage cheese, drizzle with honey, and sprinkle the chia seeds on top." },
+      { "title": "Finish", "detail": "Dust the bowl with a pinch of ground cinnamon and serve immediately for the freshest texture." }
+    ]
+  },
+  "Chocolate Peanut Butter Protein Mug Cake": {
+    "name": "Chocolate Peanut Butter Protein Mug Cake",
+    "prepTime": 5,
+    "calories": 500,
+    "protein": 45,
+    "carbs": 38,
+    "fat": 18,
+    "ingredients": [
+      { "name": "chocolate whey protein powder", "visual": "1 scoop", "grams": "30g" },
+      { "name": "large egg", "visual": "1 egg", "grams": "50g" },
+      { "name": "natural peanut butter", "visual": "1 tbsp", "grams": "16g" },
+      { "name": "rolled oats", "visual": "1/4 cup", "grams": "20g" },
+      { "name": "unsweetened cocoa powder", "visual": "1 tsp", "grams": "5g" },
+      { "name": "unsweetened almond milk", "visual": "1/4 cup", "grams": "60g" },
+      { "name": "baking powder", "visual": "1/4 tsp", "grams": "1g" },
+      { "name": "stevia or sweetener", "visual": "1 tsp", "grams": "5g" }
+    ],
+    "steps": [
+      { "title": "Mix Dry", "detail": "In a large microwave-safe mug, whisk together the protein powder, oats, cocoa powder, baking powder, and sweetener." },
+      { "title": "Add Wet", "detail": "Crack the egg into the mug, add the peanut butter and almond milk, and stir vigorously until the batter is smooth with no dry pockets." },
+      { "title": "Microwave", "detail": "Microwave on high for 60-75 seconds, until the cake springs back when lightly touched. Do not overcook or it will turn rubbery." }
+    ]
+  },
+  "Vanilla Greek Yogurt with Berries & Dark Chocolate": {
+    "name": "Vanilla Greek Yogurt with Berries & Dark Chocolate",
+    "prepTime": 5,
+    "calories": 500,
+    "protein": 50,
+    "carbs": 50,
+    "fat": 11,
+    "ingredients": [
+      { "name": "nonfat Greek yogurt", "visual": "1 cup", "grams": "250g" },
+      { "name": "vanilla whey protein powder", "visual": "1 scoop", "grams": "30g" },
+      { "name": "mixed berries", "visual": "1 cup", "grams": "150g" },
+      { "name": "dark chocolate (70%+), chopped", "visual": "2 squares", "grams": "20g" },
+      { "name": "honey", "visual": "2 tsp", "grams": "14g" }
+    ],
+    "steps": [
+      { "title": "Mix Base", "detail": "Spoon the Greek yogurt into a bowl and stir in the vanilla protein powder until fully dissolved and creamy." },
+      { "title": "Top", "detail": "Scatter the mixed berries over the yogurt and sprinkle the chopped dark chocolate evenly across the surface." },
+      { "title": "Finish", "detail": "Drizzle the honey over the top and serve immediately while the chocolate is still crisp." }
+    ]
+  },
+  "Frozen Banana Nice Cream with Cocoa": {
+    "name": "Frozen Banana Nice Cream with Cocoa",
+    "prepTime": 5,
+    "calories": 500,
+    "protein": 35,
+    "carbs": 70,
+    "fat": 8,
+    "ingredients": [
+      { "name": "frozen banana, sliced", "visual": "2 medium", "grams": "200g" },
+      { "name": "vanilla whey protein powder", "visual": "1 scoop", "grams": "30g" },
+      { "name": "unsweetened cocoa powder", "visual": "2 tbsp", "grams": "10g" },
+      { "name": "unsweetened almond milk", "visual": "1/3 cup", "grams": "80g" },
+      { "name": "vanilla extract", "visual": "1/2 tsp", "grams": "2g" },
+      { "name": "honey", "visual": "2 tsp", "grams": "14g" }
+    ],
+    "steps": [
+      { "title": "Blend", "detail": "Add the frozen banana slices, protein powder, cocoa, vanilla extract, and almond milk to a high-powered blender or food processor." },
+      { "title": "Process", "detail": "Blend on high, scraping down the sides as needed, until thick and creamy like soft-serve ice cream (about 1-2 minutes)." },
+      { "title": "Serve", "detail": "Drizzle with honey and serve immediately, or transfer to the freezer for 20-30 minutes for a firmer scoopable texture." }
+    ]
+  },
+  "Chocolate Avocado Mousse": {
+    "name": "Chocolate Avocado Mousse",
+    "prepTime": 5,
+    "calories": 500,
+    "protein": 32,
+    "carbs": 48,
+    "fat": 20,
+    "ingredients": [
+      { "name": "ripe avocado", "visual": "1 medium", "grams": "150g" },
+      { "name": "vegan chocolate protein powder", "visual": "1 scoop", "grams": "30g" },
+      { "name": "unsweetened cocoa powder", "visual": "2 tbsp", "grams": "12g" },
+      { "name": "maple syrup", "visual": "2 tbsp", "grams": "40g" },
+      { "name": "unsweetened light coconut milk", "visual": "1/4 cup", "grams": "60g" },
+      { "name": "vanilla extract", "visual": "1/2 tsp", "grams": "2g" },
+      { "name": "salt", "visual": "pinch", "grams": "1g" }
+    ],
+    "steps": [
+      { "title": "Combine", "detail": "Scoop the avocado flesh into a blender or food processor and add the protein powder, cocoa, maple syrup, coconut milk, vanilla, and salt." },
+      { "title": "Blend", "detail": "Process on high for 30-60 seconds, stopping to scrape down the sides, until completely smooth with no avocado lumps remaining." },
+      { "title": "Chill", "detail": "Spoon the mousse into a bowl and refrigerate for at least 15 minutes — this firms it up and lets the flavors meld before serving." }
+    ]
+  },
+  "Berry Chia Pudding with Maple": {
+    "name": "Berry Chia Pudding with Maple",
+    "prepTime": 5,
+    "calories": 500,
+    "protein": 30,
+    "carbs": 65,
+    "fat": 15,
+    "ingredients": [
+      { "name": "chia seeds", "visual": "3 tbsp", "grams": "30g" },
+      { "name": "vegan vanilla protein powder", "visual": "1 scoop", "grams": "30g" },
+      { "name": "unsweetened light coconut milk", "visual": "1 cup", "grams": "240g" },
+      { "name": "mixed berries", "visual": "1 cup", "grams": "150g" },
+      { "name": "maple syrup", "visual": "1 tbsp", "grams": "21g" },
+      { "name": "vanilla extract", "visual": "1/2 tsp", "grams": "2g" }
+    ],
+    "steps": [
+      { "title": "Whisk Base", "detail": "In a jar or bowl, whisk together the coconut milk, protein powder, maple syrup, and vanilla until the protein is fully dissolved with no lumps." },
+      { "title": "Add Chia", "detail": "Stir in the chia seeds thoroughly, then let the mixture sit for 5 minutes and stir again to break up any clumps that formed." },
+      { "title": "Chill & Top", "detail": "Cover and refrigerate for at least 2 hours (or overnight) until pudding-thick. Top with the mixed berries just before serving." }
+    ]
   }
 };

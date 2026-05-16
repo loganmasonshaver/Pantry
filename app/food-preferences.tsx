@@ -26,6 +26,7 @@ export const DISLIKE_CHIPS = [
   'Gluten',
   'Dairy',
   'Nuts',
+  'Seafood',
   'Shellfish',
   'Eggs',
   'Soy',

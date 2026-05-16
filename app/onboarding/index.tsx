@@ -1042,11 +1042,12 @@ function STargetWeight({
   onNext: () => void; onBack: () => void
 }) {
   const currentLb = parseInt(weight || '180', 10)
-  // Navigation in the parent skips this screen for lose/build (they committed via
-  // SGoalDelta). targetWeight is computed from delta + current weight in finish().
+  // Parent navigation skips this screen for everyone:
+  // - lose/build users commit via SGoalDelta wheel
+  // - maintain (recomp) users have no target weight — it equals current weight
   // The early-return below is just a defensive guard in case the screen is reached
-  // accidentally — back-navigation bouncing previously trapped users here.
-  if (goal !== 'maintain' && !!targetWeightDelta) return null
+  // accidentally (deep link, back-nav edge case).
+  if (goal === 'maintain' || !!targetWeightDelta) return null
 
   // Default target reflects goal direction so picker starts on a non-zero delta
   const defaultDelta = goal === 'lose' ? -10 : goal === 'build' ? 10 : 0
@@ -2276,7 +2277,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   // guaranteeing 3 valid meals even for the pickiest user without relaxing filters.
   type Sample = { name: string; slot: string; Icon: any; tint: string; calPct: number; protPct: number; prepMin: number }
   const sampleMeals = useMemo<Sample[]>(() => {
-    type Recipe = { name: string; Icon: any; tint: string; contains: string[]; skill: 'easy' | 'medium' | 'hard'; prepMin: number }
+    type Recipe = { name: string; Icon: any; tint: string; contains: string[]; skill: 'easy' | 'medium' | 'hard'; prepMin: number; dessert?: boolean }
 
     const recipes: Record<string, Record<string, Recipe[]>> = {
       Classic: {
@@ -2313,9 +2314,13 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Tuna Steak with Sesame Bok Choy', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Sesame', 'Soy'], skill: 'medium', prepMin: 20 },
         ],
         Snack: [
-          { name: 'Greek Yogurt Parfait with Granola', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Greek Yogurt Parfait with Granola', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5, dessert: true },
           { name: 'Hard-Boiled Eggs and Fruit', Icon: Sprout, tint: '#A78BFA', contains: ['Eggs'], skill: 'easy', prepMin: 15 },
-          { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Cottage Cheese Berry Bowl with Honey & Cinnamon', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Chocolate Peanut Butter Protein Mug Cake', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Eggs', 'Gluten', 'Nuts'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Vanilla Greek Yogurt with Berries & Dark Chocolate', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Frozen Banana Nice Cream with Cocoa', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
         ],
         'Main Meal': [
           { name: 'Grilled Chicken Rice Bowl', Icon: Drumstick, tint: TEAL, contains: [], skill: 'easy', prepMin: 20 },
@@ -2359,9 +2364,13 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Sesame Tuna Steak with Bok Choy', Icon: Fish, tint: '#60A5FA', contains: ['Fish', 'Sesame', 'Soy'], skill: 'medium', prepMin: 20 },
         ],
         Snack: [
-          { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5 },
+          { name: 'Greek Yogurt Protein Oats', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5, dessert: true },
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 10 },
-          { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
+          { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Cottage Cheese Berry Bowl with Honey & Cinnamon', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Chocolate Peanut Butter Protein Mug Cake', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Eggs', 'Gluten', 'Nuts'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Vanilla Greek Yogurt with Berries & Dark Chocolate', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Frozen Banana Nice Cream with Cocoa', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
         ],
         'Main Meal': [
           { name: 'Tuna and Avocado Rice Bowl', Icon: Fish, tint: '#60A5FA', contains: ['Fish'], skill: 'easy', prepMin: 8 },
@@ -2401,9 +2410,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 8 },
         ],
         Snack: [
-          { name: 'Cottage Cheese Berry Power Bowl', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5 },
-          { name: 'Vanilla Protein Chia Pudding', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5 },
+          { name: 'Cottage Cheese Berry Power Bowl', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Vanilla Protein Chia Pudding', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 10 },
+          { name: 'Chocolate Peanut Butter Protein Mug Cake', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Eggs', 'Gluten', 'Nuts'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Vanilla Greek Yogurt with Berries & Dark Chocolate', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Frozen Banana Nice Cream with Cocoa', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
         ],
         'Main Meal': [
           { name: 'Lentil Dal with Basmati Rice', Icon: Salad, tint: '#EF4444', contains: [], skill: 'easy', prepMin: 25 },
@@ -2444,13 +2456,15 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           { name: 'Black Bean and Avocado Rice Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 8 },
         ],
         Snack: [
-          { name: 'Mango Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
-          { name: 'Peanut Butter Banana Smoothie', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
-          { name: 'Apple with Almond Butter', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
+          { name: 'Mango Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Peanut Butter Banana Smoothie', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Apple with Almond Butter', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5, dessert: true },
           { name: 'Edamame with Sea Salt', Icon: Sprout, tint: '#A78BFA', contains: ['Soy'], skill: 'easy', prepMin: 5 },
-          { name: 'Peanut Butter Apple Slices', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5 },
-          { name: 'Coconut Date Energy Bites', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5 },
-          { name: 'Sliced Fruit with Tahini Drizzle', Icon: Sprout, tint: '#A78BFA', contains: ['Sesame'], skill: 'easy', prepMin: 5 },
+          { name: 'Peanut Butter Apple Slices', Icon: Sprout, tint: '#A78BFA', contains: ['Nuts'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Coconut Date Energy Bites', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Sliced Fruit with Tahini Drizzle', Icon: Sprout, tint: '#A78BFA', contains: ['Sesame'], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Chocolate Avocado Mousse', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
+          { name: 'Berry Chia Pudding with Maple', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
         ],
         'Main Meal': [
           { name: 'Chickpea and Avocado Salad Bowl', Icon: Salad, tint: TEAL, contains: [], skill: 'easy', prepMin: 10 },
@@ -2465,7 +2479,27 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
     // Strict recipe picker — filters on all 4 axes simultaneously, deduplicates across slots.
     // Also tracks ingredient theme so "chickpea lunch" never pairs with "chickpea dinner".
-    const avoidSet = new Set(allAvoids)
+    // Expand user-facing dislikes (chips + custom text) to the canonical allergen tags
+    // used in recipe.contains. Without this, "Seafood" wouldn't filter salmon (tagged 'Fish')
+    // and typed "gluten" wouldn't match recipes tagged 'Gluten' (case mismatch).
+    const expandDislike = (raw: string): string[] => {
+      const d = raw.toLowerCase().trim()
+      if (!d) return []
+      if (d === 'seafood')                                           return ['Fish', 'Shellfish']
+      if (['gluten', 'wheat', 'bread', 'pasta'].includes(d))         return ['Gluten']
+      if (['dairy', 'milk', 'cheese', 'yogurt', 'lactose'].includes(d)) return ['Dairy']
+      if (['nuts', 'nut', 'peanut', 'peanuts', 'almond', 'almonds', 'cashew', 'cashews', 'walnut', 'walnuts'].includes(d)) return ['Nuts']
+      if (['shellfish', 'shrimp', 'crab', 'lobster', 'scallop', 'scallops'].includes(d)) return ['Shellfish']
+      if (['fish', 'salmon', 'tuna', 'cod', 'tilapia', 'halibut', 'mahi'].includes(d)) return ['Fish']
+      if (['eggs', 'egg'].includes(d))                               return ['Eggs']
+      if (['soy', 'tofu', 'edamame', 'soybean', 'soybeans'].includes(d)) return ['Soy']
+      if (['sesame', 'tahini'].includes(d))                          return ['Sesame']
+      if (['pork', 'bacon', 'ham'].includes(d))                      return ['Pork']
+      if (['beef', 'steak'].includes(d))                             return ['Beef']
+      return [raw] // unknown — keep raw for substring matching below
+    }
+    const avoidSet = new Set<string>()
+    for (const a of allAvoids) for (const tag of expandDislike(a)) avoidSet.add(tag)
     const userSkill = data.cookingSkill || 'moderate'
     const allowedSkills: Record<string, string[]> = {
       minimal:     ['easy'],
@@ -2521,13 +2555,11 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       let chosen = bench.find(r => !pickedNames.has(r.name) && !getThemes(r.name).some(t => pickedThemes.has(t)) && passes(r))
       // Pass 2: relax theme dedup
       if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && passes(r))
-      // Pass 3: relax all dedup, still respect allergens + skill + prep
-      if (!chosen) chosen = bench.find(r => passes(r))
-      // Pass 4: relax skill + dislikes — still enforce allergens + prepMin + no exact dup
+      // Pass 3: relax skill — still enforce allergens + prep + no dup
       if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && noAllergen(r) && r.prepMin <= prepMin)
-      // Pass 5: relax prep — allergen safety is the only hard constraint remaining
+      // Pass 4: relax prep too — allergens + no dup
       if (!chosen) chosen = bench.find(r => !pickedNames.has(r.name) && noAllergen(r))
-      // Pass 6: absolute last resort — best available even if allergen/dup (better than crashing)
+      // Pass 5: ABSOLUTE last resort — allow dup but never break allergen safety
       if (!chosen) chosen = bench.find(r => noAllergen(r)) ?? bench[0]
 
       if (chosen) {
@@ -2563,12 +2595,16 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         Dinner:            { calPct: 0.30, protPct: 0.27 },
       },
       6: {
-        Breakfast:        { calPct: 0.20, protPct: 0.21 },
-        'Morning Snack':  { calPct: 0.09, protPct: 0.10 },
-        Lunch:            { calPct: 0.26, protPct: 0.26 },
-        'Afternoon Snack':{ calPct: 0.09, protPct: 0.10 },
-        Dinner:           { calPct: 0.27, protPct: 0.24 },
-        'Evening Snack':  { calPct: 0.09, protPct: 0.09 },
+        // 4 mains + 2 snacks. Bodybuilder-style: extra Mid-Afternoon Meal
+        // pulls from the Lunch bench for a second protein-rich plate.
+        // Dessert pulls from the Snack bench (sweet options like protein
+        // smoothies and yogurt parfaits already live there).
+        Breakfast:            { calPct: 0.22, protPct: 0.21 },
+        Snack:                { calPct: 0.09, protPct: 0.10 },
+        Lunch:                { calPct: 0.24, protPct: 0.24 },
+        'Mid-Afternoon Meal': { calPct: 0.14, protPct: 0.16 },
+        Dinner:               { calPct: 0.24, protPct: 0.24 },
+        Dessert:              { calPct: 0.07, protPct: 0.05 },
       },
     }
 
@@ -2576,8 +2612,24 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     const count = Math.min(Math.max(parseInt(data.meals) || 3, 1), 6)
     const distro = distributions[count]
     return Object.entries(distro).map(([slot, macro]) => {
-      // Named snack slots (Morning Snack, Afternoon Snack, Evening Snack) reuse the Snack bench
-      const bench = recipes[diet][slot] ?? recipes[diet]['Snack'] ?? []
+      // Slot → bench routing. Direct match first, then explicit aliases for
+      // synthetic slots, then fall back to the Snack bench (covers all *Snack*
+      // and Dessert slots since sweet options live there).
+      // Dessert slot ONLY picks recipes tagged dessert:true (no salads/eggs/etc).
+      // Falls back to full snack bench if allergens filter out every dessert
+      // — better to show a savory snack than crash with an empty slot.
+      let bench: Recipe[]
+      if (recipes[diet][slot]) {
+        bench = recipes[diet][slot]
+      } else if (slot === 'Mid-Afternoon Meal') {
+        bench = recipes[diet]['Lunch'] ?? []
+      } else if (slot === 'Dessert') {
+        const snackBench = recipes[diet]['Snack'] ?? []
+        const desserts = snackBench.filter(r => r.dessert)
+        bench = desserts.length > 0 ? desserts : snackBench
+      } else {
+        bench = recipes[diet]['Snack'] ?? []
+      }
       const chosen = pickRecipe(bench)
       return {
         slot,
@@ -3774,14 +3826,16 @@ export default function Onboarding() {
   const next = () => {
     // Skip SGoalDelta (step 7) for maintain users — they have no delta target
     if (step === 6 && data.goal === 'maintain') return navigate(8)
-    // Skip STargetWeight (step 10) for lose/build users — they already committed via delta
-    if (step === 9 && data.goal !== 'maintain') return navigate(11)
+    // Skip STargetWeight (step 10) for EVERYONE:
+    // - lose/build users committed via SGoalDelta wheel
+    // - maintain (recomp) users have no target weight — it equals current weight
+    if (step === 9) return navigate(11)
     navigate(step + 1)
   }
   const back = () => {
     // Mirror the forward skips so back navigation doesn't land on an auto-skipped screen
     if (step === 8 && data.goal === 'maintain') return navigate(6)
-    if (step === 11 && data.goal !== 'maintain') return navigate(9)
+    if (step === 11) return navigate(9)
     navigate(step - 1)
   }
 
