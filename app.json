@@ -17,7 +17,9 @@
       "bundleIdentifier": "com.kobalabs.pantry",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Pantry needs camera access to scan barcodes and food items."
+        "NSCameraUsageDescription": "Pantry uses your camera to scan your pantry shelves, capture meal photos, and scan grocery barcodes.",
+        "NSPhotoLibraryUsageDescription": "Pantry needs photo access so you can upload meal photos and import grocery receipt images you've already taken.",
+        "NSPhotoLibraryAddUsageDescription": "Pantry saves meal images you generate to your photo library so you can share them later."
       }
     },
     "web": {
@@ -30,14 +32,16 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Pantry needs access to your photos to scan grocery receipts.",
-          "cameraPermission": "Pantry needs access to your camera to scan grocery receipts."
+          "photosPermission": "Pantry needs photo access so you can upload meal photos and import grocery receipt images you've already taken.",
+          "cameraPermission": "Pantry uses your camera to scan your pantry shelves, capture meal photos, and scan grocery barcodes."
         }
       ],
       [
         "expo-camera",
         {
-          "cameraPermission": "Pantry needs camera access to scan barcodes."
+          "cameraPermission": "Pantry uses your camera to scan your pantry shelves, capture meal photos, and scan grocery barcodes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
         }
       ],
       [

@@ -137,7 +137,7 @@ function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
   )
 }
 
-function MacroBar({ label, consumed, goal, color }: { label: string; consumed: number; goal: number; color: string }) {
+function MacroBar({ label, consumed, goal, color, emphasized = false }: { label: string; consumed: number; goal: number; color: string; emphasized?: boolean }) {
   const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
   const animWidth = useRef(new RNAnimated.Value(0)).current
 
@@ -146,17 +146,24 @@ function MacroBar({ label, consumed, goal, color }: { label: string; consumed: n
     RNAnimated.timing(animWidth, { toValue: progress * 100, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
   }, [consumed, goal])
 
+  // Emphasized = the headline macro (Protein on home). Thicker bar + bigger text
+  // signals visual priority without hiding secondary macros behind a tap.
+  const barHeight = emphasized ? 10 : 5
+  const dotSize = emphasized ? 9 : 6
+  const labelSize = emphasized ? 15 : 13
+  const valueSize = emphasized ? 16 : 13
+
   return (
-    <View style={{ gap: 5 }}>
+    <View style={{ gap: 6 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
-          <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textWhite }}>{label}</Text>
+          <View style={{ width: dotSize, height: dotSize, borderRadius: dotSize / 2, backgroundColor: color }} />
+          <Text style={{ fontSize: labelSize, fontWeight: emphasized ? '700' : '600', color: COLORS.textWhite }}>{label}</Text>
         </View>
-        <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textWhite }}>{consumed}<Text style={{ color: COLORS.textMuted, fontWeight: '500' }}> / {goal}g</Text></Text>
+        <Text style={{ fontSize: valueSize, fontWeight: '700', color: COLORS.textWhite }}>{consumed}<Text style={{ color: COLORS.textMuted, fontWeight: '500' }}> / {goal}g</Text></Text>
       </View>
-      <View style={{ height: 5, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: 3, overflow: 'hidden' }}>
-        {progress > 0 && <RNAnimated.View style={{ height: 5, backgroundColor: color, borderRadius: 3, width: animWidth.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />}
+      <View style={{ height: barHeight, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: barHeight / 2, overflow: 'hidden' }}>
+        {progress > 0 && <RNAnimated.View style={{ height: barHeight, backgroundColor: color, borderRadius: barHeight / 2, width: animWidth.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />}
       </View>
     </View>
   )
@@ -353,7 +360,21 @@ export default function HomeScreen() {
     'paprika', 'cumin', 'chili powder', 'oregano', 'lemon', 'vinegar',
   ]
   const [missingStaples, setMissingStaples] = useState<string[]>([])
-  const [staplesDismissed, setStaplesDismissed] = useState(false)
+  // Staples prompt now fires ONCE as a modal right after a pantry scan
+  // completes (instead of a persistent home card). Dismissal is stored in
+  // AsyncStorage so it sticks across app launches. Old session-only state
+  // (staplesDismissed) is gone.
+  const [showStaplesPrompt, setShowStaplesPrompt] = useState(false)
+  const STAPLES_PROMPTED_KEY = 'pantry_staples_prompted'
+  // Macros card: compact (protein only) vs expanded (all 3). User's choice
+  // persists across sessions. Default compact since Pantry's audience cares
+  // most about protein; carbs/fat are one tap away if they want them.
+  const [macrosExpanded, setMacrosExpanded] = useState(false)
+  useEffect(() => {
+    AsyncStorage.getItem('pantry_macros_expanded').then(v => {
+      if (v === 'true') setMacrosExpanded(true)
+    })
+  }, [])
 
   // Fetch pantry names and compute missing staples
   useEffect(() => {
@@ -418,6 +439,8 @@ export default function HomeScreen() {
   // elsewhere) be picked up without a full app reload.
   useFocusEffect(useCallback(() => {
     if (!user) return
+    // Already showing in this session — don't re-fetch or re-clear
+    if (planMeals.length > 0) return
     let cancelled = false
     ;(async () => {
       const flag = await AsyncStorage.getItem('pantry_onboarding_plan_ready')
@@ -437,10 +460,14 @@ export default function HomeScreen() {
         RNAnimated.timing(planFadeOpacity, {
           toValue: 1, duration: 500, delay: 200, useNativeDriver: true,
         }).start()
+        // One-shot: clear the flag immediately on first show so subsequent
+        // sign-ins, app launches, or tab focuses don't re-display it.
+        // The user can still tap X to dismiss within the current session.
+        await AsyncStorage.removeItem('pantry_onboarding_plan_ready')
       }
     })()
     return () => { cancelled = true }
-  }, [user]))
+  }, [user, planMeals.length]))
   const dismissPlanReady = async () => {
     await AsyncStorage.removeItem('pantry_onboarding_plan_ready')
     RNAnimated.timing(planFadeOpacity, {
@@ -867,9 +894,29 @@ export default function HomeScreen() {
           </View>
 
           <View style={{ gap: 10 }}>
-            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color="#4ADE80" />
-            <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color="#F59E0B" />
-            <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color="#60A5FA" />
+            {/* Default compact = Protein only, shown emphasized (thicker bar +
+                bigger text). When expanded to all 3, protein drops back to
+                standard size so there's no glitchy size delta between bars. */}
+            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color="#4ADE80" emphasized={!macrosExpanded} />
+            {macrosExpanded && (
+              <>
+                <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color="#F59E0B" />
+                <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color="#60A5FA" />
+              </>
+            )}
+            <TouchableOpacity
+              onPress={async () => {
+                const next = !macrosExpanded
+                setMacrosExpanded(next)
+                await AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false')
+              }}
+              activeOpacity={0.7}
+              style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12 }}
+            >
+              <Text style={{ fontSize: 12, color: COLORS.textMuted, fontWeight: '600' }}>
+                {macrosExpanded ? 'Show less ▴' : 'Show carbs & fat ▾'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
 
@@ -1059,7 +1106,13 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[styles.heroMealCard, { marginHorizontal: 20 }]}
                 activeOpacity={0.85}
-                onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meals[0].id, mealData: JSON.stringify(meals[0]) } })}
+                onPress={() => {
+                  // Guard against missing id (GPT sometimes omits it) — fall back
+                  // to a synthetic id so the URL is well-formed. mealData carries
+                  // the full meal so meal/[id].tsx renders from URL params either way.
+                  const safeId = meals[0].id || `gen-${Date.now()}`
+                  router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(meals[0]) } })
+                }}
               >
                 {meals[0].image && meals[0].image.startsWith('http') ? (
                   <Image source={{ uri: meals[0].image }} style={styles.heroMealImage} resizeMode="cover" />
@@ -1096,34 +1149,10 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* ── Missing staples nudge — only shown after user has scanned their pantry ── */}
-        {missingStaples.length >= 3 && !staplesDismissed && !loading && pantryNames.size > 0 && (
-          <View style={styles.staplesCard}>
-            <View style={styles.staplesHeader}>
-              <View>
-                <Text style={styles.staplesTitle}>Missing kitchen basics?</Text>
-                <Text style={styles.staplesSub}>Adding these helps us suggest tastier meals</Text>
-              </View>
-              <TouchableOpacity onPress={() => setStaplesDismissed(true)} activeOpacity={0.7}>
-                <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>Dismiss</Text>
-              </TouchableOpacity>
-            </View>
-            {missingStaples.slice(0, 6).map(name => (
-              <View key={name} style={styles.stapleRow}>
-                <Text style={styles.stapleName}>{name}</Text>
-                <View style={styles.stapleActions}>
-                  <TouchableOpacity onPress={() => addStapleToPantry(name)} activeOpacity={0.7}>
-                    <Text style={styles.stapleHaveIt}>I have this</Text>
-                  </TouchableOpacity>
-                  <Text style={{ color: '#333', fontSize: 11 }}>|</Text>
-                  <TouchableOpacity onPress={() => addStapleToGrocery(name)} activeOpacity={0.7}>
-                    <Text style={styles.stapleGrocery}>+ Grocery</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
+        {/* The old persistent "Missing kitchen basics?" home card was removed —
+            it now fires once as a modal right after a pantry scan completes
+            (see the PantryScanModal onItemsAdded handler below). Dismissal is
+            persisted to AsyncStorage so it never nags again. */}
 
         {/* ── Daily Meal Log — Cards ── */}
         <View style={styles.logSection}>
@@ -1361,10 +1390,60 @@ export default function HomeScreen() {
       <PantryScanModal
         visible={showPantryScanFromHome}
         onClose={() => setShowPantryScanFromHome(false)}
-        onItemsAdded={() => {
+        onItemsAdded={async () => {
           setShowPantryScanFromHome(false)
+          // Fire the kitchen-basics nudge ONCE per user (per device) right after
+          // a scan completes — natural moment to surface "you also have these
+          // common things?" without dragging it across the home screen forever.
+          const alreadyPrompted = await AsyncStorage.getItem(STAPLES_PROMPTED_KEY)
+          if (!alreadyPrompted && missingStaples.length >= 3) {
+            setShowStaplesPrompt(true)
+          }
         }}
       />
+
+      {/* ── Missing kitchen basics modal (one-shot after first scan) ── */}
+      <Modal
+        visible={showStaplesPrompt}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowStaplesPrompt(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top']}>
+          <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ fontSize: 17, fontWeight: '700', color: COLORS.textWhite }}>Kitchen basics?</Text>
+            <TouchableOpacity
+              onPress={async () => {
+                await AsyncStorage.setItem(STAPLES_PROMPTED_KEY, 'true')
+                setShowStaplesPrompt(false)
+              }}
+              activeOpacity={0.7}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={{ color: COLORS.textMuted, fontSize: 15 }}>Done</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
+            <Text style={{ fontSize: 14, color: COLORS.textMuted, marginBottom: 20, lineHeight: 20 }}>
+              We didn't see these in your pantry — adding what you have unlocks more meal suggestions.
+            </Text>
+            {missingStaples.slice(0, 12).map(name => (
+              <View key={name} style={styles.stapleRow}>
+                <Text style={styles.stapleName}>{name}</Text>
+                <View style={styles.stapleActions}>
+                  <TouchableOpacity onPress={() => addStapleToPantry(name)} activeOpacity={0.7}>
+                    <Text style={styles.stapleHaveIt}>I have this</Text>
+                  </TouchableOpacity>
+                  <Text style={{ color: '#333', fontSize: 11 }}>|</Text>
+                  <TouchableOpacity onPress={() => addStapleToGrocery(name)} activeOpacity={0.7}>
+                    <Text style={styles.stapleGrocery}>+ Grocery</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
     </SafeAreaView>
   )

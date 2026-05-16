@@ -2630,6 +2630,23 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       } else {
         bench = recipes[diet]['Snack'] ?? []
       }
+
+      // For MAIN meals (Breakfast / Lunch / Dinner / Mid-Afternoon Meal),
+      // require at least 20% protein calories — drops fat-heavy recipes like
+      // avocado-toast that are technically valid but fail Pantry's high-protein
+      // positioning. Snacks/Dessert are inherently lower-protein and exempt.
+      // Falls back to the unfiltered bench if filtering wipes it out so we
+      // never crash with an empty slot.
+      const isMainSlot = !slot.toLowerCase().includes('snack') && slot !== 'Dessert'
+      if (isMainSlot) {
+        const highProtein = bench.filter(r => {
+          const t = recipeTemplates[r.name]
+          if (!t || !t.calories || !t.protein) return true // no template → can't measure, allow
+          return (t.protein * 4) / t.calories >= 0.20
+        })
+        if (highProtein.length > 0) bench = highProtein
+      }
+
       const chosen = pickRecipe(bench)
       return {
         slot,
