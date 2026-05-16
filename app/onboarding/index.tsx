@@ -23,7 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { VideoView, useVideoPlayer } from 'expo-video'
 import Svg, { Path, Line, Circle as SvgCircle, Text as SvgText } from 'react-native-svg'
-import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Twitter, Instagram, Youtube, Apple, Tv, Music2, Globe } from 'lucide-react-native'
+import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
 
 const AnimatedPath = Animated.createAnimatedComponent(Path)
 const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle)
@@ -554,8 +554,6 @@ const ATTRIBUTION_OPTIONS = [
   { id: 'appstore', Icon: Apple, label: 'App Store' },
   { id: 'friend', Icon: Users, label: 'Friend or family' },
   { id: 'facebook', Icon: Facebook, label: 'Facebook' },
-  { id: 'twitter', Icon: Twitter, label: 'X (Twitter)' },
-  { id: 'tv', Icon: Tv, label: 'TV' },
   { id: 'other', Icon: Globe, label: 'Other' },
 ]
 
