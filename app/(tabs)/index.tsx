@@ -47,6 +47,14 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const { width } = Dimensions.get('window')
 
+// FEATURE FLAGS
+// AI photo-to-macros ("Snap & Log") was pulled from v1 per council decision
+// 2026-05-15 — competing with Cal AI head-on dilutes Pantry's "cook-focused
+// macro app" positioning. The AILogModal component + estimate-meal-macros
+// edge function remain intact behind this flag; flip to true post-launch
+// once we have demand signal + budget for accuracy iteration.
+const ENABLE_AI_PHOTO_LOG = false
+
 type LogEntry = {
   id: string
   name: string
@@ -858,11 +866,10 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* ── Snap & Log hero — primary tracking CTA. Photo-based macro logging is Pantry's
-            killer feature vs MyFitnessPal's manual entry; deserves prime real estate.
-            Hidden for empty-pantry users — they have no plan to track against yet, and
-            the green Snap card competes visually with the green Scan-Pantry hero below. ── */}
-        {pantryFetched && pantryNames.size > 0 && (
+        {/* ── Snap & Log hero — AI photo-to-macros entry. CUT FROM v1 (see
+            ENABLE_AI_PHOTO_LOG at top). Will return in v2 once accuracy is
+            tuned and positioning supports it. ── */}
+        {ENABLE_AI_PHOTO_LOG && pantryFetched && pantryNames.size > 0 && (
         <TouchableOpacity
           style={{
             flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -1291,14 +1298,16 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── AI Log Modal ── */}
-      <AILogModal
-        visible={showAILogModal}
-        slots={slots.map(s => s.label)}
-        defaultSlot={slots[0]?.label ?? 'Breakfast'}
-        onClose={() => setShowAILogModal(false)}
-        onLogged={fetchTodayLogs}
-      />
+      {/* ── AI Log Modal — gated behind ENABLE_AI_PHOTO_LOG (cut from v1) ── */}
+      {ENABLE_AI_PHOTO_LOG && (
+        <AILogModal
+          visible={showAILogModal}
+          slots={slots.map(s => s.label)}
+          defaultSlot={slots[0]?.label ?? 'Breakfast'}
+          onClose={() => setShowAILogModal(false)}
+          onLogged={fetchTodayLogs}
+        />
+      )}
 
       {/* ── Food Search Modal (FatSecret) ── */}
       <FoodSearchModal
