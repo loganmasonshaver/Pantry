@@ -315,13 +315,14 @@ export default function GroceryScreen() {
     // For ambiguous items the user can long-press to reassign later (future).
     const category = autoCategoryMatches(name)[0] || 'Other'
 
-    const isDuplicate = items.some(existing => {
-      const a = existing.name.toLowerCase()
-      const b = name.toLowerCase()
-      return a === b || a.includes(b) || b.includes(a)
-    })
+    // Exact (case-insensitive) match only — substring matching was over-aggressive:
+    // "chicken breast" was blocking "chicken thigh", "olive oil" blocking "vegetable oil",
+    // etc. Users legitimately want multiple variants on a grocery list.
+    const isDuplicate = items.some(existing =>
+      existing.name.toLowerCase() === name.toLowerCase()
+    )
     if (isDuplicate) {
-      Alert.alert('Already on your list', `A similar item is already in your grocery list.`)
+      Alert.alert('Already on your list', `${name} is already in your grocery list.`)
       return
     }
 
