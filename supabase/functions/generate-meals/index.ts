@@ -285,16 +285,17 @@ Respond ONLY with a JSON array, no markdown, no explanation. Every meal must inc
     }
 
     // Macro band validation — drop meals whose REAL macros (post-FatSecret correction)
-    // exceed the user's distributed targets. 10% buffer above the cap avoids over-pruning
-    // near-misses where the LLM was close but not exact.
+    // exceed the user's distributed targets by 40%+. Loose buffer catches only egregious
+    // bombs (e.g. 96g protein when cap is 55g) while letting near-misses through, so the
+    // filter rarely fires and we almost always return all 3 meals.
     const beforeBands = meals.length
     meals = meals.filter((m: any) =>
-      Number(m.protein) <= proteinMax * 1.10 &&
-      Number(m.calories) <= calorieMax * 1.10
+      Number(m.protein) <= proteinMax * 1.40 &&
+      Number(m.calories) <= calorieMax * 1.40
     )
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding limits (protein ${proteinMax}g, calories ${calorieMax} kcal)`)
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding 1.4× limits (protein ${proteinMax}g, calories ${calorieMax} kcal)`)
     }
 
     // Prep-time validation — drop meals the LLM claimed fit the budget but didn't.
