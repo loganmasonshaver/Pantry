@@ -114,7 +114,6 @@ export default function GroceryScreen() {
   const [toastMessage, setToastMessage] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [addName, setAddName] = useState('')
-  const [addMeal, setAddMeal] = useState('')
   const [addSaving, setAddSaving] = useState(false)
   const [disambigChoices, setDisambigChoices] = useState<string[]>([])
   const toastOpacity = useRef(new Animated.Value(0)).current
@@ -258,7 +257,6 @@ export default function GroceryScreen() {
 
   const openAddModal = () => {
     setAddName('')
-    setAddMeal('')
     setDisambigChoices([])
     setShowAddModal(true)
   }
@@ -296,7 +294,7 @@ export default function GroceryScreen() {
       .insert({
         user_id: user.id,
         name,
-        meal: addMeal.trim(),
+        meal: '',
         category,
         checked: false,
       })
@@ -511,14 +509,6 @@ export default function GroceryScreen() {
               value={addName}
               onChangeText={(t) => { setAddName(t); setDisambigChoices([]) }}
               autoFocus
-            />
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Meal (optional)"
-              placeholderTextColor={COLORS.textMuted}
-              value={addMeal}
-              onChangeText={setAddMeal}
             />
 
             {disambigChoices.length > 0 ? (
