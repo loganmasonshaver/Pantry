@@ -1192,21 +1192,6 @@ export default function HomeScreen() {
                     </View>
                   </RNAnimated.View>
                 </TouchableOpacity>
-                {meals.length > 1 && (
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 12 }}>
-                    {meals.slice(0, 3).map((_, i) => (
-                      <View
-                        key={i}
-                        style={{
-                          width: i === safeHeroIdx ? 16 : 6,
-                          height: 6,
-                          borderRadius: 3,
-                          backgroundColor: i === safeHeroIdx ? '#4ADE80' : 'rgba(255,255,255,0.25)',
-                        }}
-                      />
-                    ))}
-                  </View>
-                )}
               </>
             ) : null}
           </View>
