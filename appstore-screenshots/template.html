@@ -94,7 +94,9 @@
       display: block;
     }
 
-    /* Dynamic Island — sits OVER the screen at the top center */
+    /* Dynamic Island — sits OVER the screen at the top center.
+       Contains a subtle front-camera lens dot on the right side, matching
+       the actual iPhone 16/17 Pro Max layout. */
     .dynamic-island {
       position: absolute;
       top: 38px;
@@ -107,19 +109,40 @@
       z-index: 5;
     }
 
-    /* Side buttons — on the phone shell, not the screen */
+    .dynamic-island::after {
+      content: '';
+      position: absolute;
+      right: 22px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 35% 35%, #2A3540 0%, #0E1418 60%, #050709 100%);
+      box-shadow:
+        inset 0 0 4px rgba(0,0,0,0.8),
+        inset 0 1px 1px rgba(80,120,160,0.3);
+    }
+
+    /* Side buttons — on the phone shell, slightly protruding.
+       Positions match iPhone 16/17 Pro Max (Action btn upper-left,
+       Camera Control lower-right is new on iPhone 16+). */
     .btn {
       position: absolute;
-      background: linear-gradient(180deg, #2A2A2D 0%, #1A1A1D 100%);
-      border-radius: 3px;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, #3A3A3D 0%, #1C1C1E 100%);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.10),
+        inset 0 -1px 0 rgba(0,0,0,0.5),
+        0 1px 2px rgba(0,0,0,0.6);
     }
-    /* Left side: silence switch + volume up + volume down */
-    .btn-silence  { left: -4px; top:  280px; width: 6px; height: 50px; border-radius: 3px 0 0 3px; }
-    .btn-vol-up   { left: -4px; top:  380px; width: 6px; height: 110px; border-radius: 3px 0 0 3px; }
-    .btn-vol-down { left: -4px; top:  520px; width: 6px; height: 110px; border-radius: 3px 0 0 3px; }
-    /* Right side: power */
-    .btn-power    { right: -4px; top: 430px; width: 6px; height: 140px; border-radius: 0 3px 3px 0; }
+    /* Left side */
+    .btn-action   { left: -5px; top:  380px; width: 7px; height:  76px; border-radius: 3px 0 0 3px; }
+    .btn-vol-up   { left: -5px; top:  500px; width: 7px; height: 120px; border-radius: 3px 0 0 3px; }
+    .btn-vol-down { left: -5px; top:  640px; width: 7px; height: 120px; border-radius: 3px 0 0 3px; }
+    /* Right side */
+    .btn-power    { right: -5px; top: 500px; width: 7px; height: 150px; border-radius: 0 3px 3px 0; }
+    .btn-camera   { right: -5px; top: 720px; width: 7px; height:  88px; border-radius: 0 3px 3px 0; }
   </style>
 </head>
 <body>
@@ -132,10 +155,11 @@
 
   <div class="phone-wrap" style="transform: translateX(-50%) {{TRANSFORM}}">
     <div class="phone">
-      <span class="btn btn-silence"></span>
+      <span class="btn btn-action"></span>
       <span class="btn btn-vol-up"></span>
       <span class="btn btn-vol-down"></span>
       <span class="btn btn-power"></span>
+      <span class="btn btn-camera"></span>
       <div class="phone-screen">
         <img src="{{SCREENSHOT}}" alt="">
         <div class="dynamic-island"></div>
