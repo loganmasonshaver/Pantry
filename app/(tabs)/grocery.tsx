@@ -6,16 +6,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   Animated,
-  Modal,
   TextInput,
   PanResponder,
   Alert,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
-import { Trash2, Check, Plus, X, Clock, ShoppingCart } from 'lucide-react-native'
+import { Trash2, Check, Plus, Clock, ShoppingCart } from 'lucide-react-native'
 import Svg, { Circle as SvgCircle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
@@ -112,10 +109,12 @@ export default function GroceryScreen() {
   const [items, setItems] = useState<GroceryItem[]>([])
   const [showToast, setShowToast] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [addName, setAddName] = useState('')
-  const [addSaving, setAddSaving] = useState(false)
-  const [disambigChoices, setDisambigChoices] = useState<string[]>([])
+  // Inline-edit pattern (Reminders-style): tapping "+ Add Item" transforms the
+  // bottom row into an editable row with a circle on the left + TextInput.
+  // No modal — multi-add is fluid (just keep hitting return).
+  const [inlineAdding, setInlineAdding] = useState(false)
+  const [inlineName, setInlineName] = useState('')
+  const inlineInputRef = useRef<TextInput>(null)
   const toastOpacity = useRef(new Animated.Value(0)).current
   const [recentOrder, setRecentOrder] = useState<{ meals: string[]; orderedAt: Date } | null>(null)
   const [lastOrder, setLastOrder] = useState<{ items: any[]; createdAt: Date } | null>(null)
@@ -255,26 +254,19 @@ export default function GroceryScreen() {
     ]).start(() => setShowToast(false))
   }
 
-  const openAddModal = () => {
-    setAddName('')
-    setDisambigChoices([])
-    setShowAddModal(true)
+  const startInlineAdd = () => {
+    setInlineName('')
+    setInlineAdding(true)
+    // autoFocus on the TextInput handles initial focus
   }
 
-  const saveItem = async (overrideCategory?: string) => {
-    const name = addName.trim()
+  const submitInline = async () => {
+    const name = inlineName.trim()
     if (!name || !user) return
 
-    // Check for ambiguity if no override provided
-    if (!overrideCategory) {
-      const matches = autoCategoryMatches(name)
-      if (matches.length > 1) {
-        setDisambigChoices(matches)
-        return
-      }
-    }
-
-    const category = overrideCategory || autoCategoryMatches(name)[0] || 'Other'
+    // Inline mode auto-picks the first category match — disambig modal is gone.
+    // For ambiguous items the user can long-press to reassign later (future).
+    const category = autoCategoryMatches(name)[0] || 'Other'
 
     const isDuplicate = items.some(existing => {
       const a = existing.name.toLowerCase()
@@ -283,12 +275,9 @@ export default function GroceryScreen() {
     })
     if (isDuplicate) {
       Alert.alert('Already on your list', `A similar item is already in your grocery list.`)
-      setAddSaving(false)
       return
     }
 
-    setAddSaving(true)
-    setDisambigChoices([])
     const { data, error } = await supabase
       .from('grocery_items')
       .insert({
@@ -300,11 +289,18 @@ export default function GroceryScreen() {
       })
       .select('id, name, meal, category, checked')
       .single()
-    setAddSaving(false)
     if (!error && data) {
       setItems(prev => [...prev, data])
-      setShowAddModal(false)
+      setInlineName('')
+      // Keep focus so user can immediately type the next item
+      inlineInputRef.current?.focus()
     }
+  }
+
+  const endInlineAdd = () => {
+    setInlineAdding(false)
+    setInlineName('')
+    inlineInputRef.current?.blur()
   }
 
   const handleReorder = async () => {
@@ -348,22 +344,30 @@ export default function GroceryScreen() {
       <View style={styles.header}>
         <PantryGroceryTabs active="grocery" />
         <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={[styles.iconBtn, !checkedCount && styles.iconBtnDisabled]}
-            onPress={clearChecked}
-            activeOpacity={0.7}
-            disabled={checkedCount === 0}
-          >
-            <Trash2 size={18} stroke={checkedCount ? '#EF4444' : COLORS.textMuted} strokeWidth={1.8} />
-          </TouchableOpacity>
-          {checkedCount > 0 && (
-            <TouchableOpacity
-              style={styles.addToPantryPill}
-              onPress={addToPantry}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.addToPantryPillText}>Add to Pantry ({checkedCount})</Text>
+          {inlineAdding ? (
+            <TouchableOpacity onPress={endInlineAdd} activeOpacity={0.7} hitSlop={10}>
+              <Text style={styles.doneText}>Done</Text>
             </TouchableOpacity>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[styles.iconBtn, !checkedCount && styles.iconBtnDisabled]}
+                onPress={clearChecked}
+                activeOpacity={0.7}
+                disabled={checkedCount === 0}
+              >
+                <Trash2 size={18} stroke={checkedCount ? '#EF4444' : COLORS.textMuted} strokeWidth={1.8} />
+              </TouchableOpacity>
+              {checkedCount > 0 && (
+                <TouchableOpacity
+                  style={styles.addToPantryPill}
+                  onPress={addToPantry}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.addToPantryPillText}>Add to Pantry ({checkedCount})</Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
       </View>
@@ -375,7 +379,7 @@ export default function GroceryScreen() {
           </View>
           <Text style={styles.emptyTitle}>You're all stocked up</Text>
           <Text style={styles.emptySub}>Add items as you think of them so you don't forget at the store</Text>
-          <TouchableOpacity style={styles.emptyAddBtn} onPress={openAddModal} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.emptyAddBtn} onPress={startInlineAdd} activeOpacity={0.85}>
             <Plus size={18} stroke="#000" strokeWidth={2.5} />
             <Text style={styles.emptyAddBtnText}>Add to List</Text>
           </TouchableOpacity>
@@ -476,70 +480,40 @@ export default function GroceryScreen() {
               ))
             })()}
 
-            {/* Reminders-style "Add Item" row — always visible at the bottom of
-                the list so the affordance is impossible to miss (was a tiny + in
-                the header before). */}
-            <TouchableOpacity
-              style={styles.addItemRow}
-              onPress={openAddModal}
-              activeOpacity={0.7}
-            >
-              <Plus size={18} stroke="#4ADE80" strokeWidth={2} />
-              <Text style={styles.addItemRowText}>Add Item</Text>
-            </TouchableOpacity>
+            {/* Reminders-style add: shows "+ Add Item" by default, transforms
+                into an inline editable row (circle + TextInput) when tapped.
+                Submit-on-return saves the item + clears input + keeps focus so
+                user can rapid-add multiple. "Done" in header exits inline mode. */}
+            {inlineAdding ? (
+              <View style={styles.inlineEditRow}>
+                <View style={styles.inlineEditCircle} />
+                <TextInput
+                  ref={inlineInputRef}
+                  style={styles.inlineEditInput}
+                  placeholder="Add Item"
+                  placeholderTextColor={COLORS.textMuted}
+                  value={inlineName}
+                  onChangeText={setInlineName}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={submitInline}
+                  blurOnSubmit={false}
+                />
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.addItemRow}
+                onPress={startInlineAdd}
+                activeOpacity={0.7}
+              >
+                <Plus size={18} stroke="#4ADE80" strokeWidth={2} />
+                <Text style={styles.addItemRowText}>Add Item</Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </>
       )}
 
-      {/* ── Add Item Modal ── */}
-      <Modal visible={showAddModal} transparent animationType="slide">
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowAddModal(false)}>
-            <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add Item</Text>
-              <TouchableOpacity onPress={() => setShowAddModal(false)} activeOpacity={0.7}>
-                <X size={18} stroke={COLORS.textMuted} strokeWidth={2} />
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Item name (e.g. Broccoli)"
-              placeholderTextColor={COLORS.textMuted}
-              value={addName}
-              onChangeText={(t) => { setAddName(t); setDisambigChoices([]) }}
-              autoFocus
-            />
-
-            {disambigChoices.length > 0 ? (
-              <View style={styles.disambigWrap}>
-                <Text style={styles.disambigTitle}>Which section?</Text>
-                <View style={styles.disambigOptions}>
-                  {disambigChoices.map(cat => (
-                    <TouchableOpacity key={cat} style={styles.disambigBtn} onPress={() => saveItem(cat)} activeOpacity={0.7}>
-                      <Text style={styles.disambigBtnText}>{cat}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity
-                style={[styles.modalConfirm, (!addName.trim() || addSaving) && { opacity: 0.5 }]}
-                activeOpacity={0.8}
-                onPress={() => saveItem()}
-                disabled={!addName.trim() || addSaving}
-              >
-                <Text style={styles.modalConfirmText}>{addSaving ? 'Adding...' : 'Add to List'}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   )
 }
@@ -708,6 +682,37 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(74,222,128,0.15)',
   },
   addItemRowText: {
+    color: '#4ADE80',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  inlineEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    marginTop: 12,
+    marginHorizontal: 20,
+    borderRadius: 14,
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.trackDark,
+  },
+  inlineEditCircle: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1.5,
+    borderColor: COLORS.textMuted,
+  },
+  inlineEditInput: {
+    flex: 1,
+    fontSize: 15,
+    color: COLORS.textWhite,
+    padding: 0,
+  },
+  doneText: {
     color: '#4ADE80',
     fontSize: 15,
     fontWeight: '600',
