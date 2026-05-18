@@ -18,7 +18,7 @@ import {
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Utensils } from 'lucide-react-native'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -30,6 +30,7 @@ import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
+import { Shimmer } from '@/components/Shimmer'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -617,9 +618,7 @@ export default function PantryScreen() {
                             {meal.image && meal.image.startsWith('http') ? (
                               <Image source={{ uri: meal.image }} style={styles.cookTonightThumb} resizeMode="cover" />
                             ) : (
-                              <View style={[styles.cookTonightThumb, styles.cookTonightThumbPlaceholder]}>
-                                <Utensils size={22} stroke="#555" strokeWidth={1.6} />
-                              </View>
+                              <Shimmer style={styles.cookTonightThumb} />
                             )}
                             <View style={{ flex: 1, gap: 4 }}>
                               <Text style={styles.cookTonightName} numberOfLines={1}>{meal.name}</Text>
