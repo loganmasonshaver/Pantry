@@ -131,10 +131,16 @@ Deno.serve(async (req: Request) => {
     } = await req.json()
 
     const count = Math.min(mealsPerDay, 3)
-    // Per-meal protein floor scales with the user's actual daily target (which is already
-    // bodyweight + goal based via calculateGoals: lose=1.2g/lb, maintain=1.0, bulk=0.8).
-    // 85% of the average meal protein gives meals room to vary ±15% while still hitting daily.
-    const perMealProteinMin = Math.max(15, Math.floor((proteinGoal / mealsPerDay) * 0.85))
+    // Tight per-meal macro bands — divide daily goals by mealsPerDay (from onboarding) and
+    // allow ±15% variance per meal. Upper cap prevents protein dumping (96g in one meal =
+    // poor absorption + GI discomfort); lower cap prevents undershooting daily totals.
+    // Protein goals already factor bodyweight via calculateGoals (lose=1.2g/lb, maintain=1.0, bulk=0.8).
+    const proteinTarget = Math.round(proteinGoal / mealsPerDay)
+    const proteinMin = Math.max(15, Math.floor(proteinTarget * 0.85))
+    const proteinMax = Math.ceil(proteinTarget * 1.15)
+    const calorieTarget = Math.round(calorieGoal / mealsPerDay)
+    const calorieMin = Math.floor(calorieTarget * 0.85)
+    const calorieMax = Math.ceil(calorieTarget * 1.15)
     const restrictions = dietaryRestrictions.filter((d: string) => d !== "None").join(", ") || "none"
     const restrictionsLine = restrictions !== "none"
       ? `\n- STRICT dietary requirements — NEVER violate these under any circumstances: ${restrictions}. Any meal that includes a forbidden ingredient for these restrictions must be discarded entirely.`
@@ -177,9 +183,11 @@ ${ingredients.join(", ")}
 Rules:
 ${ingredientRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
-- Each meal MUST have at least ${perMealProteinMin}g protein (scaled to this user's daily target and meal count). Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source
+- BALANCED MACROS (blocking constraint): every meal MUST fit BOTH bands below. Distribute macros EVENLY across meals — never pile protein/calories into one meal and starve another. Above max causes poor absorption + GI discomfort; below min undershoots daily totals.
+  • Protein: ${proteinMin}g–${proteinMax}g per meal (target ~${proteinTarget}g)
+  • Calories: ${calorieMin}–${calorieMax} kcal per meal (target ~${calorieTarget} kcal)
+- Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
-- Calories per meal should be around ${Math.round(calorieGoal / mealsPerDay)} kcal
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
 ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — this is extremely tight. You are ONLY allowed to suggest meals from this approved list of genuinely fast formats: protein shake or smoothie, Greek yogurt parfait, overnight oats (pre-made), cottage cheese bowl, scrambled eggs on toast (2-3 min scramble max), microwave rice + canned/pre-cooked protein, wrap or tortilla with pre-cooked filling, tuna or chicken salad on bread or crackers, cold high-protein bowl using pre-cooked or ready-to-eat ingredients. FORBIDDEN formats: any raw meat that must be cooked from scratch (chicken breast, ground beef, shrimp, fish fillets), pasta (boiling alone takes 8-10 min), oven dishes, stir fries with raw protein, soups from scratch, anything with more than 2 cooking steps. If your pantry has pre-cooked or ready-to-eat proteins (rotisserie chicken, canned tuna, canned chicken, hard boiled eggs, deli meat, Greek yogurt, cottage cheese, protein powder), use those.` : ''}
 - Complexity must match the time budget:
@@ -274,6 +282,19 @@ Respond ONLY with a JSON array, no markdown, no explanation. Every meal must inc
       console.log('Correcting macros via FatSecret...')
       meals = await Promise.all(meals.map((m: any) => correctMealMacros(m)))
       console.log('Macros corrected')
+    }
+
+    // Macro band validation — drop meals whose REAL macros (post-FatSecret correction)
+    // exceed the user's distributed targets. 10% buffer above the cap avoids over-pruning
+    // near-misses where the LLM was close but not exact.
+    const beforeBands = meals.length
+    meals = meals.filter((m: any) =>
+      Number(m.protein) <= proteinMax * 1.10 &&
+      Number(m.calories) <= calorieMax * 1.10
+    )
+    const droppedByBands = beforeBands - meals.length
+    if (droppedByBands > 0) {
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding limits (protein ${proteinMax}g, calories ${calorieMax} kcal)`)
     }
 
     // Prep-time validation — drop meals the LLM claimed fit the budget but didn't.
