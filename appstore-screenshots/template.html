@@ -13,82 +13,78 @@
 
     body {
       background:
-        radial-gradient(ellipse 110% 60% at 50% 0%, rgba(74,222,128,0.18), transparent 70%),
+        radial-gradient(ellipse 110% 60% at 50% 0%, rgba(74,222,128,0.20), transparent 70%),
         linear-gradient(180deg, #0A0A0A 0%, #000000 100%);
       font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
       color: #FFFFFF;
       position: relative;
     }
 
-    /* Soft inner green glow vignette — mirrors Driven's brand system, swapped to Pantry green */
     body::after {
       content: '';
       position: absolute;
       inset: 0;
-      box-shadow: inset 0 0 250px 50px rgba(74,222,128,0.08);
+      box-shadow: inset 0 0 300px 60px rgba(74,222,128,0.10);
       pointer-events: none;
       z-index: 2;
     }
 
+    /* BIG headline — MyFitnessPal-style, dominates the top half */
     .copy {
       position: absolute;
-      top: 130px;
-      left: 90px;
-      right: 90px;
+      top: 160px;
+      left: 100px;
+      right: 100px;
       z-index: 3;
     }
 
-    .eyebrow {
-      font-size: 28px;
-      font-weight: 600;
-      letter-spacing: 6px;
-      color: #4ADE80;
-      text-transform: uppercase;
-      margin-bottom: 32px;
-    }
-
     .headline {
-      font-size: 84px;
-      font-weight: 800;
-      line-height: 1.03;
-      letter-spacing: -2px;
+      font-size: 168px;
+      font-weight: 900;
+      line-height: 0.96;
+      letter-spacing: -5px;
       color: #FFFFFF;
     }
 
     .headline .line {
       display: block;
-      margin-bottom: 4px;
     }
 
     .headline .accent {
       color: #4ADE80;
     }
 
-    /* iPhone bezel — proportional to the 1320×2868 screenshot inside.
-       Width 920 × aspect (2868/1320 = 2.173) = height ~1999 + padding. */
-    .phone {
+    /* ── Realistic iPhone bezel ──
+       Outer shell ≈ phone body, padding = bezel thickness, inner = screen.
+       Side buttons + Dynamic Island add the "this is an actual iPhone" feel. */
+    .phone-wrap {
       position: absolute;
       left: 50%;
-      bottom: 130px;
+      bottom: 110px;
       transform: translateX(-50%);
-      width: 920px;
-      padding: 14px;
-      border-radius: 64px;
-      background: linear-gradient(180deg, #2A2A2A 0%, #181818 100%);
-      box-shadow:
-        0 60px 120px rgba(0,0,0,0.6),
-        0 0 0 2px rgba(255,255,255,0.06),
-        inset 0 0 0 1px rgba(255,255,255,0.04);
       z-index: 1;
+    }
+
+    .phone {
+      width: 940px;
+      padding: 18px;
+      border-radius: 78px;
+      background: linear-gradient(180deg, #3A3A3D 0%, #1C1C1E 100%);
+      box-shadow:
+        0 80px 140px rgba(0,0,0,0.65),
+        0 0 0 2px rgba(255,255,255,0.08),
+        inset 0 0 0 1px rgba(255,255,255,0.06);
+      position: relative;
     }
 
     .phone-screen {
       width: 100%;
       aspect-ratio: 1320 / 2868;
-      border-radius: 52px;
+      border-radius: 62px;
       overflow: hidden;
       background: #000;
       display: block;
+      position: relative;
     }
 
     .phone-screen img {
@@ -97,19 +93,53 @@
       object-fit: cover;
       display: block;
     }
+
+    /* Dynamic Island — sits OVER the screen at the top center */
+    .dynamic-island {
+      position: absolute;
+      top: 38px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 268px;
+      height: 76px;
+      border-radius: 38px;
+      background: #000;
+      z-index: 5;
+    }
+
+    /* Side buttons — on the phone shell, not the screen */
+    .btn {
+      position: absolute;
+      background: linear-gradient(180deg, #2A2A2D 0%, #1A1A1D 100%);
+      border-radius: 3px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+    }
+    /* Left side: silence switch + volume up + volume down */
+    .btn-silence  { left: -4px; top:  280px; width: 6px; height: 50px; border-radius: 3px 0 0 3px; }
+    .btn-vol-up   { left: -4px; top:  380px; width: 6px; height: 110px; border-radius: 3px 0 0 3px; }
+    .btn-vol-down { left: -4px; top:  520px; width: 6px; height: 110px; border-radius: 3px 0 0 3px; }
+    /* Right side: power */
+    .btn-power    { right: -4px; top: 430px; width: 6px; height: 140px; border-radius: 0 3px 3px 0; }
   </style>
 </head>
 <body>
   <div class="copy">
-    <div class="eyebrow">{{EYEBROW}}</div>
     <div class="headline">
       <span class="line">{{LINE1}}</span>
       <span class="line">{{LINE2}}</span>
     </div>
   </div>
-  <div class="phone">
-    <div class="phone-screen">
-      <img src="{{SCREENSHOT}}" alt="">
+
+  <div class="phone-wrap" style="transform: translateX(-50%) {{TRANSFORM}}">
+    <div class="phone">
+      <span class="btn btn-silence"></span>
+      <span class="btn btn-vol-up"></span>
+      <span class="btn btn-vol-down"></span>
+      <span class="btn btn-power"></span>
+      <div class="phone-screen">
+        <img src="{{SCREENSHOT}}" alt="">
+        <div class="dynamic-island"></div>
+      </div>
     </div>
   </div>
 </body>

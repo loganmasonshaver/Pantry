@@ -55,10 +55,10 @@ function renderLine(line) {
     const screenshotDataUri = `data:image/png;base64,${screenshotBase64}`
 
     const html = template
-      .replace('{{EYEBROW}}', escapeHTML(frame.eyebrow))
       .replace('{{LINE1}}', renderLine(frame.lines[0]))
       .replace('{{LINE2}}', renderLine(frame.lines[1]))
       .replace('{{SCREENSHOT}}', screenshotDataUri)
+      .replace('{{TRANSFORM}}', frame.transform || '')
 
     const page = await context.newPage()
     await page.setContent(html, { waitUntil: 'load' })
