@@ -130,21 +130,23 @@ Deno.serve(async (req: Request) => {
       mode = "cookNow",
     } = await req.json()
 
-    const count = Math.min(mealsPerDay, 3)
+    // Overgenerate-then-rank: ask the LLM for MORE meals than we'll display, filter against
+    // tight bands, then return the top N by macro fit. Compensates for LLM non-compliance
+    // (Gemini Flash Lite ignores constraints under load) without raising image-gen cost —
+    // images only get fetched client-side for the FINAL displayed meals.
+    const displayCount = Math.min(mealsPerDay, 3)
+    const genCount = mode === 'cookNow' ? Math.max(displayCount + 2, 5) : displayCount
     // Per-meal protein band: ±15% of daily target divided by mealsPerDay. Upper cap prevents
     // protein dumping (96g in one meal = poor absorption + GI discomfort). Protein goals
     // already factor bodyweight via calculateGoals (lose=1.2g/lb, maintain=1.0, bulk=0.8).
     const proteinTarget = Math.round(proteinGoal / mealsPerDay)
     const proteinMin = Math.max(15, Math.floor(proteinTarget * 0.85))
     const proteinMax = Math.ceil(proteinTarget * 1.15)
-    // Per-meal calorie GUIDANCE (used in prompt only) — soft per-meal target so the LLM
-    // distributes evenly, but actual filtering is daily-share based (below) to avoid
-    // dropping realistic meals when mealsPerDay is high.
+    // Per-meal calorie band: ±15% of daily target divided by mealsPerDay. Same ±15% as
+    // protein so meals are sized consistently. Filtered at 1.40× buffer below.
     const calorieTarget = Math.round(calorieGoal / mealsPerDay)
-    // Calorie HARD CAP: no single meal may exceed 50% of the user's daily calorie goal.
-    // Catches genuine bombs (1500+ cal "meals") without dropping normal 700-1000 cal recipes.
-    // Scales naturally with the user's goal — bulker at 3000 cal can have bigger meals.
-    const calorieHardCap = Math.round(calorieGoal * 0.50)
+    const calorieMin = Math.floor(calorieTarget * 0.85)
+    const calorieMax = Math.ceil(calorieTarget * 1.15)
     const restrictions = dietaryRestrictions.filter((d: string) => d !== "None").join(", ") || "none"
     const restrictionsLine = restrictions !== "none"
       ? `\n- STRICT dietary requirements — NEVER violate these under any circumstances: ${restrictions}. Any meal that includes a forbidden ingredient for these restrictions must be discarded entirely.`
@@ -165,13 +167,13 @@ Deno.serve(async (req: Request) => {
     const isCookNow = mode === "cookNow"
 
     const ingredientRule = isCookNow
-      ? `- HYBRID COOK NOW MODE — generate exactly ${count} meals split as follows:
-  • Meals 1 and 2 (STRICT): use ONLY ingredients from the pantry list. NO ingredient outside the list — not even oil, salt, pepper, butter, or spices unless they're explicitly listed. Set "missing_ingredients": [] for these meals. These prove "you can cook tonight with what you have."
-  • Meal ${count} (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: salt, pepper, olive oil, garlic, butter, soy sauce, lemon, rice, pasta, eggs, common dried herbs). List those extras in "missing_ingredients". NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
-- Every ingredient in meals 1 and 2 MUST appear in the pantry list (case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken").`
+      ? `- HYBRID COOK NOW MODE — generate exactly ${genCount} meals split as follows:
+  • The first ${genCount - 1} meals (STRICT): use ONLY ingredients from the pantry list. NO ingredient outside the list — not even oil, salt, pepper, butter, or spices unless they're explicitly listed. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
+  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: salt, pepper, olive oil, garlic, butter, soy sauce, lemon, rice, pasta, eggs, common dried herbs). List those extras in "missing_ingredients". NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
+- Every ingredient in STRICT meals MUST appear in the pantry list (case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken").`
       : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy. List any non-pantry ingredient in the "missing_ingredients" array for that meal.`
 
-    const prompt = `You are a nutrition-focused meal planner. Generate exactly ${count} high-protein meal suggestions.
+    const prompt = `You are a nutrition-focused meal planner. Generate exactly ${genCount} high-protein meal suggestions.
 
 User profile:
 - Daily calorie goal: ${calorieGoal} kcal
@@ -188,7 +190,7 @@ Rules:
 ${ingredientRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
-- CALORIE DISTRIBUTION (blocking constraint): each meal should target ~${calorieTarget} kcal (daily total ${calorieGoal} ÷ ${mealsPerDay} meals). HARD CAP: no single meal may exceed ${calorieHardCap} kcal (50% of the user's daily goal) — meals over that wreck the user's daily macro plan. Distribute evenly across meals.
+- CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -287,19 +289,37 @@ Respond ONLY with a JSON array, no markdown, no explanation. Every meal must inc
       console.log('Macros corrected')
     }
 
-    // Macro validation — drop meals (post-FatSecret correction) that violate either:
-    //   1. Protein band: 1.4× of per-meal cap. Above ~50g/meal causes poor absorption + GI discomfort.
-    //   2. Calorie hard cap: 50% of user's daily goal. Above that wrecks daily macro planning.
-    // Uses % of daily for calories instead of per-meal because per-meal targets get tight
-    // for high mealsPerDay configs (4-5 meals → small target → drops realistic 800 cal meals).
+    // Macro band validation — drop meals (post-FatSecret correction) that violate either
+    // band by 40%+. Both protein and calories enforced with 1.40× buffer so near-misses
+    // pass but genuine outliers (e.g. 96g protein, 1500 cal bombs) get caught.
+    const proteinDropThreshold = proteinMax * 1.40
+    const calorieDropThreshold = calorieMax * 1.40
     const beforeBands = meals.length
     meals = meals.filter((m: any) =>
-      Number(m.protein) <= proteinMax * 1.40 &&
-      Number(m.calories) <= calorieHardCap
+      Number(m.protein) <= proteinDropThreshold &&
+      Number(m.calories) <= calorieDropThreshold
     )
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals (protein drop > ${Math.round(proteinMax * 1.40)}g, calorie drop > ${calorieHardCap} kcal)`)
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding 1.4× caps (protein > ${Math.round(proteinDropThreshold)}g or calories > ${Math.round(calorieDropThreshold)} kcal)`)
+    }
+
+    // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
+    // displayCount (3). Rank survivors by macro fit — sum of normalized squared distance
+    // from per-meal targets — and slice to the top displayCount. Lower score = better fit.
+    if (meals.length > displayCount) {
+      const beforeRank = meals.length
+      meals = meals
+        .map((m: any) => {
+          const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
+          const cDelta = (Number(m.calories) - calorieTarget) / Math.max(calorieTarget, 1)
+          const fitScore = pDelta * pDelta + cDelta * cDelta
+          return { ...m, _fitScore: fitScore }
+        })
+        .sort((a: any, b: any) => a._fitScore - b._fitScore)
+        .slice(0, displayCount)
+        .map((m: any) => { const { _fitScore, ...rest } = m; return rest })
+      console.log(`Macro rank: kept top ${displayCount}/${beforeRank} meals by per-meal target fit`)
     }
 
     // Prep-time validation — drop meals the LLM claimed fit the budget but didn't.
