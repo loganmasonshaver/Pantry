@@ -325,5 +325,12 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     await fetchAndGenerate(true)
   }
 
-  return { meals, loading, error, regenerate, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
+  // Retry a failed gen — does NOT count against MAX_DAILY_REGENS. Failed gens never
+  // reach image fetch (which is where real cost lives), so retries are effectively free.
+  // Users shouldn't lose their daily refresh shot recovering from a network blip.
+  const retry = async () => {
+    await fetchAndGenerate(true)
+  }
+
+  return { meals, loading, error, regenerate, retry, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
 }

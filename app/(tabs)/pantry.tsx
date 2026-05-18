@@ -234,7 +234,7 @@ export default function PantryScreen() {
   // Generation fires once per day (daily cache). Manual refresh button is capped at
   // 1/day per user to bound image-gen cost — see MAX_DAILY_REGENS in useMealSuggestions.
   const hasPantryItems = categories.some(c => c.ingredients.length > 0)
-  const { meals, loading: mealsLoading, error: mealsError, regenerate, canRegenerate } = useMealSuggestions(
+  const { meals, loading: mealsLoading, error: mealsError, regenerate, retry, canRegenerate } = useMealSuggestions(
     user?.id, isPremium, 'cookNow', hasPantryItems
   )
 
@@ -597,7 +597,7 @@ export default function PantryScreen() {
                   ) : mealsError ? (
                     <View style={styles.cookTonightLoading}>
                       <Text style={styles.cookTonightErrorText}>Couldn't generate meals</Text>
-                      <TouchableOpacity onPress={regenerate} activeOpacity={0.7}>
+                      <TouchableOpacity onPress={retry} activeOpacity={0.7}>
                         <Text style={styles.cookTonightRetryText}>Try again →</Text>
                       </TouchableOpacity>
                     </View>
