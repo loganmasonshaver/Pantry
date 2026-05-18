@@ -356,9 +356,15 @@ export default function GroceryScreen() {
           >
             <Trash2 size={18} stroke={checkedCount ? '#EF4444' : COLORS.textMuted} strokeWidth={1.8} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn} onPress={openAddModal} activeOpacity={0.7}>
-            <Plus size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-          </TouchableOpacity>
+          {checkedCount > 0 && (
+            <TouchableOpacity
+              style={styles.addToPantryPill}
+              onPress={addToPantry}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.addToPantryPillText}>Add to Pantry ({checkedCount})</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -469,21 +475,19 @@ export default function GroceryScreen() {
                 </View>
               ))
             })()}
-          </ScrollView>
 
-          {/* ── Bottom action ── */}
-          <View style={styles.bottomBar}>
+            {/* Reminders-style "Add Item" row — always visible at the bottom of
+                the list so the affordance is impossible to miss (was a tiny + in
+                the header before). */}
             <TouchableOpacity
-              style={[styles.addBtn, !checkedCount && styles.addBtnDisabled]}
-              activeOpacity={checkedCount ? 0.85 : 1}
-              disabled={!checkedCount}
-              onPress={addToPantry}
+              style={styles.addItemRow}
+              onPress={openAddModal}
+              activeOpacity={0.7}
             >
-              <Text style={[styles.addBtnText, !checkedCount && styles.addBtnTextDisabled]}>
-                Add to Pantry{checkedCount ? ` (${checkedCount})` : ''}
-              </Text>
+              <Plus size={18} stroke="#4ADE80" strokeWidth={2} />
+              <Text style={styles.addItemRowText}>Add Item</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </>
       )}
 
@@ -677,6 +681,37 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   emptyAddBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
+  addToPantryPill: {
+    backgroundColor: COLORS.textWhite,
+    borderRadius: 30,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addToPantryPillText: {
+    color: '#000000',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  addItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    marginTop: 12,
+    marginHorizontal: 20,
+    borderRadius: 14,
+    backgroundColor: 'rgba(74,222,128,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.15)',
+  },
+  addItemRowText: {
+    color: '#4ADE80',
+    fontSize: 15,
+    fontWeight: '600',
+  },
 
   emptyState: {
     flex: 1,
