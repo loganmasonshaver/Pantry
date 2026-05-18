@@ -717,6 +717,23 @@ export default function MealDetailScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (meal) trackMealViewed(meal.name) }, [mealData, id])
 
+  // Slot-picker state — declared before any early returns to keep hook order stable.
+  // Previously these lived below `handleSave` / `logToSlot` and crashed with
+  // "rendered more hooks than during the previous render" when meal loaded async.
+  const [showCustomInput, setShowCustomInput] = useState(false)
+  const slotScrollRef = useRef<ScrollView>(null)
+  const lastHapticIndex = useRef(-1)
+  const onSlotScroll = useCallback((e: any) => {
+    const y = e.nativeEvent.contentOffset.y
+    const index = Math.round(y / ITEM_HEIGHT)
+    const clamped = Math.max(0, Math.min(index, SLOT_OPTIONS.length - 1))
+    if (clamped !== lastHapticIndex.current) {
+      lastHapticIndex.current = clamped
+      setSelectedSlotIndex(clamped)
+      hapticSelection()
+    }
+  }, [])
+
   if (!meal) {
     return (
       <SafeAreaView style={styles.safe}>
@@ -824,10 +841,6 @@ export default function MealDetailScreen() {
     }
   }
 
-  const [showCustomInput, setShowCustomInput] = useState(false)
-  const slotScrollRef = useRef<ScrollView>(null)
-  const lastHapticIndex = useRef(-1)
-
   const handleLog = () => {
     if (!meal || logged) return
     const defaultIdx = getDefaultSlotIndex()
@@ -838,17 +851,6 @@ export default function MealDetailScreen() {
     setShowSlotPicker(true)
     setTimeout(() => slotScrollRef.current?.scrollTo({ y: defaultIdx * ITEM_HEIGHT, animated: false }), 50)
   }
-
-  const onSlotScroll = useCallback((e: any) => {
-    const y = e.nativeEvent.contentOffset.y
-    const index = Math.round(y / ITEM_HEIGHT)
-    const clamped = Math.max(0, Math.min(index, SLOT_OPTIONS.length - 1))
-    if (clamped !== lastHapticIndex.current) {
-      lastHapticIndex.current = clamped
-      setSelectedSlotIndex(clamped)
-      hapticSelection()
-    }
-  }, [])
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
