@@ -17,6 +17,7 @@ import { useNotifications } from '../hooks/useNotifications'
 import { SuperwallProvider, useUser } from 'expo-superwall'
 import { SuperwallContextProvider } from '../context/SuperwallContext'
 import { ShareIntentProvider, useShareIntent } from 'expo-share-intent'
+import { supabase } from '../lib/supabase'
 
 const AppTheme = {
   ...DarkTheme,
@@ -32,14 +33,28 @@ function RootLayoutNav() {
   const pathname = usePathname()
   useNotifications(session?.user?.id ?? null)
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent()
-  const { identify: superwallIdentify, signOut: superwallSignOut } = useUser()
+  const { identify: superwallIdentify, signOut: superwallSignOut, update: superwallUpdate } = useUser()
 
   // Identify user in Superwall on sign-in so subscription status is linked to the correct account.
   // Applies to all auth methods: Apple, Google, and email.
+  // Also fetches the user's referral_code_used and attaches it as a Superwall attribute
+  // so per-creator conversion analytics work in the Superwall dashboard. Fires on every
+  // session change to handle reinstalls / new device logins where AsyncStorage is empty
+  // but the code lives in the Supabase profile.
   useEffect(() => {
     if (loading) return
     if (session?.user?.id) {
       superwallIdentify(session.user.id).catch(() => {})
+      supabase
+        .from('profiles')
+        .select('referral_code_used')
+        .eq('id', session.user.id)
+        .single()
+        .then(({ data }) => {
+          if (data?.referral_code_used) {
+            superwallUpdate({ referralCode: data.referral_code_used }).catch(() => {})
+          }
+        })
     } else {
       superwallSignOut()
     }

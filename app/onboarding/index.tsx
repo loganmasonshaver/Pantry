@@ -3747,6 +3747,9 @@ function SMealSwipe({ onNext, onBack }: { onNext: (liked: string[]) => void; onB
 export default function Onboarding() {
   const router = useRouter()
   const { user } = useAuth()
+  // Named `updateSuperwallUser` to avoid collision with the form-data `update` helper below.
+  // Used in finish() to tag the user with their referralCode for per-creator attribution.
+  const { update: updateSuperwallUser } = useUser()
   const { step: stepParam } = useLocalSearchParams<{ step?: string }>()
   const [step, setStep] = useState(1)
   const [stepLoaded, setStepLoaded] = useState(false)
@@ -3952,6 +3955,16 @@ export default function Onboarding() {
         if (error) {
           Alert.alert('Save Error', error.message)
           return
+        }
+
+        // Tag Superwall with the referral code immediately so the paywall view
+        // fires with the attribute attached. Without this, first-time users hit
+        // the paywall before _layout.tsx re-runs identify, breaking per-creator
+        // attribution on the most important conversion event.
+        if (finalData.referralCode) {
+          try {
+            await updateSuperwallUser({ referralCode: finalData.referralCode.toUpperCase().trim() })
+          } catch {}
         }
 
         // Persist the plan meals to saved_meals before navigating. Home reads the
