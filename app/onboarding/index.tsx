@@ -1764,17 +1764,16 @@ function SReferralCode({
     setChecking(true)
     setError(null)
     try {
-      const { data, error: rpcError } = await supabase.rpc('validate_referral_code_v2', { p_code: value })
-      if (rpcError) throw rpcError
-      if (data?.valid) {
-        onGrantsPromo(!!data.grants_premium)
-        setValid(true)
-        setTimeout(onNext, 450)
-      } else {
-        setError("That code isn't valid")
-        setValid(false)
-      }
+      // Accept ANY code typed — mistyped codes / creator names get attribution too.
+      // The RPC only determines whether the code grants free premium (grants_premium=true
+      // for known codes in the table). Unknown codes are still saved as attribution-only
+      // so the creator gets credit even if the viewer butchered the spelling.
+      const { data } = await supabase.rpc('validate_referral_code_v2', { p_code: value })
+      onGrantsPromo(!!data?.grants_premium)
+      setValid(true)
+      setTimeout(onNext, 450)
     } catch (e: any) {
+      // RPC genuinely errored (network blip, not "code invalid"). Tell user to retry.
       setError(e?.message ?? 'Something went wrong. Try again.')
     } finally {
       setChecking(false)
