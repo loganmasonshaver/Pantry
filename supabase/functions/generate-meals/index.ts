@@ -131,16 +131,20 @@ Deno.serve(async (req: Request) => {
     } = await req.json()
 
     const count = Math.min(mealsPerDay, 3)
-    // Tight per-meal macro bands — divide daily goals by mealsPerDay (from onboarding) and
-    // allow ±15% variance per meal. Upper cap prevents protein dumping (96g in one meal =
-    // poor absorption + GI discomfort); lower cap prevents undershooting daily totals.
-    // Protein goals already factor bodyweight via calculateGoals (lose=1.2g/lb, maintain=1.0, bulk=0.8).
+    // Per-meal protein band: ±15% of daily target divided by mealsPerDay. Upper cap prevents
+    // protein dumping (96g in one meal = poor absorption + GI discomfort). Protein goals
+    // already factor bodyweight via calculateGoals (lose=1.2g/lb, maintain=1.0, bulk=0.8).
     const proteinTarget = Math.round(proteinGoal / mealsPerDay)
     const proteinMin = Math.max(15, Math.floor(proteinTarget * 0.85))
     const proteinMax = Math.ceil(proteinTarget * 1.15)
+    // Per-meal calorie GUIDANCE (used in prompt only) — soft per-meal target so the LLM
+    // distributes evenly, but actual filtering is daily-share based (below) to avoid
+    // dropping realistic meals when mealsPerDay is high.
     const calorieTarget = Math.round(calorieGoal / mealsPerDay)
-    const calorieMin = Math.floor(calorieTarget * 0.85)
-    const calorieMax = Math.ceil(calorieTarget * 1.15)
+    // Calorie HARD CAP: no single meal may exceed 50% of the user's daily calorie goal.
+    // Catches genuine bombs (1500+ cal "meals") without dropping normal 700-1000 cal recipes.
+    // Scales naturally with the user's goal — bulker at 3000 cal can have bigger meals.
+    const calorieHardCap = Math.round(calorieGoal * 0.50)
     const restrictions = dietaryRestrictions.filter((d: string) => d !== "None").join(", ") || "none"
     const restrictionsLine = restrictions !== "none"
       ? `\n- STRICT dietary requirements — NEVER violate these under any circumstances: ${restrictions}. Any meal that includes a forbidden ingredient for these restrictions must be discarded entirely.`
@@ -184,7 +188,7 @@ Rules:
 ${ingredientRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
-- CALORIE TARGET (guidance, not blocking): aim for ~${calorieTarget} kcal per meal (range ${calorieMin}–${calorieMax}), but realistic variance is OK — the user's daily total of ${calorieGoal} kcal across ${mealsPerDay} meals is what matters, not per-meal precision.
+- CALORIE DISTRIBUTION (blocking constraint): each meal should target ~${calorieTarget} kcal (daily total ${calorieGoal} ÷ ${mealsPerDay} meals). HARD CAP: no single meal may exceed ${calorieHardCap} kcal (50% of the user's daily goal) — meals over that wreck the user's daily macro plan. Distribute evenly across meals.
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -283,15 +287,19 @@ Respond ONLY with a JSON array, no markdown, no explanation. Every meal must inc
       console.log('Macros corrected')
     }
 
-    // Protein band validation — drop meals whose REAL protein (post-FatSecret correction)
-    // exceeds the user's per-meal cap by 40%+. Only protein is enforced because it has
-    // real physiological consequences (poor absorption + GI discomfort above ~50g/meal).
-    // Calories aren't filtered — overshooting cal per meal is fine, user just eats less elsewhere.
-    const beforeProteinBand = meals.length
-    meals = meals.filter((m: any) => Number(m.protein) <= proteinMax * 1.40)
-    const droppedByProtein = beforeProteinBand - meals.length
-    if (droppedByProtein > 0) {
-      console.log(`Protein band: dropped ${droppedByProtein}/${beforeProteinBand} meals exceeding 1.4× cap (max ${proteinMax}g, drop threshold ${Math.round(proteinMax * 1.40)}g)`)
+    // Macro validation — drop meals (post-FatSecret correction) that violate either:
+    //   1. Protein band: 1.4× of per-meal cap. Above ~50g/meal causes poor absorption + GI discomfort.
+    //   2. Calorie hard cap: 50% of user's daily goal. Above that wrecks daily macro planning.
+    // Uses % of daily for calories instead of per-meal because per-meal targets get tight
+    // for high mealsPerDay configs (4-5 meals → small target → drops realistic 800 cal meals).
+    const beforeBands = meals.length
+    meals = meals.filter((m: any) =>
+      Number(m.protein) <= proteinMax * 1.40 &&
+      Number(m.calories) <= calorieHardCap
+    )
+    const droppedByBands = beforeBands - meals.length
+    if (droppedByBands > 0) {
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals (protein drop > ${Math.round(proteinMax * 1.40)}g, calorie drop > ${calorieHardCap} kcal)`)
     }
 
     // Prep-time validation — drop meals the LLM claimed fit the budget but didn't.
