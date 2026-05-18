@@ -477,6 +477,8 @@ export default function GroceryScreen() {
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
+            automaticallyAdjustKeyboardInsets
+            keyboardShouldPersistTaps="handled"
           >
             {/* ── Prep Timeline ── */}
             {recentOrder && (
