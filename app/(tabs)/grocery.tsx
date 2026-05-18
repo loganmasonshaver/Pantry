@@ -406,15 +406,16 @@ export default function GroceryScreen() {
               >
                 <Trash2 size={18} stroke={checkedCount ? '#EF4444' : COLORS.textMuted} strokeWidth={1.8} />
               </TouchableOpacity>
-              {checkedCount > 0 && (
-                <TouchableOpacity
-                  style={styles.addToPantryPill}
-                  onPress={addToPantry}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.addToPantryPillText}>Add to Pantry ({checkedCount})</Text>
-                </TouchableOpacity>
-              )}
+              <TouchableOpacity
+                style={[styles.addToPantryPill, !checkedCount && styles.addToPantryPillDisabled]}
+                onPress={addToPantry}
+                disabled={!checkedCount}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.addToPantryPillText, !checkedCount && styles.addToPantryPillTextDisabled]}>
+                  Add to Pantry{checkedCount ? ` (${checkedCount})` : ''}
+                </Text>
+              </TouchableOpacity>
             </>
           )}
         </View>
@@ -711,10 +712,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  addToPantryPillDisabled: {
+    backgroundColor: '#1A1A1A',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
   addToPantryPillText: {
     color: '#000000',
     fontSize: 13,
     fontWeight: '700',
+  },
+  addToPantryPillTextDisabled: {
+    color: COLORS.textMuted,
   },
   addItemRow: {
     flexDirection: 'row',
