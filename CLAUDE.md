@@ -27,8 +27,7 @@ Do this after each task — not just at session end — so progress is saved if 
 - React Native + Expo, iOS only
 - Supabase, OpenAI GPT-4o, Superwall, PostHog
 - Pure black (#000000) background, white cards
-- 7 screens total — Profile/Stats is currently in progress
-- Freemium: free tier (1 suggestion/day, 5 saved meals) + $7.99/month premium
+- Premium-only ($7.99/month via Superwall + Apple IAP) — no free tier
 
 ---
 
