@@ -65,22 +65,24 @@
       z-index: 1;
     }
 
+    /* Phone body — MyFitnessPal style: solid dark bezel, clean iconic
+       silhouette, no metallic gradient. Subtle 1px outer rim highlight
+       gives it just enough "edge" without going photorealistic. */
     .phone {
       width: 940px;
-      padding: 18px;
-      border-radius: 78px;
-      background: linear-gradient(180deg, #3A3A3D 0%, #1C1C1E 100%);
+      padding: 22px;
+      border-radius: 82px;
+      background: #1A1A1C;
       box-shadow:
         0 80px 140px rgba(0,0,0,0.65),
-        0 0 0 2px rgba(255,255,255,0.08),
-        inset 0 0 0 1px rgba(255,255,255,0.06);
+        0 0 0 1.5px rgba(255,255,255,0.10);
       position: relative;
     }
 
     .phone-screen {
       width: 100%;
       aspect-ratio: 1320 / 2868;
-      border-radius: 62px;
+      border-radius: 60px;
       overflow: hidden;
       background: #000;
       display: block;
@@ -94,55 +96,34 @@
       display: block;
     }
 
-    /* Dynamic Island — sits OVER the screen at the top center.
-       Contains a subtle front-camera lens dot on the right side, matching
-       the actual iPhone 16/17 Pro Max layout. */
+    /* Dynamic Island — solid black pill, no camera detail. Matches the
+       clean "icon" look MFP uses vs. hyper-realistic device renders. */
     .dynamic-island {
       position: absolute;
       top: 38px;
       left: 50%;
       transform: translateX(-50%);
-      width: 268px;
-      height: 76px;
-      border-radius: 38px;
+      width: 280px;
+      height: 80px;
+      border-radius: 40px;
       background: #000;
       z-index: 5;
     }
 
-    .dynamic-island::after {
-      content: '';
-      position: absolute;
-      right: 22px;
-      top: 50%;
-      transform: translateY(-50%);
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background:
-        radial-gradient(circle at 35% 35%, #2A3540 0%, #0E1418 60%, #050709 100%);
-      box-shadow:
-        inset 0 0 4px rgba(0,0,0,0.8),
-        inset 0 1px 1px rgba(80,120,160,0.3);
-    }
-
-    /* Side buttons — on the phone shell, slightly protruding.
-       Positions match iPhone 16/17 Pro Max (Action btn upper-left,
-       Camera Control lower-right is new on iPhone 16+). */
+    /* Side buttons — simpler, flatter, just enough to read as buttons.
+       MFP style: dark, uniform color, no metallic gradient. */
     .btn {
       position: absolute;
-      background: linear-gradient(180deg, #3A3A3D 0%, #1C1C1E 100%);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,0.10),
-        inset 0 -1px 0 rgba(0,0,0,0.5),
-        0 1px 2px rgba(0,0,0,0.6);
+      background: #2A2A2C;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.4);
     }
-    /* Left side */
-    .btn-action   { left: -5px; top:  380px; width: 7px; height:  76px; border-radius: 3px 0 0 3px; }
-    .btn-vol-up   { left: -5px; top:  500px; width: 7px; height: 120px; border-radius: 3px 0 0 3px; }
-    .btn-vol-down { left: -5px; top:  640px; width: 7px; height: 120px; border-radius: 3px 0 0 3px; }
-    /* Right side */
-    .btn-power    { right: -5px; top: 500px; width: 7px; height: 150px; border-radius: 0 3px 3px 0; }
-    .btn-camera   { right: -5px; top: 720px; width: 7px; height:  88px; border-radius: 0 3px 3px 0; }
+    /* Left side: Action button + Volume up/down (iPhone 15 Pro+ layout) */
+    .btn-action   { left: -4px; top:  400px; width: 6px; height:  78px; border-radius: 3px 0 0 3px; }
+    .btn-vol-up   { left: -4px; top:  520px; width: 6px; height: 125px; border-radius: 3px 0 0 3px; }
+    .btn-vol-down { left: -4px; top:  670px; width: 6px; height: 125px; border-radius: 3px 0 0 3px; }
+    /* Right side: Power + Camera Control (iPhone 16+ layout) */
+    .btn-power    { right: -4px; top: 520px; width: 6px; height: 160px; border-radius: 0 3px 3px 0; }
+    .btn-camera   { right: -4px; top: 760px; width: 6px; height:  90px; border-radius: 0 3px 3px 0; }
   </style>
 </head>
 <body>
