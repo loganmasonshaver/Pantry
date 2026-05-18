@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Animated, LayoutChangeEvent, StyleSheet, View, ViewStyle, StyleProp } from 'react-native'
+import { Animated, Easing, LayoutChangeEvent, StyleSheet, View, ViewStyle, StyleProp } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 
 type Props = {
@@ -12,8 +12,8 @@ type Props = {
 export function Shimmer({
   style,
   baseColor = '#1A1A1A',
-  highlightColor = '#2A2A2A',
-  durationMs = 1200,
+  highlightColor = '#3A3A3A',
+  durationMs = 900,
 }: Props) {
   const progress = useRef(new Animated.Value(0)).current
   const [width, setWidth] = useState(0)
@@ -23,6 +23,7 @@ export function Shimmer({
       Animated.timing(progress, {
         toValue: 1,
         duration: durationMs,
+        easing: Easing.linear,
         useNativeDriver: true,
       })
     )
@@ -30,9 +31,11 @@ export function Shimmer({
     return () => loop.stop()
   }, [progress, durationMs])
 
+  // Sweep travels from fully off-screen left to fully off-screen right with a brief
+  // dark moment between loops — more visible than a continuous gradient.
   const translateX = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [-width, width],
+    outputRange: [-width, width * 2],
   })
 
   const handleLayout = (e: LayoutChangeEvent) => {
