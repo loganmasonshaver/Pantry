@@ -3759,8 +3759,8 @@ export const templates: Record<string, RecipeTemplate> = {
       }
     ]
   },
-  "Hard-Boiled Eggs and Fruit": {
-    "name": "Hard-Boiled Eggs and Fruit",
+  "Hard-Boiled Eggs Snack Plate": {
+    "name": "Hard-Boiled Eggs Snack Plate",
     "prepTime": 15,
     "calories": 500,
     "protein": 38,

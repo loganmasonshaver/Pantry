@@ -20,12 +20,17 @@ function normalizeKey(name: string): string {
 // Lite is essentially free; OpenAI fallback is cheap. If both fail, the caller falls back
 // to the original static template so image generation never hard-stops.
 async function generateVisualDescription(mealName: string, ingredients: string[]): Promise<string | null> {
-  const sysPrompt = `You are a food stylist. In ONE concise sentence (under 35 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate. Do NOT list ingredients. Do NOT mention cooking process.
+  const sysPrompt = `You are a food stylist. In ONE concise sentence (under 35 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate.
+
+CRITICAL — INGREDIENT FIDELITY: Compose the description from the SPECIFIC ingredients listed. If the dish name is generic (e.g., "Fruit", "Bowl", "Plate"), use the exact ingredient (e.g., "sliced apple" not "berries"). NEVER substitute photogenic alternatives or generic interpretations of the name.
+
+ASSEMBLED, NOT STACKED: Describe the dish AS PLATED — fully assembled, integrated, ready to eat. Never describe separate visible components (e.g., a brownie with cottage cheese baked in, NOT cottage cheese piled on top of a brownie). Do NOT mention cooking process.
 
 Examples:
-- "Cottage Cheese Brownie Bake" -> "A dense baked chocolate brownie square with a slightly cracked golden top, served on a wooden cutting board."
-- "Strawberry Protein Smoothie" -> "A thick pink smoothie in a tall clear glass, topped with a yogurt swirl and a strawberry slice."
-- "Greek Chicken Salad" -> "A wide ceramic bowl of mixed greens with grilled chicken slices, feta crumbles, and olives, drizzled with olive oil."`
+- "Cottage Cheese Brownie Bake" (ingredients: cottage cheese, cocoa, eggs) -> "A dense baked chocolate brownie square with a slightly cracked golden top, served on a wooden cutting board."
+- "Strawberry Protein Smoothie" (ingredients: strawberries, yogurt, protein powder) -> "A thick pink smoothie in a tall clear glass, topped with a yogurt swirl and a strawberry slice."
+- "Greek Chicken Salad" (ingredients: chicken, greens, feta, olives) -> "A wide ceramic bowl of mixed greens with grilled chicken slices, feta crumbles, and olives, drizzled with olive oil."
+- "Hard-Boiled Eggs and Fruit" (ingredients: eggs, apple, almonds, greek yogurt) -> "Halved hard-boiled eggs arranged on a dark plate beside sliced apple, a small mound of almonds, and a dollop of greek yogurt."`
 
   const userPrompt = `Now describe: ${mealName}${ingredients.length ? ` — ingredients: ${ingredients.join(', ')}` : ''}`
 

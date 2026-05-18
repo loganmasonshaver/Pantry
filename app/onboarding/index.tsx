@@ -2313,7 +2313,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         ],
         Snack: [
           { name: 'Greek Yogurt Parfait with Granola', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Gluten'], skill: 'easy', prepMin: 5, dessert: true },
-          { name: 'Hard-Boiled Eggs and Fruit', Icon: Sprout, tint: '#A78BFA', contains: ['Eggs'], skill: 'easy', prepMin: 15 },
+          { name: 'Hard-Boiled Eggs Snack Plate', Icon: Sprout, tint: '#A78BFA', contains: ['Eggs'], skill: 'easy', prepMin: 15 },
           { name: 'Tropical Protein Smoothie', Icon: Sprout, tint: '#A78BFA', contains: [], skill: 'easy', prepMin: 5, dessert: true },
           { name: 'Cottage Cheese Berry Bowl with Honey & Cinnamon', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy'], skill: 'easy', prepMin: 5, dessert: true },
           { name: 'Chocolate Peanut Butter Protein Mug Cake', Icon: Sprout, tint: '#A78BFA', contains: ['Dairy', 'Eggs', 'Gluten', 'Nuts'], skill: 'easy', prepMin: 5, dessert: true },
