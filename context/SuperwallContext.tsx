@@ -98,38 +98,21 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
           const now = Date.now()
           await AsyncStorage.setItem(TRIAL_STARTED_KEY, String(now))
 
-          // Two scheduled reminders for a 7-day trial:
-          //   • Day 5 (~120hr) — "2 days left" — gives the user time to opt out
-          //     without surprise charge, AND time to reconsider and convert
-          //   • Day 7 (~167hr = 7d minus 1hr) — "ends today" — last-chance nudge
-          const reminders = [
-            {
-              hoursAfterStart: 5 * 24, // day 5 of 7
+          // Day-5 reminder for a 7-day trial — gives user 2 days to opt out
+          // without surprise charge, AND time to reconsider and convert.
+          const triggerDate = new Date(now + 5 * 24 * 60 * 60 * 1000)
+          await Notifications.scheduleNotificationAsync({
+            content: {
               title: 'Your free trial ends in 2 days',
               body: 'Lock in unlimited scans, saved meals, and AI suggestions before you get charged.',
+              sound: 'default',
+              data: { app: 'pantry', type: 'trial_expiry' },
             },
-            {
-              hoursAfterStart: 7 * 24 - 1, // day 7, 1 hr before lapse
-              title: 'Your free trial ends today',
-              body: 'Upgrade now to keep unlimited scans, saves, and meal suggestions.',
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: triggerDate,
             },
-          ]
-
-          for (const r of reminders) {
-            const triggerDate = new Date(now + r.hoursAfterStart * 60 * 60 * 1000)
-            await Notifications.scheduleNotificationAsync({
-              content: {
-                title: r.title,
-                body: r.body,
-                sound: 'default',
-                data: { app: 'pantry', type: 'trial_expiry' },
-              },
-              trigger: {
-                type: Notifications.SchedulableTriggerInputTypes.DATE,
-                date: triggerDate,
-              },
-            }).catch(() => {}) // Non-fatal if notification permission not granted
-          }
+          }).catch(() => {}) // Non-fatal if notification permission not granted
         }
       }
 
