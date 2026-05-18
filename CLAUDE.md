@@ -1,9 +1,16 @@
 # Pantry App — Claude Instructions
 
+## Git Workflow — IMPORTANT
+This repo uses a single main-branch workflow. No feature branches, no PRs for solo work. Every session:
+1. **At start:** `cd /Users/loganshaver/pantry && git pull origin main` — sync before any work. If the session was launched inside a `.claude/worktrees/*` path, still `cd` to `/Users/loganshaver/pantry` and do all work there. The worktree is dead weight; ignore it.
+2. **During:** commit + push to `main` directly after each meaningful change (no branching).
+3. **Metro lives in main too:** the Expo dev server should always be running from `/Users/loganshaver/pantry`, never from a worktree path — otherwise edits won't hot-reload.
+
 ## On Session Start
-1. Read ~/my-briefing/todos/active.md (clone it locally first if needed)
-2. Summarize what's in progress and what's next
-3. Tell me where to start today based on priority
+1. `cd /Users/loganshaver/pantry && git pull origin main` (per Git Workflow above)
+2. Read ~/my-briefing/todos/active.md (clone it locally first if needed)
+3. Summarize what's in progress and what's next
+4. Tell me where to start today based on priority
 
 ## During Session
 After completing each feature or fix, immediately update ~/my-briefing/todos/active.md:
@@ -14,7 +21,7 @@ Do this after each task — not just at session end — so progress is saved if 
 
 ## On Session End
 1. Do a final update of ~/my-briefing/todos/active.md (tasks, bugs)
-2. The git commit and push happens automatically via SessionEnd hook — no need to run it manually
+2. Ensure all code changes are committed + pushed to `main` before the session closes
 
 ## App Context
 - React Native + Expo, iOS only
