@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist'
 import {
   View,
@@ -13,7 +13,10 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  Animated as RNAnimated,
+  Easing,
 } from 'react-native'
+import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Utensils } from 'lucide-react-native'
@@ -204,6 +207,21 @@ export default function PantryScreen() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showScanModal, setShowScanModal] = useState(false)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
+
+  // Sweeping scan-beam animation reused by both scan cards. Single shared Animated
+  // value so both beams stay perfectly in sync — visually reads as one continuous
+  // pulse across the row. Loops indefinitely on mount.
+  const scanCardBeam = useRef(new RNAnimated.Value(0)).current
+  useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(scanCardBeam, { toValue: 1, duration: 2200, useNativeDriver: true, easing: Easing.linear }),
+        RNAnimated.timing(scanCardBeam, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [])
   const [showAddModal, setShowAddModal] = useState(false)
   const [newIngredientName, setNewIngredientName] = useState('')
   const [addSaving, setAddSaving] = useState(false)
@@ -446,7 +464,9 @@ export default function PantryScreen() {
                 </View>
               </View>
 
-              {/* Scan cards */}
+              {/* Scan cards — each card has a compact animated illustration filling
+                  the lower half so the cards aren't visually empty. Both share the
+                  same scanCardBeam loop so the sweeping beams stay in sync. */}
               <View style={[styles.scanRow, { marginHorizontal: 0 }]}>
                 <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={() => setShowScanModal(true)} activeOpacity={0.85}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
@@ -454,6 +474,64 @@ export default function PantryScreen() {
                     <View style={styles.scanCardBadge}><Text style={styles.scanCardBadgeText}>AI</Text></View>
                   </View>
                   <View><Text style={styles.scanCardTitle}>Scan Pantry</Text><Text style={styles.scanCardSub}>Auto-detect items</Text></View>
+                  {/* Compact pantry visual: 2 shelves × 3 items, beam sweeps top→bottom */}
+                  <View style={styles.scanCardVisual}>
+                    <Svg width="100%" height="100%" viewBox="0 0 160 70">
+                      {[24, 56].map(y => (
+                        <SvgG key={y}>
+                          <SvgRect x={6} y={y - 1.5} width={148} height={2} fill="rgba(74,222,128,0.18)" />
+                          <SvgLine x1={6} y1={y + 0.5} x2={154} y2={y + 0.5} stroke="#4ADE80" strokeWidth={1} opacity={0.55} />
+                        </SvgG>
+                      ))}
+                      {/* Shelf 1 */}
+                      <SvgG>
+                        <SvgRect x={16} y={6} width={14} height={2.5} rx={0.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.15)" />
+                        <SvgRect x={17} y={8.5} width={12} height={15} rx={1.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
+                        <SvgRect x={18} y={14} width={10} height={6} fill="rgba(0,201,167,0.30)" />
+                      </SvgG>
+                      <SvgG>
+                        <SvgRect x={72} y={6} width={18} height={17} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
+                        <SvgLine x1={74} y1={10} x2={88} y2={10} stroke="#4ADE80" strokeWidth={0.8} opacity={0.5} />
+                        <SvgRect x={74} y={14} width={14} height={3} fill="rgba(0,201,167,0.30)" />
+                      </SvgG>
+                      <SvgG>
+                        <SvgRect x={120} y={8} width={20} height={1.5} rx={0.3} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.2)" />
+                        <SvgRect x={120} y={9.5} width={20} height={14} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
+                        <SvgRect x={120} y={14} width={20} height={5} fill="rgba(0,201,167,0.30)" />
+                      </SvgG>
+                      {/* Shelf 2 */}
+                      <SvgG>
+                        <SvgRect x={16} y={38} width={16} height={2.5} rx={0.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.2)" />
+                        <SvgRect x={17} y={40.5} width={14} height={15} rx={1.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
+                        <SvgRect x={17} y={46} width={14} height={7} fill="rgba(0,201,167,0.30)" />
+                      </SvgG>
+                      <SvgG>
+                        <SvgPath d="M 72 56 L 72 41 L 81 38 L 90 41 L 90 56 Z" stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
+                        <SvgRect x={73} y={48} width={16} height={6} fill="rgba(0,201,167,0.30)" />
+                      </SvgG>
+                      <SvgG>
+                        <SvgRect x={118} y={42} width={24} height={14} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
+                        <SvgRect x={118} y={47} width={24} height={4} fill="rgba(0,201,167,0.30)" />
+                      </SvgG>
+                    </Svg>
+                    {/* Corner brackets */}
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerTL]} />
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerTR]} />
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerBL]} />
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerBR]} />
+                    {/* Sweeping beam */}
+                    <RNAnimated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.scanCardBeam,
+                        {
+                          transform: [{
+                            translateY: scanCardBeam.interpolate({ inputRange: [0, 1], outputRange: [2, 68] }),
+                          }],
+                        },
+                      ]}
+                    />
+                  </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={() => setShowReceiptModal(true)} activeOpacity={0.85}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
@@ -461,6 +539,44 @@ export default function PantryScreen() {
                     <View style={styles.scanCardBadge}><Text style={styles.scanCardBadgeText}>AI</Text></View>
                   </View>
                   <View><Text style={styles.scanCardTitle}>Scan Receipt</Text><Text style={styles.scanCardSub}>Import purchases</Text></View>
+                  {/* Compact receipt visual: paper with item lines + price column, beam sweeps */}
+                  <View style={styles.scanCardVisual}>
+                    <Svg width="100%" height="100%" viewBox="0 0 160 70">
+                      {/* Receipt body with serrated bottom edge */}
+                      <SvgPath
+                        d="M 40 4 L 120 4 L 120 60 L 116 56 L 112 60 L 108 56 L 104 60 L 100 56 L 96 60 L 92 56 L 88 60 L 84 56 L 80 60 L 76 56 L 72 60 L 68 56 L 64 60 L 60 56 L 56 60 L 52 56 L 48 60 L 44 56 L 40 60 Z"
+                        stroke="#4ADE80"
+                        strokeWidth={1}
+                        fill="rgba(74,222,128,0.05)"
+                      />
+                      {/* Header line (store name placeholder) */}
+                      <SvgRect x={50} y={10} width={40} height={3} rx={0.5} fill="rgba(74,222,128,0.30)" />
+                      {/* Itemized rows: 5 rows of (item label + price) */}
+                      {[20, 28, 36, 44, 52].map(y => (
+                        <SvgG key={y}>
+                          <SvgRect x={46} y={y} width={32} height={1.5} rx={0.4} fill="rgba(74,222,128,0.22)" />
+                          <SvgRect x={94} y={y} width={20} height={1.5} rx={0.4} fill="rgba(0,201,167,0.30)" />
+                        </SvgG>
+                      ))}
+                    </Svg>
+                    {/* Corner brackets */}
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerTL]} />
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerTR]} />
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerBL]} />
+                    <View style={[styles.scanCardCorner, styles.scanCardCornerBR]} />
+                    {/* Sweeping beam (same value as pantry card → in sync) */}
+                    <RNAnimated.View
+                      pointerEvents="none"
+                      style={[
+                        styles.scanCardBeam,
+                        {
+                          transform: [{
+                            translateY: scanCardBeam.interpolate({ inputRange: [0, 1], outputRange: [2, 68] }),
+                          }],
+                        },
+                      ]}
+                    />
+                  </View>
                 </TouchableOpacity>
               </View>
 
@@ -757,6 +873,36 @@ const styles = StyleSheet.create({
   scanCardBadgeText: { fontSize: 9, fontWeight: '800', color: '#004a22', letterSpacing: 0.5 },
   scanCardTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
   scanCardSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  // Compact animated illustration sitting below the title in each scan card.
+  // Mirrors the home-screen hero animation but downsized to fit the card width.
+  scanCardVisual: {
+    width: '100%',
+    height: 70,
+    marginTop: 6,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  scanCardCorner: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderColor: '#4ADE80',
+  },
+  scanCardCornerTL: { top: 0, left: 0, borderTopWidth: 1.5, borderLeftWidth: 1.5 },
+  scanCardCornerTR: { top: 0, right: 0, borderTopWidth: 1.5, borderRightWidth: 1.5 },
+  scanCardCornerBL: { bottom: 0, left: 0, borderBottomWidth: 1.5, borderLeftWidth: 1.5 },
+  scanCardCornerBR: { bottom: 0, right: 0, borderBottomWidth: 1.5, borderRightWidth: 1.5 },
+  scanCardBeam: {
+    position: 'absolute',
+    left: 2,
+    right: 2,
+    height: 1.5,
+    backgroundColor: '#4ADE80',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 5,
+  },
 
   // kept for reference — replaced by scanRow
   scanHero: {
