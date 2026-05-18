@@ -127,6 +127,7 @@ Deno.serve(async (req: Request) => {
       dislikedMeals = [],
       likedMeals = [],
       cuisinePreferences = [],
+      recentMealNames = [],
       mode = "cookNow",
     } = await req.json()
 
@@ -163,6 +164,9 @@ Deno.serve(async (req: Request) => {
     const cuisineLine = cuisinePreferences.length > 0
       ? `\nThe user enjoys these cuisine styles — strongly prioritize them: ${cuisinePreferences.join(", ")}.`
       : ""
+    const recentMealsLine = recentMealNames.length > 0
+      ? `\nDO NOT SUGGEST these meals — they were shown in recent generations and would feel like a repeat: ${recentMealNames.join(", ")}. Suggest different dishes, even if the same ingredients are involved.`
+      : ""
 
     const isCookNow = mode === "cookNow"
 
@@ -181,7 +185,7 @@ User profile:
 - Meals per day: ${mealsPerDay}
 - Cooking skill: ${cookingSkill === 'minimal' ? 'minimal (beginner-friendly meals only — basic heat application, one pan where possible, think scrambled eggs, pasta with jarred sauce, sheet pan meals, no complex techniques)' : cookingSkill === 'moderate' ? 'moderate (standard home cook — can follow a multi-step recipe, comfortable with a pan and oven)' : cookingSkill === 'adventurous' ? 'adventurous (confident cook — bold and global flavors, complexity is welcome, unfamiliar ingredients encouraged)' : cookingSkill === 'culinary' ? 'culinary (advanced home cook — multi-step techniques, braising, homemade sauces, chef-level complexity expected)' : cookingSkill}
 - Max prep time: ${maxPrepMinutes} minutes
-- Dietary restrictions: ${restrictions}${restrictionsLine}${dislikesLine}${dislikedMealsLine}${likedMealsLine}${cuisineLine}
+- Dietary restrictions: ${restrictions}${restrictionsLine}${dislikesLine}${dislikedMealsLine}${likedMealsLine}${cuisineLine}${recentMealsLine}
 
 Available pantry ingredients (listed oldest first — prioritize using the first items to reduce food waste):
 ${ingredients.join(", ")}

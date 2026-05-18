@@ -26,6 +26,7 @@ export async function generateMeals({
   dislikedMeals = [],
   likedMeals = [],
   cuisinePreferences = [],
+  recentMealNames = [],
   mode = 'cookNow',
 }: {
   ingredients: string[]
@@ -39,6 +40,7 @@ export async function generateMeals({
   dislikedMeals?: string[]
   likedMeals?: string[]
   cuisinePreferences?: string[]
+  recentMealNames?: string[]
   mode?: 'cookNow' | 'mealPlan'
 }): Promise<GeneratedMeal[]> {
   // Ensure we have a fresh access token before invoking edge functions.
@@ -68,6 +70,7 @@ export async function generateMeals({
       dislikedMeals,
       likedMeals,
       cuisinePreferences,
+      recentMealNames,
       mode,
     },
   })

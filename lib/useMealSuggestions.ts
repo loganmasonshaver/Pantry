@@ -6,6 +6,7 @@ import { useAIConsent } from '../context/AIConsentContext'
 
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
 const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
+const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of meal names, per mode, to suppress repeats
 
 // Hard cap on user-initiated regens per day. The auto-fire on first daily visit is free
 // (doesn't count); this cap only governs the manual "Refresh after shopping" button.
@@ -116,6 +117,14 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
       const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
 
+      // Suppress repeats from recent generations — keeps suggestions feeling fresh between regens.
+      // Stored device-local (per-mode), trimmed to last 12 meal names = ~3-4 prior generations.
+      let recentMealNames: string[] = []
+      try {
+        const recentRaw = await AsyncStorage.getItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`)
+        if (recentRaw) recentMealNames = JSON.parse(recentRaw)
+      } catch {}
+
       const ok = await requestConsent()
       if (!ok) { setLoading(false); return }
 
@@ -131,6 +140,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         dislikedMeals,
         likedMeals,
         cuisinePreferences: profile?.cuisine_preferences || [],
+        recentMealNames,
         mode,
       })
 
@@ -138,6 +148,14 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // and regenCount to track how many manual refreshes have been used today (cap enforced in regenerate()).
       const maxPrep = profile?.max_prep_minutes || 30
       await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current }))
+
+      // Append new meal names to the recent-meals list (keep last 12 names, ~3-4 gens) so
+      // future generations can exclude them and feel fresh between regens.
+      try {
+        const newNames = generated.map(m => m.name).filter(Boolean)
+        const merged = [...newNames, ...recentMealNames].slice(0, 12)
+        await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
+      } catch {}
 
       // images load progressively after meals are shown; errors must not block the UI
       // Fetch all images in parallel
