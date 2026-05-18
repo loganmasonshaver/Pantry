@@ -350,9 +350,36 @@ export default function HomeScreen() {
   const { registerPlacement } = useSuperwall()
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [pantryFetched, setPantryFetched] = useState(false)
-  // Home shows just the top suggested meal as a compact tease; the full suggested-meal list
-  // lives in the Pantry tab (next IA phase). MealPlan mode isn't used on Home — drop the hook.
+  // Home shows the full Cook Tonight set as an auto-cycling hero carousel (Apple TV style).
+  // Every HERO_CYCLE_MS the hero crossfades to the next meal so all 3 are surfaced over time
+  // without duplicating the Pantry tab's compact list. Pantry tab still owns the
+  // "Got everything / Need: X" detail view.
   const { meals, loading } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  const HERO_CYCLE_MS = 5000
+  const HERO_FADE_MS = 450
+  const [heroIdx, setHeroIdx] = useState(0)
+  const heroFade = useRef(new RNAnimated.Value(1)).current
+  useEffect(() => {
+    if (loading || meals.length <= 1) return
+    const interval = setInterval(() => {
+      RNAnimated.timing(heroFade, {
+        toValue: 0,
+        duration: HERO_FADE_MS,
+        useNativeDriver: true,
+      }).start(() => {
+        setHeroIdx(i => (i + 1) % Math.min(meals.length, 3))
+        RNAnimated.timing(heroFade, {
+          toValue: 1,
+          duration: HERO_FADE_MS,
+          useNativeDriver: true,
+        }).start()
+      })
+    }, HERO_CYCLE_MS)
+    return () => clearInterval(interval)
+  }, [loading, meals.length, heroFade])
+  // Guard heroIdx — meals.length can shrink between regens and leave us pointing at an empty slot
+  const safeHeroIdx = Math.min(heroIdx, Math.max(meals.length - 1, 0))
+  const heroMeal = meals[safeHeroIdx]
 
   const ESSENTIAL_STAPLES = [
     'salt', 'pepper', 'olive oil', 'garlic', 'butter', 'onion',
@@ -1102,49 +1129,68 @@ export default function HomeScreen() {
                 <ActivityIndicator color="#4ADE80" />
                 <Text style={[styles.loadingText, { marginTop: 12 }]}>Finding a meal from your pantry…</Text>
               </View>
-            ) : meals.length > 0 ? (
-              <TouchableOpacity
-                style={[styles.heroMealCard, { marginHorizontal: 20 }]}
-                activeOpacity={0.85}
-                onPress={() => {
-                  // Guard against missing id (GPT sometimes omits it) — fall back
-                  // to a synthetic id so the URL is well-formed. mealData carries
-                  // the full meal so meal/[id].tsx renders from URL params either way.
-                  const safeId = meals[0].id || `gen-${Date.now()}`
-                  router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(meals[0]) } })
-                }}
-              >
-                {meals[0].image && meals[0].image.startsWith('http') ? (
-                  <Image source={{ uri: meals[0].image }} style={styles.heroMealImage} resizeMode="cover" />
-                ) : (
-                  <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
-                    <Utensils size={32} stroke="#555" strokeWidth={1.5} />
+            ) : heroMeal ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.heroMealCard, { marginHorizontal: 20 }]}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    // Guard against missing id (GPT sometimes omits it) — fall back
+                    // to a synthetic id so the URL is well-formed. mealData carries
+                    // the full meal so meal/[id].tsx renders from URL params either way.
+                    const safeId = heroMeal.id || `gen-${Date.now()}`
+                    router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(heroMeal) } })
+                  }}
+                >
+                  <RNAnimated.View style={{ flex: 1, opacity: heroFade }}>
+                    {heroMeal.image && heroMeal.image.startsWith('http') ? (
+                      <Image source={{ uri: heroMeal.image }} style={styles.heroMealImage} resizeMode="cover" />
+                    ) : (
+                      <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
+                        <Utensils size={32} stroke="#555" strokeWidth={1.5} />
+                      </View>
+                    )}
+                    <LinearGradient
+                      colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                      locations={[0.3, 0.6, 1]}
+                      style={styles.heroMealGradient}
+                    />
+                    <View style={styles.heroMealContent}>
+                      <Text style={styles.heroMealName} numberOfLines={2}>{heroMeal.name}</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                        {heroMeal.prepTime > 0 && (
+                          <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
+                            <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{heroMeal.prepTime} MIN</Text>
+                          </View>
+                        )}
+                        <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                          <Text style={styles.heroMealPillText}>{heroMeal.calories} CAL</Text>
+                        </View>
+                        {heroMeal.protein > 0 && (
+                          <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
+                            <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{heroMeal.protein}P</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  </RNAnimated.View>
+                </TouchableOpacity>
+                {meals.length > 1 && (
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+                    {meals.slice(0, 3).map((_, i) => (
+                      <View
+                        key={i}
+                        style={{
+                          width: i === safeHeroIdx ? 16 : 6,
+                          height: 6,
+                          borderRadius: 3,
+                          backgroundColor: i === safeHeroIdx ? '#4ADE80' : 'rgba(255,255,255,0.25)',
+                        }}
+                      />
+                    ))}
                   </View>
                 )}
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
-                  locations={[0.3, 0.6, 1]}
-                  style={styles.heroMealGradient}
-                />
-                <View style={styles.heroMealContent}>
-                  <Text style={styles.heroMealName} numberOfLines={2}>{meals[0].name}</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
-                    {meals[0].prepTime > 0 && (
-                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
-                        <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{meals[0].prepTime} MIN</Text>
-                      </View>
-                    )}
-                    <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                      <Text style={styles.heroMealPillText}>{meals[0].calories} CAL</Text>
-                    </View>
-                    {meals[0].protein > 0 && (
-                      <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
-                        <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{meals[0].protein}P</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              </TouchableOpacity>
+              </>
             ) : null}
           </View>
         )}
