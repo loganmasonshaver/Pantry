@@ -207,7 +207,12 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
 - Recipe steps must ACTUALLY fit within the prepTime claimed. If a step alone (e.g. boiling pasta) takes longer than the budget, the entire meal is disqualified.
 - For each ingredient include both a visual portion size (e.g. "1 palm", "1 fist", "2 tbsp") AND a gram/ml weight (e.g. "120g", "185g", "30ml")
 - No repeated meals
-- KEEP IT COOKABLE: 5–9 ingredients per meal (fewer when possible), 3–6 steps per meal. No filler steps like "Set aside" or "Wait" as their own step. Combine related actions into one step.
+- KEEP IT COOKABLE: 5–12 ingredients per meal — simple dishes (smoothies, scrambles) use fewer, complex dishes (curries, stews, layered Mexican) use more. Don't truncate authentic cuisines to hit a low cap.
+- ATOMIC STEPS: each step contains ONE primary cooking action so it's easy to follow while actually cooking.
+  ✗ BAD: "Heat oil in pan, add chicken, sear 5 minutes" (3 actions crammed into one step)
+  ✓ GOOD: "Heat oil in pan." → "Add chicken." → "Sear 5 minutes." (3 separate steps)
+  Combine ONLY when actions happen simultaneously without a state change (e.g. "season with salt and pepper" is one step). 4-10 steps per meal — scale to complexity, don't force into a small range.
+- No filler steps ("Set aside" or "Wait" as their own step) — fold those into the adjacent action step.
 - ONLY suggest real, practical meals that people actually eat. No bizarre combinations.
 - CRITICAL: You do NOT need to use every pantry ingredient. Only include ingredients that make culinary sense for THIS specific meal. It is BETTER to skip a pantry ingredient than to force it into a meal where it doesn't belong.
 - CUISINE COHERENCE IS MANDATORY: Every meal must fit ONE identifiable cuisine or style (Italian, Mexican, Asian/Thai/Chinese/Japanese, Mediterranean, American comfort, Middle Eastern, Indian, etc.). Before picking ingredients, decide the cuisine FIRST, then only include pantry items that belong in that cuisine. Do NOT create cuisine mash-ups (e.g. no peanut butter in Italian pasta, no soy sauce in Mediterranean bowls, no curry powder in Tex-Mex).
