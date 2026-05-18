@@ -183,9 +183,8 @@ ${ingredients.join(", ")}
 Rules:
 ${ingredientRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
-- BALANCED MACROS (blocking constraint): every meal MUST fit BOTH bands below. Distribute macros EVENLY across meals — never pile protein/calories into one meal and starve another. Above max causes poor absorption + GI discomfort; below min undershoots daily totals.
-  • Protein: ${proteinMin}g–${proteinMax}g per meal (target ~${proteinTarget}g)
-  • Calories: ${calorieMin}–${calorieMax} kcal per meal (target ~${calorieTarget} kcal)
+- PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
+- CALORIE TARGET (guidance, not blocking): aim for ~${calorieTarget} kcal per meal (range ${calorieMin}–${calorieMax}), but realistic variance is OK — the user's daily total of ${calorieGoal} kcal across ${mealsPerDay} meals is what matters, not per-meal precision.
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -284,18 +283,15 @@ Respond ONLY with a JSON array, no markdown, no explanation. Every meal must inc
       console.log('Macros corrected')
     }
 
-    // Macro band validation — drop meals whose REAL macros (post-FatSecret correction)
-    // exceed the user's distributed targets by 40%+. Loose buffer catches only egregious
-    // bombs (e.g. 96g protein when cap is 55g) while letting near-misses through, so the
-    // filter rarely fires and we almost always return all 3 meals.
-    const beforeBands = meals.length
-    meals = meals.filter((m: any) =>
-      Number(m.protein) <= proteinMax * 1.40 &&
-      Number(m.calories) <= calorieMax * 1.40
-    )
-    const droppedByBands = beforeBands - meals.length
-    if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding 1.4× limits (protein ${proteinMax}g, calories ${calorieMax} kcal)`)
+    // Protein band validation — drop meals whose REAL protein (post-FatSecret correction)
+    // exceeds the user's per-meal cap by 40%+. Only protein is enforced because it has
+    // real physiological consequences (poor absorption + GI discomfort above ~50g/meal).
+    // Calories aren't filtered — overshooting cal per meal is fine, user just eats less elsewhere.
+    const beforeProteinBand = meals.length
+    meals = meals.filter((m: any) => Number(m.protein) <= proteinMax * 1.40)
+    const droppedByProtein = beforeProteinBand - meals.length
+    if (droppedByProtein > 0) {
+      console.log(`Protein band: dropped ${droppedByProtein}/${beforeProteinBand} meals exceeding 1.4× cap (max ${proteinMax}g, drop threshold ${Math.round(proteinMax * 1.40)}g)`)
     }
 
     // Prep-time validation — drop meals the LLM claimed fit the budget but didn't.
