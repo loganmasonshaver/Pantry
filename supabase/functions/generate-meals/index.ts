@@ -155,8 +155,11 @@ Deno.serve(async (req: Request) => {
     const isCookNow = mode === "cookNow"
 
     const ingredientRule = isCookNow
-      ? `- STRICTLY use ONLY ingredients from the pantry list below. Do NOT include ANY ingredient not on this list — not even cooking basics like oil, salt, pepper, butter, or spices unless they are explicitly listed. The user wants to cook right now with ONLY what they have. If an ingredient is not in the list, do not use it. Every single ingredient in the recipe MUST appear in the pantry list.`
-      : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy. Mark any non-pantry ingredient by appending " *" to its name (e.g. "salmon fillet *").`
+      ? `- HYBRID COOK NOW MODE — generate exactly ${count} meals split as follows:
+  • Meals 1 and 2 (STRICT): use ONLY ingredients from the pantry list. NO ingredient outside the list — not even oil, salt, pepper, butter, or spices unless they're explicitly listed. Set "missing_ingredients": [] for these meals. These prove "you can cook tonight with what you have."
+  • Meal ${count} (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: salt, pepper, olive oil, garlic, butter, soy sauce, lemon, rice, pasta, eggs, common dried herbs). List those extras in "missing_ingredients". NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
+- Every ingredient in meals 1 and 2 MUST appear in the pantry list (case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken").`
+      : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy. List any non-pantry ingredient in the "missing_ingredients" array for that meal.`
 
     const prompt = `You are a nutrition-focused meal planner. Generate exactly ${count} high-protein meal suggestions.
 
@@ -203,7 +206,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
 - NAMING: Meal names must sound like restaurant menu items. Use culinary terms (e.g. "Lemon Herb", "Miso Glazed", "Chipotle Lime", "Thai Basil", "Pesto", "Teriyaki"). Never name a meal after a crude ingredient list (bad: "Chicken Rice Broccoli Bowl", "Peanut Butter Chicken Bowl"; good: "Thai Basil Chicken Rice Bowl", "Teriyaki Sesame Chicken").
 - Smoothies should only contain typical smoothie ingredients (fruits, protein powder, milk, yogurt, greens)
 
-Respond ONLY with a JSON array, no markdown, no explanation:
+Respond ONLY with a JSON array, no markdown, no explanation. Every meal must include the "missing_ingredients" array (empty for strict meals, populated for stretch):
 [
   {
     "id": "1",
@@ -216,6 +219,7 @@ Respond ONLY with a JSON array, no markdown, no explanation:
     "ingredients": [
       { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "120g" }
     ],
+    "missing_ingredients": [],
     "steps": [
       { "title": "Sear Chicken", "detail": "Heat oil in a skillet over medium-high heat. Season chicken and cook 6-7 minutes per side until golden." },
       { "title": "Make Sauce", "detail": "Remove chicken. Add garlic, deglaze with broth, and simmer 2 minutes." }

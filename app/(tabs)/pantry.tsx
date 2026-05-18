@@ -12,14 +12,13 @@ import {
   Platform,
   Image,
   ActivityIndicator,
-  Alert,
   Animated as RNAnimated,
   Easing,
 } from 'react-native'
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Utensils } from 'lucide-react-native'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, Utensils } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -28,7 +27,6 @@ import { usePremium } from '@/context/SuperwallContext'
 import { supabase } from '@/lib/supabase'
 import { STORE_CATEGORIES, autoCategoryMatches } from '@/lib/categories'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
-import { trackMealRegenerated, trackUpgradePromptShown } from '@/lib/analytics'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
@@ -201,7 +199,7 @@ function CategorySection({
 export default function PantryScreen() {
   const { user } = useAuth()
   const router = useRouter()
-  const { isPremium, triggerUpgrade } = usePremium()
+  const { isPremium } = usePremium()
   const [categories, setCategories] = useState<Category[]>([])
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(['protein']))
   const [searchQuery, setSearchQuery] = useState('')
@@ -232,9 +230,15 @@ export default function PantryScreen() {
   // because "what to cook from my pantry" is a kitchen task, not a tracking task.
   // Visually distinct from the Discover tab (cinematic horizontal browse): compact
   // action-rows with missing-ingredient surfacing, anchored to actual pantry contents.
-  const hasPantryItems = categories.some(c => c.ingredients.length > 0)
+  // Total in-stock count drives auto-regen: hook regenerates when pantry changes by
+  // PANTRY_REGEN_THRESHOLD (3) items since last gen — no manual refresh button needed.
+  const pantryItemCount = useMemo(
+    () => categories.reduce((sum, c) => sum + c.ingredients.filter(i => i.inStock).length, 0),
+    [categories]
+  )
+  const hasPantryItems = pantryItemCount > 0
   const { meals, loading: mealsLoading, error: mealsError, regenerate } = useMealSuggestions(
-    user?.id, isPremium, 'cookNow', hasPantryItems
+    user?.id, isPremium, 'cookNow', hasPantryItems, pantryItemCount
   )
 
   // Lower-cased pantry names for fuzzy substring matching against meal ingredients.
@@ -269,18 +273,9 @@ export default function PantryScreen() {
     return missing
   }
 
-  const handleRegenerate = () => {
-    if (!isPremium) {
-      trackUpgradePromptShown('regen_limit')
-      Alert.alert('Upgrade to Premium', 'Free accounts get 1 set of suggestions per day.', [
-        { text: 'Not now', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => triggerUpgrade('regen_limit') },
-      ])
-      return
-    }
-    trackMealRegenerated()
-    regenerate()
-  }
+  // Manual refresh removed — Cook Tonight regenerates automatically when (a) a new day
+  // starts (daily cache) or (b) pantry changes by 3+ items since last gen (handled in
+  // useMealSuggestions). Killing the button bounds image-gen cost at scale.
 
   const fetchItems = useCallback(async () => {
     if (!user) return
@@ -584,9 +579,6 @@ export default function PantryScreen() {
                       <Text style={styles.cookTonightTitle}>Cook tonight</Text>
                       <Text style={styles.cookTonightSub}>From what you have</Text>
                     </View>
-                    <TouchableOpacity onPress={handleRegenerate} hitSlop={10} activeOpacity={0.7} style={styles.cookTonightRegen}>
-                      <RefreshCw size={14} stroke="#4ADE80" strokeWidth={2.2} />
-                    </TouchableOpacity>
                   </View>
 
                   {mealsLoading ? (
@@ -604,7 +596,10 @@ export default function PantryScreen() {
                   ) : meals.length > 0 ? (
                     <View style={{ gap: 10 }}>
                       {meals.slice(0, 3).map((meal, idx) => {
-                        const missing = missingFor(meal.ingredients)
+                        // Prefer server-supplied missing_ingredients (set by the hybrid
+                        // 2-strict + 1-stretch prompt). Fall back to client-side substring
+                        // detection during the deploy window when the edge function is older.
+                        const missing = meal.missing_ingredients ?? missingFor(meal.ingredients)
                         return (
                           <TouchableOpacity
                             key={`${meal.id}-${idx}`}

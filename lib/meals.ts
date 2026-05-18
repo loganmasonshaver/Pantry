@@ -9,6 +9,7 @@ export type GeneratedMeal = {
   carbs: number
   fat: number
   ingredients: { name: string; visual: string; grams: string }[]
+  missing_ingredients?: string[]
   steps: (string | { title: string; detail: string })[]
   image: null
 }

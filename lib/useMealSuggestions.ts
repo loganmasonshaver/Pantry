@@ -7,7 +7,11 @@ import { useAIConsent } from '../context/AIConsentContext'
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
 const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 
-type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number }
+// Pantry items added/removed since last gen before auto-regenerating. Chosen so a single
+// add (most common interaction) never triggers regen, but a meaningful bulk add does.
+const PANTRY_REGEN_THRESHOLD = 3
+
+type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number; pantryCount?: number }
 
 // Local-timezone date string. Previously this used toISOString() which is UTC,
 // so reloading the app after ~7pm CT (00:00 UTC) treated cached meals as
@@ -17,7 +21,7 @@ function todayStr() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
+export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true, pantryCount = 0) {
   const { requestConsent } = useAIConsent()
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   const [loading, setLoading] = useState(false)
@@ -123,9 +127,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         mode,
       })
 
-      // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes
+      // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes,
+      // and pantryCount so cache can be invalidated when pantry grows/shrinks meaningfully.
       const maxPrep = profile?.max_prep_minutes || 30
-      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep }))
+      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, pantryCount }))
 
       // images load progressively after meals are shown; errors must not block the UI
       // Fetch all images in parallel
@@ -144,7 +149,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             })
           }
         }))
-        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep }))
+        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep, pantryCount }))
       })()
 
       return generated
@@ -158,13 +163,18 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     setError(null)
 
     try {
-      // Free users: serve cached meals instantly (no loading state)
+      // Serve cached meals instantly (no loading state)
       if (!forceGenerate) {
         const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
+          // Pantry has grown/shrunk significantly since last gen — treat as stale.
+          // Defaults to current count for pre-update caches so existing caches stay valid.
+          const pantryDiff = Math.abs(pantryCount - (cached.pantryCount ?? pantryCount))
           // Old cache format has no maxPrepMinutes — treat as miss so it regenerates with correct prep constraint
           if (cached.maxPrepMinutes === undefined) {
+            await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+          } else if (pantryDiff >= PANTRY_REGEN_THRESHOLD) {
             await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
           } else if (cached.date === todayStr() && cached.meals.length > 0) {
             const validMeals = cached.meals.filter(m => !m.prepTime || Number(m.prepTime) <= cached.maxPrepMinutes!)
@@ -189,7 +199,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                       })
                     }
                   }))
-                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes }))
+                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, pantryCount: cached.pantryCount ?? pantryCount }))
                 })()
               }
               return
@@ -233,8 +243,8 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     }
   }
 
-  // On mode change, immediately load cached meals before async fetch.
-  // On mode change, immediately load cached meals before async fetch.
+  // Triggers on mount, mode change, or significant pantry change (3+ items added/removed
+  // since last gen). Cache load is instant; regen only fires when cache is genuinely stale.
   // Seeded meals (onboarding placeholders) are skipped — they have no recipe data.
   useEffect(() => {
     if (!userId || !enabled) return
@@ -243,8 +253,13 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
+        // Pantry has grown/shrunk meaningfully since last gen — invalidate cache.
+        // Defaults to current count for pre-update caches so existing caches stay valid.
+        const pantryDiff = Math.abs(pantryCount - (cached.pantryCount ?? pantryCount))
         // Invalidate if no maxPrepMinutes stored (old cache format) — forces regeneration with correct prep constraint
         if (cached.maxPrepMinutes === undefined) {
+          await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+        } else if (pantryDiff >= PANTRY_REGEN_THRESHOLD) {
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         } else if (cached.date === todayStr() && cached.meals.length > 0) {
           // Filter out any meals that somehow slipped past the prep cap
@@ -269,7 +284,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                     })
                   }
                 }))
-                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes }))
+                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, pantryCount: cached.pantryCount ?? pantryCount }))
               })()
             }
             return
@@ -281,7 +296,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       if (!cancelled) fetchAndGenerate()
     })()
     return () => { cancelled = true }
-  }, [userId, isPremium, mode, enabled])
+  }, [userId, isPremium, mode, enabled, pantryCount])
 
   return { meals, loading, error, regenerate: () => fetchAndGenerate(true) }
 }
