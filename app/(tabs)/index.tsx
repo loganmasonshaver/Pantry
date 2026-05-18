@@ -1771,8 +1771,10 @@ const styles = StyleSheet.create({
 
   // Hero meal cards (horizontal scroll)
   heroMealCard: {
-    width: 240,
-    height: 280,
+    // Full-width hero (Netflix/Spotify style). Width is implicit via parent (ScrollView
+    // gives full screen width); the marginHorizontal applied at the usage site pads
+    // it in from the screen edges. Height bumped from 280 for a more cinematic feel.
+    height: 360,
     borderRadius: 28,
     overflow: 'hidden',
     position: 'relative',
