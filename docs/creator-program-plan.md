@@ -1,200 +1,167 @@
-# Pantry: Creator Program Plan (Day 1–90)
+# Pantry: Creator Program Plan
 
-*Generated 2026-05-18. Based on Cal AI playbook + RevenueCat 2026 fitness benchmarks + your unit economics.*
+*Latest revision 2026-05-18 after deep deliberation on commission structure, attribution stack, and stage-aware optimization.*
 
 ---
 
 ## TL;DR
 
-Run Cal AI's playbook, not a discount model.
+**Stage 1 (current — pre-launch / first 6 months):** 50% of first payment, one-time, paid to affiliate when their referred user converts post-trial. Attribution via Supabase `referral_codes` table + Superwall `referralCode` user attribute. No Apple Offer Codes, no webhook to Supabase, no admin UI yet.
 
-- **Default paywall:** 3-day free trial → $7.99/mo
-- **Creator code (Apple Offer Code):** 7-day free trial → $7.99/mo (adds 4 days as the value unlock)
-- **Creator payment:** Flat fee per video ($50–150), not commissions
-- **Attribution:** Apple Offer Code redemption events → Superwall webhook → Supabase `subscription_events` table
-- **Tiered structure:** 1 shared Apple Offer slot for the long tail (50+ creators), up to 9 unique slots for top performers
+**Stage 2 (12+ months out, held in reserve):** graduate proven creators (100+ paid conversions/quarter) to $500/mo flat retainer + 15% recurring on their referrals for 6 months.
 
-This avoids the API cost drain of "free first month" promos and uses the Apple Offer Code 10-slot limit efficiently.
+**Trial structure:** Default 7-day trial stays. Codes are attribution-only (don't change user experience).
 
 ---
 
-## Why this beats the alternatives
+## Final commission decision: 50% first-conversion
 
-**My earlier recommendation was 50% off first month. The data says don't.**
+### What it is
 
-| Strategy | 90-day GP per 1000 installs | Risk |
-|---|---|---|
-| Attribution-only (full price) | $1,487 | Low code redemption (~5%) |
-| **7-day trial via code (Cal AI)** | **$1,684** ⭐ | Low; cleanest funnel |
-| 50% off first month | $1,750–$2,490 | Worse retention (RevenueCat) + burns Apple slots |
-| Free first month | $507 | Cash drag in month 1; ~6.9% conversion |
-
-The 50% discount looks best on paper, but RevenueCat 2026 fitness data shows discount-first-month cohorts have 20-40% worse 90-day retention vs. organic. After you reprice for that, the trial-bonus strategy wins on margin AND cohort quality.
-
----
-
-## Unit economics
-
-| | Value |
+| | Amount |
 |---|---|
-| Subscription | $7.99/mo |
-| Apple cut (SBP year 1) | 15% |
-| Net per paying user | $6.79/mo |
-| API cost per active premium user | $1.20/mo |
-| **Contribution margin per paying user** | **$5.59/mo (~70%)** |
-| Cost-to-revenue ratio | 18% (high — most SaaS is <5%) |
+| Monthly conversion ($8/mo) | $4 once per converted user |
+| Annual conversion ($30/yr) | $15 once per converted user |
+| Triggers on | First paid charge AFTER 7-day trial completes |
+| Renewals | $0 — creator earns nothing on renewals |
+| Cap per creator | Unlimited (Stage 1 is about finding golden geese) |
 
-**Implication:** Every "free" user actively burns ~$1.20/mo. Free-month codes are real cash drain, not just "missed revenue."
+### Why this beat 20% recurring
 
----
+The math was actually close — 20% recurring is cheaper for failures (most relationships end in 1-3 months), while 50% one-time caps the cost of golden geese. Portfolio totals over 6 months are within ~$400 of each other.
 
-## 90-day financial model (per 1000 creator-attributed installs)
+**The deciding factor: STAGE.** At pre-launch the bottleneck is creator yes-rate, not unit economics. 50% one-time:
+1. Pitches better — "50%" anchors as the bigger headline number to newbie creators
+2. Bounded liability — no compounding risk on the rare golden goose
+3. Simpler operationally — one payment per user, no monthly accounting per creator
+4. Cleaner pitch — "50% of what each user pays me, once when they finish their trial"
 
-### Strategy B — 7-day trial bonus via Apple Offer Code (recommended)
+### Why NOT recurring at Stage 1
 
-| | Month 1 | Month 2 | Month 3 | 90-day |
-|---|---|---|---|---|
-| Code redeems (trial) | 300 (30%) | — | — | — |
-| Trial → paid (15%) | 45 | — | — | — |
-| Organic paywall (70% remainder × 10%) | 70 | — | — | — |
-| **Paying users** | **115** | **105** | **94** | — |
-| Revenue | $780 | $713 | $638 | $2,131 |
-| API cost | $208 | $126 | $113 | $447 |
-| **Gross profit** | **$572** | **$587** | **$525** | **$1,684** |
-
-### Growth scenarios — D90 MRR under Strategy B
-
-Assumes each creator drives ~250 installs/month.
-
-| Scenario | Creators | Installs (90d) | Paying D90 | MRR D90 |
-|---|---|---|---|---|
-| Slow | 5 | 3,750 | ~280 | $1,901 |
-| **Expected (Cal AI early-days analog)** | **20** | **15,000** | **~1,120** | **$7,605** |
-| Viral (1 hit + 20 creators) | 21 | 40,000 | ~3,000 | $20,370 |
+Even though recurring is technically more profitable per creator on average:
+- **Adverse selection risk** if we ever offered choice between models
+- **Compounding cost on golden geese** could blow past the first-conversion cap
+- **Operational drag** of monthly per-creator accounting on a solo dev
+- **Newbie creators don't fully understand recurring math** — the "passive income" framing leads to mismatched expectations when reality is 1-3 month tenure
 
 ---
 
-## Case study validation
+## Stage 2 graduation path (held in reserve)
 
-### Cal AI ($0 → $50M exit in 12 months)
-- 3-day free trial as audience carrot
-- Flat fees to creators (scaled to views, not followers)
-- Funnel order: creators FIRST, then paid ads layered on at $7K/day once awareness existed, affiliates last
-- Sources: [Growthcurve](https://growthcurve.co/three-engines-and-an-exit-the-cal-ai-growth-playbook), [Plutus](https://growwithplutus.com/blog/cal-ai-app-tiktok-strategy), [Shortimize](https://www.shortimize.com/blog/cal-ais-marketing-strategies-lessons-from-a-400k-mrr-success-story)
+Don't build the Stage 2 mechanics until a golden goose actually emerges.
 
-### MacroFactor ($500K MRR bootstrapped, NO promo codes ever)
-- Stronger By Science + Jeff Nippard owned audience (10M+ combined)
-- Doesn't apply to you — you don't have an owned audience; codes are the substitute
-- Source: [MacroFactor 2025 Annual Report](https://macrofactorapp.com/annual-report-2025/)
+**Criteria:** creator drives 100+ paid conversions in any rolling 90-day window
 
-### AG1 (commission benchmark — DO NOT COPY at your pricing)
-- 20-30% commission + $20 customer discount on $79 sub
-- Requires LTV > $700 (12+ month retention) to break even
-- Your $7.99 sub can't support these commission rates
-- Source: [UpPromote AG1](https://uppromote.com/affiliate-directory/ag1/)
+**Offered upgrade:** transition to "$500/mo flat retainer + 15% recurring on referred users for 6 months" — capped at 6 months recurring to avoid permanent commitment
 
-### Industry benchmarks (RevenueCat 2026)
-- Health & Fitness trial-to-paid: **6.9% median, 23% top quartile**
-- 82.1% of trial starts happen on Day 0 — first-session quality determines everything
-- 2-4 week trials convert best (45.7%); <4 day trials convert worst (<27%) — but 3-day filters HARDER for LTV
-- Source: [RevenueCat 2026](https://www.revenuecat.com/state-of-subscription-apps/)
+This gives every creator a coherent story:
+- New creator: "Join our 50% affiliate program"
+- Proven creator: "Welcome to our Top Tier — here's your retainer deal"
 
 ---
 
-## Apple Offer Codes — the hard constraint
+## Attribution stack
 
-- **10 active offers per SKU. Period.** ([Apple Dev docs](https://developer.apple.com/help/app-store-connect/manage-subscriptions/set-up-subscription-offer-codes/))
-- Apple reports offer NAME, not code → unique-per-creator attribution requires unique-per-creator offer
-- Forces tiered structure:
+**Codes:** Stored in existing Supabase `referral_codes` table with `grants_premium=false` for affiliate-tracking codes.
 
-| Tier | Mechanism | Apple slots used |
-|---|---|---|
-| Creator personal access | Supabase code (`grants_premium=true`) | 0 |
-| Long-tail audience promo | 1 shared Apple Offer Code (7-day trial) | 1 |
-| Top creator tier (up to 9) | Unique Apple Offer Code per creator | 9 |
+**Tracking:** Superwall `identify(userId, { referralCode: 'JOHN' })` tags every event from that user. Implementation needs ~10 lines of code added to:
+- [app/_layout.tsx](app/_layout.tsx) — fetch `profiles.referral_code_used` on session change, call `superwallUpdate({ referralCode })`
+- [app/onboarding/index.tsx](app/onboarding/index.tsx) — call `superwallUpdate` right after `finish()` upsert so paywall in same session is tagged
 
----
+**Dashboard:** Superwall dashboard → Analytics → filter/group by `referralCode` attribute. Per-creator conversion + revenue visible natively, no custom UI needed.
 
-## Implementation plan (90 days)
+**Why NOT Apple Offer Codes:** 10-active-per-SKU limit forces tiered structure. Not worth the complexity at current scale.
 
-### Weeks 1-2: Infrastructure
-- Wire Superwall webhook → `subscription_events` Supabase table (`{user_id, event_type, code, occurred_at}`)
-- Extend `validate_referral_code_v2` RPC to handle three code types:
-  - `creator_personal` (free forever, single-use)
-  - `creator_promo` (attribution-only, multi-use)
-  - `apple_offer_alias` (no-op locally, just tags the creator)
-- Build `/admin/creators` route: per-creator redemptions, M1 conversions, M2 retention, computed CAC
-
-### Week 3: First Apple Offer Code
-- Set up `pantry_monthly` subscription product in App Store Connect
-- Create ONE offer: "Long-tail creator pool" = 7 days free trial
-- Generate ~50 codes from that offer
-- Test redemption flow on TestFlight
-
-### Week 4: First creator pilot
-- Pick one creator (10K-100K followers, high engagement, food/fitness niche)
-- Deal: $50 flat fee + 1 video + free personal access + their followers get 7-day trial code
-- Vanity URL: `heypantry.app/c/[name]` → App Store with code preloaded
-- Measure: views → app store visits → installs → redemptions → M1 conversions
-
-### Weeks 5-8: Scale long tail
-- Onboard 5-10 creators/week with same flat-fee deal
-- All share the same Apple Offer Code
-- Attribution via Supabase `referral_code_used`
-- Daily review of admin dashboard; cut underperformers fast
-
-### Weeks 9-12: Tier the program
-- Top 3-5 creators by conversion: upgrade to unique Apple Offer Code with free first month (consume 3-5 of 10 slots)
-- These become flagship partnerships; possibly add 20% rev-share for the very best
-- Re-measure: are top-tier offers worth the extra cost vs. the pool?
-
-### Day 90 decision point
-- MRR > $5K → layer paid ads (Cal AI's step 2)
-- MRR < $2K → cut creator program, revisit positioning
-- MRR $2-5K → optimize same playbook for another 90 days
+**Why NOT Supabase webhook:** Superwall analytics already shows per-attribute conversion + revenue. Webhook would only add value for cross-joining with pantry/meal data (future ML / cohort analysis — Year 2 problem).
 
 ---
 
-## Failure modes to plan for
+## Trial structure (no change)
 
-1. **Multi-accounting fraud** — users cycle Apple IDs to re-claim trials. Mitigate via redemption caps per code + Supabase device fingerprinting via `expo-device`.
-2. **Promo cohorts churn harder than organic** — track promo vs. organic LTV separately; never blend in dashboards.
-3. **Creator code reuse confusion** — unique vanity URLs per creator solve this.
-4. **Cash drag during ramp** — 7-day trials only cost ~$0.28/redemption (1/4 month of API). Absorbable at any scale.
-5. **Operational complexity > revenue** — build the dashboard before creator #5, not after.
+- **Default:** 7-day free trial → $8/mo or $30/yr
+- **Code-redeemed:** same 7-day trial (codes are attribution-only, no extra value unlock)
+- **Why not 3-day:** Apple's trial-eligibility-once-per-app rule creates a one-way door. Going 7→3 forecloses options for users who already triggered the 7-day trial. The "cohort quality" advantage of 3-day only matters at scale with retention data we don't have yet.
 
 ---
 
-## What to verify before fully committing
+## Unit economics at $8/$30 pricing
 
-1. **YOUR first creator cohort's trial→paid rate.** Industry median is 6.9%; your funnel could be 3% or 18%. Measure before scaling.
-2. **Whether creators take $50 flat fees.** Mid-tier fitness creators increasingly want $200-500/video. If $50 doesn't get traction, you may need to barter heavier (rev share, equity, free product).
-3. **Whether 7-day trial converts well enough.** If D90 trial conversion <10%, extend to 14-day (RevenueCat says 45.7% median conversion — at the cost of more API spend during the trial).
+Assuming realistic API cost of ~$0.30/mo per active user (NOT the older $1.20 estimate — Gemini Flash Lite migration killed the meal-gen cost):
+
+| Plan | User pays | Apple (15%) | Your net | API cost | First-period profit |
+|---|---|---|---|---|---|
+| Monthly $8 | $8.00 | −$1.20 | $6.80 | −$0.30/mo | **$6.50/mo** |
+| Annual $30 | $30.00 | −$4.50 | $25.50 | −$3.60 (12mo) | **$21.90/year** |
+
+After 50% first-conversion commission:
+- Monthly conversion: +$2.50 month 1 (then $6.50/mo pure margin every renewal)
+- Annual conversion: +$6.90 year 1 (then pure margin if they renew Y2)
+
+**Verify with real numbers:** check OpenAI + Replicate billing dashboards for actual cost-per-active-user before scaling. The $0.30 estimate could be off in either direction.
 
 ---
 
-## Final recommendation in 3 sentences
+## Implementation status
 
-Build Cal AI's exact funnel: pooled 7-day free trial Apple Offer Code for creator audiences (vs. 3-day default for organic), Supabase attribution per creator, flat-fee creator payments scaled to views. Reserve up to 9 Apple Offer Code slots for top creators only — don't waste them early. Wire the Superwall webhook + admin dashboard first; nothing else matters if you can't measure per-creator LTV.
+| Component | Status |
+|---|---|
+| `referral_codes` table + RPC | ✅ Already built |
+| Onboarding code entry (`SReferralCode`) | ✅ Already built |
+| `referral_code_used` stored on profile | ✅ Already wired |
+| Superwall `referralCode` user attribute | ⏳ Not yet wired (~10 min of work) |
+| Test code in DB | ⏳ Need to insert one for testing |
+| Affiliate pitch script | ⏳ Not yet drafted |
+| First creator signed | ⏳ Pre-launch |
+
+---
+
+## Implementation checklist when ready to ship Stage 1
+
+1. **Insert test code** in Supabase (`grants_premium=false` for attribution-only)
+2. **Wire Superwall attribute** — modify [app/_layout.tsx](app/_layout.tsx) + [app/onboarding/index.tsx](app/onboarding/index.tsx) to pass `referralCode` via `superwallUpdate`
+3. **Test end-to-end:** sign up with test code → complete trial → verify in Superwall dashboard that user is tagged
+4. **Draft pitch DM:** "50% per converted user + free lifetime account + founding creator badge"
+5. **Send 10 DMs** to creators (food/macro/fitness, 10K-50K followers, 2%+ engagement)
+6. **Pay monthly** based on Superwall analytics count × $4 (monthly) or × $15 (annual)
+
+---
+
+## Affiliate pitch template
+
+> "Hey [creator] — launching Pantry soon, an AI cooking app that builds meals from what's already in your pantry. Want to join the founding affiliate program?
+>
+> - **50% commission** on every paid user from your code (paid once they finish their 7-day trial)
+> - **Free lifetime premium account** for you
+> - **Founding Creator badge** in the app
+>
+> No contracts. If your audience converts, you earn. If not, no hard feelings. Interested?"
+
+That's the entire pitch. Don't customize per creator until they prove they're a golden goose.
+
+---
+
+## Risks to plan for
+
+1. **Multi-account fraud** — users cycle Apple IDs to re-trial. Cap codes at lower max redemptions, fingerprint via expo-device.
+2. **Creator code typos** — "MRJOHN" vs "MR JOHN" loses attribution. Keep codes short, all caps, no punctuation. Define aliases for popular codes.
+3. **Promo cohorts churn harder than organic** — track promo vs organic LTV separately in Superwall.
+4. **Operational complexity creep** — if creators start asking for custom terms, point them to Stage 2 graduation criteria. Don't customize per creator until 100+ conversions/quarter.
+
+---
+
+## What I'd verify before scaling Stage 1 to 20+ creators
+
+1. **First creator's trial→paid conversion rate.** Industry median is 6.9% (RevenueCat 2026 fitness). Yours could be 3% or 18%. Measure before scaling.
+2. **Actual API cost per active user.** Check OpenAI + Replicate dashboards. The $0.30 estimate could be off.
+3. **Pitch yield.** If <5% of DM'd creators say yes, the pitch needs work before scaling outreach.
 
 ---
 
 ## Sources
 
-- [Cal AI growth playbook (Growthcurve)](https://growthcurve.co/three-engines-and-an-exit-the-cal-ai-growth-playbook)
-- [Cal AI TikTok strategy (Plutus)](https://growwithplutus.com/blog/cal-ai-app-tiktok-strategy)
-- [Cal AI marketing lessons (Shortimize)](https://www.shortimize.com/blog/cal-ais-marketing-strategies-lessons-from-a-400k-mrr-success-story)
-- [Cal AI Micro Empires](https://www.microempires.cc/p/cal-ai)
-- [Zach Yadegari exit profile (Yuanchang)](https://yuanchang.org/en/posts/zach-yadegari-cal-ai-50m-exit/)
-- [MacroFactor 2025 Annual Report](https://macrofactorapp.com/annual-report-2025/)
-- [AG1 affiliate commissions](https://uppromote.com/affiliate-directory/ag1/)
-- [AG1 affiliate review (Creator Hero)](https://www.creator-hero.com/blog/ag1-affiliate-program-in-depth-review-pros-and-cons)
-- [AG1 marketing strategy (Latterly)](https://www.latterly.org/ag1-marketing-strategy/)
+Same set as the original research:
 - [RevenueCat State of Subscription Apps 2026](https://www.revenuecat.com/state-of-subscription-apps/)
-- [RevenueCat 2026 benchmarks blog](https://www.revenuecat.com/blog/growth/subscription-app-trends-benchmarks-2026/)
-- [RevenueCat trial conversion chart](https://www.revenuecat.com/docs/dashboard-and-metrics/charts/trial-conversion-chart)
-- [Apple Offer Codes — subscriptions setup](https://developer.apple.com/help/app-store-connect/manage-subscriptions/set-up-subscription-offer-codes/)
-- [Apple Offer Codes for iOS Apps (Appbot)](https://appbot.co/blog/apple-offer-code/)
-- [Apple custom codes for influencers (Purchasely)](https://www.purchasely.com/blog/apple-releases-custom-codes-and-unlocks-influencers-referral-capacity)
-- [Promo abuse failure modes (Ravelin)](https://www.ravelin.com/insights/policy-abuse)
-- [Promo code abuse risks (Hitprobe)](https://hitprobe.com/blog/promo-code-abuse)
+- [Cal AI growth playbook (Growthcurve)](https://growthcurve.co/three-engines-and-an-exit-the-cal-ai-growth-playbook)
+- [AG1 affiliate commissions](https://uppromote.com/affiliate-directory/ag1/)
+- [Apple Offer Codes docs](https://developer.apple.com/help/app-store-connect/manage-subscriptions/set-up-subscription-offer-codes/)
+- [MacroFactor 2025 Annual Report](https://macrofactorapp.com/annual-report-2025/)
