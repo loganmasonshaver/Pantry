@@ -648,6 +648,9 @@ export default function MealDetailScreen() {
       }
       meal = {
         ...generated,
+        // saved_meals DB column is `image_url`; URL-param mealData uses `image`.
+        // Normalize so downstream rendering (meal.image) works for both paths.
+        image: generated.image || generated.image_url || null,
         carbs: generated.carbs,
         fat: generated.fat,
         steps: rawSteps,
