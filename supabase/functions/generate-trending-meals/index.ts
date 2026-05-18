@@ -452,6 +452,18 @@ Respond ONLY with a JSON array, no markdown:
           // and returns two recipes for the same dish (e.g. two oatmeal bowls)
           const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
           const seenNames = new Set<string>()
+          const seenWordSets: Set<string>[] = [] // for same-day Jaccard dedup
+          const STOPWORDS = new Set(['high', 'protein', 'recipe', 'easy', 'quick', 'best', 'the', 'a', 'an', 'with', 'and', 'of', 'for', 'low', 'macro', 'friendly', 'healthy'])
+          const wordsOf = (s: string) => new Set(
+            s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
+          )
+          const jaccardTooClose = (a: Set<string>, b: Set<string>) => {
+            if (a.size === 0 || b.size === 0) return false
+            let overlap = 0
+            a.forEach(w => { if (b.has(w)) overlap++ })
+            const union = new Set([...a, ...b]).size
+            return (overlap / union) >= 0.5
+          }
           const filtered = parsed.filter((r: any) => {
             // Pre-FatSecret quality gate: density-based, not absolute. 25% cal-from-protein
             // for meals, 22% for snacks (dropped from 25% — snacks have less calorie budget
@@ -465,27 +477,19 @@ Respond ONLY with a JSON array, no markdown:
             if (ratio < minRatio) return false
             const key = normalize(r.name)
             if (!key || seenNames.has(key)) return false
+            const candWords = wordsOf(r.name)
             // Cross-day similarity check via Jaccard word overlap (≥50% shared meaningful
             // words = reject). Replaces the previous "first AND last word match" heuristic
             // which was both too loose (Crispy Chicken Wings vs Soy Glazed Chicken Bowl
             // didn't trigger — both pass) and too strict at scale (anything with 'High'
             // first word got rejected). Stopwords are dropped from both sides so common
             // brand-voice words ("high", "protein", "recipe") don't dominate the overlap.
-            const STOPWORDS = new Set(['high', 'protein', 'recipe', 'easy', 'quick', 'best', 'the', 'a', 'an', 'with', 'and', 'of', 'for', 'low', 'macro', 'friendly', 'healthy'])
-            const wordsOf = (s: string) => new Set(
-              s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
-            )
-            const candWords = wordsOf(r.name)
-            const tooSimilar = prevNames.some((prev: string) => {
-              const prevWords = wordsOf(prev)
-              if (candWords.size === 0 || prevWords.size === 0) return false
-              let overlap = 0
-              candWords.forEach(w => { if (prevWords.has(w)) overlap++ })
-              const union = new Set([...candWords, ...prevWords]).size
-              return (overlap / union) >= 0.5
-            })
-            if (tooSimilar) return false
+            if (prevNames.some((prev: string) => jaccardTooClose(candWords, wordsOf(prev)))) return false
+            // Same-day similarity check — catches beef-chili + chicken-chili type pairs
+            // that the protein-source dedup misses (different proteins, same base dish).
+            if (seenWordSets.some(prev => jaccardTooClose(candWords, prev))) return false
             seenNames.add(key)
+            seenWordSets.push(candWords)
             return true
           }).slice(0, 20)
           if (!recipes || filtered.length > recipes.length) recipes = filtered
