@@ -469,10 +469,7 @@ export default function PantryScreen() {
                   same scanCardBeam loop so the sweeping beams stay in sync. */}
               <View style={[styles.scanRow, { marginHorizontal: 0 }]}>
                 <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={() => setShowScanModal(true)} activeOpacity={0.85}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
-                    <View style={styles.scanIconContainer}><Camera size={22} stroke="#4ADE80" strokeWidth={1.8} /></View>
-                    <View style={styles.scanCardBadge}><Text style={styles.scanCardBadgeText}>AI</Text></View>
-                  </View>
+                  <View style={styles.scanCardBadgeAbs}><Text style={styles.scanCardBadgeText}>AI</Text></View>
                   <View><Text style={styles.scanCardTitle}>Scan Pantry</Text><Text style={styles.scanCardSub}>Auto-detect items</Text></View>
                   {/* Compact pantry visual: 2 shelves × 3 items, beam sweeps top→bottom */}
                   <View style={styles.scanCardVisual}>
@@ -534,10 +531,7 @@ export default function PantryScreen() {
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={() => setShowReceiptModal(true)} activeOpacity={0.85}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'flex-start' }}>
-                    <View style={styles.scanIconContainer}><Receipt size={22} stroke="#4ADE80" strokeWidth={1.8} /></View>
-                    <View style={styles.scanCardBadge}><Text style={styles.scanCardBadgeText}>AI</Text></View>
-                  </View>
+                  <View style={styles.scanCardBadgeAbs}><Text style={styles.scanCardBadgeText}>AI</Text></View>
                   <View><Text style={styles.scanCardTitle}>Scan Receipt</Text><Text style={styles.scanCardSub}>Import purchases</Text></View>
                   {/* Compact receipt visual: paper with item lines + price column, beam sweeps */}
                   <View style={styles.scanCardVisual}>
@@ -849,12 +843,13 @@ const styles = StyleSheet.create({
   scanCard: {
     backgroundColor: '#191919',
     borderRadius: 24,
-    paddingVertical: 24,
+    paddingVertical: 16,
     paddingHorizontal: 16,
     alignItems: 'flex-start',
-    gap: 14,
+    gap: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
+    position: 'relative',
   },
   scanIconContainer: {
     width: 48,
@@ -869,6 +864,18 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 7,
     paddingVertical: 2,
+  },
+  // Absolute-positioned variant — sits in the top-right corner of the card so
+  // we can drop the icon row entirely and let the title start at the top.
+  scanCardBadgeAbs: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    backgroundColor: '#4ADE80',
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    zIndex: 1,
   },
   scanCardBadgeText: { fontSize: 9, fontWeight: '800', color: '#004a22', letterSpacing: 0.5 },
   scanCardTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
