@@ -49,8 +49,49 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Service-role client for the actual destructive delete.
+  // Service-role client for the destructive operations.
   const adminClient = createClient(supabaseUrl, supabaseServiceKey)
+
+  // Manually clear child rows first. auth.admin.deleteUser() fails if any FK
+  // points to the user row WITHOUT ON DELETE CASCADE, and our schema didn't
+  // declare cascades on these tables. Mirror what Profile → Reset Onboarding
+  // does client-side, but with service-role privileges so RLS doesn't block.
+  //
+  // Order matters for trending_meals: it FKs creators(id), so wipe trending
+  // rows for this user's creator first, then delete the creator row.
+  try {
+    const { data: creatorRow } = await adminClient
+      .from('creators')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (creatorRow?.id) {
+      await adminClient.from('trending_meals').delete().eq('creator_id', creatorRow.id)
+    }
+
+    // Parallel-delete all user-owned rows. .then() with empty callbacks swallow
+    // table-missing errors so a single absent table doesn't block the whole flow.
+    await Promise.all([
+      adminClient.from('saved_meals').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('meal_logs').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('meal_ratings').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('grocery_items').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('pantry_items').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('weight_logs').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('macro_overrides').delete().eq('user_id', user.id).then(() => {}, () => {}),
+      adminClient.from('creators').delete().eq('user_id', user.id).then(() => {}, () => {}),
+    ])
+
+    // Profile last — other tables may FK to it.
+    await adminClient.from('profiles').delete().eq('id', user.id).then(() => {}, () => {})
+  } catch (e) {
+    console.log('Child row cleanup partial failure (continuing to auth delete):', (e as Error).message)
+    // Don't bail — even if cleanup partially fails, attempt the auth.users delete.
+    // The user can re-run if it errors and we'll have at least made progress.
+  }
+
+  // Now delete the auth.users row itself.
   const { error: deleteError } = await adminClient.auth.admin.deleteUser(user.id)
   if (deleteError) {
     return new Response(JSON.stringify({ error: deleteError.message }), {
