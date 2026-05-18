@@ -853,11 +853,19 @@ export default function ProfileScreen() {
                       if (error) throw error
                       // Server-side delete succeeded — clear local storage + sign out so
                       // the UI doesn't try to refetch profile data for a now-dead user.
+                      // Must clear the SAME keys as Reset Onboarding, otherwise onboarding
+                      // resumes mid-flow (at the last persisted onboarding_step) after the
+                      // user re-signs in, which is jarring.
                       await AsyncStorage.multiRemove([
                         'onboarding_complete',
+                        'onboarding_step',
+                        'onboarding_data',
+                        'otp_verified',
+                        'onboarding_swiped_meals',
                         'pantry_onboarding_plan_ready',
                         'pantry_daily_meals_cookNow',
                         'pantry_daily_meals_mealPlan',
+                        'pantry_image_urls_v1',
                       ])
                       await authSignOut()
                     } catch (e: any) {
