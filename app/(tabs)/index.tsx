@@ -359,6 +359,9 @@ export default function HomeScreen() {
   const HERO_FADE_MS = 450
   const [heroIdx, setHeroIdx] = useState(0)
   const heroFade = useRef(new RNAnimated.Value(1)).current
+  // Ken Burns slow-zoom — image scales from 1.0 to 1.12 over the full slide duration,
+  // resets on idx change. Gives constant motion even when crossfade is idle.
+  const heroScale = useRef(new RNAnimated.Value(1)).current
   useEffect(() => {
     if (loading || meals.length <= 1) return
     const interval = setInterval(() => {
@@ -377,6 +380,16 @@ export default function HomeScreen() {
     }, HERO_CYCLE_MS)
     return () => clearInterval(interval)
   }, [loading, meals.length, heroFade])
+  // Ken Burns zoom — restart on every heroIdx change. Linear easing for steady drift.
+  useEffect(() => {
+    heroScale.setValue(1)
+    RNAnimated.timing(heroScale, {
+      toValue: 1.12,
+      duration: HERO_CYCLE_MS,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }).start()
+  }, [heroIdx, heroScale])
   // Guard heroIdx — meals.length can shrink between regens and leave us pointing at an empty slot
   const safeHeroIdx = Math.min(heroIdx, Math.max(meals.length - 1, 0))
   const heroMeal = meals[safeHeroIdx]
@@ -1142,14 +1155,18 @@ export default function HomeScreen() {
                     router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(heroMeal) } })
                   }}
                 >
-                  <RNAnimated.View style={{ flex: 1, opacity: heroFade }}>
-                    {heroMeal.image && heroMeal.image.startsWith('http') ? (
-                      <Image source={{ uri: heroMeal.image }} style={styles.heroMealImage} resizeMode="cover" />
-                    ) : (
-                      <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
-                        <Utensils size={32} stroke="#555" strokeWidth={1.5} />
-                      </View>
-                    )}
+                  <RNAnimated.View style={[StyleSheet.absoluteFillObject, { opacity: heroFade }]}>
+                    {/* Image layer — slow zoom (Ken Burns). Wrapped in its own Animated.View
+                        so the gradient + text stay anchored while only the image scales. */}
+                    <RNAnimated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: heroScale }] }]}>
+                      {heroMeal.image && heroMeal.image.startsWith('http') ? (
+                        <Image source={{ uri: heroMeal.image }} style={styles.heroMealImage} resizeMode="cover" />
+                      ) : (
+                        <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
+                          <Utensils size={32} stroke="#555" strokeWidth={1.5} />
+                        </View>
+                      )}
+                    </RNAnimated.View>
                     <LinearGradient
                       colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
                       locations={[0.3, 0.6, 1]}
