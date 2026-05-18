@@ -18,7 +18,7 @@ import {
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, Utensils } from 'lucide-react-native'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Utensils } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -230,15 +230,11 @@ export default function PantryScreen() {
   // because "what to cook from my pantry" is a kitchen task, not a tracking task.
   // Visually distinct from the Discover tab (cinematic horizontal browse): compact
   // action-rows with missing-ingredient surfacing, anchored to actual pantry contents.
-  // Total in-stock count drives auto-regen: hook regenerates when pantry changes by
-  // PANTRY_REGEN_THRESHOLD (3) items since last gen — no manual refresh button needed.
-  const pantryItemCount = useMemo(
-    () => categories.reduce((sum, c) => sum + c.ingredients.filter(i => i.inStock).length, 0),
-    [categories]
-  )
-  const hasPantryItems = pantryItemCount > 0
-  const { meals, loading: mealsLoading, error: mealsError, regenerate } = useMealSuggestions(
-    user?.id, isPremium, 'cookNow', hasPantryItems, pantryItemCount
+  // Generation fires once per day (daily cache). Manual refresh button is capped at
+  // 1/day per user to bound image-gen cost — see MAX_DAILY_REGENS in useMealSuggestions.
+  const hasPantryItems = categories.some(c => c.ingredients.length > 0)
+  const { meals, loading: mealsLoading, error: mealsError, regenerate, canRegenerate } = useMealSuggestions(
+    user?.id, isPremium, 'cookNow', hasPantryItems
   )
 
   // Lower-cased pantry names for fuzzy substring matching against meal ingredients.
@@ -577,8 +573,19 @@ export default function PantryScreen() {
                   <View style={styles.cookTonightHeader}>
                     <View>
                       <Text style={styles.cookTonightTitle}>Cook tonight</Text>
-                      <Text style={styles.cookTonightSub}>From what you have</Text>
+                      <Text style={styles.cookTonightSub}>
+                        {canRegenerate ? 'From what you have' : 'Refreshed today · New tomorrow'}
+                      </Text>
                     </View>
+                    <TouchableOpacity
+                      onPress={regenerate}
+                      hitSlop={10}
+                      activeOpacity={0.7}
+                      disabled={!canRegenerate}
+                      style={[styles.cookTonightRegen, !canRegenerate && { opacity: 0.35 }]}
+                    >
+                      <RefreshCw size={14} stroke={canRegenerate ? '#4ADE80' : '#888'} strokeWidth={2.2} />
+                    </TouchableOpacity>
                   </View>
 
                   {mealsLoading ? (
