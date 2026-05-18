@@ -1129,8 +1129,8 @@ export default function HomeScreen() {
             Full suggested-meal browse will live in the Pantry tab (Phase 2b). For now we
             show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
         {pantryFetched && pantryNames.size > 0 && (
-          <View style={{ marginBottom: 28 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}>
+          <View style={{ marginBottom: 36 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
               <Text style={styles.sectionTitle}>Cook from your pantry</Text>
               <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
                 <Text style={{ color: '#4ADE80', fontSize: 13, fontWeight: '600' }}>See all →</Text>
@@ -1596,7 +1596,7 @@ const styles = StyleSheet.create({
   avatarInitial: { fontSize: 14, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
   hiText: { fontSize: 26, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
   greetText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
-  macroCard: { marginHorizontal: 20, marginBottom: 24, borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
+  macroCard: { marginHorizontal: 20, marginBottom: 32, borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   macroSectionLabel: { fontSize: 10, fontWeight: '700', color: '#4ADE80', textTransform: 'uppercase', letterSpacing: 2 },
   macroCalorieText: { fontSize: 32, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
   macroRingsRow: { flexDirection: 'row', justifyContent: 'space-evenly', paddingHorizontal: 20, marginTop: 4 },
