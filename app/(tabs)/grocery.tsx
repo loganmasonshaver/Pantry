@@ -10,6 +10,8 @@ import {
   TextInput,
   PanResponder,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
@@ -489,8 +491,12 @@ export default function GroceryScreen() {
 
       {/* ── Add Item Modal ── */}
       <Modal visible={showAddModal} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowAddModal(false)}>
-          <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowAddModal(false)}>
+            <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Item</Text>
               <TouchableOpacity onPress={() => setShowAddModal(false)} activeOpacity={0.7}>
@@ -538,6 +544,7 @@ export default function GroceryScreen() {
             )}
           </View>
         </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   )
