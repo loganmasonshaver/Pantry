@@ -155,6 +155,7 @@ export default function GroceryScreen() {
   const [inlineAdding, setInlineAdding] = useState(false)
   const [inlineName, setInlineName] = useState('')
   const inlineInputRef = useRef<TextInput>(null)
+  const scrollRef = useRef<ScrollView>(null)
   const toastOpacity = useRef(new Animated.Value(0)).current
   const [recentOrder, setRecentOrder] = useState<{ meals: string[]; orderedAt: Date } | null>(null)
   const [lastOrder, setLastOrder] = useState<{ items: any[]; createdAt: Date } | null>(null)
@@ -304,6 +305,9 @@ export default function GroceryScreen() {
   const startInlineAdd = () => {
     setInlineName('')
     setInlineAdding(true)
+    // Scroll the inline row into view in case list is already long. setTimeout
+    // gives React time to render the input before the scroll target exists.
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)
     // autoFocus on the TextInput handles initial focus
   }
 
@@ -340,8 +344,11 @@ export default function GroceryScreen() {
     if (!error && data) {
       setItems(prev => [...prev, data])
       setInlineName('')
-      // Keep focus so user can immediately type the next item
+      // Keep focus + scroll the inline input back into view so user can see what
+      // they're typing as the list grows. setTimeout gives React time to commit
+      // the new item + relayout before the scroll.
       inlineInputRef.current?.focus()
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)
     }
   }
 
@@ -474,6 +481,7 @@ export default function GroceryScreen() {
           </View>
 
           <ScrollView
+            ref={scrollRef}
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
