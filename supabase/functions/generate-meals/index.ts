@@ -168,6 +168,18 @@ Deno.serve(async (req: Request) => {
       ? `\nDO NOT SUGGEST these meals — they were shown in recent generations and would feel like a repeat: ${recentMealNames.join(", ")}. Suggest different dishes, even if the same ingredients are involved.`
       : ""
 
+    // Recipe complexity scales with cookingSkill from onboarding.
+    // Minimal cooks get short weeknight meals; culinary cooks get real chef-level dishes.
+    const complexityBands = (() => {
+      switch (cookingSkill) {
+        case 'minimal':     return { ingredients: '4-7',  steps: '3-5' }
+        case 'moderate':    return { ingredients: '5-10', steps: '4-7' }
+        case 'adventurous': return { ingredients: '6-12', steps: '5-9' }
+        case 'culinary':    return { ingredients: '7-15', steps: '6-12' }
+        default:            return { ingredients: '5-10', steps: '4-7' }
+      }
+    })()
+
     const isCookNow = mode === "cookNow"
 
     const ingredientRule = isCookNow
@@ -207,11 +219,13 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
 - Recipe steps must ACTUALLY fit within the prepTime claimed. If a step alone (e.g. boiling pasta) takes longer than the budget, the entire meal is disqualified.
 - For each ingredient include both a visual portion size (e.g. "1 palm", "1 fist", "2 tbsp") AND a gram/ml weight (e.g. "120g", "185g", "30ml")
 - No repeated meals
-- KEEP IT COOKABLE: 5–12 ingredients per meal — simple dishes (smoothies, scrambles) use fewer, complex dishes (curries, stews, layered Mexican) use more. Don't truncate authentic cuisines to hit a low cap.
+- KEEP IT COOKABLE — scaled to this user's cooking skill (${cookingSkill}):
+  • Ingredients per meal: ${complexityBands.ingredients}. Fewer for simple dishes, more for complex dishes (curries, stews, layered cuisines). Stay in this band — don't push past the cap or undershoot the floor.
+  • Steps per meal: ${complexityBands.steps}. Scale to dish complexity within the band.
 - ATOMIC STEPS: each step contains ONE primary cooking action so it's easy to follow while actually cooking.
   ✗ BAD: "Heat oil in pan, add chicken, sear 5 minutes" (3 actions crammed into one step)
   ✓ GOOD: "Heat oil in pan." → "Add chicken." → "Sear 5 minutes." (3 separate steps)
-  Combine ONLY when actions happen simultaneously without a state change (e.g. "season with salt and pepper" is one step). 4-10 steps per meal — scale to complexity, don't force into a small range.
+  Combine ONLY when actions happen simultaneously without a state change (e.g. "season with salt and pepper" is one step).
 - No filler steps ("Set aside" or "Wait" as their own step) — fold those into the adjacent action step.
 - ONLY suggest real, practical meals that people actually eat. No bizarre combinations.
 - CRITICAL: You do NOT need to use every pantry ingredient. Only include ingredients that make culinary sense for THIS specific meal. It is BETTER to skip a pantry ingredient than to force it into a meal where it doesn't belong.
