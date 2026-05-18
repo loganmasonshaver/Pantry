@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 1320px;
+      height: 2868px;
+      overflow: hidden;
+    }
+
+    body {
+      background:
+        radial-gradient(ellipse 110% 60% at 50% 0%, rgba(74,222,128,0.18), transparent 70%),
+        linear-gradient(180deg, #0A0A0A 0%, #000000 100%);
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif;
+      color: #FFFFFF;
+      position: relative;
+    }
+
+    /* Soft inner green glow vignette — mirrors Driven's brand system, swapped to Pantry green */
+    body::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 250px 50px rgba(74,222,128,0.08);
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .copy {
+      position: absolute;
+      top: 130px;
+      left: 90px;
+      right: 90px;
+      z-index: 3;
+    }
+
+    .eyebrow {
+      font-size: 28px;
+      font-weight: 600;
+      letter-spacing: 6px;
+      color: #4ADE80;
+      text-transform: uppercase;
+      margin-bottom: 32px;
+    }
+
+    .headline {
+      font-size: 84px;
+      font-weight: 800;
+      line-height: 1.03;
+      letter-spacing: -2px;
+      color: #FFFFFF;
+    }
+
+    .headline .line {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .headline .accent {
+      color: #4ADE80;
+    }
+
+    /* iPhone bezel — proportional to the 1320×2868 screenshot inside.
+       Width 920 × aspect (2868/1320 = 2.173) = height ~1999 + padding. */
+    .phone {
+      position: absolute;
+      left: 50%;
+      bottom: 130px;
+      transform: translateX(-50%);
+      width: 920px;
+      padding: 14px;
+      border-radius: 64px;
+      background: linear-gradient(180deg, #2A2A2A 0%, #181818 100%);
+      box-shadow:
+        0 60px 120px rgba(0,0,0,0.6),
+        0 0 0 2px rgba(255,255,255,0.06),
+        inset 0 0 0 1px rgba(255,255,255,0.04);
+      z-index: 1;
+    }
+
+    .phone-screen {
+      width: 100%;
+      aspect-ratio: 1320 / 2868;
+      border-radius: 52px;
+      overflow: hidden;
+      background: #000;
+      display: block;
+    }
+
+    .phone-screen img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="copy">
+    <div class="eyebrow">{{EYEBROW}}</div>
+    <div class="headline">
+      <span class="line">{{LINE1}}</span>
+      <span class="line">{{LINE2}}</span>
+    </div>
+  </div>
+  <div class="phone">
+    <div class="phone-screen">
+      <img src="{{SCREENSHOT}}" alt="">
+    </div>
+  </div>
+</body>
+</html>

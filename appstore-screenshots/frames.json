@@ -1,0 +1,52 @@
+[
+  {
+    "id": "01",
+    "slug": "home",
+    "eyebrow": "01 · DAILY TRACKING",
+    "screenshot": "01-home.png",
+    "lines": [
+      { "text": "Track your macros." },
+      { "text": "Cook from your pantry.", "accent": "Cook" }
+    ]
+  },
+  {
+    "id": "02",
+    "slug": "pantry",
+    "eyebrow": "02 · AI PANTRY",
+    "screenshot": "02-pantry.png",
+    "lines": [
+      { "text": "What's in your pantry?" },
+      { "text": "Cook it tonight.", "accent": "Cook it tonight" }
+    ]
+  },
+  {
+    "id": "03",
+    "slug": "discover",
+    "eyebrow": "03 · DISCOVER",
+    "screenshot": "03-discover.png",
+    "lines": [
+      { "text": "Fresh inspiration." },
+      { "text": "Daily.", "accent": "Daily" }
+    ]
+  },
+  {
+    "id": "04",
+    "slug": "saved",
+    "eyebrow": "04 · YOUR LIBRARY",
+    "screenshot": "04-saved.png",
+    "lines": [
+      { "text": "Build your" },
+      { "text": "personal cookbook.", "accent": "personal cookbook" }
+    ]
+  },
+  {
+    "id": "05",
+    "slug": "grocery",
+    "eyebrow": "05 · GROCERY LIST",
+    "screenshot": "05-grocery.png",
+    "lines": [
+      { "text": "Smart list." },
+      { "text": "Auto-updates your pantry.", "accent": "pantry" }
+    ]
+  }
+]

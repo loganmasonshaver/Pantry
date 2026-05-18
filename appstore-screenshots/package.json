@@ -1,0 +1,13 @@
+{
+  "name": "pantry-appstore-screenshots",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Generates App Store iPhone 6.9\" screenshots (1320×2868) from raw iPhone captures + brand headlines.",
+  "scripts": {
+    "build": "node render.js",
+    "postinstall": "playwright install chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
