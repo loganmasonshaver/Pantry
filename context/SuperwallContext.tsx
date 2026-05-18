@@ -13,7 +13,7 @@ const TRIAL_EXPIRED_KEY = 'pantry_trial_expired'
 // Bypasses the __DEV__ "always premium" shortcut below so registerPlacement
 // actually presents the paywall modal. Must be FALSE for normal dev work or
 // every screen will throw paywalls at you. Has no effect in release builds.
-const DEV_FORCE_PAYWALL = false
+const DEV_FORCE_PAYWALL = true
 
 type SuperwallContextType = {
   isPremium: boolean
