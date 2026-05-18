@@ -49,13 +49,30 @@ function GroceryRow({
   item,
   onToggle,
   onDelete,
+  onRename,
 }: {
   item: GroceryItem
   onToggle: () => void
   onDelete: () => void
+  onRename: (newName: string) => void
 }) {
   const translateX = useRef(new Animated.Value(0)).current
   const DELETE_THRESHOLD = -80
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState(item.name)
+
+  const startEdit = () => {
+    setEditName(item.name.replace(/\s*\*\s*$/, ''))
+    setEditing(true)
+  }
+
+  const commitEdit = () => {
+    const next = editName.trim()
+    if (next && next !== item.name) {
+      onRename(next)
+    }
+    setEditing(false)
+  }
 
   const panResponder = useRef(
     PanResponder.create({
@@ -87,8 +104,8 @@ function GroceryRow({
         {...panResponder.panHandlers}
       >
         <View style={styles.row}>
-          {/* Only the checkbox toggles — tapping the rest of the row does nothing
-              (was a footgun: misclicks while reading the list checked off items). */}
+          {/* Checkbox toggles checked state. Tapping the row TEXT enters edit mode
+              for renaming (Reminders pattern). Tapping the row outside both does nothing. */}
           <TouchableOpacity
             onPress={onToggle}
             hitSlop={10}
@@ -99,10 +116,25 @@ function GroceryRow({
             </View>
           </TouchableOpacity>
           <View style={styles.rowContent}>
-            <Text style={[styles.itemName, item.checked && styles.itemNameChecked]}>
-              {item.name.replace(/\s*\*\s*$/, '')}
-            </Text>
-            {item.meal ? <Text style={styles.itemMeal}>{item.meal}</Text> : null}
+            {editing ? (
+              <TextInput
+                style={[styles.itemName, { padding: 0 }]}
+                value={editName}
+                onChangeText={setEditName}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={commitEdit}
+                onBlur={commitEdit}
+                selectTextOnFocus
+              />
+            ) : (
+              <TouchableOpacity onPress={startEdit} activeOpacity={0.6}>
+                <Text style={[styles.itemName, item.checked && styles.itemNameChecked]}>
+                  {item.name.replace(/\s*\*\s*$/, '')}
+                </Text>
+                {item.meal ? <Text style={styles.itemMeal}>{item.meal}</Text> : null}
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Animated.View>
@@ -196,6 +228,13 @@ export default function GroceryScreen() {
   useFocusEffect(useCallback(() => {
     fetchItems()
   }, [fetchItems]))
+
+  const rename = async (id: string, newName: string) => {
+    const trimmed = newName.trim()
+    if (!trimmed) return
+    setItems(prev => prev.map(i => i.id === id ? { ...i, name: trimmed } : i))
+    await supabase.from('grocery_items').update({ name: trimmed }).eq('id', id)
+  }
 
   const toggle = async (id: string) => {
     const item = items.find(i => i.id === id)
@@ -480,7 +519,7 @@ export default function GroceryScreen() {
                     {group.items.map((item, i) => (
                       <View key={item.id}>
                         {i > 0 && <View style={styles.divider} />}
-                        <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} />
+                        <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} onRename={(name) => rename(item.id, name)} />
                       </View>
                     ))}
                   </View>
