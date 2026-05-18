@@ -116,7 +116,6 @@ export default function GroceryScreen() {
   const [addSaving, setAddSaving] = useState(false)
   const [disambigChoices, setDisambigChoices] = useState<string[]>([])
   const toastOpacity = useRef(new Animated.Value(0)).current
-  const pendingOrderRef = useRef(false)
   const [recentOrder, setRecentOrder] = useState<{ meals: string[]; orderedAt: Date } | null>(null)
   const [lastOrder, setLastOrder] = useState<{ items: any[]; createdAt: Date } | null>(null)
 
@@ -154,51 +153,6 @@ export default function GroceryScreen() {
     }
   }, [user?.id])
 
-  const handleOrderComplete = useCallback(async () => {
-    if (!user) return
-    const currentItems = await supabase
-      .from('grocery_items')
-      .select('id, name, meal, category')
-      .eq('user_id', user.id)
-    const groceryItems = currentItems.data || []
-    if (!groceryItems.length) return
-
-    // Save to order_history
-    await supabase.from('order_history').insert({
-      user_id: user.id,
-      items: groceryItems.map(i => ({ name: i.name, category: i.category, meal: i.meal })),
-    })
-
-    // Insert into pantry_items
-    await supabase.from('pantry_items').insert(
-      groceryItems.map(i => ({
-        user_id: user.id,
-        name: i.name,
-        category: i.category,
-        in_stock: true,
-      })),
-    )
-
-    // Set prep timeline from ordered meals
-    const orderedMeals = [...new Set(groceryItems.map(i => i.meal).filter(Boolean))]
-    if (orderedMeals.length > 0) {
-      setRecentOrder({ meals: orderedMeals, orderedAt: new Date() })
-    }
-
-    // Delete all grocery items
-    await supabase.from('grocery_items').delete().eq('user_id', user.id)
-
-    const count = groceryItems.length
-    setItems([])
-    setToastMessage(`Added ${count} item${count !== 1 ? 's' : ''} to pantry ✓`)
-    setShowToast(true)
-    Animated.sequence([
-      Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.delay(1600),
-      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-    ]).start(() => setShowToast(false))
-  }, [user?.id])
-
   // Check for today's order (prep timeline) and last order (reorder)
   useEffect(() => {
     if (!user) return
@@ -233,20 +187,7 @@ export default function GroceryScreen() {
 
   useFocusEffect(useCallback(() => {
     fetchItems()
-    if (pendingOrderRef.current) {
-      pendingOrderRef.current = false
-      setTimeout(() => {
-        Alert.alert(
-          'Did you place your order?',
-          undefined,
-          [
-            { text: 'Not yet', style: 'cancel' },
-            { text: 'Yes, add to pantry', onPress: handleOrderComplete },
-          ],
-        )
-      }, 500)
-    }
-  }, [fetchItems, handleOrderComplete]))
+  }, [fetchItems]))
 
   const toggle = async (id: string) => {
     const item = items.find(i => i.id === id)
@@ -422,34 +363,25 @@ export default function GroceryScreen() {
       </View>
 
       {isEmpty ? (
-        <>
-          <View style={styles.emptyState}>
-            <View style={styles.emptyCircle}>
-              <ShoppingCart size={32} stroke="#4ADE80" strokeWidth={2} />
-            </View>
-            <Text style={styles.emptyTitle}>You're all stocked up</Text>
-            <Text style={styles.emptySub}>Tap + to add items to your list</Text>
-            {lastOrder && (
-              <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8} onPress={handleReorder}>
-                <Text style={styles.reorderBtnText}>Reorder Last</Text>
-                <Text style={styles.reorderBtnSub}>
-                  {lastOrder.items.length} item{lastOrder.items.length !== 1 ? 's' : ''} · {relativeTime(lastOrder.createdAt)}
-                </Text>
-              </TouchableOpacity>
-            )}
+        <View style={styles.emptyState}>
+          <View style={styles.emptyCircle}>
+            <ShoppingCart size={32} stroke="#4ADE80" strokeWidth={2} />
           </View>
-          <View style={styles.bottomBar}>
-            <TouchableOpacity
-              style={styles.deliveryBtn}
-              activeOpacity={0.85}
-              // flag checked on focus-return to prompt "Did you order?" confirmation
-              onPress={() => { pendingOrderRef.current = true; router.push('/delivery-webview') }}
-            >
-              <ShoppingCart size={18} stroke="#4ADE80" strokeWidth={2} />
-              <Text style={styles.deliveryBtnText}>Browse & Order</Text>
+          <Text style={styles.emptyTitle}>You're all stocked up</Text>
+          <Text style={styles.emptySub}>Add items as you think of them so you don't forget at the store</Text>
+          <TouchableOpacity style={styles.emptyAddBtn} onPress={openAddModal} activeOpacity={0.85}>
+            <Plus size={18} stroke="#000" strokeWidth={2.5} />
+            <Text style={styles.emptyAddBtnText}>Add to List</Text>
+          </TouchableOpacity>
+          {lastOrder && (
+            <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8} onPress={handleReorder}>
+              <Text style={styles.reorderBtnText}>Reorder Last</Text>
+              <Text style={styles.reorderBtnSub}>
+                {lastOrder.items.length} item{lastOrder.items.length !== 1 ? 's' : ''} · {relativeTime(lastOrder.createdAt)}
+              </Text>
             </TouchableOpacity>
-          </View>
-        </>
+          )}
+        </View>
       ) : (
         <>
           {/* ── Progress Card with Ring ── */}
@@ -541,26 +473,16 @@ export default function GroceryScreen() {
 
           {/* ── Bottom action ── */}
           <View style={styles.bottomBar}>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TouchableOpacity
-                style={[styles.addBtn, { flex: 1 }, !checkedCount && styles.addBtnDisabled]}
-                activeOpacity={checkedCount ? 0.85 : 1}
-                disabled={!checkedCount}
-                onPress={addToPantry}
-              >
-                <Text style={[styles.addBtnText, !checkedCount && styles.addBtnTextDisabled]}>
-                  Add to Pantry{checkedCount ? ` (${checkedCount})` : ''}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.deliveryBtn}
-                activeOpacity={0.85}
-                onPress={() => { pendingOrderRef.current = true; router.push('/delivery-webview') }}
-              >
-                <ShoppingCart size={18} stroke="#00C9A7" strokeWidth={2} />
-                <Text style={styles.deliveryBtnText}>Order</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={[styles.addBtn, !checkedCount && styles.addBtnDisabled]}
+              activeOpacity={checkedCount ? 0.85 : 1}
+              disabled={!checkedCount}
+              onPress={addToPantry}
+            >
+              <Text style={[styles.addBtnText, !checkedCount && styles.addBtnTextDisabled]}>
+                Add to Pantry{checkedCount ? ` (${checkedCount})` : ''}
+              </Text>
+            </TouchableOpacity>
           </View>
         </>
       )}
@@ -734,7 +656,6 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
-    gap: 10,
     alignItems: 'center',
   },
   addBtn: {
@@ -748,18 +669,17 @@ const styles = StyleSheet.create({
   addBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
   addBtnTextDisabled: { color: COLORS.textMuted },
   addBtnSub: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center' },
-  deliveryBtn: {
-    borderWidth: 2,
-    borderColor: '#4ADE80',
+  emptyAddBtn: {
+    backgroundColor: COLORS.textWhite,
     borderRadius: 30,
     paddingVertical: 14,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 32,
     flexDirection: 'row',
-    gap: 6,
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 20,
   },
-  deliveryBtnText: { color: '#4ADE80', fontSize: 14, fontWeight: '700' },
+  emptyAddBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
 
   emptyState: {
     flex: 1,
