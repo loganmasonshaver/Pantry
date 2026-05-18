@@ -92,25 +92,44 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
 
       // Transition INACTIVE → ACTIVE means the user just started a trial (or purchased)
       if (newStatus === 'ACTIVE' && prevStatus !== 'ACTIVE') {
-        // Guard with AsyncStorage so re-installs / app restarts don't re-schedule the notification
+        // Guard with AsyncStorage so re-installs / app restarts don't re-schedule notifications
         const alreadyStarted = await AsyncStorage.getItem(TRIAL_STARTED_KEY)
         if (!alreadyStarted) {
           const now = Date.now()
           await AsyncStorage.setItem(TRIAL_STARTED_KEY, String(now))
-          // 71 hours = 3-day trial minus 1 hour — nudge the user before it lapses
-          const triggerDate = new Date(now + 71 * 60 * 60 * 1000)
-          await Notifications.scheduleNotificationAsync({
-            content: {
+
+          // Two scheduled reminders for a 7-day trial:
+          //   • Day 5 (~120hr) — "2 days left" — gives the user time to opt out
+          //     without surprise charge, AND time to reconsider and convert
+          //   • Day 7 (~167hr = 7d minus 1hr) — "ends today" — last-chance nudge
+          const reminders = [
+            {
+              hoursAfterStart: 5 * 24, // day 5 of 7
+              title: 'Your free trial ends in 2 days',
+              body: 'Lock in unlimited scans, saved meals, and AI suggestions before you get charged.',
+            },
+            {
+              hoursAfterStart: 7 * 24 - 1, // day 7, 1 hr before lapse
               title: 'Your free trial ends today',
               body: 'Upgrade now to keep unlimited scans, saves, and meal suggestions.',
-              sound: 'default',
-              data: { app: 'pantry', type: 'trial_expiry' },
             },
-            trigger: {
-              type: Notifications.SchedulableTriggerInputTypes.DATE,
-              date: triggerDate,
-            },
-          }).catch(() => {}) // Non-fatal if notification permission not granted
+          ]
+
+          for (const r of reminders) {
+            const triggerDate = new Date(now + r.hoursAfterStart * 60 * 60 * 1000)
+            await Notifications.scheduleNotificationAsync({
+              content: {
+                title: r.title,
+                body: r.body,
+                sound: 'default',
+                data: { app: 'pantry', type: 'trial_expiry' },
+              },
+              trigger: {
+                type: Notifications.SchedulableTriggerInputTypes.DATE,
+                date: triggerDate,
+              },
+            }).catch(() => {}) // Non-fatal if notification permission not granted
+          }
         }
       }
 
