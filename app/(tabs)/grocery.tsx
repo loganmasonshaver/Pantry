@@ -86,17 +86,25 @@ function GroceryRow({
         style={{ transform: [{ translateX }] }}
         {...panResponder.panHandlers}
       >
-        <TouchableOpacity style={styles.row} onPress={onToggle} activeOpacity={0.7}>
-          <View style={[styles.checkbox, item.checked && styles.checkboxChecked]}>
-            {item.checked && <Check size={12} stroke="#000000" strokeWidth={2.5} />}
-          </View>
+        <View style={styles.row}>
+          {/* Only the checkbox toggles — tapping the rest of the row does nothing
+              (was a footgun: misclicks while reading the list checked off items). */}
+          <TouchableOpacity
+            onPress={onToggle}
+            hitSlop={10}
+            activeOpacity={0.6}
+          >
+            <View style={[styles.checkbox, item.checked && styles.checkboxChecked]}>
+              {item.checked && <Check size={12} stroke="#000000" strokeWidth={2.5} />}
+            </View>
+          </TouchableOpacity>
           <View style={styles.rowContent}>
             <Text style={[styles.itemName, item.checked && styles.itemNameChecked]}>
               {item.name.replace(/\s*\*\s*$/, '')}
             </Text>
             {item.meal ? <Text style={styles.itemMeal}>{item.meal}</Text> : null}
           </View>
-        </TouchableOpacity>
+        </View>
       </Animated.View>
     </View>
   )
