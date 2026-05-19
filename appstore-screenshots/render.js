@@ -38,7 +38,7 @@ function renderLine(line) {
 
   const browser = await chromium.launch()
   const context = await browser.newContext({
-    viewport: { width: 1320, height: 2868 },
+    viewport: { width: 1284, height: 2778 },
     deviceScaleFactor: 1,
   })
 
