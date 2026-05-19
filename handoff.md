@@ -1,181 +1,189 @@
-# Handoff — Creator attribution shipped + verified on device, plus a stack of fixes
+# Handoff — Massive day: meal-gen pipeline rebuilt, App Store screenshots done, DMCA registered, privacy + terms updated
 
 ## TL;DR
 
-This session built and **end-to-end verified** the creator attribution pipeline (Supabase code → Superwall user attribute → trial events tagged), shipped a stack of bug fixes (delete account, trial reminder, image fields, meal detail crash), made the referral code field accept ANY input (not just allowlisted), and locked in the creator program structure via a deep dive deliberation (saved as docs/creator-program-plan.md + project memory).
+This session reshaped Cook Tonight from the ground up (hybrid 2-strict + 1-stretch + overgenerate-and-rank + macro bands + atomic steps + recent-meal exclusion + 1/day refresh cap), redesigned the Grocery tab into a Reminders-style inline-edit flow, killed the dead delivery integration, built an auto-cycling Ken Burns hero on Home, shipped a code-driven App Store screenshot pipeline at `appstore-screenshots/` (5 PNGs ready at Apple's required 1284×2778), fixed Discover going near-empty on concentrated-content days, and closed several legal gaps — **DMCA Designated Agent registered with the U.S. Copyright Office** ($6, dmca@heypantry.app), privacy policy corrected (removed stale providers, added PostHog/Superwall/Replicate, expanded CCPA), terms.html got a DMCA section, and email forwarders for `privacy@` and `dmca@` are live in Cloudflare.
 
-**Headline win:** completed a real sandbox trial purchase on Logan's iPhone with code `NOAH` → Superwall shows `Referral Code: NOAH` on the user AND on the `Trial Start` + `Transaction Complete` events. Pipeline confirmed working end-to-end.
-
-**18 commits pushed to `main` this session:**
-
-| # | Commit | What |
-|---|--------|------|
-| 1 | [`a19ff89`](https://github.com/loganmasonshaver/Pantry/commit/a19ff89) | Pin git workflow to main-only |
-| 2 | [`f3a0030`](https://github.com/loganmasonshaver/Pantry/commit/f3a0030) | Strip stale freemium line from CLAUDE.md |
-| 3 | [`bf4dfc6`](https://github.com/loganmasonshaver/Pantry/commit/bf4dfc6) | Fix meal detail "rendered more hooks" crash |
-| 4 | [`308e0f9`](https://github.com/loganmasonshaver/Pantry/commit/308e0f9) | Trending pipeline: same-day Jaccard dish dedup |
-| 5 | [`10d7f3e`](https://github.com/loganmasonshaver/Pantry/commit/10d7f3e) | Animated illustrations inside Pantry scan cards |
-| 6 | [`ab44870`](https://github.com/loganmasonshaver/Pantry/commit/ab44870) | Drop scan-card icons, tighten height |
-| 7 | [`3a9571c`](https://github.com/loganmasonshaver/Pantry/commit/3a9571c) | Creator program plan v1 (Cal AI draft) |
-| 8 | [`68884fc`](https://github.com/loganmasonshaver/Pantry/commit/68884fc) | Creator program plan v2 (50% first-conversion FINAL) |
-| 9 | [`8c24fb1`](https://github.com/loganmasonshaver/Pantry/commit/8c24fb1) | Tag Superwall users with `referralCode` attribute |
-| 10 | [`d212c9b`](https://github.com/loganmasonshaver/Pantry/commit/d212c9b) | Normalize image field (saved_meals.image_url vs meal.image) |
-| 11 | [`21b9636`](https://github.com/loganmasonshaver/Pantry/commit/21b9636) | Ingredient-faithful image prompt + rename misleading recipe |
-| 12 | [`c46156f`](https://github.com/loganmasonshaver/Pantry/commit/c46156f) | Accept ANY referral code typed (no allowlist gate) |
-| 13 | [`bcc382e`](https://github.com/loganmasonshaver/Pantry/commit/bcc382e) | TEMP: flip `DEV_FORCE_PAYWALL=true` (KEEP ON per user request) |
-| 14 | [`0c499e4`](https://github.com/loganmasonshaver/Pantry/commit/0c499e4) | Delete-account: manually wipe child rows before auth delete |
-| 15 | [`00b3cf9`](https://github.com/loganmasonshaver/Pantry/commit/00b3cf9) | Delete-account: clear ALL onboarding AsyncStorage keys |
-| 16 | [`d3eb9ad`](https://github.com/loganmasonshaver/Pantry/commit/d3eb9ad) → [`db7a8ad`](https://github.com/loganmasonshaver/Pantry/commit/db7a8ad) | Trial reminder day-5 push (was 71hr/3-day, broken for 7-day trial) |
-| 17 | [`987d7aa`](https://github.com/loganmasonshaver/Pantry/commit/987d7aa) | New users now see real plan-meal images (shared image_cache fallback) |
+**Two repos involved this session:**
+- `/Users/loganshaver/pantry/` — main app, ~25 commits pushed to GitHub main
+- `/Users/loganshaver/pantry-landing/` — heypantry.app marketing + legal site, has commits but NO git remote configured (deploy via `npx wrangler pages deploy . --project-name=heypantry`)
 
 ---
 
-## Creator program — final structure decided
+## Meal generation overhaul (the biggest stack of work)
 
-Full doc at [docs/creator-program-plan.md](docs/creator-program-plan.md). Memory saved at `project_creator_program.md`.
+Comprehensive rebuild of `supabase/functions/generate-meals/index.ts` and `lib/useMealSuggestions.ts` based on a long iterative debugging conversation about why meals were either repetitive, overshooting macros, or disappearing.
 
-### Stage 1 (default, pre-launch / first ~6 months)
-- **Commission: 50% of first payment, one-time.** Monthly conversion = $4, annual conversion = $15.
-- **Triggers on first paid charge after 7-day trial**, NOT on signup or trial start.
-- **No payments on renewals** — clean, predictable, no monthly accounting.
-- Pitch: "I pay 50% of what each new user pays me, once when they survive the trial."
+| Change | Why |
+|---|---|
+| **Hybrid 2-strict + 1-stretch mode** | Cook Tonight now shows 2 pantry-only meals + 1 "with a quick stop" stretch. Gemini was ignoring strict-only constraint; new prompt sets explicit `missing_ingredients: []` for strict and 1-2 staples for stretch |
+| **Overgenerate-and-rank** | LLM asked for 5 meals (genCount), filtered against macro bands, top 3 returned by fit score. Solves "today only produced 2 meals" undershoots on bad LLM days |
+| **Protein band ±15% with 1.40× filter** | Logan's 144g/3-meal goal → 41-55g target per meal, drops above ~77g. Was generating 96g protein bombs that cause GI distress |
+| **Calorie cap = 50% of daily goal** | Per-meal cap (1290 kcal for 2580 goal) catches bombs but isn't tied to mealsPerDay, so high-meal-count users don't get tight bands |
+| **Atomic recipe steps** | "Heat oil. Add chicken. Sear 5 min." — one action per step. Was "Heat oil, add chicken, sear 5 min" mega-steps. Easier to glance-do-advance while cooking |
+| **CookingSkill-scaled bands** | minimal: 4-7 ingredients / 3-5 steps; moderate: 5-10 / 4-7; adventurous: 6-12 / 5-9; culinary: 7-15 / 6-12. The cookingSkill onboarding field now actually drives behavior |
+| **Ingredient cap raised 9 → 12** | Was truncating authentic curries / stews / Mexican which need 10-15 ingredients |
+| **`recentMealNames` exclusion** | Last 12 meal names persisted to AsyncStorage and passed to next gen as "DO NOT suggest these" — kills cross-gen repeats |
+| **Daily refresh cap = 1** | `MAX_DAILY_REGENS` in `useMealSuggestions.ts`. Bounds image-gen cost. Refresh button greys out after use. Resets at local midnight |
+| **`retry()` vs `regenerate()` split** | Error-recovery `retry()` doesn't consume the daily cap (failed gens cost $0). Only successful user-initiated `regenerate()` counts |
+| **Killed pantry-diff auto-regen loophole** | Earlier "auto-regen on 3+ pantry items" turned out exploitable via add/remove cycling — reverted |
 
-### Stage 2 (12+ months out, top performers only)
-- **Graduation criteria:** creator drives 100+ paid conversions in any 90-day window.
-- **Upgrade:** $500/mo flat retainer + 15% recurring on referred users for 6 months.
-- Don't build Stage 2 mechanics until a golden goose emerges.
-
-### Why this beat alternatives
-Long iterative debate captured in docs/creator-program-plan.md. Short version: at $8/mo ARPU with 18% cost-to-revenue ratio, percentage recurring math is brutal. Flat per-conversion is simpler, pitches better to newbie creators (anchors on the bigger "50%" headline), and bounds your liability on golden geese.
-
----
-
-## Creator attribution — wiring + verification
-
-### Architecture
-1. **User types code in onboarding** → `SReferralCode` validates via `validate_referral_code_v2` RPC (now accepts ANY code, not just allowlisted)
-2. **Code saved to Supabase** → `profiles.referral_code_used = 'NOAH'`
-3. **Superwall identify + update** → [_layout.tsx](app/_layout.tsx) on session change + [onboarding/index.tsx](app/onboarding/index.tsx) `finish()` both call `superwallUpdate({ referralCode })`
-4. **Superwall tags every subsequent event** with the attribute (Trial Start, Transaction Complete, all auto-tagged)
-5. **Superwall dashboard chart** breaks down events by `referralCode` attribute
-
-### Verified end-to-end on Logan's iPhone (2026-05-18 ~2:45pm)
-- Code `NOAH` typed in onboarding → appeared on Superwall user
-- Completed sandbox trial purchase with `sandbox02@heypantry.app`
-- Superwall user detail page shows: `Referral Code: NOAH`, `Has Referral Code: Yes`
-- Recent Events panel shows: `Trial Start` and `Transaction Complete` both fired
-- Charts → New Trials → Breakdown by Referral Code (Environment filter set to PRODUCTION,SANDBOX) → NOAH visible with count
-
-### Key code changes
-- [app/_layout.tsx](app/_layout.tsx) — fetches profile.referral_code_used on session change, calls `superwallUpdate({ referralCode })`
-- [app/onboarding/index.tsx](app/onboarding/index.tsx) — `finish()` immediately calls `updateSuperwallUser({ referralCode })` right after profile upsert (so paywall view in same session is tagged)
-- [app/onboarding/index.tsx](app/onboarding/index.tsx) `SReferralCode` — removed validation gate, ANY code typed gets saved
-- Existing Supabase code system (`referral_codes` table + RPC) still works for `grants_premium=true` creator personal-access codes
+**Deployed today:** generate-meals version 83 at Supabase. Verified the deployed source matches local with `supabase functions download`.
 
 ---
 
-## Stack of fixes shipped this session
+## Cook Tonight UI
 
-### Delete Account (was completely broken)
-Two bugs compounding:
-1. Edge function called `auth.admin.deleteUser()` which fails when child tables (saved_meals, pantry_items, meal_logs, etc.) lack `ON DELETE CASCADE` on their FKs. Fixed in [supabase/functions/delete-account/index.ts](supabase/functions/delete-account/index.ts) — now manually wipes all child rows with service-role privileges before deleting auth user.
-2. Client only cleared 4 of 9 onboarding AsyncStorage keys, so re-login resumed mid-onboarding instead of starting fresh. Fixed in [app/(tabs)/profile.tsx](app/(tabs)/profile.tsx) — now mirrors Reset Onboarding's full cleanup.
-
-**Deploy needed:** `supabase functions deploy delete-account` (done by Logan)
-
-### Trial reminder push notification
-Was hardcoded to fire at 71hr (3-day trial minus 1hr) but trial is now 7 days. Fixed to fire at day 5 (~120hr): "Your free trial ends in 2 days."
-
-### Meal detail image rendering
-Two stacking bugs:
-1. saved_meals DB column is `image_url` but render code expected `meal.image` → fixed in parse block to normalize.
-2. Meal name "Hard-Boiled Eggs and Fruit" rendered as berries because Gemini visual-description prompt had "Do NOT list ingredients" rule (added in 559f059 to prevent deconstructed-component photos). Replaced with INGREDIENT FIDELITY + ASSEMBLED-NOT-STACKED rules. Renamed recipe to "Hard-Boiled Eggs Snack Plate" to force cache regen.
-
-**Deploy needed:** `supabase functions deploy generate-meal-image` (already done by Logan)
-
-### New users seeing blank plan-meal thumbnails
-`finish()` only consulted local AsyncStorage for image URLs (empty for first-ever signup). Now batch-queries the shared server-side `image_cache` table, so any plan meal generated by any prior user shows immediately.
-
-### Trending meals same-day dedup
-Added Jaccard word-overlap check WITHIN today's batch (not just cross-day). Catches "beef chili + chicken chili" case that protein-source dedup missed because they have different primary proteins.
-
-### Meal detail "rendered more hooks" crash
-Slot-picker hooks were declared AFTER an `if (!meal) return` early return. Hoisted them above to keep hook order stable across renders.
+- **Shimmer skeleton** on meal thumbnails while images load — sweep gradient, brightened from #2A→#3A2A for visibility on 64×64 thumbs. Component at `components/Shimmer.tsx`, reusable
+- **Auto-scroll keyboard avoidance** added to grocery + add-item flows
+- Killed the dead freemium "Upgrade to Premium" alert
+- "Refreshed today · New tomorrow" subtitle when refresh cap is hit
 
 ---
 
-## Pantry scan card UI
+## Home tab — auto-cycling hero meal carousel
 
-Animated SVG illustrations now fill the two scan cards on the Pantry tab (Scan Pantry + Scan Receipt). Mirrors home-screen hero animation pattern, downsized. Removed the 48×48 icon containers and absolute-positioned the AI badge in the top-right corner to tighten card height. Visual parity between cards (both have sweeping beam animations synced via shared `Animated.Value`).
+`app/(tabs)/index.tsx` (~lines 355-400):
+
+- Hero meal card now **auto-cycles through all 3 generated meals** every 5 seconds with a 450ms crossfade
+- **Ken Burns slow zoom** (scale 1.0 → 1.12 over slide duration) while displayed — image stays "alive" between crossfades
+- **Pagination dots removed** — they signaled false swipe affordance. Motion alone signals cycling
+- **Hero card width fixed** from hard-coded 240px to full-width (parent-driven). Was looking sparse on modern phone screens
+- Height bumped 280 → 360 for cinematic proportion
+- Section spacing tweaks for better breathing room between macros card / Cook from Pantry / Daily Meal Log
 
 ---
 
-## State of important flags
+## Grocery tab — Reminders-style redesign
 
-- **`DEV_FORCE_PAYWALL = true`** in [context/SuperwallContext.tsx:16](context/SuperwallContext.tsx:16) — **LEAVE ON per user request.** Logan uses creator code (`PANTRY_CREATOR` or similar with `grants_premium=true`) to bypass paywall during dev. If you flip it off, paywall stops firing in dev → can't test paywall behavior.
+Major UX rewrite of `app/(tabs)/grocery.tsx`:
 
-- **Apple Sign-In entitlement** confirmed in [ios/Pantry/Pantry.entitlements](ios/Pantry/Pantry.entitlements). Both Debug + Release Xcode build configs reference the same file (lines 365 + 405 of project.pbxproj). Sign in with Apple WILL work in release builds. Verify Apple Developer Portal has "Sign in with Apple" capability enabled on the `com.kobalabs.pantry` App ID before submission.
+| Change | Before | After |
+|---|---|---|
+| Add item | Tiny `+` icon in header opens modal | Bottom "Add Item" row transforms inline into editable row with circle on left + TextInput; return to save + autofocus next |
+| Add to Pantry | Bottom bar button | Top-right header pill (always visible, greys out when nothing checked) |
+| Order delivery | "Browse & Order" + "Order" buttons | **REMOVED** — no real delivery integration existed |
+| Edit existing item | Not possible | Tap row text → inline rename input |
+| Row tap behavior | Whole row toggles checked | Only circle toggles; text taps open edit; swipe deletes |
+| Duplicate detection | Substring match — blocked "chicken thigh" if "chicken breast" existed | Exact (case-insensitive) only |
+| Modal dim overlay | Heavy dark dim | Transparent — feels like inline sheet |
+| Meal field on add | "Meal (optional)" text input | **REMOVED** — confusing for grocery list |
+| Empty state | Small "Tap + to add" hint | Prominent white "Add to List" pill button |
+| Multi-add scroll | Input got hidden under keyboard after 2-3 items | Auto-scroll-to-end after each save, keyboard-aware insets |
+
+Also added missing meat-cut keywords to `lib/categories.ts` (sirloin, ribeye, flank, skirt, chuck, brisket, etc.) so "Sirloin" no longer falls through to "Other".
 
 ---
 
-## Where Logan is on launch path
+## Discover tab — variety-fill + wider window
 
-**Logan's stated next move:** iterate on features before TestFlight rather than rush to ship. Wise — TestFlight burns review cycles when builds are half-baked.
+`app/(tabs)/discover.tsx`:
 
-### What works rock-solid (verified on device this session)
-- Onboarding flow end-to-end
-- Paywall + sandbox purchase
-- Creator attribution
-- Recipe templates with images (shared cache fallback)
-- Reset Onboarding + Delete Account
-- Push notification scheduling for trial reminder
+- **YouTube visibility window 2 → 7 days** — matches the 3-day fallback retention the pipeline keeps
+- **`applyVarietyFill`** function: caps each primary protein at MAX_PER_PROTEIN = 2 in the final 6, backfills from past days when today's batch is concentrated
+- Mirrored `PROTEIN_KEYWORDS` from the pipeline so client + server agree on what counts as a primary protein
+- Atomic steps rule **also added** to `generate-trending-meals/index.ts` prompt — takes effect on next daily cron run
 
-### What Logan said he wants to iterate on next
-- **App Store screenshots via Huashu design GitHub repo** — Logan's last request before context cutoff. Investigate the repo, propose how to integrate, generate screenshots for the App Store listing.
-- Onboarding redesign partial per active.md
-- Saved Meals + Profile redesigns pending
-- Various modal redesigns pending
+**Root cause of "Discover going empty" earlier today:** today's pipeline only produced 2 meals (chicken + cottage cheese) because YouTube's viral pool was concentrated in 2 protein sources. Strict 1-per-protein dedup capped at 2, the 2-day visibility filter hid the other 17 meals in the DB. Both layers fixed.
 
-### TestFlight readiness gaps (when ready)
-1. Flip `DEV_FORCE_PAYWALL = false` for production builds
-2. Verify App Store Connect:
-   - App icon 1024×1024 uploaded
-   - Privacy Policy URL (heypantry.app needs `/privacy` page)
-   - App Review Demo Account in Review Information (creds already exist: `appreview@heypantry.app` / `PantryReview2026!`)
-3. Subscription products confirmed "Ready to Submit" or "Approved"
-4. Bump version + build number in app.json
-5. `eas build --platform ios --profile production` → `eas submit --platform ios`
-6. Add internal testers in TestFlight
+---
+
+## App Store Screenshots — full code-driven pipeline at `appstore-screenshots/`
+
+**Output: 5 PNGs at `appstore-screenshots/output/` at 1284×2778** (Apple's iPhone 6.7" Display spec — what App Store Connect was actually asking for; the newer 1320×2868 6.9" got rejected).
+
+Files:
+- `template.html` — single HTML template with placeholders, MyFitnessPal-style design
+- `frames.json` — per-frame config (headline, accent word, transform, screenshot filename)
+- `render.js` — Playwright-driven renderer, inlines screenshots as data URLs (file:// blocked via setContent)
+- `package.json` — local playwright dep, `npm install` once
+
+**Design system** (adapted from Logan's Driven brand):
+- Dark gradient bg `#131D16` → `#080C09` with radial green halo top
+- 168px bold headlines, green accent on key word
+- Realistic iPhone 16/17 Pro Max bezel: Dynamic Island, Action button, Volume up/down, Power, Camera Control
+- Per-frame phone transforms (slight tilts left/right) for visual variety
+
+**The 5 frames:**
+1. `Track Your Macros` — Home screenshot
+2. `Scan Your Pantry` — Pantry tab
+3. `Discover New Meals` — Discover
+4. `Build Your Cookbook` — Saved
+5. `Smart Grocery List` — Grocery
+
+**Iteration workflow:**
+- Edit `frames.json` (headline, accent, transform)
+- Replace files in `raw/` if screenshots get stale
+- `node render.js` → regenerates all PNGs in seconds
+- Reusable for Driven and future apps
+
+---
+
+## Legal + Compliance (the second half of the session)
+
+Logan watched a video about app legal risks and we audited Pantry against:
+
+| Risk | Status |
+|---|---|
+| Privacy policy honesty | ✅ Updated `pantry-landing/privacy.html` — corrected 3rd-party list (dropped Anthropic/Groq/fal.ai which aren't actually in code, added PostHog/Superwall/Replicate/YouTube API), expanded CCPA section with explicit opt-out + 45-day window, added `privacy@heypantry.app` |
+| Terms of Use missing DMCA | ✅ Added new Section 7 with takedown notice procedure to `pantry-landing/terms.html`, renumbered remaining sections |
+| DMCA Designated Agent | ✅ **REGISTERED** with U.S. Copyright Office. Service Provider: Koba Labs LLC, 5900 Balcones Drive Suite 100, Austin TX 78731. Designated Agent: Logan Mason Shaver, dmca@heypantry.app. $6 paid via Pay.gov |
+| Email forwarders for legal contact | ✅ Set up in Cloudflare: `privacy@heypantry.app` → loganmasonshaver@gmail.com, `dmca@heypantry.app` → loganmasonshaver@gmail.com |
+| California auto-renewal | ⚠️ Apple IAP handles disclosure + cancellation, but Logan should verify Superwall paywall copy mentions auto-renew + cancellation. **Logan said "i don't need to worry"** — flag for double-check |
+| CAN-SPAM | 🟡 Not yet sending marketing emails. Logan said "about to set up" — needs physical address + unsubscribe + honest subject lines when activated |
+| AI/nutrition disclaimer | ✅ Already in terms.html Section 5 (verified) |
+
+---
+
+## Active todos updated
+
+`active.md` was updated mid-session:
+- ✅ Checked off: Apple Developer account, AI meal generation, App Store screenshots
+- ➕ Added new section: **"🤖 Android / Google Play (Post-iOS Launch)"** with 17 deferred tasks across Build+Test / Store Setup / Listing Assets / Launch Sequence. Logan explicitly wants this deferred until iOS is shipped and most CTO responsibilities are settled
+
+---
+
+## Stuff that still needs doing (no specific order)
+
+### Immediate / pre-launch
+- [ ] **Deploy pantry-landing** to Cloudflare Pages: `cd /Users/loganshaver/pantry-landing && npx wrangler pages deploy . --project-name=heypantry`. Privacy + terms updates are committed locally but NOT yet live on heypantry.app. terms.html in particular has never been deployed at all — visiting heypantry.app/terms currently returns the landing page
+- [ ] **Deploy edge functions** (re-run from /Users/loganshaver/pantry):
+  - `supabase functions deploy generate-meals` (already version 83 with atomic steps live)
+  - `supabase functions deploy generate-trending-meals` (atomic steps rule added to trending pipeline this session, needs deploy)
+- [ ] Verify the next Cook Tonight regen shows atomic-step recipes — cached meals from before today's deploy still have multi-action steps. Cache resets at midnight or next pantry-tab visit on a new day
+- [ ] **Verify DMCA registration shows "Active"** at dmca.copyright.gov within a few minutes of payment (Pay.gov credit card → Active is usually fast; ACH takes 7 days)
+- [ ] Test the privacy@ and dmca@ email forwarders — send a test email and confirm receipt at loganmasonshaver@gmail.com
+- [ ] App Store Connect: drag the 5 PNGs from `appstore-screenshots/output/` into the iPhone 6.5"/6.7" Display screenshots slot
+
+### Polish (not blockers)
+- [ ] Stretch meal isn't always present — when the LLM happens to generate all 3 as strict, no "Need: X" variety. Could tighten the prompt to require exactly 1 stretch
+- [ ] Saved meals — old saved meals frozen with multi-action mega-steps until user re-saves them
+- [ ] Replicate vs fal.ai — the privacy policy now lists Replicate, but worth a final code audit to make sure no fal.ai references remain
+- [ ] Pre-existing TS errors at `app/onboarding/index.tsx:393` and `app/(tabs)/index.tsx:196`+`:1064` — not introduced this session, not blocking
+- [ ] Image:null type errors in `lib/useMealSuggestions.ts` (6 instances) — `image: null` type is too strict, image gets set to URL strings throughout. Pre-existing
+
+### Eventually
+- [ ] CAN-SPAM setup when starting marketing emails — physical address (5900 Balcones Drive, Suite 100, Austin TX 78731) + unsubscribe link + honest subjects. Use Resend or Mailchimp; they handle compliance automatically
+- [ ] Open Mercury bank account (all docs ready per memory)
+- [ ] Android launch — full Google Play track per active.md's new section
 
 ---
 
 ## File pointers
 
-- [docs/creator-program-plan.md](docs/creator-program-plan.md) — full creator program structure with case studies + financial models
-- [app/onboarding/index.tsx](app/onboarding/index.tsx) — onboarding flow, finish() at ~3860, SReferralCode at ~1737
-- [app/_layout.tsx](app/_layout.tsx) — session-change Superwall identify + update with referralCode (line ~39)
-- [context/SuperwallContext.tsx](context/SuperwallContext.tsx) — `DEV_FORCE_PAYWALL` at line 16 (keep TRUE), trial reminder at ~95
-- [app/(tabs)/profile.tsx](app/(tabs)/profile.tsx) — Delete Account (~810), Reset Onboarding (~877)
-- [supabase/functions/delete-account/index.ts](supabase/functions/delete-account/index.ts) — manual child-row cleanup before auth delete
-- [supabase/functions/generate-meal-image/index.ts](supabase/functions/generate-meal-image/index.ts) — Gemini prompt with INGREDIENT FIDELITY rule
+- `supabase/functions/generate-meals/index.ts` — meal generation prompt + macro bands + variety logic + atomic steps
+- `supabase/functions/generate-trending-meals/index.ts` — trending pipeline, NOW with atomic steps rule (line ~393)
+- `lib/useMealSuggestions.ts` — daily cache + regen cap + retry split
+- `app/(tabs)/index.tsx` — Home with auto-cycling hero (~lines 355-450)
+- `app/(tabs)/pantry.tsx` — Pantry tab with Cook Tonight + Shimmer
+- `app/(tabs)/grocery.tsx` — Reminders-style inline-edit grocery
+- `app/(tabs)/discover.tsx` — variety-fill + 7-day visibility
+- `components/Shimmer.tsx` — reusable loading skeleton
+- `lib/categories.ts` — grocery auto-categorization keywords (meat cuts added)
+- `appstore-screenshots/` — full screenshot pipeline (template.html / frames.json / render.js / raw/ / output/)
+- `/Users/loganshaver/pantry-landing/privacy.html` — privacy policy (updated, not yet deployed)
+- `/Users/loganshaver/pantry-landing/terms.html` — terms (DMCA added, not yet deployed)
 
 ---
 
-## Things to verify / pick up next session
-
-1. **App Store screenshots via Huashu design GitHub repo** — Logan's pending ask. Find the repo, evaluate fit, propose workflow.
-2. **Quick smoke test on iPhone:** new user → reset onboarding → walk through → confirm plan-card meal thumbnails actually show real images now (the fix from this session).
-3. **Active.md sweep:** session focused on creator program + bug fixes; active.md hasn't been updated this session with everything that shipped.
-
----
-
-## Known limitations / v2 todos
-
-- **`aps-environment` in entitlements is "development"** — Apple's distribution signing usually auto-flips to "production" but worth verifying push notifications work on TestFlight.
-- **Duplicate "Referral Code" entries in Superwall breakdown dropdown** — cosmetic, both keys work but only camelCase `referralCode` is populated. Not worth fixing now.
-- **Image generation doesn't write back to `saved_meals.image_url`** — when meal/[id].tsx auto-generates an image, it shows in component state but next view regenerates (fast since server-cached, but still a round-trip). Future improvement: UPDATE saved_meals.image_url when auto-generation succeeds.
-- **Pre-existing TS errors** at [app/onboarding/index.tsx:393](app/onboarding/index.tsx:393) and [app/(tabs)/index.tsx:196/1064](app/(tabs)/index.tsx:196) — not introduced this session, not blocking.
-
----
-
-Branch: `main` (Logan's workflow — all work goes directly to main, no feature branches)
+Branch: `main` (Logan's workflow — all work goes directly to main, no feature branches). Two repos — main pantry app committed + pushed to GitHub, pantry-landing committed locally only (no git remote, deploy via wrangler).
