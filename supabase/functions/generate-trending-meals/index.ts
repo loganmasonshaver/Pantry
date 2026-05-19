@@ -390,6 +390,13 @@ PORTION + MACRO DETAILS:
 - "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual.
 - "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only.
 
+ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-do-advance while cooking.
+  ✗ BAD: "Heat oil in pan, add chicken, sear 5 minutes" (3 actions crammed into one step)
+  ✓ GOOD: "Heat oil in pan." → "Add chicken." → "Sear 5 minutes." (3 separate steps)
+  Combine ONLY when actions happen simultaneously without a state change (e.g. "Season with salt and pepper" is one step).
+  Scale step count to dish complexity — simple recipes 4-6 steps, complex 7-12 steps. Don't pad.
+  This applies to the FORMAT of the steps, not the content — still respect the creator's recipe faithfully. Just break their consolidated instructions into individual actions.
+
 OUTPUT TARGET: Aim for 15-20 recipes total. We expect a meaningful number to be skipped due to the density gate, name dedup, or low appeal — outputting 15-20 candidates gives downstream filters enough to land at our 6-meal display target. Don't pad with weak picks just to hit 20; quality > quantity. But err on the higher side when in doubt.
 
 Respond ONLY with a JSON array, no markdown:
