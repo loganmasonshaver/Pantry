@@ -1,3 +1,5 @@
+import { supabase } from './supabase'
+
 // Ordered like a grocery store walkthrough
 export const STORE_CATEGORIES = [
   'Produce', 'Bakery', 'Meat & Fish', 'Dairy & Eggs', 'Frozen',
@@ -24,12 +26,48 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Beverages': ['water', 'juice', 'soda', 'coffee', 'tea', 'kombucha', 'beer', 'wine', 'seltzer', 'sparkling', 'lemonade', 'smoothie', 'protein shake', 'almond milk', 'oat milk', 'soy milk', 'coconut water', 'energy drink', 'gatorade', 'electrolyte', 'protein powder'],
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+// Precompile regexes once: word-boundary match with optional plural (s / es).
+// Word boundaries prevent false positives like "cod" matching "avacodo".
+// Plural support keeps "scallops" matching keyword "scallop", "tomatoes" matching "tomato", etc.
+const CATEGORY_REGEXES: Record<string, RegExp[]> = Object.fromEntries(
+  Object.entries(CATEGORY_KEYWORDS).map(([cat, kws]) => [
+    cat,
+    kws.map(kw => new RegExp(`\\b${escapeRegex(kw)}(s|es)?\\b`, 'i')),
+  ])
+)
+
 // returns an array because one item can match multiple categories (e.g. "peanut butter" hits both Canned & Nuts)
 export function autoCategoryMatches(itemName: string): string[] {
   const lower = itemName.toLowerCase()
   const matches: string[] = []
-  for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    if (keywords.some(kw => lower.includes(kw))) matches.push(category) // substring match so "chicken breast" matches keyword "chicken"
+  for (const [category, regexes] of Object.entries(CATEGORY_REGEXES)) {
+    if (regexes.some(rx => rx.test(lower))) matches.push(category)
   }
   return matches
+}
+
+// Async categorization with LLM fallback for items where keyword matching fails.
+// Common case: typo'd names like "avacodo" or rare items not in the keyword list.
+// Returns the best category; falls back to 'Other' if even the LLM fails.
+//
+// Always returns synchronously fast when keyword matching wins (no await on edge function).
+// Edge function call only happens when keywords produce no match — typically misspellings or
+// exotic items. ~400ms latency for those cases, negligible cost ($0.00002/call via Gemini).
+export async function categorizeItem(name: string): Promise<string> {
+  const matches = autoCategoryMatches(name)
+  if (matches.length > 0) return matches[0]
+
+  try {
+    const { data, error } = await supabase.functions.invoke('categorize-item', {
+      body: { name, categories: STORE_CATEGORIES },
+    })
+    if (error || !data?.category) return 'Other'
+    return STORE_CATEGORIES.includes(data.category) ? data.category : 'Other'
+  } catch {
+    return 'Other'
+  }
 }

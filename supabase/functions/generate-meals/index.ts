@@ -182,6 +182,38 @@ Deno.serve(async (req: Request) => {
 
     const isCookNow = mode === "cookNow"
 
+    // Detect distinct primary protein sources in the pantry. If 3+ are available,
+    // enforce that each of the 3 displayed meals uses a different one. With 1-2
+    // sources, this constraint is impossible to satisfy — skip it so the LLM can
+    // reuse the available protein across meals (e.g. all chicken if that's all you have).
+    const PROTEIN_GROUPS: Record<string, string[]> = {
+      chicken: ['chicken'],
+      beef: ['beef', 'steak', 'sirloin', 'ribeye', 'flank', 'skirt', 'chuck', 'brisket'],
+      turkey: ['turkey'],
+      pork: ['pork', 'bacon', 'ham', 'prosciutto', 'sausage', 'chorizo'],
+      lamb: ['lamb'],
+      salmon: ['salmon'],
+      tuna: ['tuna'],
+      shrimp: ['shrimp'],
+      whitefish: ['cod', 'tilapia', 'haddock', 'halibut', 'sea bass'],
+      eggs: ['egg'],
+      tofu: ['tofu'],
+      tempeh: ['tempeh'],
+      'cottage cheese': ['cottage cheese'],
+      'greek yogurt': ['greek yogurt', 'skyr'],
+      lentils: ['lentil'],
+      beans: ['black bean', 'kidney bean', 'pinto bean', 'white bean', 'navy bean'],
+      chickpeas: ['chickpea', 'garbanzo'],
+      'protein powder': ['protein powder', 'whey'],
+    }
+    const pantryLower = ingredients.map((i: string) => i.toLowerCase()).join(' | ')
+    const detectedProteins = Object.entries(PROTEIN_GROUPS)
+      .filter(([_, keywords]) => keywords.some(kw => pantryLower.includes(kw)))
+      .map(([name]) => name)
+    const proteinVarietyRule = (isCookNow && detectedProteins.length >= 3)
+      ? `\n- PROTEIN VARIETY (blocking): pantry has ${detectedProteins.length} distinct primary protein sources — ${detectedProteins.join(', ')}. Each of the ${displayCount} displayed meals MUST use a DIFFERENT primary protein. Do not repeat a protein across meals. This prevents redundancy when the user clearly has variety on hand.`
+      : ''
+
     const ingredientRule = isCookNow
       ? `- HYBRID COOK NOW MODE — generate exactly ${genCount} meals split as follows:
   • The first ${genCount - 1} meals (STRICT): use ONLY ingredients from the pantry list. NO ingredient outside the list — not even oil, salt, pepper, butter, or spices unless they're explicitly listed. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
@@ -203,7 +235,7 @@ Available pantry ingredients (listed oldest first — prioritize using the first
 ${ingredients.join(", ")}
 
 Rules:
-${ingredientRule}
+${ingredientRule}${proteinVarietyRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
 - CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.

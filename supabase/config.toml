@@ -38,3 +38,6 @@ verify_jwt = false
 
 [functions.fatsecret-proxy]
 verify_jwt = false
+
+[functions.categorize-item]
+verify_jwt = false

@@ -24,7 +24,7 @@ import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { autoCategoryMatches } from '@/lib/categories'
+import { categorizeItem } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
 import { GeneratedMeal } from '../../lib/meals'
@@ -548,11 +548,12 @@ export default function MealDetailScreen() {
   const addToGrocery = async (ingredientName: string) => {
     if (!user || addedToGrocery.has(ingredientName)) return
     setAddedToGrocery(prev => new Set(prev).add(ingredientName))
+    const category = await categorizeItem(ingredientName)
     await supabase.from('grocery_items').insert({
       user_id: user.id,
       name: ingredientName,
       meal: meal?.name ?? '',
-      category: autoCategoryMatches(ingredientName)[0] || 'Other',
+      category,
       checked: false,
     })
   }
@@ -581,7 +582,8 @@ export default function MealDetailScreen() {
     if (existing && existing.length > 0) {
       await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
     } else {
-      await supabase.from('pantry_items').insert({ user_id: user.id, name: ingredientName, category: autoCategoryMatches(ingredientName)[0] || 'Other', in_stock: true })
+      const category = await categorizeItem(ingredientName)
+      await supabase.from('pantry_items').insert({ user_id: user.id, name: ingredientName, category, in_stock: true })
     }
   }
 
@@ -705,15 +707,16 @@ export default function MealDetailScreen() {
       toAdd.forEach(i => next.add(i.name.toLowerCase()))
       return next
     })
-    await supabase.from('grocery_items').insert(
-      toAdd.map(i => ({
+    const categorized = await Promise.all(
+      toAdd.map(async i => ({
         user_id: user.id,
         name: i.name,
         meal: meal.name,
-        category: autoCategoryMatches(i.name)[0] || 'Other',
+        category: await categorizeItem(i.name),
         checked: false,
       }))
     )
+    await supabase.from('grocery_items').insert(categorized)
     Alert.alert('Added to grocery list', `${toAdd.length} item${toAdd.length !== 1 ? 's' : ''} added`)
   }
 

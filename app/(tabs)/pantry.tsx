@@ -25,7 +25,7 @@ import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { supabase } from '@/lib/supabase'
-import { STORE_CATEGORIES, autoCategoryMatches } from '@/lib/categories'
+import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
@@ -361,8 +361,8 @@ export default function PantryScreen() {
       }
     }
 
-    const category = overrideCategory || autoCategoryMatches(name)[0] || 'Other'
     setAddSaving(true)
+    const category = overrideCategory || (await categorizeItem(name))
     setDisambigChoices([])
     const { data, error } = await supabase
       .from('pantry_items')

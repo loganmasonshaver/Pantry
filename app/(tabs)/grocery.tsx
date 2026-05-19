@@ -17,7 +17,7 @@ import Svg, { Circle as SvgCircle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
-import { STORE_CATEGORIES, autoCategoryMatches } from '@/lib/categories'
+import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -317,7 +317,7 @@ export default function GroceryScreen() {
 
     // Inline mode auto-picks the first category match — disambig modal is gone.
     // For ambiguous items the user can long-press to reassign later (future).
-    const category = autoCategoryMatches(name)[0] || 'Other'
+    const category = await categorizeItem(name)
 
     // Exact (case-insensitive) match only — substring matching was over-aggressive:
     // "chicken breast" was blocking "chicken thigh", "olive oil" blocking "vegetable oil",
