@@ -16,7 +16,6 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
-import * as ImageManipulator from 'expo-image-manipulator'
 import { X, ScanLine, Check, Plus, Zap, ImageIcon } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
@@ -25,6 +24,7 @@ import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
+import { categorizeItem } from '@/lib/categories'
 
 const { width: SCREEN_W } = Dimensions.get('window')
 
@@ -78,12 +78,11 @@ const RESULT_CATEGORIES = [
 ]
 
 const LOADING_MESSAGES = [
-  { title: 'AI is scanning your kitchen...', sub: 'Looking at every shelf and corner' },
-  { title: 'Detecting ingredients...', sub: 'Identifying each item in your photos' },
+  { title: 'Scanning your kitchen...', sub: 'First pass — looking at every shelf and corner' },
   { title: 'Reading labels & packaging...', sub: 'Checking brand names and product details' },
-  { title: 'Identifying fresh produce...', sub: 'Spotting fruits, veggies, and herbs' },
+  { title: 'Second pass — catching anything missed...', sub: 'Looking for small items, back rows, and door shelves' },
   { title: 'Categorizing everything...', sub: 'Sorting items by grocery aisle' },
-  { title: 'Almost ready...', sub: 'Putting the finishing touches together' },
+  { title: 'Almost ready...', sub: 'You can add anything we missed on the next screen' },
 ]
 
 const EXTRA_OPTIONS = [
@@ -146,6 +145,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
+  const [missedInput, setMissedInput] = useState('')
+  const [addingMissed, setAddingMissed] = useState(false)
 
   // Camera
   const cameraRef = useRef<CameraView>(null)
@@ -263,24 +264,61 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     setDetectedItems([])
     setZones([])
     setFlashOn(false)
+    setMissedInput('')
+    setAddingMissed(false)
     onClose()
+  }
+
+  // Parse comma- or newline-separated names, categorize each via the LLM-backed
+  // helper, append to the detected list under a "Added manually" zone.
+  const addMissedItems = async () => {
+    const names = missedInput
+      .split(/[,\n]/)
+      .map(s => s.trim())
+      .filter(Boolean)
+    if (names.length === 0) return
+    setAddingMissed(true)
+    try {
+      const newItems: DetectedItem[] = await Promise.all(
+        names.map(async (name, i) => ({
+          id: `manual-${Date.now()}-${i}`,
+          name,
+          category: await categorizeItem(name),
+          checked: true,
+          zone: 'Added manually',
+        }))
+      )
+      setDetectedItems(prev => [...prev, ...newItems])
+      setZones(prev => {
+        const manualZone = prev.find(z => z.zone === 'Added manually')
+        if (manualZone) {
+          return prev.map(z =>
+            z.zone === 'Added manually'
+              ? { ...z, items: [...z.items, ...newItems] }
+              : z
+          )
+        }
+        return [...prev, { zone: 'Added manually', items: newItems }]
+      })
+      setMissedInput('')
+    } finally {
+      setAddingMissed(false)
+    }
   }
 
   const capturePhoto = async (label: string, next: number) => {
     if (!cameraRef.current) return
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 })
+      // Single capture at quality 0.9 with base64 directly from the camera.
+      // Previous flow double-compressed (camera 0.8 → ImageManipulator 0.7),
+      // which destroyed label readability on small/back-shelf items.
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: true })
       if (photo) {
-        const fixed = await ImageManipulator.manipulateAsync(
-          photo.uri,
-          [],
-          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-        )
         setPhotos(prev => [...prev, {
           id: String(Date.now()),
           label,
-          uri: fixed.uri,
-          base64: fixed.base64 ?? undefined,
+          uri: photo.uri,
+          base64: photo.base64 ?? undefined,
         }])
       }
     } catch (e) {
@@ -297,7 +335,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
+      quality: 1,
       base64: true,
     })
     if (!result.canceled && result.assets[0]) {
@@ -316,7 +354,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     if (status !== 'granted') return
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
+      quality: 1,
       base64: true,
     })
     if (!result.canceled && result.assets[0]) {
@@ -400,6 +438,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 <View style={styles.stepTextCompact}>
                   <Text style={styles.title}>{stepConfig.title}</Text>
                   <Text style={styles.subtitle}>{stepConfig.subtitle}</Text>
+                  <Text style={styles.cameraTip}>
+                    Tip: stand 3-4 ft back · tap screen to focus · use flash in dim light
+                  </Text>
                 </View>
 
                 <View style={styles.shutterRow}>
@@ -527,10 +568,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 </View>
               </View>
               <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>
-                {showDone ? 'Scan complete' : LOADING_MESSAGES[loadingMessageIdx].title}
+                {showDone ? 'First pass complete' : LOADING_MESSAGES[loadingMessageIdx].title}
               </Text>
               <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>
-                {showDone ? `Found ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} in your kitchen` : LOADING_MESSAGES[loadingMessageIdx].sub}
+                {showDone ? `Spotted ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} — you can add anything we missed on the next screen` : LOADING_MESSAGES[loadingMessageIdx].sub}
               </Text>
             </View>
 
@@ -573,7 +614,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
               )}
 
               <Text style={[styles.subtitle, { marginTop: 12, marginBottom: 16 }]}>
-                {detectedItems.length} item{detectedItems.length !== 1 ? 's' : ''} detected — tap X to remove
+                {detectedItems.length} item{detectedItems.length !== 1 ? 's' : ''} spotted — tap X to remove, or add missed items below
               </Text>
 
               {/* Zone sections */}
@@ -599,6 +640,33 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   </View>
                 )
               })}
+
+              {/* Missed-something input — type items we missed, comma-separated.
+                  Helper auto-categorizes each via the LLM-backed categorizer. */}
+              <View style={styles.missedSection}>
+                <Text style={styles.zoneLabel}>Missed something?</Text>
+                <TextInput
+                  style={styles.missedInput}
+                  placeholder="e.g. salt, pepper, soy sauce"
+                  placeholderTextColor={COLORS.textMuted}
+                  value={missedInput}
+                  onChangeText={setMissedInput}
+                  multiline
+                  blurOnSubmit
+                  returnKeyType="done"
+                />
+                <TouchableOpacity
+                  style={[styles.missedAddBtn, (!missedInput.trim() || addingMissed) && { opacity: 0.5 }]}
+                  onPress={addMissedItems}
+                  disabled={!missedInput.trim() || addingMissed}
+                  activeOpacity={0.7}
+                >
+                  {addingMissed
+                    ? <ActivityIndicator color="#4ADE80" size="small" />
+                    : <Text style={styles.missedAddBtnText}>Add to list</Text>}
+                </TouchableOpacity>
+              </View>
+
               <View style={{ height: 8 }} />
             </ScrollView>
 
@@ -1118,5 +1186,44 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textWhite,
     flex: 1,
+  },
+
+  // Camera capture hint
+  cameraTip: {
+    fontSize: 11,
+    color: '#666666',
+    fontWeight: '500',
+    marginTop: 6,
+  },
+
+  // Missed-something input (zone review screen)
+  missedSection: {
+    marginTop: 6,
+    marginBottom: 12,
+  },
+  missedInput: {
+    backgroundColor: '#111111',
+    borderRadius: 12,
+    padding: 14,
+    color: '#FFFFFF',
+    fontSize: 14,
+    minHeight: 60,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 8,
+  },
+  missedAddBtn: {
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.3)',
+  },
+  missedAddBtnText: {
+    color: '#4ADE80',
+    fontSize: 13,
+    fontWeight: '700',
   },
 })

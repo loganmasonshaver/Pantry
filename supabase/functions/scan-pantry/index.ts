@@ -62,31 +62,23 @@ Deno.serve(async (req: Request) => {
       image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" as const },
     }))
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openaiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        max_tokens: 1500,
-        messages: [
-          {
-            role: "user",
-            content: [
-              ...imageContent,
-              {
-                type: "text",
-                text: `These are photos of a kitchen (fridge, pantry shelves, counter). Identify every visible food ingredient or grocery item.
+    const firstPassPrompt = `These are photos of a kitchen (fridge, pantry shelves, counter). Identify every visible food ingredient or grocery item.
 
-You are a kitchen inventory scanner. Analyze these photos using ALL available clues to identify every food item as accurately as possible.
+You are a kitchen inventory scanner. Be EXHAUSTIVE — your job is to spot every single edible item in these photos, even ones that are small, partially hidden, in clear containers, on shelf edges, or at the very top/bottom/back of the frame. Better to over-include with a best-guess name than to silently miss something.
 
 Use these 4 detection strategies on every item:
 1. VISUAL RECOGNITION — identify foods by their appearance, shape, color, container type
 2. BRAND/LOGO READING — if you can see a brand name, logo, or product label, use it to determine the exact product variant (e.g. "Non-Fat Greek Yogurt" instead of just "Greek Yogurt")
 3. BARCODE NUMBERS — if any barcodes or UPC numbers are visible and readable, include the number in the "barcode" field
 4. NUTRITION LABEL / INGREDIENT LIST — if a product is turned showing its back label, read any visible nutrition facts or ingredient lists to help identify the specific product (e.g. seeing "Whole Wheat" in ingredients → "Whole Wheat Bread" not just "Bread")
+
+EXHAUSTIVENESS RULES (these matter more than naming precision):
+- Scan EVERY zone in the image — don't focus on the obvious centerpiece items and skip the rest
+- Common misses to actively look for: spices in small jars, condiment bottles on fridge doors, sauces, oils, items in CLEAR or SEMI-TRANSPARENT containers (you can see contents through the plastic), back-row items partially hidden behind front items, frozen drawer contents, items on the very top shelf, items on the bottom that may look like packaging trash
+- For items in clear containers (Tupperware, glass jars, ziplock bags), identify the CONTENTS not the container
+- If you see something edible but can't ID it precisely, use a best-guess generic name (e.g. "leafy greens" if you can't tell spinach from kale, "white sauce" if you can't ID it specifically) — DO NOT skip it
+- If a single product is duplicated (3 cans of beans), list it ONCE — but don't skip a real second item because it "looks similar" to another
+- Partial labels still count — if you can see part of a label that suggests a product, include it with your best inference
 
 Return a JSON object with this structure:
 {
@@ -111,7 +103,6 @@ Zone detection rules:
 Item rules:
 - "name" must be a GENERIC ingredient name — no brand names in this field. Use the most specific generic name you can determine from all context clues (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani" and not just "Yogurt")
 - "barcode" — include ONLY if you can clearly read a UPC/EAN barcode number in the image. Set to null otherwise. Do not guess barcode numbers.
-- Be thorough — include everything visible, even partially obscured items
 - Use brand logos and nutrition labels as CONTEXT to make the generic name more specific, but never put the brand in the name field
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
@@ -122,9 +113,21 @@ Item rules:
   - Pantry Staples: canned goods, broth, baking items
   - Other: anything else
 
-Return ONLY the raw JSON object, no markdown, no explanation.`,
-              },
-            ],
+Return ONLY the raw JSON object, no markdown, no explanation.`
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${openaiApiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        max_tokens: 6000,
+        messages: [
+          {
+            role: "user",
+            content: [...imageContent, { type: "text", text: firstPassPrompt }],
           },
         ],
       }),
@@ -139,6 +142,83 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
     const text = data.choices?.[0]?.message?.content?.trim() ?? "{}"
     const clean = text.replace(/```json|```/g, "").trim()
     const result = JSON.parse(clean)
+
+    // ── SECOND PASS: catch what the first pass missed ───────────────────
+    // GPT-4o spreads attention thin on dense kitchen photos. A focused
+    // second pass with the first-pass list as context reliably surfaces
+    // small/partial/back-row items that got skipped. Cost ~2× per scan
+    // but recognition rate jumps noticeably. Failures here are non-fatal —
+    // if the second pass errors out, we just return the first-pass result.
+    try {
+      const firstPassNames: string[] = (result.zones || []).flatMap(
+        (z: any) => (z.items || []).map((i: any) => i.name)
+      )
+      const knownZones: string[] = (result.zones || []).map((z: any) => z.zone)
+      if (firstPassNames.length > 0) {
+        const secondPassPrompt = `You previously scanned these same photos and identified these items:
+${firstPassNames.map(n => `- ${n}`).join('\n')}
+
+NOW LOOK AGAIN more carefully. List ONLY items you MISSED in the first pass. DO NOT repeat any item already in the list above.
+
+Focus your attention on:
+- Small items: spices, herbs in small jars, salt/pepper shakers, hot sauce bottles
+- Items in clear/transparent containers — identify the CONTENTS, not the container
+- Back-row items partially hidden behind front items
+- Door contents — fridge door condiments, butter shelf, egg shelf
+- Top shelf and bottom shelf items (these get less attention)
+- Items in drawers, especially the produce drawer
+- Anything edible you previously dismissed as ambiguous — give a best-guess name now
+
+Use SAME zone names from first pass where possible: ${knownZones.join(', ') || '(none — invent zones based on layout)'}.
+Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
+
+Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "..." }] }
+
+Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] }.`
+
+        const secondResp = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${openaiApiKey}`,
+          },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            max_tokens: 2000,
+            messages: [
+              {
+                role: "user",
+                content: [...imageContent, { type: "text", text: secondPassPrompt }],
+              },
+            ],
+          }),
+        })
+        const secondData = await secondResp.json()
+        const secondText = secondData.choices?.[0]?.message?.content?.trim() ?? "{}"
+        const secondClean = secondText.replace(/```json|```/g, "").trim()
+        const secondResult = JSON.parse(secondClean)
+        const missed: any[] = Array.isArray(secondResult.missed) ? secondResult.missed : []
+
+        // Merge missed items into the first-pass result, deduping by lowercased name
+        const seenNames = new Set<string>(firstPassNames.map(n => n.toLowerCase()))
+        for (const item of missed) {
+          if (!item?.name || typeof item.name !== 'string') continue
+          const key = item.name.toLowerCase()
+          if (seenNames.has(key)) continue
+          seenNames.add(key)
+          const zoneName = item.zone || 'Other'
+          let zone = result.zones.find((z: any) => z.zone === zoneName)
+          if (!zone) {
+            zone = { zone: zoneName, items: [] }
+            result.zones.push(zone)
+          }
+          zone.items.push({ name: item.name, category: item.category || 'Other', barcode: null })
+        }
+        console.log(`[scan-pantry] second pass added ${missed.length} items`)
+      }
+    } catch (e) {
+      console.log('[scan-pantry] second pass failed (non-fatal):', e)
+    }
 
     // Second pass: look up any detected barcodes for more accurate names
     for (const zone of (result.zones || [])) {
