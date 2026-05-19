@@ -185,9 +185,9 @@ Deno.serve(async (req: Request) => {
     const ingredientRule = isCookNow
       ? `- HYBRID COOK NOW MODE — generate exactly ${genCount} meals split as follows:
   • The first ${genCount - 1} meals (STRICT): use ONLY ingredients from the pantry list. NO ingredient outside the list — not even oil, salt, pepper, butter, or spices unless they're explicitly listed. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
-  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: salt, pepper, olive oil, garlic, butter, soy sauce, lemon, rice, pasta, eggs, common dried herbs). List those extras in "missing_ingredients". NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
+  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: salt, pepper, olive oil, garlic, butter, soy sauce, lemon, rice, pasta, eggs, common dried herbs). NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
 - Every ingredient in STRICT meals MUST appear in the pantry list (case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken").`
-      : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy. List any non-pantry ingredient in the "missing_ingredients" array for that meal.`
+      : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy.`
 
     const prompt = `You are a nutrition-focused meal planner. Generate exactly ${genCount} high-protein meal suggestions.
 
@@ -218,6 +218,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
   - ≤90 min: full recipes including roasts, braises, marinated dishes, multi-component dishes.
 - Recipe steps must ACTUALLY fit within the prepTime claimed. If a step alone (e.g. boiling pasta) takes longer than the budget, the entire meal is disqualified.
 - For each ingredient include both a visual portion size (e.g. "1 palm", "1 fist", "2 tbsp") AND a gram/ml weight (e.g. "120g", "185g", "30ml")
+- INGREDIENT COMPLETENESS (blocking): EVERY single item referenced in any step — including oil, butter, salt, pepper, garlic, lemon juice, broth, spices, pasta, rice, sauces, anything — MUST appear in the "ingredients" array with grams/visual. If a step says "add garlic," there MUST be a garlic entry in ingredients. No exceptions. The "missing_ingredients" array is a FILTER LIST of names already present in "ingredients" that aren't in the pantry — it never contains items that aren't also in "ingredients".
 - No repeated meals
 - KEEP IT COOKABLE — scaled to this user's cooking skill (${cookingSkill}):
   • Ingredients per meal: ${complexityBands.ingredients}. Fewer for simple dishes, more for complex dishes (curries, stews, layered cuisines). Stay in this band — don't push past the cap or undershoot the floor.
@@ -242,7 +243,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
 - NAMING: Meal names must sound like restaurant menu items. Use culinary terms (e.g. "Lemon Herb", "Miso Glazed", "Chipotle Lime", "Thai Basil", "Pesto", "Teriyaki"). Never name a meal after a crude ingredient list (bad: "Chicken Rice Broccoli Bowl", "Peanut Butter Chicken Bowl"; good: "Thai Basil Chicken Rice Bowl", "Teriyaki Sesame Chicken").
 - Smoothies should only contain typical smoothie ingredients (fruits, protein powder, milk, yogurt, greens)
 
-Respond ONLY with a JSON array, no markdown, no explanation. Every meal must include the "missing_ingredients" array (empty for strict meals, populated for stretch):
+Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item mentioned in steps (oil, garlic, broth, salt, pepper) appears in the ingredients array. "missing_ingredients" lists the NAMES of ingredients already in the array that aren't in the pantry:
 [
   {
     "id": "1",
@@ -253,11 +254,16 @@ Respond ONLY with a JSON array, no markdown, no explanation. Every meal must inc
     "carbs": 40,
     "fat": 12,
     "ingredients": [
-      { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "120g" }
+      { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "120g" },
+      { "name": "olive oil", "visual": "1 tbsp", "grams": "15ml" },
+      { "name": "garlic", "visual": "2 cloves", "grams": "6g" },
+      { "name": "chicken broth", "visual": "1/4 cup", "grams": "60ml" },
+      { "name": "salt", "visual": "to taste", "grams": "2g" },
+      { "name": "black pepper", "visual": "to taste", "grams": "1g" }
     ],
     "missing_ingredients": [],
     "steps": [
-      { "title": "Sear Chicken", "detail": "Heat oil in a skillet over medium-high heat. Season chicken and cook 6-7 minutes per side until golden." },
+      { "title": "Sear Chicken", "detail": "Heat oil in a skillet over medium-high heat. Season chicken with salt and pepper and cook 6-7 minutes per side until golden." },
       { "title": "Make Sauce", "detail": "Remove chicken. Add garlic, deglaze with broth, and simmer 2 minutes." }
     ]
   }
