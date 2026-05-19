@@ -19,20 +19,26 @@ function normalizeKey(name: string): string {
 // brownie) end up as stacked components and cold dishes get steam plumes. Gemini Flash
 // Lite is essentially free; OpenAI fallback is cheap. If both fail, the caller falls back
 // to the original static template so image generation never hard-stops.
-async function generateVisualDescription(mealName: string, ingredients: string[]): Promise<string | null> {
+async function generateVisualDescription(mealName: string, ingredients: string[], steps: string[] = []): Promise<string | null> {
   const sysPrompt = `You are a food stylist. In ONE concise sentence (under 35 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate.
 
 CRITICAL — INGREDIENT FIDELITY: Compose the description from the SPECIFIC ingredients listed. If the dish name is generic (e.g., "Fruit", "Bowl", "Plate"), use the exact ingredient (e.g., "sliced apple" not "berries"). NEVER substitute photogenic alternatives or generic interpretations of the name.
 
 ASSEMBLED, NOT STACKED: Describe the dish AS PLATED — fully assembled, integrated, ready to eat. Never describe separate visible components (e.g., a brownie with cottage cheese baked in, NOT cottage cheese piled on top of a brownie). Do NOT mention cooking process.
 
+READ THE STEPS FOR INGREDIENT ROLES: If recipe steps are provided, use them to determine each ingredient's role in the finished plate. An ingredient that is mashed, blended, mixed, stirred, folded, dissolved, melted, whisked, or otherwise incorporated INTO another component is INVISIBLE in the photo — do NOT depict it as a separate dollop, drizzle, swirl, sprinkle, or pile. Only ingredients that are plated separately, served on top, used as garnish, or remain as recognizable solids should appear visually.
+
 Examples:
 - "Cottage Cheese Brownie Bake" (ingredients: cottage cheese, cocoa, eggs) -> "A dense baked chocolate brownie square with a slightly cracked golden top, served on a wooden cutting board."
-- "Strawberry Protein Smoothie" (ingredients: strawberries, yogurt, protein powder) -> "A thick pink smoothie in a tall clear glass, topped with a yogurt swirl and a strawberry slice."
+- "Strawberry Protein Smoothie" (ingredients: strawberries, yogurt, protein powder; steps: blend everything until smooth) -> "A thick pink smoothie in a tall clear glass, topped with a single strawberry slice."
 - "Greek Chicken Salad" (ingredients: chicken, greens, feta, olives) -> "A wide ceramic bowl of mixed greens with grilled chicken slices, feta crumbles, and olives, drizzled with olive oil."
-- "Hard-Boiled Eggs and Fruit" (ingredients: eggs, apple, almonds, greek yogurt) -> "Halved hard-boiled eggs arranged on a dark plate beside sliced apple, a small mound of almonds, and a dollop of greek yogurt."`
+- "Hard-Boiled Eggs and Fruit" (ingredients: eggs, apple, almonds, greek yogurt; steps: arrange components on plate) -> "Halved hard-boiled eggs arranged on a dark plate beside sliced apple, a small mound of almonds, and a dollop of greek yogurt."
+- "Roasted Salmon and Sweet Potato Mash" (ingredients: salmon, sweet potato, asparagus, olive oil, greek yogurt; steps: mash potatoes with yogurt; plate salmon, asparagus, mash) -> "A roasted salmon fillet resting on a bed of creamy orange sweet potato mash, with bright green roasted asparagus alongside, on a dark ceramic plate." (NOTE: greek yogurt is invisible — mashed into the potatoes.)`
 
-  const userPrompt = `Now describe: ${mealName}${ingredients.length ? ` — ingredients: ${ingredients.join(', ')}` : ''}`
+  const stepsText = steps.length
+    ? `\nSteps: ${steps.map((s, i) => `${i + 1}. ${s}`).join(' ')}`
+    : ''
+  const userPrompt = `Now describe: ${mealName}${ingredients.length ? ` — ingredients: ${ingredients.join(', ')}` : ''}${stepsText}`
 
   const providers = [
     googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite" },
@@ -83,15 +89,23 @@ Deno.serve(async (req: Request) => {
   if (!allowed) return rateLimitResponse()
 
   try {
-    const { mealName, ingredients = [] } = await req.json()
+    const { mealName, ingredients = [], steps = [], bypassCache = false } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
+
+    // Normalize steps to a string array — accepts either ["raw text"] or [{title, detail}]
+    const stepStrings: string[] = Array.isArray(steps)
+      ? steps.map((s: any) => typeof s === 'string' ? s : (s?.detail ?? s?.title ?? '')).filter(Boolean)
+      : []
 
     const cacheKey = normalizeKey(mealName)
 
-    // Check DB cache — use Supabase Storage URLs (permanent, no expiry)
-    const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
-    if (cached?.image_url) {
-      return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
+    // Check DB cache unless explicitly bypassed (used for testing prompt changes
+    // against a recipe that already has a cached image).
+    if (!bypassCache) {
+      const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
+      if (cached?.image_url) {
+        return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
+      }
     }
 
     if (!falApiKey) {
@@ -102,7 +116,7 @@ Deno.serve(async (req: Request) => {
     // STAGE 1: ask an LLM to visually describe the finished dish. If it succeeds we use
     // that as the basis for the Flux prompt; if it fails we fall back to a static template
     // built from keyword heuristics so image generation never hard-stops.
-    const description = await generateVisualDescription(mealName, ingredients)
+    const description = await generateVisualDescription(mealName, ingredients, stepStrings)
 
     let prompt: string
     if (description) {

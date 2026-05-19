@@ -519,7 +519,7 @@ export default function MealDetailScreen() {
 
     const tryGenerate = (attempt = 0) => {
       supabase.functions.invoke('generate-meal-image', {
-        body: { mealName: meal.name, ingredients: ingredientNames },
+        body: { mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [] },
       }).then(({ data }) => {
         if (data?.image) {
           Image.prefetch(data.image).then(() => {

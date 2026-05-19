@@ -35,7 +35,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   const regensUsedTodayRef = useRef(0)
   useEffect(() => { regensUsedTodayRef.current = regensUsedToday }, [regensUsedToday])
 
-  const fetchImage = async (name: string, ingredientNames: string[] = []): Promise<string | null> => {
+  const fetchImage = async (name: string, ingredientNames: string[] = [], steps: any[] = []): Promise<string | null> => {
     // Check device cache first — avoids any network call if already fetched before
     try {
       const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
@@ -47,7 +47,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const { data, error } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames } })
+        const { data, error } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames, steps } })
         console.log(`[MealImage] ${name}: data=`, JSON.stringify(data)?.substring(0, 100), 'error=', error)
         if (data?.image) {
           // Persist to device cache so future renders are instant
@@ -164,7 +164,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         await Promise.all(mealsToImage.map(async (meal, i) => {
           if (meal.image) return
           const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
-          const image = await fetchImage(meal.name, ingNames)
+          const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
           if (image) {
             mealsToImage[i] = { ...mealsToImage[i], image }
             setMeals(prev => {
@@ -210,7 +210,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                   await Promise.all(cachedMeals.map(async (meal, i) => {
                     if (meal.image) return
                     const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
-                    const image = await fetchImage(meal.name, ingNames)
+                    const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
                     if (image) {
                       cachedMeals[i] = { ...cachedMeals[i], image }
                       setMeals(prev => {
@@ -291,7 +291,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                 await Promise.all(cachedMeals.map(async (meal, i) => {
                   if (meal.image) return
                   const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
-                  const image = await fetchImage(meal.name, ingNames)
+                  const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
                   if (image && !cancelled) {
                     cachedMeals[i] = { ...cachedMeals[i], image }
                     setMeals(prev => {
