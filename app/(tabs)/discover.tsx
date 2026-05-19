@@ -31,13 +31,52 @@ function isCreatorRecipeVisible(m: any): boolean {
 }
 function isYouTubeRecipeVisible(m: any): boolean {
   const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
-  return ageDays <= 2
+  return ageDays <= 7
 }
 function filterTrendingByLifecycle(rows: any[]): any[] {
   return rows.filter(m => {
     if (m.trend_source === 'creator' || m.creators) return isCreatorRecipeVisible(m)
     return isYouTubeRecipeVisible(m)
   })
+}
+
+// Mirrors the pipeline's PROTEIN_KEYWORDS — order matters (specific first).
+const DISCOVER_PROTEIN_KEYWORDS = [
+  'chicken', 'turkey', 'beef', 'pork', 'lamb', 'bacon', 'ham',
+  'salmon', 'tuna', 'shrimp', 'crab', 'lobster', 'cod', 'tilapia', 'fish',
+  'cottage cheese', 'paneer', 'greek yogurt', 'skyr', 'feta', 'ricotta', 'mozzarella',
+  'tofu', 'tempeh', 'seitan',
+  'lentil', 'chickpea', 'black bean', 'kidney bean', 'edamame', 'soy',
+  'protein powder', 'whey',
+  'egg',
+]
+function detectPrimaryProtein(meal: any): string {
+  const ings = (meal.ingredients || []).slice(0, 3).map((i: any) => i.name ?? '').join(' ')
+  const haystack = `${meal.name ?? ''} ${ings}`.toLowerCase()
+  for (const kw of DISCOVER_PROTEIN_KEYWORDS) {
+    if (haystack.includes(kw)) return kw
+  }
+  return 'other'
+}
+
+// Variety-fill: prefer newest meals first, but cap each primary protein source at
+// MAX_PER_PROTEIN to keep the feed varied. Solves the "today only produced 2 meals
+// and they're both chicken-adjacent" problem by backfilling from prior days with
+// other proteins, while preventing any single source from dominating.
+const TARGET_DISCOVER_COUNT = 6
+const MAX_PER_PROTEIN = 2
+function applyVarietyFill(meals: any[]): any[] {
+  const result: any[] = []
+  const proteinCounts = new Map<string, number>()
+  for (const m of meals) {
+    if (result.length >= TARGET_DISCOVER_COUNT) break
+    const protein = detectPrimaryProtein(m)
+    const count = proteinCounts.get(protein) ?? 0
+    if (count >= MAX_PER_PROTEIN) continue
+    result.push(m)
+    proteinCounts.set(protein, count + 1)
+  }
+  return result
 }
 
 type DiscoverMeal = {
@@ -184,7 +223,9 @@ export default function DiscoverScreen() {
         if (dateDiff !== 0) return dateDiff
         return (b.vote_score ?? 0) - (a.vote_score ?? 0)
       })
-    setTrending(mapped)
+    // Apply variety-fill on the sorted set so the front of the feed gets a varied
+    // mix instead of "today's 2 chicken-adjacent meals only" on concentrated days.
+    setTrending(applyVarietyFill(mapped))
     setLoading(false)
   }, [])
 
