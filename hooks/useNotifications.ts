@@ -1,6 +1,14 @@
 import { useEffect, useRef } from 'react'
 import * as Notifications from 'expo-notifications'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
+
+// Bump this when the weekly schedule changes (times, days, or message content).
+// Stale schedules from older app versions get nuked when the version mismatches —
+// this fixes the "double notifications" bug where iOS persisted notifications
+// scheduled by previous app versions alongside the current ones.
+const SCHEDULE_VERSION = 'v2'
+const SCHEDULE_VERSION_KEY = 'notifications_schedule_version'
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -81,12 +89,31 @@ const WEEKLY_SCHEDULE: DayConfig[] = [
 ]
 
 async function scheduleAllReminders(): Promise<void> {
-  // Clear existing Pantry notifications
-  const all = await Notifications.getAllScheduledNotificationsAsync()
-  for (const n of all) {
-    if (n.content.data?.app === 'pantry') {
-      await Notifications.cancelScheduledNotificationAsync(n.identifier)
+  // Idempotency: if this app version's schedule is already laid down, skip the
+  // whole dance. Prevents the schedule from being torn down + rebuilt every
+  // time userId changes (sign in / out / back in cycles) — which previously
+  // caused brief windows where multiple schedules could coexist.
+  const existingVersion = await AsyncStorage.getItem(SCHEDULE_VERSION_KEY)
+  if (existingVersion === SCHEDULE_VERSION) {
+    if (__DEV__) {
+      const all = await Notifications.getAllScheduledNotificationsAsync()
+      console.log(`[notifications] schedule ${SCHEDULE_VERSION} already in place — ${all.length} scheduled`)
     }
+    return
+  }
+
+  // Nuke ALL scheduled notifications belonging to this app. iOS persists local
+  // notifications across app updates, so older app versions may have scheduled
+  // notifications WITHOUT the `data.app === 'pantry'` tag (or with different
+  // tags), which the prior tag-filtered cleanup missed — leaving stale
+  // schedules to fire alongside the current ones. The one exception is
+  // 'trial_expiry' (scheduled by SuperwallContext when the trial starts) which
+  // we preserve so a schedule-version bump doesn't drop pending trial
+  // notifications.
+  const existing = await Notifications.getAllScheduledNotificationsAsync()
+  for (const n of existing) {
+    if (n.content.data?.type === 'trial_expiry') continue
+    await Notifications.cancelScheduledNotificationAsync(n.identifier)
   }
 
   for (const day of WEEKLY_SCHEDULE) {
@@ -96,7 +123,7 @@ async function scheduleAllReminders(): Promise<void> {
         title: msg.title,
         body: msg.body,
         sound: 'default',
-        data: { app: 'pantry', type: day.type },
+        data: { app: 'pantry', type: day.type, version: SCHEDULE_VERSION },
       },
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
@@ -105,6 +132,13 @@ async function scheduleAllReminders(): Promise<void> {
         minute: 0,
       },
     })
+  }
+
+  await AsyncStorage.setItem(SCHEDULE_VERSION_KEY, SCHEDULE_VERSION)
+
+  if (__DEV__) {
+    const all = await Notifications.getAllScheduledNotificationsAsync()
+    console.log(`[notifications] scheduled ${SCHEDULE_VERSION} — ${all.length} total scheduled`)
   }
 }
 
