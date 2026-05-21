@@ -12,12 +12,19 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { Eye, EyeOff, ArrowLeft } from 'lucide-react-native'
+import { Eye, EyeOff, ArrowLeft, Check } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
-import { trackAccountCreated } from '../../lib/analytics'
+import { trackAccountCreated, trackMarketingOptIn } from '../../lib/analytics'
 import TurnstileWebView, { type TurnstileRef } from '../../components/TurnstileWebView'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { generateMeals } from '../../lib/meals'
+
+// Email marketing opt-in is captured on this screen for all 3 signup paths
+// (email, Apple, Google). Because Apple/Google flows redirect through OAuth,
+// the checkbox state is stashed in AsyncStorage BEFORE the OAuth call. The
+// AuthContext reads + applies it after the auth callback completes, then
+// clears the flag so it doesn't leak to subsequent signups.
+const PENDING_OPT_IN_KEY = 'pending_email_marketing_opt_in'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -33,7 +40,15 @@ export default function CreateAccountScreen() {
   const [loading, setLoading] = useState(false)
   const [lastAttempt, setLastAttempt] = useState(0)
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
+  const [emailOptIn, setEmailOptIn] = useState(false) // GDPR: unchecked default
   const turnstileRef = useRef<TurnstileRef>(null)
+
+  // Stash the opt-in choice in AsyncStorage so it survives the OAuth round-trip
+  // for Apple/Google sign-in. Cleared after AuthContext applies it to the profile.
+  const stashOptIn = async (method: 'email' | 'apple' | 'google') => {
+    await AsyncStorage.setItem(PENDING_OPT_IN_KEY, emailOptIn ? '1' : '0')
+    trackMarketingOptIn(method, emailOptIn)
+  }
 
   const handleCreateAccount = async () => {
     if (!name || !email || !password) {
@@ -52,6 +67,7 @@ export default function CreateAccountScreen() {
     setLastAttempt(now)
     try {
       setLoading(true)
+      await stashOptIn('email')
       await signUp(email, password, { full_name: name }, captchaToken ?? undefined)
       setCaptchaToken(null)
       turnstileRef.current?.reset()
@@ -77,6 +93,7 @@ export default function CreateAccountScreen() {
   const handleAppleSignIn = async () => {
     try {
       setLoading(true)
+      await stashOptIn('apple')
       await signInWithApple()
       if (await isReturningUser()) {
         await AsyncStorage.setItem('onboarding_complete', 'true')
@@ -128,6 +145,7 @@ export default function CreateAccountScreen() {
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true)
+      await stashOptIn('google')
       await signInWithGoogle()
       if (await isReturningUser()) {
         await AsyncStorage.setItem('onboarding_complete', 'true')
@@ -210,6 +228,19 @@ export default function CreateAccountScreen() {
             </View>
           </View>
 
+          <TouchableOpacity
+            style={s.consentRow}
+            onPress={() => setEmailOptIn(v => !v)}
+            activeOpacity={0.7}
+          >
+            <View style={[s.consentBox, emailOptIn && s.consentBoxChecked]}>
+              {emailOptIn && <Check size={12} stroke="#000" strokeWidth={3} />}
+            </View>
+            <Text style={s.consentText}>
+              Send me cooking tips and occasional offers. You can unsubscribe anytime.
+            </Text>
+          </TouchableOpacity>
+
           <View style={s.orRow}>
             <View style={s.orLine} />
             <Text style={s.orText}>or</Text>
@@ -287,6 +318,36 @@ const s = StyleSheet.create({
     padding: 0,
   },
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+
+  // Email marketing consent — unchecked default to satisfy GDPR. Captured for
+  // all 3 signup paths via AsyncStorage trampoline.
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginTop: 16,
+    paddingHorizontal: 4,
+  },
+  consentBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  consentBoxChecked: {
+    backgroundColor: TEAL,
+    borderColor: TEAL,
+  },
+  consentText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#AAAAAA',
+    lineHeight: 18,
+  },
 
   orRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 20 },
   orLine: { flex: 1, height: 1, backgroundColor: '#2A2A2A' },

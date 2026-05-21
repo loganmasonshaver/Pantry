@@ -23,8 +23,12 @@ export function trackOnboardingStep(step: number) {
   posthog.capture('onboarding_step_viewed', { step })
 }
 
-export function trackAccountCreated(method: 'email') {
+export function trackAccountCreated(method: 'email' | 'apple' | 'google') {
   posthog.capture('account_created', { method })
+}
+
+export function trackMarketingOptIn(method: 'email' | 'apple' | 'google', optedIn: boolean) {
+  posthog.capture('marketing_opt_in_decision', { method, opted_in: optedIn })
 }
 
 // ── Paywall / Subscription ────────────────────────────────────────────────────
@@ -77,4 +81,25 @@ export function trackWeightLogged(weightKg: number) {
 
 export function trackFoodPreferencesUpdated(dislikeCount: number) {
   posthog.capture('food_preferences_updated', { dislike_count: dislikeCount })
+}
+
+// ── Email funnel (Loops integration) ─────────────────────────────────────────
+// Fired from in-app to mirror Loops events into PostHog for unified funnel
+// analysis. Loops also tracks opens/clicks on its end — these are the
+// app-side events that complete the loop.
+
+export function trackEmailSequenceTriggered(eventName: string) {
+  posthog.capture('email_sequence_triggered', { event_name: eventName })
+}
+
+export function trackEmailLinkOpened(source: string) {
+  // Called when the app receives a deep-link from a marketing email.
+  // `source` is the UTM source param from the link (e.g. 'trial_day_3').
+  posthog.capture('email_link_opened', { source })
+}
+
+export function trackTrialConvertedFromEmail(source: string) {
+  // Fired when a user converts to paid within 24h of clicking an email link.
+  // PostHog will sequence-join this with email_link_opened for attribution.
+  posthog.capture('trial_converted_from_email', { source })
 }

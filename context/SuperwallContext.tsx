@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { markTrialStarted, markTrialEnded, markSubscribed } from '@/lib/engagement'
 
 // AsyncStorage keys for tracking trial lifecycle across app restarts
 const TRIAL_STARTED_KEY = 'pantry_trial_started_at'
@@ -92,6 +93,10 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
 
       // Transition INACTIVE → ACTIVE means the user just started a trial (or purchased)
       if (newStatus === 'ACTIVE' && prevStatus !== 'ACTIVE') {
+        // Mirror lifecycle to Loops + cache trial-start timestamp on profile
+        if (session?.user?.id) {
+          await markTrialStarted(session.user.id)
+        }
         // Guard with AsyncStorage so re-installs / app restarts don't re-schedule notifications
         const alreadyStarted = await AsyncStorage.getItem(TRIAL_STARTED_KEY)
         if (!alreadyStarted) {
@@ -123,6 +128,10 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
         if (trialStarted) {
           await AsyncStorage.setItem(TRIAL_EXPIRED_KEY, 'true')
           setTrialExpired(true)
+          // Fire Loops event so the trial-expired win-back sequence triggers
+          if (session?.user?.id) {
+            await markTrialEnded(session.user.id, false)
+          }
         }
       }
     },

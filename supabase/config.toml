@@ -41,3 +41,9 @@ verify_jwt = false
 
 [functions.categorize-item]
 verify_jwt = false
+
+[functions.loops-sync]
+verify_jwt = false
+
+[functions.loops-import-waitlist]
+verify_jwt = false

@@ -3,9 +3,47 @@ import { Session, User } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { identifyUser, resetUser } from '../lib/analytics';
+import { syncProfileToLoops, fireLoopsEvent } from '../lib/loops';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
 import * as AuthSession from 'expo-auth-session';
+
+const PENDING_OPT_IN_KEY = 'pending_email_marketing_opt_in'
+
+// Apply the marketing opt-in choice stashed by the createaccount screen,
+// write it to the profile, and fire the Loops "user_signed_up" event.
+// Idempotent — safe to call multiple times; clears the AsyncStorage flag
+// after first successful application.
+async function applyPendingMarketingOptIn(userId: string, userEmail: string | null) {
+  try {
+    const stash = await AsyncStorage.getItem(PENDING_OPT_IN_KEY)
+    if (stash === null) return // user signed in via existing account, no pending opt-in to apply
+
+    const optIn = stash === '1'
+    const consentAt = new Date().toISOString()
+
+    // Apple Hide-My-Email private relays never receive marketing — force-off
+    // regardless of what the user clicked. Transactional emails still work.
+    const isPrivateRelay = !!userEmail?.toLowerCase().endsWith('@privaterelay.appleid.com')
+    const finalOptIn = optIn && !isPrivateRelay
+
+    await supabase
+      .from('profiles')
+      .update({
+        marketing_email_opt_in: finalOptIn,
+        marketing_consent_at: consentAt,
+      })
+      .eq('id', userId)
+
+    await AsyncStorage.removeItem(PENDING_OPT_IN_KEY)
+
+    // Mirror to Loops + fire signup event (transactional — fires regardless of opt-in)
+    await syncProfileToLoops(userId)
+    await fireLoopsEvent(userId, 'user_signed_up')
+  } catch (e) {
+    console.log('[auth] applyPendingMarketingOptIn failed (non-fatal):', e)
+  }
+}
 
 type AuthContextType = {
   session: Session | null;
@@ -41,12 +79,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     // Subscribe to all future auth changes (sign in, sign out, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
         // Sync user identity to PostHog so events are attributed to this user
         identifyUser(session.user.id, { email: session.user.email });
+        // On the initial sign-in event, apply any pending email marketing opt-in
+        // stashed by the createaccount screen and fire the Loops signup event.
+        if (event === 'SIGNED_IN') {
+          applyPendingMarketingOptIn(session.user.id, session.user.email ?? null);
+        }
       } else {
         // Clear PostHog identity on sign-out so subsequent events aren't mis-attributed
         resetUser();
