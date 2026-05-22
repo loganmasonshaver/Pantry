@@ -1,6 +1,8 @@
-# Email Marketing Runbook
+# Email Marketing Runbook — V1 (pre-launch)
 
-Everything you need to set up the email program. The code-side infra is shipped; this doc walks you through the Loops dashboard work + sequence copy + the launch email send.
+Everything you need to set up the email program for launch. Code-side infra is shipped; this doc walks you through the Loops dashboard work + sequence copy + the launch email send.
+
+**Scope:** lean V1. The fancier features (engagement-based email skipping, re-engagement loop, winback discount email) are intentionally deferred to V2 because at sub-1K users you can't measure if they actually move conversion. See `~/my-briefing/todos/active.md` V2 section for the deferred details.
 
 ---
 
@@ -12,7 +14,7 @@ Everything you need to set up the email program. The code-side infra is shipped;
 3. Set your "From" name and reply-to:
    - From name: `Pantry`
    - From email: `team@heypantry.app` (or `hello@heypantry.app`)
-   - Reply-to: `team@heypantry.app` — you'll want a Cloudflare email forwarder for this if you don't already have one
+   - Reply-to: `team@heypantry.app` — set up a Cloudflare email forwarder for this if you don't already have one (same flow you used for `dmca@` and `privacy@`)
 
 ### 1.2 Get the API key
 1. Loops dashboard → Settings → API
@@ -21,35 +23,31 @@ Everything you need to set up the email program. The code-side infra is shipped;
    ```bash
    npx supabase secrets set LOOPS_API_KEY=<your-key>
    ```
-4. Also generate one admin token for the bulk waitlist import:
+4. Also generate an admin token for the bulk waitlist import:
    ```bash
    npx supabase secrets set IMPORT_ADMIN_TOKEN=$(openssl rand -hex 32)
    ```
-   Save that token — you'll need it once to trigger the waitlist import.
+   Save that token somewhere safe — you'll need it once to trigger the waitlist import.
 
 ### 1.3 Create contact properties in Loops
 Loops auto-creates properties when our `loops-sync` function fires them, but you can pre-create them in Settings → Contact Properties:
 
 | Property name | Type | Used by |
 |---|---|---|
-| `pantry_marketing_opt_in` | Boolean | All sequence conditions |
-| `pantry_is_apple_private_relay` | Boolean | Filter out marketing sends |
-| `pantry_is_engaged` | Boolean | "Skip if engaged" condition |
-| `pantry_cook_tonight_used_count` | Number | Engagement tracking |
-| `pantry_meals_saved_count` | Number | Engagement tracking |
-| `pantry_goals_customized` | Boolean | Engagement tracking |
-| `pantry_last_active_at` | Date | Re-engagement detection |
-| `pantry_trial_started_at` | Date | Trial sequence trigger |
-| `pantry_trial_ended_at` | Date | Win-back sequence trigger |
-| `pantry_subscribed_at` | Date | Stop trial sequences |
-| `pantry_is_waitlist` | Boolean | Filter the launch email audience |
+| `pantry_marketing_opt_in` | Boolean | All marketing sequence audience filters |
+| `pantry_is_apple_private_relay` | Boolean | Hard-block on marketing for these addresses |
+| `pantry_trial_started_at` | Date | Trial conversion sequence trigger |
+| `pantry_trial_ended_at` | Date | (V2: winback sequence) |
+| `pantry_subscribed_at` | Date | Sequence exit condition |
+| `pantry_churned_at` | Date | (V2: re-engagement) |
+| `pantry_is_waitlist` | Boolean | Launch campaign audience filter |
 
 ### 1.4 Enable time-of-day optimization
-Loops → Settings → Send Time Optimization → toggle ON. Loops will learn each contact's open patterns and send when they're most likely to read. Free tier supported.
+Loops → Settings → Send Time Optimization → toggle ON. Loops will learn each contact's open patterns and send when they're most likely to read. Free tier supported. **No code change needed — just flip the switch.**
 
 ---
 
-## Part 2 — Build the 4 email sequences
+## Part 2 — Build the 3 email sequences
 
 For each sequence, create in Loops dashboard: **Loops → Loops** → New Loop → choose trigger.
 
@@ -57,42 +55,39 @@ For each sequence, create in Loops dashboard: **Loops → Loops** → New Loop �
 
 **Trigger event:** `trial_started`
 **Audience filter:** `pantry_marketing_opt_in = true` AND `pantry_is_apple_private_relay = false`
+**Exit condition (set on every loop):** if `pantry_subscribed_at` becomes set, exit immediately. Prevents emails to users who already converted.
 
-| Day | Email key | Subject (≤50 chars) | Skip condition |
-|---|---|---|---|
-| 0 (immediate) | `trial_welcome` | Welcome to Pantry — start here | none |
-| 3 | `trial_day_3_value` | 3 ways our top users get more from Pantry | `pantry_is_engaged = true` (skip if user already cooking) |
-| 6 | `trial_annual_pitch` | Save 68% — Pantry annual is $30/yr | none |
-| 7 (fires only if `subscribed_at` is null on day 7) | `trial_expired_winback` | Trial ended — here's 50% off | none |
+| Day | Email key | Subject (≤50 chars) |
+|---|---|---|
+| 0 (immediate) | `trial_welcome` | Welcome to Pantry — start here |
+| 3 | `trial_day_3_value` | 3 ways our top users get more from Pantry |
+| 6 | `trial_annual_pitch` | Save 68% — Pantry annual is $30/yr |
 
-**Reverse-fail safety:** add an exit rule on every loop — if `subscribed_at` is set, exit the loop immediately. Prevents emails to converted users.
+That's it for V1 — 3 emails over 7 days. Day 5 "your trial ends in 2 days" is handled by the push notification already wired in `SuperwallContext.tsx`.
 
-### 2.2 Welcome Series (for non-trial sign-ups)
+### 2.2 Welcome Series (for non-trial signups)
 
 **Trigger event:** `user_signed_up`
-**Wait 24h then check** `trial_started_at` — if not set, enter this sequence.
-**Audience filter:** `pantry_marketing_opt_in = true` AND `pantry_is_apple_private_relay = false`
+**Audience filter (CRITICAL — gates this sequence away from trial users):**
+- `pantry_marketing_opt_in = true`
+- `pantry_is_apple_private_relay = false`
+- **`pantry_trial_started_at = NULL`** (do NOT send to users who started a trial — they get the trial sequence instead)
+- `pantry_subscribed_at = NULL`
+
+**Wait condition:** add a 24-hour delay step at the top of the loop before sending the first email — this gives the trial-conversion path time to fire if the user is going to start a trial. Avoids the welcome series racing the trial sequence.
 
 | Day | Email key | Subject |
 |---|---|---|
-| 0 | `welcome_value` | Welcome — your first action inside |
+| 0 (+24h delay) | `welcome_value` | Welcome — your first action inside |
 | 7 | `welcome_recipe_drop` | 3 high-protein dinners under 600 cal |
 | 14 | `welcome_soft_trial_pitch` | Ready to stop guessing what's for dinner? |
 
-### 2.3 Re-engagement (for users who go quiet)
+**Exit condition:** if `pantry_trial_started_at` becomes set OR `pantry_subscribed_at` becomes set, exit immediately. Stops emails to users who decide to start a trial mid-series.
 
-**Trigger event:** `user_reengaged` (fires automatically when a user opens the app after >3 days silence — the engagement.ts helper does this)
-**Audience filter:** `pantry_marketing_opt_in = true` AND `pantry_is_apple_private_relay = false` AND `pantry_subscribed_at = null` (don't re-engage paying users)
-
-Single email, send immediately:
-| Email key | Subject |
-|---|---|
-| `reengage_welcome_back` | Noticed you came back — here's the one thing to try |
-
-### 2.4 Launch Email (one-time campaign — NOT a sequence)
+### 2.3 Launch Email (one-time campaign — NOT a sequence)
 
 For the existing waitlist + future use:
-- Build as a **Campaign** in Loops, not a Loop
+- Build as a **Campaign** in Loops (not a Loop)
 - Audience filter: `pantry_is_waitlist = true`
 - Send manually when the app is live on the App Store
 
@@ -100,7 +95,7 @@ For the existing waitlist + future use:
 
 ## Part 3 — Email copy (paste into Loops drafts)
 
-All emails are designed plain-text-style (no big graphics, no marketing template chrome) per the higher open-rate research. Each ≤120 words, single CTA, mobile-first.
+All emails are designed plain-text-style (no big graphics, no marketing template chrome) per the research showing 2-3× higher open rates vs branded templates. Each ≤120 words, single CTA, mobile-first. Subject lines all under 50 chars so they don't truncate on iPhone notification preview.
 
 ### `trial_welcome` (Day 0, all trial users)
 
@@ -128,7 +123,7 @@ P.S. If anything's broken or confusing, just hit reply. I read every email.
 (You can unsubscribe anytime, no hard feelings: {{unsubscribeUrl}})
 ```
 
-### `trial_day_3_value` (Day 3, SKIP if engaged)
+### `trial_day_3_value` (Day 3, all trial users still in window)
 
 **Subject:** 3 ways our top users get more from Pantry
 **Preview text:** Quick wins — under 30 sec each.
@@ -153,7 +148,7 @@ Each takes under 30 seconds. The combo is what makes Pantry stop feeling like "a
 (Unsubscribe: {{unsubscribeUrl}})
 ```
 
-### `trial_annual_pitch` (Day 6, all)
+### `trial_annual_pitch` (Day 6, all trial users still in window)
 
 **Subject:** Save 68% — Pantry annual is $30/yr
 **Preview text:** Same Pantry, locked in for the year.
@@ -177,32 +172,7 @@ P.S. If you've decided Pantry isn't for you, no worries — just cancel from you
 (Unsubscribe: {{unsubscribeUrl}})
 ```
 
-### `trial_expired_winback` (Day 7, only fires if not subscribed)
-
-**Subject:** Trial ended — here's 50% off
-**Preview text:** Want to come back? One-time offer inside.
-
-```
-Hey {{firstName}},
-
-Your free trial just ended, and I noticed you didn't keep going.
-
-Totally fair if Pantry isn't right for you. But if life just got busy and you didn't get a chance to really try it — here's a one-time offer:
-
-50% off your first month. $3.94 instead of $7.88.
-
-Tap to redeem: pantry://redeem/winback50
-
-The offer expires in 7 days. After that, the regular price kicks back in.
-
-Either way, thanks for trying Pantry. Reply if you have feedback — I want to know what didn't click.
-
-— Logan
-
-(Unsubscribe: {{unsubscribeUrl}})
-```
-
-### `welcome_value` (Day 0, non-trial sign-up)
+### `welcome_value` (Day 0 +24h delay, non-trial sign-up)
 
 **Subject:** Welcome — your first action inside
 **Preview text:** One quick thing while everything's fresh.
@@ -272,25 +242,6 @@ Try it: pantry://trial
 (Unsubscribe: {{unsubscribeUrl}})
 ```
 
-### `reengage_welcome_back` (Re-engagement)
-
-**Subject:** Noticed you came back — here's the one thing to try
-**Preview text:** Pick up where you left off.
-
-```
-Hey {{firstName}},
-
-Noticed you opened Pantry today after a bit of a gap.
-
-If you're not sure where to pick back up, here's the one thing to try: tap "Cook Tonight" on the home screen. It generates a meal you can make right now with what's in your pantry.
-
-Takes 5 seconds. Solves dinner in 30.
-
-— Logan
-
-(Unsubscribe: {{unsubscribeUrl}})
-```
-
 ### `launch_email` (Launch campaign, sent to waitlist)
 
 **Subject:** Pantry is live — your early access link inside
@@ -301,7 +252,7 @@ Hey there,
 
 A few weeks ago you joined the waitlist for Pantry.
 
-It's live. Download here: https://apps.apple.com/app/pantry-food-tracker/id...
+It's live. Download here: https://apps.apple.com/app/pantry-food-tracker/id<APP_ID>
 
 Quick recap of what it does:
 - AI generates 3 meals every morning from what's in your pantry
@@ -318,6 +269,8 @@ Founder, Pantry
 (Unsubscribe: {{unsubscribeUrl}})
 ```
 
+**⚠️ Before sending: replace `<APP_ID>` with your actual App Store ID** (found in App Store Connect → App Information → Apple ID).
+
 ---
 
 ## Part 4 — Trigger the waitlist import + launch email
@@ -325,7 +278,7 @@ Founder, Pantry
 When the app is live and you're ready to send:
 
 ```bash
-# Make sure both secrets are set:
+# Verify both secrets are set:
 npx supabase secrets list
 
 # Run the import. Replace <TOKEN> with the IMPORT_ADMIN_TOKEN you set earlier.
@@ -337,8 +290,10 @@ curl -X POST 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/loops-import
 
 You'll get back `{ ok: true, imported: N, skipped: 0 }`. All waitlist contacts now live in Loops with `pantry_is_waitlist = true`.
 
+> **Note:** the import is sequential at ~120ms per contact. If your waitlist has >500 emails, this may approach the 60s edge function timeout. If it fails partway, the response will show which contacts succeeded and you can re-run for the remainder (uniqueness on email prevents dupes).
+
 Then in Loops dashboard:
-1. Campaigns → New Campaign → use the `launch_email` copy
+1. Campaigns → New Campaign → use the `launch_email` copy above
 2. Audience filter: `pantry_is_waitlist = true`
 3. Send. Track open rate + click-through over the next 48h.
 
@@ -347,38 +302,44 @@ Then in Loops dashboard:
 ## Part 5 — Deploy
 
 ```bash
-# Deploy all 3 new edge functions
+# Deploy all 3 new edge functions (loops-sync, loops-import-waitlist, delete-account refresh)
 npx supabase functions deploy loops-sync
 npx supabase functions deploy loops-import-waitlist
+npx supabase functions deploy delete-account
 
-# Apply the migration to production
+# Apply the email-marketing schema migration to production
 npx supabase db push
 
-# Redeploy heypantry.app with updated privacy policy
+# Redeploy heypantry.app with updated privacy policy (Loops sub-processor disclosure)
 cd /Users/loganshaver/pantry-landing && npx wrangler pages deploy . --project-name=heypantry
 ```
 
 ---
 
-## Part 6 — Verify everything works
+## Part 6 — Verify everything works (~5 min sandbox test)
 
-Sandbox test (5 min):
 1. Create a new account in the app with the marketing opt-in box CHECKED
 2. Check Loops → Contacts — your test email should appear within 30 sec with `pantry_marketing_opt_in = true`
-3. Check `profiles` table in Supabase — `marketing_email_opt_in = true`, `marketing_consent_at` set
-4. Start a trial via paywall — `pantry_trial_started_at` should populate in Loops
-5. Verify the trial_welcome email arrives
+3. Check `profiles` table in Supabase — `marketing_email_opt_in = true`, `marketing_consent_at` set to a timestamp
+4. Verify the `welcome_value` email (after 24h delay) OR start a trial via paywall to verify `trial_welcome` fires
+5. Delete the test account → verify the contact is gone from Loops (Contacts list)
 
 If anything fails, check edge function logs:
 ```bash
 npx supabase functions logs loops-sync
+npx supabase functions logs delete-account
 ```
 
 ---
 
-## What's NOT in this MVP (deferred)
+## What's NOT in V1 (everything deferred to V2)
 
-- **Refer-a-friend program** — needs App Store Connect API integration (~15-20 hrs). V2.
-- **A/B testing different subject lines** — Loops supports natively, set up after 200+ trial-end events accumulate.
-- **PostHog dashboards for email funnel** — added to V2 todos. Events are firing today; dashboards built post-launch.
-- **Behavioral-trigger sequences** beyond engagement-skip and re-engagement — defer until conversion data shows where users drop off.
+The full V2 plan is in `~/my-briefing/todos/active.md` under "V2 Features (post-launch)". Quick summary of what's deferred and why:
+
+- **Engagement-based email skipping** (skip day 3 if user already engaged) — needs wiring 4 UI trigger points; 5-10% conversion optimization not worth measuring at <1K users
+- **Re-engagement loop** (auto-fire on 3-day silence) — same reason; small cohort at pre-launch
+- **Trial-expired winback discount email** — requires App Store Connect API integration for offer codes (~4-6 hrs)
+- **Email-link attribution funnel** — Loops natively tracks opens/clicks; full in-app attribution is V2 polish
+- **Refer-a-friend program** — needs Apple-compliant offer code system + fraud detection (~15-20 hrs)
+- **Loops unsubscribe webhook → app** — only matters when you add in-app marketing prompts
+- **Subscription renewed event** — edge case; sequences exit on `subscribed_at` so this is non-blocking

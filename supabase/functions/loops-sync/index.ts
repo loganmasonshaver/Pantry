@@ -1,5 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+}
+const jsonCors = { ...corsHeaders, "Content-Type": "application/json" }
 
 // Loops API base — https://loops.so/docs/api-reference/intro
 // Auth: Bearer token via LOOPS_API_KEY secret (created in Loops dashboard).
@@ -101,38 +109,53 @@ async function loopsDeleteContact(email: string) {
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-      },
-    })
+    return new Response("ok", { headers: corsHeaders })
   }
 
   if (!loopsApiKey) {
     return new Response(JSON.stringify({ error: "LOOPS_API_KEY not configured" }), {
-      status: 500, headers: { "Content-Type": "application/json" },
+      status: 500, headers: jsonCors,
     })
   }
 
+  // AUTH GATE — verify the caller's JWT and require them to be operating on
+  // their own user_id. Without this, anyone with the function URL could spam
+  // Loops events against other users' accounts.
+  const callerUser = await verifyUser(req)
+  if (!callerUser) return unauthorizedResponse()
+
+  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
+  const { allowed } = rateLimit(ip, 30, 60000)
+  if (!allowed) return rateLimitResponse()
+
   try {
-    // Expected payload from either a Supabase database webhook or an in-app
-    // call. Two shapes accepted:
+    // Expected payload from in-app call. Three shapes accepted:
     //
     //   { action: "sync_profile", userId: "..." }       — re-mirror profile to Loops
     //   { action: "event", userId: "...", eventName: "trial_started", eventProperties: {...} }
-    //   { action: "delete", email: "..." }
+    //   { action: "delete", userId: "..." }              — used by delete-account flow
     const body = await req.json()
     const action = body.action ?? "sync_profile"
 
     if (action === "delete") {
-      if (!body.email) return new Response(JSON.stringify({ error: "email required" }), { status: 400 })
-      await loopsDeleteContact(body.email)
-      return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } })
+      // Self-delete only — caller's userId must match. Resolve email from auth
+      // since the profile may already be deleted by the time this is called.
+      if (body.userId && body.userId !== callerUser.id) {
+        return new Response(JSON.stringify({ error: "cannot delete other users" }), { status: 403, headers: jsonCors })
+      }
+      const email = body.email ?? callerUser.email
+      if (!email) return new Response(JSON.stringify({ error: "no email to delete" }), { status: 400, headers: jsonCors })
+      await loopsDeleteContact(email)
+      return new Response(JSON.stringify({ ok: true }), { headers: jsonCors })
     }
 
     if (!body.userId) {
-      return new Response(JSON.stringify({ error: "userId required" }), { status: 400 })
+      return new Response(JSON.stringify({ error: "userId required" }), { status: 400, headers: jsonCors })
+    }
+
+    // Enforce that the caller is operating on their own user record.
+    if (body.userId !== callerUser.id) {
+      return new Response(JSON.stringify({ error: "userId mismatch" }), { status: 403, headers: jsonCors })
     }
 
     // Pull the latest profile state so the Loops contact properties stay fresh
@@ -143,7 +166,7 @@ Deno.serve(async (req: Request) => {
       .single()
 
     if (profileErr || !profile) {
-      return new Response(JSON.stringify({ error: profileErr?.message ?? "profile not found" }), { status: 404 })
+      return new Response(JSON.stringify({ error: profileErr?.message ?? "profile not found" }), { status: 404, headers: jsonCors })
     }
 
     // Only sync contacts who exist with an email (fallback: pull from auth if profile.email is empty)
@@ -153,7 +176,7 @@ Deno.serve(async (req: Request) => {
       email = authUser?.user?.email ?? null
     }
     if (!email) {
-      return new Response(JSON.stringify({ ok: false, skipped: "no email" }), { headers: { "Content-Type": "application/json" } })
+      return new Response(JSON.stringify({ ok: false, skipped: "no email" }), { headers: jsonCors })
     }
 
     // Always upsert the contact first so event triggers find an existing record
@@ -167,7 +190,7 @@ Deno.serve(async (req: Request) => {
       const eventName = body.eventName
       const eventProperties = body.eventProperties ?? {}
       if (!eventName) {
-        return new Response(JSON.stringify({ error: "eventName required for action=event" }), { status: 400 })
+        return new Response(JSON.stringify({ error: "eventName required for action=event" }), { status: 400, headers: jsonCors })
       }
       // Marketing events only fire if user has opted in. Transactional events
       // (e.g., trial_started, password_reset) always fire regardless.
@@ -181,27 +204,21 @@ Deno.serve(async (req: Request) => {
       ])
       const isTransactional = TRANSACTIONAL.has(eventName)
       if (!isTransactional && !props.pantry_marketing_opt_in) {
-        return new Response(JSON.stringify({ ok: false, skipped: "no marketing opt-in" }), {
-          headers: { "Content-Type": "application/json" },
-        })
+        return new Response(JSON.stringify({ ok: false, skipped: "no marketing opt-in" }), { headers: jsonCors })
       }
       // Apple private-relay → never send marketing events. Transactional only.
       if (!isTransactional && props.pantry_is_apple_private_relay) {
-        return new Response(JSON.stringify({ ok: false, skipped: "apple private relay" }), {
-          headers: { "Content-Type": "application/json" },
-        })
+        return new Response(JSON.stringify({ ok: false, skipped: "apple private relay" }), { headers: jsonCors })
       }
 
       await loopsFireEvent(email, body.userId, eventName, eventProperties)
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
-      headers: { "Content-Type": "application/json" },
-    })
+    return new Response(JSON.stringify({ ok: true }), { headers: jsonCors })
   } catch (err) {
     console.log("[loops-sync] error:", err)
     return new Response(JSON.stringify({ error: (err as Error).message }), {
-      status: 500, headers: { "Content-Type": "application/json" },
+      status: 500, headers: jsonCors,
     })
   }
 })

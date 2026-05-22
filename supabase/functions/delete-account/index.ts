@@ -13,6 +13,30 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
+const loopsApiKey = Deno.env.get("LOOPS_API_KEY")
+
+// GDPR Article 17: when a user deletes their account, their email must also
+// be removed from our email-marketing processor (Loops). Direct API call here
+// — simpler than chaining edge functions and survives even if loops-sync is
+// down. Failure is non-fatal so account deletion always completes.
+async function deleteLoopsContact(email: string): Promise<void> {
+  if (!loopsApiKey || !email) return
+  try {
+    const res = await fetch("https://app.loops.so/api/v1/contacts/delete", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${loopsApiKey}`,
+      },
+      body: JSON.stringify({ email }),
+    })
+    if (!res.ok && res.status !== 404) {
+      console.log(`[delete-account] Loops delete failed: ${res.status}`)
+    }
+  } catch (e) {
+    console.log("[delete-account] Loops delete threw (non-fatal):", e)
+  }
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -89,6 +113,12 @@ Deno.serve(async (req) => {
     console.log('Child row cleanup partial failure (continuing to auth delete):', (e as Error).message)
     // Don't bail — even if cleanup partially fails, attempt the auth.users delete.
     // The user can re-run if it errors and we'll have at least made progress.
+  }
+
+  // GDPR: remove the user's email from Loops before deleting the auth row so
+  // we still have the email available. Non-fatal — won't block deletion.
+  if (user.email) {
+    await deleteLoopsContact(user.email)
   }
 
   // Now delete the auth.users row itself.
