@@ -228,17 +228,25 @@ export default function CreateAccountScreen() {
             </View>
           </View>
 
+          {/* Marketing consent — applies to ALL sign-up paths (email, Apple, Google).
+              Wrapped in its own card so it visually separates from the email form
+              above + clarifies via subtitle that it's a global preference. */}
           <TouchableOpacity
-            style={s.consentRow}
+            style={s.consentCard}
             onPress={() => setEmailOptIn(v => !v)}
             activeOpacity={0.7}
           >
             <View style={[s.consentBox, emailOptIn && s.consentBoxChecked]}>
               {emailOptIn && <Check size={12} stroke="#000" strokeWidth={3} />}
             </View>
-            <Text style={s.consentText}>
-              Send me cooking tips and occasional offers. You can unsubscribe anytime.
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.consentText}>
+                Send me cooking tips and occasional offers
+              </Text>
+              <Text style={s.consentSubtext}>
+                Applies to all sign-up methods · unsubscribe anytime
+              </Text>
+            </View>
           </TouchableOpacity>
 
           <View style={s.orRow}>
@@ -320,13 +328,18 @@ const s = StyleSheet.create({
   passwordRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   // Email marketing consent — unchecked default to satisfy GDPR. Captured for
-  // all 3 signup paths via AsyncStorage trampoline.
-  consentRow: {
+  // all 3 signup paths via AsyncStorage trampoline. Card-style to visually
+  // separate from the email form above and read as a global preference.
+  consentCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
     marginTop: 16,
-    paddingHorizontal: 4,
+    padding: 14,
+    backgroundColor: '#0F0F0F',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
   consentBox: {
     width: 22,
@@ -343,10 +356,16 @@ const s = StyleSheet.create({
     borderColor: TEAL,
   },
   consentText: {
-    flex: 1,
-    fontSize: 13,
-    color: '#AAAAAA',
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontWeight: '500',
     lineHeight: 18,
+  },
+  consentSubtext: {
+    fontSize: 11,
+    color: '#666666',
+    marginTop: 3,
+    lineHeight: 14,
   },
 
   orRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 20 },
