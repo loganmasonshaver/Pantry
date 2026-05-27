@@ -3241,10 +3241,14 @@ const f = StyleSheet.create({
 
   // Real pantry-screen preview
   phonePreview: {
-    width: 285,
-    height: 620,
+    // Sized to fit below the headline + above the absolute bottom CTA on every
+    // iPhone we ship to. Previously 285×620 (real iPhone aspect) but the bottom
+    // of the phone shell got obscured by the sticky "Try Now" footer.
+    // 210×460 gives proper breathing room while still reading as "phone shape."
+    width: 210,
+    height: 460,
     backgroundColor: '#0A0A0A',
-    borderRadius: 36,
+    borderRadius: 28,
     borderWidth: 2.5,
     borderColor: '#2A2A2A',
     overflow: 'hidden',
