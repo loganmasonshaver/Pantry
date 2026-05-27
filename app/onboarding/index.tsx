@@ -2998,23 +2998,23 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
             Unlock your personalized meal plan at no cost. Your kitchen. Your goals. Zero risk.
           </Text>
 
-          {/* iPhone frame — flexible middle slot. flex:1 + justifyContent
-              centers the phone in whatever space remains between the
-              headlines above and the absolute CTA below. */}
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 180, marginTop: 16 }}>
+          {/* iPhone frame — flexible middle slot. flex:1 with flex-start
+              alignment pushes the phone right under the headlines, then it
+              naturally fills available height up to the CTA. */}
+          <View style={{ flex: 1, justifyContent: 'flex-start', alignItems: 'center', paddingTop: 12, paddingBottom: 160 }}>
             <Animated.View style={{
               opacity: phoneAnim,
               transform: [{ translateY: phoneAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
               alignSelf: 'center',
             }}>
               {/* Hardware buttons — left side (volume) */}
-              <View style={{ position: 'absolute', left: -4, top: 50, gap: 10, zIndex: 10 }}>
-                <View style={{ width: 4, height: 22, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
-                <View style={{ width: 4, height: 22, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+              <View style={{ position: 'absolute', left: -4, top: 60, gap: 10, zIndex: 10 }}>
+                <View style={{ width: 4, height: 26, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+                <View style={{ width: 4, height: 26, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
               </View>
               {/* Hardware button — right side (power) */}
-              <View style={{ position: 'absolute', right: -4, top: 68, zIndex: 10 }}>
-                <View style={{ width: 4, height: 38, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+              <View style={{ position: 'absolute', right: -4, top: 80, zIndex: 10 }}>
+                <View style={{ width: 4, height: 44, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
               </View>
               {/* Phone shell — looping intro video */}
               <View style={f.phonePreview}>
@@ -3245,14 +3245,14 @@ const f = StyleSheet.create({
 
   // Real pantry-screen preview
   phonePreview: {
-    // Sized to fit ABOVE the absolute bottom CTA without scrolling. With the
-    // non-scrolling flex layout, parent's flex:1 slot is ~280-340pt on most
-    // iPhones after subtracting badge + headlines (~250pt) + bottom area
-    // (~180pt). 160×340 keeps real iPhone aspect (~1:2.13) and fits cleanly.
-    width: 160,
-    height: 340,
+    // Sized to fill the available space between headlines and the absolute
+    // bottom CTA, top-aligned in its slot so there's no empty gap under the
+    // headlines. 185×400 = ~1:2.16 iPhone aspect ratio, large enough to read
+    // app content clearly inside the shell.
+    width: 185,
+    height: 400,
     backgroundColor: '#0A0A0A',
-    borderRadius: 24,
+    borderRadius: 28,
     borderWidth: 2,
     borderColor: '#2A2A2A',
     overflow: 'hidden',
