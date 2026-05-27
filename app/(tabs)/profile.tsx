@@ -1303,6 +1303,9 @@ export default function ProfileScreen() {
         {/* ── Settings ── */}
         <Text style={styles.sectionTitle}>Settings</Text>
         <View style={styles.card}>
+          {/* Show which account is signed in. Lets users verify they're on the
+              right account before destructive actions (sign out, delete, switch). */}
+          <SettingsRow label="Email" value={user?.email ?? '—'} />
           {/* Single Food Preferences row covers allergies + dislikes (chip selector
               with custom input). The old "Dietary Restrictions" row was removed
               because its modal mixed allergen-frees (Dairy-free, Gluten-free) with
