@@ -3001,7 +3001,7 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
           {/* iPhone frame — flexible middle slot. flex:1 with flex-start
               alignment pushes the phone right under the headlines, then it
               naturally fills available height up to the CTA. */}
-          <View style={{ flex: 1, justifyContent: 'flex-start', alignItems: 'center', paddingTop: 12, paddingBottom: 160 }}>
+          <View style={{ flex: 1, justifyContent: 'flex-start', alignItems: 'center', paddingBottom: 160 }}>
             <Animated.View style={{
               opacity: phoneAnim,
               transform: [{ translateY: phoneAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
@@ -3234,7 +3234,7 @@ const f = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 2 },
   heroTitle: { fontSize: 36, fontWeight: '800', color: '#FFF', textAlign: 'center', letterSpacing: -0.5 },
   heroTitleGreen: { fontSize: 36, fontWeight: '800', color: TEAL, textAlign: 'center', letterSpacing: -0.5, marginBottom: 14 },
-  heroSub: { fontSize: 16, color: '#888', textAlign: 'center', lineHeight: 24, marginBottom: 32, paddingHorizontal: 12 },
+  heroSub: { fontSize: 16, color: '#888', textAlign: 'center', lineHeight: 24, marginBottom: 4, paddingHorizontal: 12 },
 
   // Product demo mockup (legacy — retained for reference; replaced by phonePreview)
   phoneMockup: {
