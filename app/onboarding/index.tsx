@@ -2943,6 +2943,16 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   const { refresh: refreshSuperwallUser, getEntitlements } = useUser()
   const [restoring, setRestoring] = useState(false)
 
+  // Reuse the intro onboarding demo video on this paywall — same asset as the
+  // welcome screen, but here it LOOPS so users lingering on the paywall keep
+  // seeing the product in motion. Placeholder until Logan ships new video.
+  const videoPlayer = useVideoPlayer(require('../../assets/onboarding-demo.mov'), (p) => {
+    p.loop = true
+    p.muted = true
+    p.playbackRate = 0.9
+    p.play()
+  })
+
   useEffect(() => {
     Animated.timing(phoneAnim, { toValue: 1, duration: 700, delay: 300, useNativeDriver: true }).start()
   }, [])
@@ -3001,12 +3011,15 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
             <View style={{ position: 'absolute', right: -4, top: 96, zIndex: 10 }}>
               <View style={{ width: 4, height: 48, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
             </View>
-            {/* Phone shell */}
+            {/* Phone shell — looping intro video instead of static screenshot */}
             <View style={f.phonePreview}>
-              <Image
-                source={require('../../assets/pantry-screenshot.png')}
+              <VideoView
+                player={videoPlayer}
                 style={{ width: '100%', height: '100%' }}
-                resizeMode="cover"
+                contentFit="cover"
+                nativeControls={false}
+                allowsFullscreen={false}
+                allowsPictureInPicture={false}
               />
             </View>
           </Animated.View>
