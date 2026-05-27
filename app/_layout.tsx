@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
-import { View, LogBox } from 'react-native'
+import { LogBox } from 'react-native'
 import { Stack, router, usePathname } from 'expo-router'
+import SplashOverlay from '../components/SplashOverlay'
+
+// Minimum splash display duration. Cold-start UX feels more "premium" with a
+// short branded moment; also buys buffer time so AsyncStorage cache lookups +
+// in-flight requests can settle before the home screen renders. Returning users
+// with valid sessions resolve auth in <500ms — without a minimum, the splash
+// would barely flicker.
+const MIN_SPLASH_MS = 2000
 
 // Known 3rd-party noise — library hasn't migrated yet. Our code is clean.
 // Remove these when upstream updates.
@@ -30,10 +38,22 @@ const AppTheme = {
 function RootLayoutNav() {
   const { session, loading } = useAuth()
   const [checking, setChecking] = useState(true)
+  // Min-splash-duration gate — splash hides only when checking=false AND this is true
+  const [minSplashElapsed, setMinSplashElapsed] = useState(false)
   const pathname = usePathname()
   useNotifications(session?.user?.id ?? null)
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntent()
   const { identify: superwallIdentify, signOut: superwallSignOut, update: superwallUpdate } = useUser()
+
+  // Start the min-splash timer on mount. Runs in parallel with auth resolution.
+  useEffect(() => {
+    const t = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Splash stays visible while EITHER auth is still resolving OR min display
+  // duration hasn't elapsed yet. Whichever finishes last hides the splash.
+  const showSplash = checking || !minSplashElapsed
 
   // Identify user in Superwall on sign-in so subscription status is linked to the correct account.
   // Applies to all auth methods: Apple, Google, and email.
@@ -116,7 +136,6 @@ function RootLayoutNav() {
   return (
     <>
       <StatusBar style="light" />
-      {checking && <View style={{ flex: 1, backgroundColor: '#000000' }} />}
       <Stack screenOptions={{ headerShown: false, tintColor: '#FFFFFF' }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="onboarding/index" />
@@ -128,6 +147,9 @@ function RootLayoutNav() {
         <Stack.Screen name="delivery-webview" />
         <Stack.Screen name="food-preferences" />
       </Stack>
+      {/* Branded splash overlay — covers any partial Stack render during cold start.
+          Positioned AFTER the Stack so it floats above. */}
+      {showSplash && <SplashOverlay />}
     </>
   )
 }
