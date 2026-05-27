@@ -174,21 +174,22 @@ P.S. If you've decided Pantry isn't for you, no worries — just cancel from you
 
 ### `welcome_value` (Day 0 +24h delay, non-trial sign-up)
 
-**Subject:** Welcome — your first action inside
-**Preview text:** One quick thing while everything's fresh.
+**Subject:** Welcome — try Pantry free for 7 days
+**Preview text:** Here's the one tap that solves dinner.
 
 ```
 Hey {{firstName}},
 
 Welcome to Pantry.
 
-Even without a subscription, you've got the basics: pantry tracking, meal logging, macro tracking.
+Heads up — Pantry's a paid app ($7.99/mo or $30/yr). Every new account gets a 7-day free trial before any charge. Cancel anytime from iPhone Settings before day 7 and you pay nothing.
 
-The one thing I'd recommend doing right now while it's fresh: open the app and add 5-10 items to your pantry. Even if you don't try Cook Tonight today, those items make every future suggestion sharper.
+If you're on the fence: open the app, tap "Cook Tonight" once. It generates 3 meals you can make right now with what's in your pantry. That's the whole product, in one tap.
 
-I'll send a few recipe ideas next week. Until then.
+If that solves "what's for dinner" for you, the trial gives you a week to keep using it before any charge.
 
 — Logan
+Founder, Pantry
 
 (Unsubscribe: {{unsubscribeUrl}})
 ```
