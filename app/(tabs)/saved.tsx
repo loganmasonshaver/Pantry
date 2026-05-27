@@ -130,7 +130,9 @@ export default function SavedScreen() {
   const [importUrl, setImportUrl] = useState('')
   const [importing, setImporting] = useState(false)
 
-  // Auto-open import modal when URL is shared from another app
+  // Triggered by the iOS Share Sheet extension (Info.plist NSExtensionActivationRule).
+  // Expo Router parses the incoming URL's params; this effect lifts the sharedUrl param
+  // into the import-modal state so the user lands directly in the "import flow" UI.
   useEffect(() => {
     if (sharedUrl) {
       setImportUrl(sharedUrl)
@@ -141,10 +143,14 @@ export default function SavedScreen() {
   const handleImportFromUrl = async () => {
     const url = importUrl.trim()
     if (!url) return
+    // Regex matches both youtube.com and youtu.be (shortlink) plus tiktok.com.
+    // No other sources are supported by the extract-recipe-from-url edge function yet
+    // (Instagram is RA-blocked; we'd need oEmbed + caption parsing).
     if (!/youtu\.?be|tiktok\.com/.test(url)) {
       Alert.alert('Unsupported link', 'Please paste a YouTube or TikTok URL.')
       return
     }
+    // Sends video to OpenAI/Anthropic — must obtain explicit AI consent first.
     const ok = await requestConsent()
     if (!ok) return
     setImporting(true)
@@ -190,7 +196,8 @@ export default function SavedScreen() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (!error && data) {
-      // Use the stored image_url first (preserves trending meal images and any image used at save time)
+      // Use the stored image_url first (preserves trending meal images and any image used at save time).
+      // Only meals saved BEFORE image_url was added to the schema (and AI-photo-imported recipes) have null here.
       const mealsWithTags = data.map(row => ({
         ...row,
         tags: deriveTags(row),
@@ -198,7 +205,10 @@ export default function SavedScreen() {
         is_user_created: row.is_user_created ?? false,
       }))
       setMeals(mealsWithTags)
-      // Only fetch generated images for meals that don't have a stored image (legacy saves)
+      // Lazy backfill: fire per-meal image generation in parallel for legacy saves.
+      // Each completes independently — no blocking, no Promise.all (we want progressive
+      // reveal as each thumbnail lands). Errors are swallowed so one failure doesn't
+      // block the others. The closure captures `i` so we splice into the right slot.
       mealsWithTags.forEach(async (meal, i) => {
         if (meal.image) return // already have stored image — skip regeneration
         try {
@@ -234,8 +244,8 @@ export default function SavedScreen() {
   }
 
   const startTimer = () => {
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(dismissToast, 4000)
+    if (timerRef.current) clearTimeout(timerRef.current) // cancel prior timer if user unsaves multiple meals rapidly
+    timerRef.current = setTimeout(dismissToast, 4000) // 4s undo window — long enough to read, short enough to feel responsive
   }
 
   const unsave = async (id: string) => {
@@ -254,7 +264,8 @@ export default function SavedScreen() {
   const undo = async () => {
     if (!removed || !user) return
     if (timerRef.current) clearTimeout(timerRef.current)
-    // Re-insert the removed meal
+    // Re-insert with the SAME id so any references (e.g. routing, meal_logs.food_id)
+    // remain valid. Supabase respects client-provided uuid as long as the row is gone.
     await supabase.from('saved_meals').insert({
       id: removed.meal.id,
       user_id: user.id,

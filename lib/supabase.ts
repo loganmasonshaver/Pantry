@@ -8,7 +8,7 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
+    storage: AsyncStorage, // RN equivalent of localStorage — Supabase defaults to window.localStorage which doesn't exist here
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false, // React Native has no URL bar; prevents Supabase from trying to parse OAuth tokens from window.location

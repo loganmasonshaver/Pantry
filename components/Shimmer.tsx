@@ -23,7 +23,7 @@ export function Shimmer({
       Animated.timing(progress, {
         toValue: 1,
         duration: durationMs,
-        easing: Easing.linear,
+        easing: Easing.linear, // linear keeps the sweep velocity constant — easing makes the highlight feel laggy
         useNativeDriver: true,
       })
     )
@@ -48,6 +48,8 @@ export function Shimmer({
       style={[{ overflow: 'hidden', backgroundColor: baseColor }, style]}
       onLayout={handleLayout}
     >
+      {/* Guard against rendering the gradient before onLayout has measured width — would
+          give translateX an undefined range and the sweep would stay stuck at 0. */}
       {width > 0 && (
         <Animated.View style={[StyleSheet.absoluteFillObject, { transform: [{ translateX }] }]}>
           <LinearGradient

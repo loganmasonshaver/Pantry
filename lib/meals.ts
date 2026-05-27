@@ -43,7 +43,9 @@ export async function generateMeals({
   recentMealNames?: string[]
   mode?: 'cookNow' | 'mealPlan'
 }): Promise<GeneratedMeal[]> {
-  // Ensure we have a fresh access token before invoking edge functions.
+  // Edge functions verify the JWT — a stale or missing token returns 401 from
+  // the gateway before our function even runs. Validating up front gives a
+  // clearer error than the opaque 401 the client would otherwise see.
   const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
   console.log('[generateMeals] getSession →', { hasSession: !!sessionData?.session, expires_at: sessionData?.session?.expires_at, sessionError: sessionError?.message })
 

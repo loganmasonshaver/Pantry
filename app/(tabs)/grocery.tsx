@@ -76,14 +76,18 @@ function GroceryRow({
 
   const panResponder = useRef(
     PanResponder.create({
-      // only claim the gesture if horizontal movement dominates, so vertical scroll still works
+      // only claim the gesture if horizontal movement dominates, so vertical scroll still works.
+      // 10px threshold filters out incidental finger jitter on tap.
       onMoveShouldSetPanResponder: (_, g) =>
         Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy),
       onPanResponderMove: (_, g) => {
-        if (g.dx < 0) translateX.setValue(g.dx)
+        if (g.dx < 0) translateX.setValue(g.dx) // left-swipe only — right-swipe is a no-op
       },
       onPanResponderRelease: (_, g) => {
         if (g.dx < DELETE_THRESHOLD) {
+          // Past threshold: animate the row fully off-screen (-400px is well past any
+          // device width) BEFORE invoking onDelete, so the row doesn't flicker back to
+          // origin between gesture release and the parent state update.
           Animated.timing(translateX, { toValue: -400, duration: 200, useNativeDriver: true }).start(() => {
             onDelete()
           })
@@ -168,7 +172,9 @@ export default function GroceryScreen() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
     if (data) {
-      // migrate items that were saved under old category names
+      // Lazy migration: items inserted before the category taxonomy was renamed
+      // (Pantry Staples / Condiments / Dairy → new STORE_CATEGORIES) get re-bucketed
+      // on read. The trailing '*' was an old hack to mark "from generated meal" — strip.
       const fixed = data.map(item => {
         const cleanName = item.name.replace(/\s*\*\s*$/, '').trim()
         if (item.category === 'Other' || item.category === 'Pantry Staples' || item.category === 'Condiments' || item.category === 'Dairy') {
@@ -180,7 +186,8 @@ export default function GroceryScreen() {
         return { ...item, name: cleanName }
       })
 
-      // fuzzy dedup: skip if a similar item name is already in the list
+      // fuzzy dedup: substring match in either direction collapses "chicken" + "chicken breast"
+      // duplicates that the AI meal-generator sometimes emits when the same dish is suggested twice.
       const seen: string[] = []
       const deduped = fixed.filter(item => {
         const lower = item.name.toLowerCase()
@@ -257,6 +264,10 @@ export default function GroceryScreen() {
     await supabase.from('grocery_items').delete().eq('id', id)
   }
 
+  // Closed-loop grocery→pantry transfer: checked items move into the pantry as in_stock.
+  // Pantry has a unique (user_id, name) constraint, so we split into insert (new) +
+  // update (toggle existing back to in_stock) rather than upsert — gives accurate counts
+  // for the success toast and avoids overwriting any custom category the user set.
   const addToPantry = async () => {
     if (!user) return
     const checked = items.filter(i => i.checked)
@@ -284,7 +295,8 @@ export default function GroceryScreen() {
       )
     }
 
-    // Mark existing ones as in_stock in case they were toggled off
+    // Mark existing ones as in_stock in case they were previously toggled off (out of stock).
+    // ilike (case-insensitive) is safer than equality — historical entries have inconsistent casing.
     const existingItems = checked.filter(i => existingNames.has(i.name.toLowerCase()))
     for (const item of existingItems) {
       await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', user.id).ilike('name', item.name)

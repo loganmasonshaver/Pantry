@@ -71,7 +71,8 @@ Deno.serve(async (req: Request) => {
         skipped++
         errors.push({ email: row.email, message: (e as Error).message })
       }
-      // Loops rate limit: stay under 10/sec
+      // Loops rate limit is 10 req/sec — 120ms gap ≈ 8 req/sec leaves headroom for retries
+      // and Cloudflare jitter without hitting the cap and getting throttled mid-import.
       await new Promise(r => setTimeout(r, 120))
     }
 

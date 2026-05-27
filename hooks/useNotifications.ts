@@ -10,6 +10,8 @@ import { supabase } from '@/lib/supabase'
 const SCHEDULE_VERSION = 'v2'
 const SCHEDULE_VERSION_KEY = 'notifications_schedule_version'
 
+// Foreground behavior: show banner + sound but never increment the badge.
+// We don't use the badge anywhere in-app, and stale badge counts confuse users.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -19,6 +21,8 @@ Notifications.setNotificationHandler({
 })
 
 async function requestPermissions(): Promise<boolean> {
+  // Check first — iOS shows the system prompt at most once per install. Re-asking
+  // after denial silently returns the existing 'denied' status with no UI.
   const { status: existing } = await Notifications.getPermissionsAsync()
   if (existing === 'granted') return true
   const { status } = await Notifications.requestPermissionsAsync({
@@ -59,6 +63,8 @@ const SUNDAY_MESSAGES = [
   { title: 'Pantry', body: "Don't let Sunday slip. One more day logged keeps your streak alive." },
 ]
 
+// Picked once at schedule-time, so the same user sees the same variant for the
+// week. Stays fresh because the schedule re-rolls on each version bump.
 function randomPick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]
 }
@@ -155,6 +161,8 @@ export function useNotifications(userId: string | null) {
       if (!granted) return
 
       try {
+        // Push tokens are only issued on physical devices; simulators throw here.
+        // Stored on the profile so server-side jobs can target this device.
         const tokenData = await Notifications.getExpoPushTokenAsync()
         await supabase
           .from('profiles')

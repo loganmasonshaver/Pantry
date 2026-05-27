@@ -21,6 +21,8 @@ import TurnstileWebView from '../../components/TurnstileWebView'
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
 const CARD = '#1A1A1A'
+// Supabase email OTP codes are 6 chars by default but we configured 8 in the
+// dashboard for added entropy. Must match the dashboard setting or verifyOtp fails.
 const CODE_LENGTH = 8
 
 type Step = 'email' | 'code' | 'password'
@@ -47,10 +49,15 @@ export default function ResetPasswordScreen() {
     return () => clearTimeout(timer)
   }, [resendCooldown])
 
+  // Turnstile WebView fires onToken whenever it gets a fresh challenge token.
+  // pendingSendRef guards against firing the OTP send on initial mount — we
+  // only want to send when the user explicitly tapped "Send code" / "Resend".
+  // shouldCreateUser=false: reset-password must not silently create new accounts
+  // for typos. The user must already exist in auth.users.
   const handleCaptchaToken = async (token: string) => {
     if (!email || !pendingSendRef.current) return
     pendingSendRef.current = false
-    setResendCooldown(60)
+    setResendCooldown(60) // Supabase rate-limits OTP per email at ~60s — match it client-side
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: { shouldCreateUser: false, captchaToken: token },
@@ -60,6 +67,9 @@ export default function ResetPasswordScreen() {
     }
   }
 
+  // Bump turnstileKey to remount the WebView and trigger a fresh token. The
+  // onToken callback then fires handleCaptchaToken which actually sends the OTP.
+  // pendingSendRef = true tells that callback this is an intentional send.
   const handleSendCode = () => {
     if (!email) {
       Alert.alert('Error', 'Please enter your email')
@@ -76,6 +86,9 @@ export default function ResetPasswordScreen() {
   }
 
   const handleCodeChange = (text: string, index: number) => {
+    // Paste path: when the OS pastes the full code into a single input, spread
+    // the digits across consecutive boxes. Filter non-digits because iOS Mail
+    // sometimes wraps the code with whitespace or punctuation.
     if (text.length > 1) {
       const chars = text.replace(/[^0-9]/g, '').split('').slice(0, CODE_LENGTH)
       const newCode = [...code]

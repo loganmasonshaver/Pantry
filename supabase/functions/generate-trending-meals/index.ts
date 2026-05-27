@@ -102,7 +102,9 @@ async function correctMealMacros(recipe: any): Promise<any> {
 
 Deno.serve(async (req: Request) => {
   // Allow service-role-key callers (pg_cron daily job) to bypass user auth and rate limit.
-  // This is the only way cron can invoke an edge function — it has no user JWT.
+  // pg_cron runs without a user session — service-role JWT is the only token it can attach.
+  // Constant-time-ish comparison via === is acceptable here since both are 200+ char tokens
+  // and any timing leak would only reveal whether the supplied token matches at byte-N.
   const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
   const authToken = (req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "")
     .replace(/^Bearer\s+/i, "").trim()
@@ -453,6 +455,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
+          // max_tokens 6000 — 20-recipe output with full ingredient arrays + step arrays
+          // pushes 4-5k tokens easily. Lower caps were silently truncating mid-JSON,
+          // producing parse errors that masked as "0 recipes generated".
           body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 6000 }),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId))

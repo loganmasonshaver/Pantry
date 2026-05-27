@@ -2,6 +2,8 @@ import { useRef, useCallback, useImperativeHandle, forwardRef } from 'react'
 import { View } from 'react-native'
 import { WebView } from 'react-native-webview'
 
+// Cloudflare Turnstile public site key — paired with the secret key validated server-side
+// by Supabase's auth.captcha config. Safe to ship in client code; the secret is what proves identity.
 const SITE_KEY = '0x4AAAAAACwdja-rhxwgnKlK'
 
 const html = `
@@ -50,6 +52,9 @@ export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onTok
     },
   }))
 
+  // postMessage from the embedded HTML arrives here. Token strings are short-lived
+  // (~5 min) and single-use — caller must pass them straight to supabase.auth with
+  // captchaToken, then call reset() to issue a fresh challenge for the next attempt.
   const handleMessage = useCallback(
     (event: { nativeEvent: { data: string } }) => {
       const token = event.nativeEvent.data

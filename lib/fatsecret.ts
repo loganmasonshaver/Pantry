@@ -30,6 +30,8 @@ export type FoodSearchResult = {
 
 // ── API calls via Edge Function ──────────────────────────────────────────
 
+// Routed through an edge function because FatSecret OAuth requires a server-side
+// signing step — we can't expose the consumer secret to the client.
 async function apiFetch<T>(method: string, params: Record<string, string>): Promise<T> {
   const { data, error } = await supabase.functions.invoke('fatsecret-proxy', {
     body: { method, params },
@@ -85,7 +87,9 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
       }})
     : []
 
-  // Add synthetic "100g" and "1g" options if metric data is available and no gram serving exists
+  // Add synthetic "100g" and "1g" options if metric data is available and no gram serving exists.
+  // Users frequently want to log by gram weight (kitchen scale workflow) but FatSecret only
+  // returns "1 cup" / "1 slice" / etc. — synthesizing gram servings lets the UI offer a scale-friendly path.
   const hasGramServing = servingsArr.some(s =>
     s.serving_description.match(/^\d+\s*g$/) || s.serving_description === '100 g'
   )
@@ -136,10 +140,10 @@ async function productNameFromBarcode(barcode: string): Promise<string | null> {
     const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`)
     if (!res.ok) return null
     const json = await res.json()
-    if (json.status !== 1) return null
+    if (json.status !== 1) return null // OpenFoodFacts returns status:0 for unknown barcodes (not a 404)
     const p = json.product
-    const brand: string = p.brands?.split(',')[0]?.trim() ?? ''
-    const name: string = p.product_name_en ?? p.product_name ?? ''
+    const brand: string = p.brands?.split(',')[0]?.trim() ?? '' // products may list multiple brands comma-separated; first one is usually the primary
+    const name: string = p.product_name_en ?? p.product_name ?? '' // prefer English name; many EU products have only localized names
     if (!name) return null
     return brand ? `${brand} ${name}` : name
   } catch {

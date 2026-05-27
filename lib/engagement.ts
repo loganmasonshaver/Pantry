@@ -23,8 +23,8 @@ export async function touchLastActive(userId: string): Promise<void> {
       .single()
 
     const lastActive = profile?.last_active_at ? new Date(profile.last_active_at).getTime() : 0
-    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000
-    const wasInactive = lastActive > 0 && lastActive < threeDaysAgo
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000 // 3 days = the line where "still active" becomes "re-engagement"
+    const wasInactive = lastActive > 0 && lastActive < threeDaysAgo // guard against lastActive===0 (new user) firing a re-engagement
 
     await supabase.from('profiles').update({ last_active_at: now }).eq('id', userId)
 
@@ -40,6 +40,9 @@ export async function touchLastActive(userId: string): Promise<void> {
 
 export async function trackCookTonightUsed(userId: string): Promise<void> {
   try {
+    // Prefer the atomic RPC (avoids the read-then-write race when the user fires
+    // this from multiple devices). Fallback path is non-atomic but acceptable
+    // since this is a counter for marketing segmentation, not anything load-bearing.
     await supabase.rpc('increment_cook_tonight_count', { p_user_id: userId }).then(
       () => {},
       // Fallback if the RPC doesn't exist — use a direct update

@@ -293,6 +293,9 @@ export default function MealDetailScreen() {
   const { registerPlacement } = useSuperwall()
   const SLOT_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   const ITEM_HEIGHT = 50
+  // Time-of-day default for the meal slot picker so users tapping "Log Meal"
+  // at 8am land on Breakfast, lunch lands on Lunch, etc.
+  // <11am Breakfast, <3pm Lunch, <9pm Dinner, else Snack.
   const getDefaultSlotIndex = () => {
     const h = new Date().getHours()
     if (h < 11) return 0
@@ -318,7 +321,9 @@ export default function MealDetailScreen() {
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
   const [ingredientImages, setIngredientImages] = useState<Record<string, string>>({})
   const [generatedImage, setGeneratedImage] = useState<string | null>(null)
-  const slideAnim = useRef(new Animated.Value(0)).current // 0 = thumbnail, 1 = AI image
+  // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
+  // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
+  const slideAnim = useRef(new Animated.Value(0)).current
 
   // Normalize ambiguous ingredient names for image lookup
   const IMAGE_ALIASES: Record<string, string> = {
@@ -431,6 +436,9 @@ export default function MealDetailScreen() {
       })
   }, [meal?.name])
 
+  // Sequential generation with a 500ms gap between calls. Replicate (image gen
+  // backend) rate-limits parallel requests aggressively — running in parallel
+  // gives ~50% failure rate. Single retry pass after 3s for any that failed.
   const generateMissingIngredientImages = async (names: string[]) => {
     const failed: string[] = []
     for (const name of names) {
@@ -444,9 +452,9 @@ export default function MealDetailScreen() {
           failed.push(name)
         }
       } catch { failed.push(name) }
-      await new Promise(r => setTimeout(r, 500))
+      await new Promise(r => setTimeout(r, 500)) // pace to avoid Replicate rate-limit
     }
-    // Retry failed ones after a delay
+    // One retry pass after a longer pause — covers transient rate-limit / cold-start failures.
     if (failed.length > 0) {
       await new Promise(r => setTimeout(r, 3000))
       for (const name of failed) {
@@ -490,6 +498,7 @@ export default function MealDetailScreen() {
   const rateMeal = async (rating: 1 | -1) => {
     if (!user || !meal) return
     const prev = userRating
+    // Tapping the same rating again clears it (toggle behavior).
     const next = prev === rating ? null : rating
     setUserRating(next)
     if (next === null) {
@@ -503,7 +512,9 @@ export default function MealDetailScreen() {
       }, { onConflict: 'user_id,meal_name' })
       showRatingToast(next === 1 ? "Got it — we'll suggest more like this" : "Noted — we'll skip this kind of meal")
     }
-    // Update vote_score on trending meals for creator recipes
+    // For creator-uploaded recipes (not AI-generated), the rating also moves a
+    // global vote_score that drives the trending feed for everyone. Delta math
+    // covers all transitions (up→down, clear, etc) in one increment_vote_score call.
     if ((meal as any).trend_source === 'creator' && id && !id.startsWith('mock')) {
       const delta = next === null ? -(prev ?? 0) : next - (prev ?? 0)
       if (delta !== 0) {
@@ -755,6 +766,8 @@ export default function MealDetailScreen() {
     }
     if (saved) return
 
+    // Free-tier save limit: 3 meals. Past that, triggers the Superwall upgrade
+    // prompt instead of saving. Premium users skip this check entirely.
     if (!isPremium) {
       const { count } = await supabase
         .from('saved_meals')
@@ -808,7 +821,9 @@ export default function MealDetailScreen() {
     setLogging(true)
     const today = new Date().toISOString().split('T')[0]
 
-    // Try to get cached image if we don't have one yet
+    // Fallback to the shared image_cache (populated by other users who've already
+    // generated this meal) so meal logs render with an image even if this user
+    // tapped Log before the local generate-meal-image call resolved.
     let mealImage = meal.image || generatedImage || null
     if (!mealImage) {
       const cacheKey = meal.name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()

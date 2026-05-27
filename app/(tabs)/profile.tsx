@@ -83,6 +83,9 @@ function buildPeriodDates(logs: WeightLogEntry[]): Record<PeriodKey, string[]> |
   return result
 }
 
+// Walk backward from today, counting consecutive days that have at least one logged meal.
+// Stops at first gap. Note: starts from today — if user hasn't logged today yet, streak is 0
+// (intentional: encourages logging before bedtime).
 function calcStreak(dates: string[]): number {
   const dateSet = new Set(dates)
   let streak = 0
@@ -465,19 +468,25 @@ const GOAL_ADJUSTMENTS: Record<string, number> = {
 }
 
 function calculateGoals(age: number, gender: string, heightCm: number, weightKg: number, activityLevel: string, fitnessGoal: string) {
+  // Mifflin-St Jeor BMR formula — modern standard, more accurate than Harris-Benedict
+  // for current-population body comps. Gender constant is the only hardcoded sex difference.
   const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161)
-  const tdee = bmr * (ACTIVITY_MULTIPLIERS[activityLevel] ?? 1.55)
+  const tdee = bmr * (ACTIVITY_MULTIPLIERS[activityLevel] ?? 1.55) // fallback = moderately active
   const calories = Math.round(tdee + (GOAL_ADJUSTMENTS[fitnessGoal] ?? 0))
   const weightLbs = weightKg / 0.453592
+  // Custom protein ratios (see project_nutrition_formulas in memory): cutting uses 1.0 g/lb
+  // (not the canonical 1.2 — owner preference), bulking 0.8 since calorie surplus carries
+  // more growth signal than extra protein.
   const proteinPerLb = fitnessGoal === 'lose' ? 1.0 : fitnessGoal === 'maintain' ? 1.0 : 0.8
   const protein = Math.round(weightLbs * proteinPerLb)
-  // Derive carbs/fat from remaining calories after protein
-  // Protein = 4 cal/g, Fat = 30% of calories (9 cal/g), Carbs = remainder (4 cal/g)
+  // Derive carbs/fat from remaining calories after protein.
+  // Protein = 4 cal/g, Fat = 30% of calories (9 cal/g) — middle of AMDR 20-35%, fits cut/bulk.
+  // Carbs = remainder (4 cal/g).
   const proteinCals = protein * 4
   const fatCals = Math.round(calories * 0.30)
   const fat = Math.round(fatCals / 9)
   const carbsCals = calories - proteinCals - fatCals
-  const carbs = Math.max(0, Math.round(carbsCals / 4))
+  const carbs = Math.max(0, Math.round(carbsCals / 4)) // clamp negative when protein+fat > calories (steep cuts)
   return { calories, protein, carbs, fat }
 }
 
@@ -509,6 +518,11 @@ export default function ProfileScreen() {
   const [restoring, setRestoring] = useState(false)
   const [profile, setProfile] = useState<Profile | null>(null)
 
+  // Two-stage restore: first try Superwall's refresh-from-receipt (silent, no UI).
+  // If Superwall doesn't show an active entitlement, fall back to presenting the
+  // paywall, which embeds StoreKit's "Restore Purchases" button — the only path
+  // Apple guarantees for users who installed on a fresh device. Required by App
+  // Review for any IAP app.
   const handleRestorePurchases = async () => {
     if (restoring) return
     setRestoring(true)
@@ -569,7 +583,9 @@ export default function ProfileScreen() {
     if (!user) return
     await supabase.from('profiles').update({ dietary_restrictions: dietDraft }).eq('id', user.id)
     setProfile(p => p ? { ...p, dietary_restrictions: dietDraft } : p)
-    // Clear meal cache so next home screen load regenerates with updated restrictions
+    // Invalidate the daily-meal cache (both modes) so the user doesn't see meals that
+    // violate their new restrictions until the next midnight rollover. Without this
+    // wipe, the cache stays valid for 24h and silently serves the old (now-invalid) set.
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setShowDietModal(false)
   }
@@ -759,6 +775,9 @@ export default function ProfileScreen() {
     setDisplayCalories(startCal)
     setDisplayProtein(startPro)
 
+    // Hand-rolled count-up animation rather than RNAnimated — the numbers need to be
+    // formatted with locale separators each frame (e.g. "1,847 kcal"), and toLocaleString
+    // doesn't compose with native-driven animated values. 30 steps over 800ms feels smooth.
     const duration = 800
     const steps = 30
     const interval = duration / steps

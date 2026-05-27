@@ -186,11 +186,13 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
 
     if (!isPremium) {
       trackUpgradePromptShown('ai_log_limit')
-      await registerPlacement('ai_log_limit')
+      await registerPlacement('ai_log_limit') // Superwall placement — opens trial paywall, blocks until dismissed
       onClose()
       return
     }
 
+    // Show first-run AI consent gate (legally required disclosure that photos/descriptions
+    // are sent to a third-party LLM). Returns false if user denies — bail without analyzing.
     const ok = await requestConsent()
     if (!ok) return
 
@@ -201,7 +203,9 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
         ? await estimateFromPhoto(imageBase64!)
         : await estimateFromText(description.trim())
 
-      // Auto-correct calories to match macros (protein×4 + carbs×4 + fat×9)
+      // Atwater factors — protein/carbs each yield 4 kcal/g, fat yields 9 kcal/g.
+      // GPT often returns macros that don't add up to its calorie estimate, so recompute
+      // from macros for consistency with the macro display on the review screen.
       const correctedCal = (estimate.protein || 0) * 4 + (estimate.carbs || 0) * 4 + (estimate.fat || 0) * 9
       // fall back to GPT estimate if FatSecret has no calorie data
       const finalCal = correctedCal > 0 ? correctedCal : estimate.calories
@@ -447,7 +451,9 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   ))}
                 </View>
 
-                {/* Auto-sync: if user edits a macro, recalculate calories to match */}
+                {/* Auto-sync: if user edits a macro, recalculate calories to match (Atwater 4/4/9).
+                    Only fires when the user touched a macro field (lastEditedMacro), so editing
+                    calories directly doesn't get clobbered by this loop. */}
                 {(() => {
                   const p = parseInt(protein) || 0
                   const c = parseInt(carbs) || 0
@@ -455,9 +461,10 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   const cal = parseInt(calories) || 0
                   const macroCals = p * 4 + c * 4 + f * 9
                   const diff = Math.abs(macroCals - cal)
+                  // 10 kcal tolerance to ignore rounding noise from individual macro inputs
                   if (diff > 10 && macroCals > 0 && lastEditedMacro) {
-                    // Silently sync calories to match macros
-                    // deferred to avoid setState during render
+                    // setTimeout(0) defers setState out of the render phase — React forbids
+                    // setState during render and will warn/throw if called synchronously here.
                     setTimeout(() => setCalories(String(macroCals)), 0)
                   }
                   return null
@@ -482,7 +489,9 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   </View>
                 </ScrollView>
 
-                {/* disable save if calories don't match macro totals */}
+                {/* Guard against logging an entry whose calories visibly disagree with its macros.
+                    50 kcal tolerance is intentionally loose — typing pauses can leave numbers
+                    momentarily mismatched while the auto-sync above is still queued. */}
                 <TouchableOpacity
                   style={[styles.analyzeBtn, (!mealName.trim() || saving || (() => {
                     const p = parseInt(protein) || 0, c = parseInt(carbs) || 0, f = parseInt(fat) || 0, cal = parseInt(calories) || 0

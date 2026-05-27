@@ -14,7 +14,8 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => null)
   if (!body) return new Response('Invalid JSON', { status: 400 })
 
-  // Verify admin password
+  // Shared-secret auth — this function isn't user-facing, it's invoked manually by Logan
+  // from a curl/script to seed creator content. Service-role client below bypasses RLS.
   if (body.secret !== adminSecret) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
   }

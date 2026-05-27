@@ -41,6 +41,8 @@ import { useMealSuggestions } from '../../lib/useMealSuggestions'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
 
+// LayoutAnimation requires explicit opt-in on Android — iOS supports it natively.
+// We're iOS-only but this guards future Android builds from silent no-op animations.
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
@@ -114,6 +116,8 @@ function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
     animProgress.setValue(0)
     setDisplayRemaining(goal)
     setDisplayOffset(circumference)
+    // useNativeDriver: false — strokeDashoffset is an SVG attribute, not a transform/opacity,
+    // so the native driver can't animate it. We pay the JS-bridge cost here to drive the ring.
     RNAnimated.timing(animProgress, { toValue: progress, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
     const listener = animProgress.addListener(({ value }) => {
       setDisplayRemaining(Math.round(goal - goal * value))
@@ -390,7 +394,9 @@ export default function HomeScreen() {
       useNativeDriver: true,
     }).start()
   }, [heroIdx, heroScale])
-  // Guard heroIdx — meals.length can shrink between regens and leave us pointing at an empty slot
+  // Guard heroIdx — meals.length can shrink between regens and leave us pointing at an empty slot.
+  // Without this, heroMeal would be undefined and the gradient/text overlay would render against
+  // a blank background until the next setHeroIdx tick.
   const safeHeroIdx = Math.min(heroIdx, Math.max(meals.length - 1, 0))
   const heroMeal = meals[safeHeroIdx]
 
@@ -612,6 +618,8 @@ export default function HomeScreen() {
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0])
   const isToday = selectedDate === new Date().toISOString().split('T')[0]
 
+  // Anchor at noon when constructing the Date so DST transitions don't shift the day
+  // backward (e.g. midnight + DST fallback = previous day on iOS).
   const goBackDay = () => {
     const d = new Date(selectedDate + 'T12:00:00')
     d.setDate(d.getDate() - 1)
@@ -680,6 +688,9 @@ export default function HomeScreen() {
     try { await fetchTodayLogs() } finally { setRefreshing(false) }
   }, [fetchTodayLogs])
 
+  // AppState 'active' fires on background→foreground resume. Without this, logs
+  // added on another device (or just stale state after a long backgrounding) won't
+  // refresh until the user manually pulls or switches tabs.
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') fetchTodayLogs()
@@ -765,6 +776,8 @@ export default function HomeScreen() {
     const name = logName.trim()
     if (!name || !user) return
     setLogSaving(true)
+    // `|| 0` covers both NaN (empty input) and parseInt failures — schema requires
+    // non-null numerics, so a user logging just "name" gets zeros instead of an error.
     const { error } = await supabase.from('meal_logs').insert({
       user_id: user.id,
       meal_name: name,

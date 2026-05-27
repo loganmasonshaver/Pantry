@@ -160,6 +160,8 @@ Rules:
       ]
     }
 
+    // Vision (photo) needs full gpt-4o — mini's vision is too weak to estimate portion grams
+    // reliably. Text-only descriptions get mini since it's just nutritional reasoning.
     const model = mode === "photo" ? "gpt-4o" : "gpt-4o-mini"
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -192,6 +194,8 @@ Rules:
     if (fsKey && fsSecret && items.length > 0) {
       for (const item of items) {
         const macros = await lookupMacros(item.food, item.grams || 100)
+        // Skip obviously-wrong lookups — a single ingredient over 1500 kcal almost certainly
+        // means FatSecret matched the wrong food (e.g. "chicken" → some processed dish entry).
         if (macros && macros.cal > 0 && macros.cal < 1500) {
           totalCal += macros.cal
           totalPro += macros.p
@@ -202,8 +206,8 @@ Rules:
       }
     }
 
-    // Step 3: If FatSecret got at least half the items, use verified data
-    // Otherwise fall back to a single GPT estimate
+    // Step 3: If FatSecret resolved at least half the items AND the total is sane,
+    // trust the database numbers. Sub-50 kcal total means lookups were too sparse to trust.
     if (fsLookups >= items.length / 2 && totalCal >= 50) {
       console.log(`FatSecret verified ${fsLookups}/${items.length} items for "${mealName}"`)
       return new Response(JSON.stringify({

@@ -74,6 +74,9 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         model: "gemini-3.1-flash-lite",
         messages: [{ role: "user", content: buildPrompt(mealName) }],
+        // temperature 0.6 — templates are seeded once and reused. Want enough variety that
+        // different runs produce slightly different recipes (so re-running fixes a bad seed),
+        // but not so high that the recipe drifts from the meal name (e.g. "Chicken Alfredo" → some random pasta dish).
         temperature: 0.6,
         max_tokens: 1500,
       }),

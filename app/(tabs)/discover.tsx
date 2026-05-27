@@ -23,12 +23,16 @@ import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 // Lifecycle filters mirror the home-tab logic so Discover shows the same trending
 // pool. They live here as a temporary duplicate; Phase 3b moves Trending out of
 // Home entirely and these become the single source of truth.
+// Creator recipes get a longer shelf life than YouTube (14d guaranteed, up to 30d if
+// engagement is strong) — creators earn revenue share, so we honor their content longer.
 function isCreatorRecipeVisible(m: any): boolean {
-  const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
+  const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000 // ms → days
   if (ageDays <= 14) return true
   if (ageDays <= 30 && ((m.vote_score ?? 0) >= 3 || (m.log_count ?? 0) >= 10)) return true
   return false
 }
+// YouTube-sourced recipes are pure editorial filler — drop them after a week so the
+// feed stays fresh and we don't keep showing stale trending picks.
 function isYouTubeRecipeVisible(m: any): boolean {
   const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
   return ageDays <= 7
@@ -50,6 +54,9 @@ const DISCOVER_PROTEIN_KEYWORDS = [
   'protein powder', 'whey',
   'egg',
 ]
+// Only check first 3 ingredients — GPT lists them in order of prominence, so the
+// "primary" protein is essentially always in the first few. Cheaper than scanning all
+// ingredients and avoids false matches like "splash of cream" being tagged as dairy.
 function detectPrimaryProtein(meal: any): string {
   const ings = (meal.ingredients || []).slice(0, 3).map((i: any) => i.name ?? '').join(' ')
   const haystack = `${meal.name ?? ''} ${ings}`.toLowerCase()
@@ -196,6 +203,9 @@ export default function DiscoverScreen() {
 
   const fetchTrending = useCallback(async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
+    // 30-day window is the absolute upper bound (creator lifecycle ceiling).
+    // Lifecycle filtering below further trims YouTube to 7d and creators by engagement.
+    // The !creator_id syntax is PostgREST's foreign-key embed — joins one creator per meal.
     const { data } = await supabase.from('trending_meals')
       .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
       .gte('generated_at', thirtyDaysAgo)

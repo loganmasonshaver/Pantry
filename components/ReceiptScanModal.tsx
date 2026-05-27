@@ -40,8 +40,10 @@ const CATEGORIES = ['Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantr
 
 // ── Brand normalization ──────────────────────────────────────────────────
 
-// Common grocery brand name patterns to strip from ingredient names.
-// Matches leading brand words followed by a space + actual ingredient.
+// Receipt OCR returns lines like "KRAFT Mac & Cheese" or "Organic Spinach" — strip the
+// brand/descriptor prefix so the pantry stores "Mac & Cheese" / "Spinach". Matters because
+// downstream features (categorization, matching against saved meals, dedup) work on the
+// generic name; preserving brands creates pantry clutter and breaks recipe matching.
 const BRAND_PATTERNS: RegExp[] = [
   // Major national brands
   /^(Kraft|Heinz|Nestlé|Nestle|Kellogg'?s?|General Mills|Pepperidge Farm|Pepperidge|Dole|Del Monte|Hunt'?s?|Libby'?s?|Progresso|Campbell'?s?|Swanson|Birds Eye|Green Giant|Pillsbury|Betty Crocker|Duncan Hines|Quaker|Cheerios|Tropicana|Minute Maid|Simply|Welch'?s?|Ocean Spray|Smucker'?s?|Jif|Skippy|Peter Pan|Planters|Blue Diamond|Horizon|Organic Valley|Tillamook|Cabot|Land O'? ?Lakes?|Kerrygold|Daisy|Breakstone'?s?|Knorr|Lipton|McCormick|Lawry'?s?|Morton|Diamond Crystal|Arm & Hammer|Arm and Hammer|Bob'?s? Red Mill|King Arthur|Gold Medal|Hodgson Mill|Argo|Domino|C&H|Imperial|Dixie Crystals|Rumford|Clabber Girl|Davis|Fleischmann'?s?|Red Star|Hodgson|Barilla|Ronzoni|Mueller'?s?|De Cecco|Dreamfields|Classico|Prego|Ragu|Newman'?s? Own|Annie'?s?|Amy'?s?|Eden|365|Simple Truth|Private Selection|Signature Select|Great Value|Good & Gather|Sprouts|Market Pantry|Archer Farms)\s+/i,
@@ -64,7 +66,8 @@ function normalizeIngredientName(raw: string): string {
   // Remove leading item codes or numbers: "1234 Whole Milk" → "Whole Milk"
   name = name.replace(/^\d[\d\s\-#]*\s+/, '')
 
-  // Apply brand pattern stripping iteratively (some items have stacked prefixes)
+  // Iterative pass handles stacked prefixes like "Organic Kerrygold Butter" → "Kerrygold Butter"
+  // → "Butter". Each pattern only strips one leading word, so we loop until no pattern matches.
   let changed = true
   while (changed) {
     changed = false
@@ -205,9 +208,10 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
         .eq('id', user!.id)
         .single()
       const count = profile?.receipt_scan_count ?? 0
+      // Lifetime cap of 3 free receipt scans (separate counter from pantry_scan_count)
       if (count >= 3) {
         trackUpgradePromptShown('scan_limit')
-        await triggerUpgrade('receipt_scan_limit')
+        await triggerUpgrade('receipt_scan_limit') // Superwall placement — opens paywall
         onClose()
         return
       }

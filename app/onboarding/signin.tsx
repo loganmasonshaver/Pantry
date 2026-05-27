@@ -34,7 +34,9 @@ export default function SignInScreen() {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null)
   const [turnstileKey, setTurnstileKey] = useState(0)
 
-  // Refresh Turnstile token when screen regains focus (e.g. returning from reset-password)
+  // Turnstile tokens are single-use AND short-lived. After the user bounces to
+  // reset-password and comes back, the stashed token is either consumed or expired.
+  // Bumping turnstileKey remounts the WebView to fetch a fresh one.
   useFocusEffect(
     useCallback(() => {
       setCaptchaToken(null)
@@ -48,6 +50,9 @@ export default function SignInScreen() {
       return
     }
     const now = Date.now()
+    // Exponential-ish cooldown for failed sign-ins: 3s default, 15s after 3 fails,
+    // 60s after 5. Slows brute-force credential stuffing without locking real users
+    // out for too long. failCount resets to 0 on successful sign-in.
     const cooldown = failCount >= 5 ? 60000 : failCount >= 3 ? 15000 : 3000
     if (now - lastAttempt < cooldown) {
       Alert.alert('Too many attempts', `Please wait ${Math.ceil(cooldown / 1000)} seconds.`)
@@ -180,6 +185,7 @@ export default function SignInScreen() {
                 await signInWithApple()
                 await routeAfterSignIn()
               } catch (e: any) {
+                // ERR_REQUEST_CANCELED = user dismissed the Apple sheet; not an error.
                 if (e.code !== 'ERR_REQUEST_CANCELED') Alert.alert('Apple Sign-In Failed', e.message)
               } finally { setLoading(false) }
             }} activeOpacity={0.8}>
@@ -195,6 +201,7 @@ export default function SignInScreen() {
               // Google users skip OTP — already verified via Google
               await routeAfterSignIn()
             } catch (e: any) {
+              // Google native code 12501 = SIGN_IN_CANCELLED (user dismissed). Not an error.
               if (e.code !== '12501') Alert.alert('Google Sign-In Failed', e.message)
             } finally { setLoading(false) }
           }} activeOpacity={0.8}>

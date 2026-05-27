@@ -42,9 +42,11 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
     }
   }, [visible])
 
+  // This is a marketing/browse-only paywall — the actual purchase happens through Superwall's
+  // native StoreKit sheet (registerPlacement). Without that delegation, no Apple IAP receipt
+  // is created and entitlement never flips on.
   const handleStartTrial = async () => {
     try {
-      // delegates to Superwall, which presents the native StoreKit IAP sheet for this placement
       await registerPlacement('usage_paywall')
     } catch {}
     onClose()

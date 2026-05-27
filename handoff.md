@@ -200,7 +200,7 @@ Limitation acknowledged: doesn't actively preload meals — just delays home ren
 ### Immediate
 - [ ] **Default paywall debugging:** Logan to check App Store Connect → Monetization → Subscriptions → confirm every product is "Ready to Submit" or "Approved" status. Suspect: annual product missing metadata + Review Information screenshot. Plus rebuild with the new Superwall SDK to see if v1.0.9 callback fix resolves it.
 - [ ] **Email program sandbox test:** Logan to do a fresh signup with marketing opt-in checked, verify contact appears in Loops within 30 sec with correct properties, start trial via paywall, verify trial_welcome email arrives in inbox. Then delete sandbox account, verify Loops contact gone.
-- [ ] **Deploy pantry-landing privacy policy update:** `cd /Users/loganshaver/pantry-landing && npx wrangler pages deploy . --project-name=heypantry`. Stripe references stripped + Loops sub-processor added locally but NOT yet live on heypantry.app.
+- [x] ~~**Deploy pantry-landing privacy policy update:** `cd /Users/loganshaver/pantry-landing && npx wrangler pages deploy . --project-name=heypantry`. Stripe references stripped + Loops sub-processor added locally but NOT yet live on heypantry.app.~~
 - [ ] **Verify dual-Pantry-install fix:** confirm only one Pantry on Logan's iPhone after the rebuild, Metro console shows `[notifications] scheduled v2 — 7 total scheduled`.
 
 ### Pre-launch (in active.md)

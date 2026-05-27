@@ -92,6 +92,8 @@ export default function FoodPreferencesScreen() {
     setInputText('')
   }
 
+  // Comma as an inline commit shortcut — users can type "mushrooms, olives" and
+  // each item gets added as a chip without ever leaving the input field.
   const handleTextChange = (text: string) => {
     if (text.endsWith(',')) {
       commitInput(text.slice(0, -1))
@@ -128,10 +130,13 @@ export default function FoodPreferencesScreen() {
       .from('profiles')
       .update({
         food_dislikes: allDislikes,
+        // Also dismisses the home-screen "set your preferences" prompt so it
+        // doesn't re-appear after the user has explicitly answered.
         food_prefs_banner_dismissed: true,
       })
       .eq('id', user.id)
-    // Clear meal cache so next home screen load regenerates without disliked ingredients
+    // Cache contains meals generated against the OLD dislike list — wipe both
+    // modes so the next Home render re-fetches with the new preferences applied.
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setSaving(false)
     if (error) {

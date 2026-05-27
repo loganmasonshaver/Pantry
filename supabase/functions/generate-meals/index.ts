@@ -77,6 +77,8 @@ async function correctMealMacros(meal: any): Promise<any> {
 
   for (const macros of results) {
     if (macros) {
+      // Skip obviously-wrong FatSecret matches — a single ingredient over 900 kcal or 100g
+      // protein almost certainly means the search matched the wrong food entry.
       if (macros.cal > 900 || macros.p > 100) continue
       totalCal += macros.cal
       totalP += macros.p
@@ -86,6 +88,10 @@ async function correctMealMacros(meal: any): Promise<any> {
     }
   }
 
+  // Only override LLM macros if FatSecret resolved ≥50% of ingredients AND the total is
+  // within a sane single-serving range. Outside this band → trust the LLM (database
+  // mismatch likely worse than estimate). Capped at 1200 here because generate-meals
+  // produces single meals, not meal-prep portions.
   if (lookedUp >= ingredients.length / 2 && totalCal >= 200 && totalCal <= 1200) {
     meal.calories = Math.round(totalCal)
     meal.protein = Math.round(totalP)
@@ -315,6 +321,10 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
         const response = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
+          // temperature 0.8 — enough variety so consecutive generations don't return identical
+          // meals, but not so high that the LLM ignores the dense constraint list above.
+          // max_tokens 2000 — 5 full meals with ingredient arrays + step arrays fits here;
+          // raise if we ever generate >7 meals per call (currently capped at genCount=5).
           body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 2000 }),
         })
         const data = await response.json()
@@ -383,12 +393,10 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       console.log(`Macro rank: kept top ${displayCount}/${beforeRank} meals by per-meal target fit`)
     }
 
-    // Prep-time validation — drop meals the LLM claimed fit the budget but didn't.
-    // If we lose too many (<50% survive), keep them but clamp the displayed prepTime so
-    // the user-facing number is honest to their cap. The LLM lied about the number but
-    // the meal itself may still be usable; clamping prevents user confusion.
-    // Drop any meal whose honest prepTime exceeds the user's budget — never clamp/lie.
-    // The prompt's whitelist for ≤10 min should prevent this from wiping all meals.
+    // Prep-time validation — drop meals whose claimed prepTime exceeds the user's budget.
+    // The LLM occasionally returns a 30-min recipe when the user asked for ≤10 min — usually
+    // a hallucinated "prepTime: 25" alongside a recipe that actually IS doable in 10. Dropping
+    // is cleaner than clamping: clamping would lie to the user about how long it takes.
     const originalCount = meals.length
     meals = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
     const droppedCount = originalCount - meals.length

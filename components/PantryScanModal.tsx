@@ -186,10 +186,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           .eq('id', user!.id)
           .single()
         const count = profile?.pantry_scan_count ?? 0
-        // free tier is capped at 3 pantry scans
+        // Lifetime cap of 3 free pantry scans — counter increments below, never resets
         if (count >= 3) {
           trackUpgradePromptShown('scan_limit')
-          await triggerUpgrade('pantry_scan_limit')
+          await triggerUpgrade('pantry_scan_limit') // Superwall placement — blocks until paywall dismissed
           handleClose()
           return
         }
@@ -198,6 +198,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           .update({ pantry_scan_count: count + 1 })
           .eq('id', user!.id)
       }
+      // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
       const ok = await requestConsent()
       if (!ok) { onClose(); return }
       try {

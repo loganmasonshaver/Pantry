@@ -74,7 +74,8 @@ export default function EditPortionModal({
     let updatePayload: Record<string, any>
 
     if (food && selectedServing) {
-      // floor at 0.1 to prevent zero-quantity division
+      // Floor at 0.1 so an empty/invalid input doesn't zero out the log entirely —
+      // user can always edit further; never silently save 0 cal / 0 protein.
       const qty = Math.max(0.1, parseFloat(quantity) || 1)
       const base = parseMacros(selectedServing)
       calories = Math.round(base.calories * qty)
@@ -187,7 +188,7 @@ export default function EditPortionModal({
                   </View>
                 )}
 
-                {/* FatSecret attribution */}
+                {/* FatSecret attribution — required by their free-tier API terms */}
                 <View style={styles.attribution}>
                   <Text style={styles.attributionText}>Nutrition data</Text>
                   <Image
@@ -198,7 +199,8 @@ export default function EditPortionModal({
                 </View>
               </>
             ) : (
-              /* Fallback: direct edit for AI-logged items */
+              /* Fallback: AI-logged meals have no FatSecret food_id, so servings are unavailable.
+                 Let the user edit calories/protein directly instead of locking them out. */
               <>
                 <Text style={styles.fallbackHint}>
                   No serving data available. Edit calories and protein directly.

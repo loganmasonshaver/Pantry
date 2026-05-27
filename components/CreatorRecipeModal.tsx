@@ -39,7 +39,7 @@ type CreatorProfile = {
   youtube_url: string | null
 } | null
 
-const DAILY_LIMIT = 2
+const DAILY_LIMIT = 2 // anti-spam: caps creator posts at 2/day, enforced client-side by counting today's rows
 
 function TikTokIcon({ size, color }: { size: number; color: string }) {
   return (
@@ -174,7 +174,8 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
 
   const uploadPhoto = async (uri: string): Promise<string | null> => {
     try {
-      // ArrayBuffer is more reliable than blob() in React Native
+      // React Native's blob() implementation is unreliable for file:// URIs (returns 0-byte blobs
+      // on some iOS versions). ArrayBuffer round-trip through fetch() works consistently.
       const response = await fetch(uri)
       const arrayBuffer = await response.arrayBuffer()
       const filename = `creator-recipes/${Date.now()}.jpg`
@@ -212,6 +213,8 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
       .select('id, name, handle, instagram_url, tiktok_url, youtube_url')
       .single()
     setSubmitting(false)
+    // Postgres unique-constraint violations contain "unique" in the message — surface a friendly
+    // collision message instead of the raw "duplicate key value violates unique constraint" text.
     if (error) { Alert.alert('Error', error.message.includes('unique') ? 'That handle is already taken.' : error.message); return }
     setCreator(data)
     setTodayCount(0)

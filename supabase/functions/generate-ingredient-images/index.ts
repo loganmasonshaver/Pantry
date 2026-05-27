@@ -169,10 +169,14 @@ function getPrompt(ingredient: string): string {
 async function generateImage(ingredient: string, retries = 3): Promise<string | null> {
   const prompt = getPrompt(ingredient)
 
+  // Sequential retries with a 3s gap — Replicate rate-limits aggressive parallel hits and
+  // returns transient 5xx under load. 3 attempts × 3s gap clears most blips.
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       if (attempt > 0) await new Promise(r => setTimeout(r, 3000))
 
+      // Flux Schnell — 4-step distilled Flux, ~1.5s per image. Schnell is sufficient quality
+      // for ingredient thumbnails (Pro/Dev only matter for hero meal images).
       const res = await fetch('https://api.replicate.com/v1/models/black-forest-labs/flux-schnell/predictions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${replicateToken}`, 'Content-Type': 'application/json' },
@@ -181,7 +185,8 @@ async function generateImage(ingredient: string, retries = 3): Promise<string | 
       const data = await res.json()
       if (data.output?.[0]) return data.output[0]
 
-      // Poll for completion
+      // Replicate's prediction API is async — initial POST returns a polling URL. Poll up to
+      // 30s (60 × 500ms). Schnell usually finishes in 1-3s so this is generous headroom.
       const pollUrl = data.urls?.get
       if (pollUrl) {
         for (let i = 0; i < 60; i++) {
@@ -277,6 +282,9 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Batched generation — Supabase Edge Functions cap at ~150s wall time. 5 ingredients per
+  // batch × ~5s each = ~25s + overhead, well within budget. Caller drives the batch index
+  // forward via the returned `next` field until done.
   const url = new URL(req.url)
   const batchParam = url.searchParams.get('batch') ?? '0'
   const batchSize = 5

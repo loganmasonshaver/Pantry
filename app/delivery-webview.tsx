@@ -6,6 +6,9 @@ import { WebView } from 'react-native-webview'
 import { Image } from 'react-native'
 import { ChevronLeft } from 'lucide-react-native'
 
+// In-app browser to Instacart so users can re-order pantry/grocery items without
+// leaving Pantry. Plain URL — no affiliate token yet, no SSO. Future: deep-link
+// pre-populated cart from grocery list.
 const DELIVERY_URL = 'https://www.instacart.com'
 
 export default function DeliveryWebViewScreen() {

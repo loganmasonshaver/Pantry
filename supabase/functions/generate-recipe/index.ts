@@ -30,8 +30,10 @@ Deno.serve(async (req: Request) => {
       })
     }
 
-    // When existingSteps is provided, we only need prepTime + a short title per step
-    // (creator-recipe flow). Skip the full recipe generation.
+    // Two modes — full recipe gen vs annotate-existing.
+    // Annotate mode handles the creator-import path: a creator submits a recipe with their
+    // own instructions; we only need to add step titles + estimate prepTime, not rewrite the
+    // recipe. Skipping full gen here preserves the creator's voice and avoids macro drift.
     const annotateMode = Array.isArray(existingSteps) && existingSteps.length > 0
 
     const prompt = annotateMode ? `Recipe: "${description}"

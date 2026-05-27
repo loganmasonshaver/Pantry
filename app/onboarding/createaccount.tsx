@@ -60,7 +60,10 @@ export default function CreateAccountScreen() {
       return
     }
     const now = Date.now()
-    if (now - lastAttempt < 30000) {
+    // Cooldown between sign-up attempts — prevents Supabase rate-limit hits and
+    // spam abuse if someone holds the button. Turnstile (above) is the real
+    // bot defense; this is just a client-side guard.
+    if (now - lastAttempt < 30000) { // 30s cooldown between submit attempts
       Alert.alert('Please wait', 'You can try again in a few seconds.')
       return
     }
@@ -104,6 +107,8 @@ export default function CreateAccountScreen() {
       trackAccountCreated('apple')
       router.replace({ pathname: '/onboarding', params: { step: '20' } })
     } catch (e: any) {
+      // ERR_REQUEST_CANCELED is the Apple-native code for the user dismissing
+      // the sheet — not an error, swallow silently. Real failures fall through.
       if (e.code !== 'ERR_REQUEST_CANCELED') {
         Alert.alert('Apple Sign-In Failed', e.message)
       }
@@ -156,7 +161,8 @@ export default function CreateAccountScreen() {
       trackAccountCreated('google')
       router.replace({ pathname: '/onboarding', params: { step: '20' } })
     } catch (e: any) {
-      if (e.code !== '12501') { // SIGN_IN_CANCELLED
+      // Google's native code 12501 = SIGN_IN_CANCELLED (user dismissed). Not an error.
+      if (e.code !== '12501') {
         Alert.alert('Google Sign-In Failed', e.message)
       }
     } finally {

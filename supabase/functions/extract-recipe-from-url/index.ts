@@ -17,9 +17,14 @@ function extractYouTubeId(url: string): string | null {
   return match?.[1] ?? null
 }
 
-// Fetch YouTube content — try captions first, then description via noembed
+// Fetch YouTube content — three-tier fallback chain. Captions are the richest source
+// (full recipe spoken in the video), but only present on ~30% of cooking videos.
+// Description falls back to title-only via oEmbed/noembed which still gives GPT enough
+// to construct a "most likely" recipe from cooking-knowledge priors.
 async function getYouTubeContent(videoId: string): Promise<string | null> {
-  // Approach 1: Try scraping captions from the watch page
+  // Approach 1: Scrape captions from the watch page HTML. YouTube embeds a JSON blob
+  // with captionTracks[].baseUrl pointing to the XML transcript. Requires a real browser
+  // UA — bare fetches get a 429 or cookie-consent wall.
   try {
     const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
@@ -31,6 +36,7 @@ async function getYouTubeContent(videoId: string): Promise<string | null> {
     // Try caption tracks
     const captionMatch = html.match(/"captionTracks":\[.*?"baseUrl":"(.*?)"/)
     if (captionMatch) {
+      // YouTube escapes & as & in the JSON blob — must un-escape before fetching
       const captionUrl = captionMatch[1].replace(/\\u0026/g, '&')
       const xml = await fetch(captionUrl).then(r => r.text())
       const lines = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/gs)].map(m =>
@@ -138,8 +144,8 @@ Respond ONLY with valid JSON, no markdown, no explanation:
     body: JSON.stringify({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
-      max_tokens: 2000,
+      temperature: 0.7,     // moderate variety — recipe reconstructions benefit from some creativity when source is sparse
+      max_tokens: 2000,     // full recipe JSON with 8+ ingredients and 6+ steps fits comfortably
     }),
   })
 

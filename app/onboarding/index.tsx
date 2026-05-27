@@ -1127,11 +1127,15 @@ const FITNESS_GOAL_OPTIONS = [
   { key: 'gain', label: 'Gain Muscle', adj: 300 },
 ]
 
+// Compute the user's daily calorie + protein targets from their onboarding data.
+// BMR (Mifflin-St Jeor) → TDEE (× activity multiplier) → calories (+/- goal adjustment).
+// Protein uses custom g/lb ratios — cutting 1.0, maintain 1.0, bulk 0.8 — tuned for
+// our audience (general fitness, not bodybuilders); see project_nutrition_formulas memory.
 function calculateGoals(age: number, gender: string, heightCm: number, weightKg: number, activityLevel: string, fitnessGoal: string) {
-  // Mifflin-St Jeor BMR
+  // Mifflin-St Jeor BMR — gender correction: +5 male, -161 female
   const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + (gender === 'male' ? 5 : -161)
   const activity = ACTIVITY_OPTIONS.find(a => a.key === activityLevel)
-  const tdee = bmr * (activity?.mult ?? 1.55)
+  const tdee = bmr * (activity?.mult ?? 1.55) // default 1.55 = moderate if level unset
   const goalAdj = FITNESS_GOAL_OPTIONS.find(g => g.key === fitnessGoal)?.adj ?? 0
   const calories = Math.round(tdee + goalAdj)
   const weightLbs = weightKg / 0.453592
@@ -1155,7 +1159,8 @@ const cmToFtIn = (cm: number) => {
   const totalInches = cm / 2.54
   const ft = Math.floor(totalInches / 12)
   const inches = Math.round(totalInches - ft * 12)
-  // Handle rounding overflow (e.g., 11.5in → 12in → carry to next ft)
+  // Carry: rounding 11.5in up gives 12in which isn't a valid value.
+  // Promote it to the next foot (e.g., 5'12" → 6'0").
   if (inches === 12) return { ft: ft + 1, inches: 0 }
   return { ft, inches }
 }
@@ -3348,11 +3353,16 @@ function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () 
   })
 
   useEffect(() => {
-    // Skip paywall entirely for promo code holders
+    // Promo-code grant = comp'd subscription (creator/family/staff). Bypass paywall
+    // entirely so they don't see a price at all.
     if (data.grantsPromo) { onNext(); return }
     trackPaywallViewed('onboarding')
     const run = async () => {
       await registerPlacement('onboarding_paywall')
+      // Abandonment fallback: if the user closed the main paywall without buying,
+      // show a discounted second-chance offer. Short delay lets the subscription
+      // status webhook settle so purchasedRef is accurate. Currently disabled —
+      // see ABANDONMENT_PAYWALL_ENABLED flag at top of file for Apple review risk.
       if (ABANDONMENT_PAYWALL_ENABLED) {
         await new Promise(r => setTimeout(r, 400))
         if (!purchasedRef.current) {
@@ -3785,6 +3795,9 @@ export default function Onboarding() {
   // Resume at saved step. If user was mid-transition (referral / generating intro)
   // after finishing data entry, jump straight to plan loading — they've already
   // entered everything, no need to re-walk the reveal intro.
+  // 15 (notification permission) and 16 (referral code) auto-advance forward to 17
+  // because they're either OS-popups or already-typed inputs that don't benefit
+  // from a re-prompt. 13 → 14 skips the now-removed cuisine swipe step.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -3840,14 +3853,14 @@ export default function Onboarding() {
     })
   }
 
+  // Cross-fade between steps. Double requestAnimationFrame is intentional:
+  // the inner rAF gives React one frame to commit the new screen's tree before
+  // the outer rAF triggers the fade-in. A single rAF still flashes the old
+  // screen because opacity rises BEFORE the commit lands.
   const navigate = (newStep: number) => {
     trackOnboardingStep(newStep)
     Animated.timing(fadeAnim, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => {
       setStep(newStep)
-      // Defer fade-in by one frame so React commits the new screen render
-      // BEFORE opacity starts going back up. Without this, the old screen
-      // briefly flashes back in because opacity rises before the new screen
-      // has been committed to the tree.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           Animated.timing(fadeAnim, { toValue: 1, duration: 180, useNativeDriver: true }).start()
@@ -3856,6 +3869,9 @@ export default function Onboarding() {
     })
   }
 
+  // Navigation is mostly linear but has conditional skips. Both forward (next)
+  // and back must skip the same screens or back-tap lands on a screen the user
+  // never saw forward and gets stuck (no way to advance past it).
   const next = () => {
     // Skip SGoalDelta (step 7) for maintain users — they have no delta target
     if (step === 6 && data.goal === 'maintain') return navigate(8)
@@ -3912,7 +3928,8 @@ export default function Onboarding() {
         // Derive carbs/fat from the calorie target. Without this, Home falls back to
         // hardcoded 250g carbs / 80g fat defaults that have nothing to do with the
         // user's actual goal. Split: 27% of calories from fat (within ISSN range),
-        // remainder after protein → carbs.
+        // remainder after protein → carbs. Energy density constants: fat 9 cal/g,
+        // protein/carb 4 cal/g.
         let computedCarbs: number | null = null
         let computedFat: number | null = null
         if (computedCals && computedProt) {

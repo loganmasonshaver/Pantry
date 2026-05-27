@@ -177,7 +177,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     try {
       const res = await searchFoods(q.trim())
       setResults(res)
-      // fetch full nutrition details in background after showing initial results
+      // FatSecret's foods.search endpoint returns a description string but not the full
+      // serving object — fetch details per-row in the background so the list can show
+      // calories/protein without blocking the initial render.
       res.forEach(async (food) => {
         try {
           const detail = await getFoodById(food.food_id)
@@ -238,7 +240,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const handleBarcodeScan = async ({ data }: { data: string }) => {
     if (scanningRef.current) return
     scanningRef.current = true
-    setScanned(true)
+    setScanned(true) // freezes the CameraView's onBarcodeScanned by passing undefined below
     setScanLoading(true)
     try {
       const food = await findFoodByBarcode(data)
@@ -738,6 +740,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                       style={StyleSheet.absoluteFillObject}
                       facing="back"
                       onBarcodeScanned={scanned ? undefined : handleBarcodeScan}
+                      // Limit to retail product barcodes — QR/PDF417 would trigger false positives
+                      // from any junk in the viewfinder. EAN/UPC are the formats FatSecret indexes.
                       barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'] }}
                     />
                     {/* Viewfinder overlay */}

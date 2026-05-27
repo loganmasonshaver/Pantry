@@ -32,7 +32,7 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
+        tabBarShowLabel: false, // icon-only bar — active state is conveyed by the pill background, not text
         tabBarStyle: styles.tabBar,
         tabBarActiveTintColor: '#FFFFFF',
         tabBarInactiveTintColor: '#AAAAAA',

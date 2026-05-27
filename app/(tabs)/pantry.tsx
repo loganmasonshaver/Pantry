@@ -353,6 +353,10 @@ export default function PantryScreen() {
     const name = newIngredientName.trim()
     if (!name || !user) return
 
+    // Two-pass categorization: first try the fast local keyword matcher. If it returns
+    // ≥2 candidates (e.g. "cream" → Dairy + Sauces & Condiments), surface a disambig
+    // picker instead of guessing. overrideCategory short-circuits this on second call
+    // after the user picks from the picker.
     if (!overrideCategory) {
       const matches = autoCategoryMatches(name)
       if (matches.length > 1) {
@@ -362,6 +366,8 @@ export default function PantryScreen() {
     }
 
     setAddSaving(true)
+    // Falls back to async categorizeItem (LLM-backed) when local matcher returned exactly 0 or 1.
+    // Always single category at this point — disambig case already handled above.
     const category = overrideCategory || (await categorizeItem(name))
     setDisambigChoices([])
     const { data, error } = await supabase

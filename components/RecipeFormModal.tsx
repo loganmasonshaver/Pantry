@@ -47,11 +47,13 @@ type Props = {
 
 const EMPTY_INGREDIENT: Ingredient = { name: '', visual: '', grams: '' }
 
+// Older saved meals stored ingredients as plain strings ("1 cup rice"); newer ones use
+// {name, visual, grams} objects. Normalize both shapes into the editable Ingredient row format.
 function parseIngredients(raw: any[]): Ingredient[] {
   if (!raw || raw.length === 0) return [{ ...EMPTY_INGREDIENT }]
   return raw.map((i: any) => ({
     name: typeof i === 'string' ? i : i.name ?? '',
-    visual: i.visual ?? i.amount ?? '',
+    visual: i.visual ?? i.amount ?? '', // "amount" was the old field name; fall back to it for legacy rows
     grams: i.grams != null ? String(i.grams) : '',
   }))
 }
@@ -112,6 +114,7 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
   async function handleGenerate() {
     const desc = aiPrompt.trim()
     if (!desc) return
+    // First-run AI consent gate — discloses that the prompt is sent to OpenAI
     const ok = await requestConsent()
     if (!ok) return
     setAiLoading(true)

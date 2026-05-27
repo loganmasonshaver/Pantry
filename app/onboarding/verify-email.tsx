@@ -15,6 +15,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../../lib/supabase'
 import TurnstileWebView from '../../components/TurnstileWebView'
 
+// Supabase email OTP codes are 8 chars in our project (configured in the
+// Supabase dashboard — must match or verifyOtp rejects with 'Invalid OTP').
 const CODE_LENGTH = 8
 
 export default function VerifyEmailScreen() {
@@ -34,10 +36,15 @@ export default function VerifyEmailScreen() {
     return () => clearTimeout(timer)
   }, [resendCooldown])
 
+  // Fired by TurnstileWebView whenever it acquires a fresh challenge token.
+  // pendingSendRef gates this — we only want to actually send the OTP when the
+  // user explicitly triggered it (initial mount or "Resend"), not on every
+  // background token refresh. shouldCreateUser=false so a typo'd email at this
+  // point doesn't create a phantom account.
   const handleCaptchaToken = async (token: string) => {
     if (!email || !pendingSendRef.current) return
     pendingSendRef.current = false
-    setResendCooldown(60)
+    setResendCooldown(60) // matches Supabase per-email OTP throttle
     await supabase.auth.signInWithOtp({
       email,
       options: { shouldCreateUser: false, captchaToken: token },
@@ -46,7 +53,7 @@ export default function VerifyEmailScreen() {
 
   const handleResend = () => {
     pendingSendRef.current = true
-    setTurnstileKey(k => k + 1) // remount WebView to get fresh token
+    setTurnstileKey(k => k + 1) // Turnstile tokens are single-use — remount for a fresh one
   }
 
   const handleChange = (text: string, index: number) => {

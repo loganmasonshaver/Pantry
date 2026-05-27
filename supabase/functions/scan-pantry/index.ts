@@ -122,8 +122,8 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
         "Authorization": `Bearer ${openaiApiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o",
-        max_tokens: 6000,
+        model: "gpt-4o",   // mini's vision is too weak to read partial labels / back-row items
+        max_tokens: 6000,  // dense kitchen scans were silently truncating at lower caps — losing whole zones at the end of the JSON
         messages: [
           {
             role: "user",
@@ -220,12 +220,16 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
       console.log('[scan-pantry] second pass failed (non-fatal):', e)
     }
 
-    // Second pass: look up any detected barcodes for more accurate names
+    // Barcode enrichment — for any item where GPT-4o read a UPC, hit Open Food Facts to
+    // get the canonical generic product name. Avoids GPT's tendency to under-specify
+    // (e.g. label → "Whole Wheat Bread" instead of just "Bread"). Sequential because OFF
+    // can rate-limit a barrage of parallel requests from the same IP.
     for (const zone of (result.zones || [])) {
       for (const item of zone.items) {
         if (item.barcode) {
           const betterName = await lookupBarcode(item.barcode)
           if (betterName) {
+            // Title-case the OFF response — "whole wheat bread" → "Whole Wheat Bread"
             item.name = betterName
               .toLowerCase()
               .replace(/\b\w/g, (c: string) => c.toUpperCase())

@@ -89,6 +89,8 @@ async function loopsFireEvent(email: string, userId: string, eventName: string, 
 }
 
 // Delete a contact entirely (used for GDPR deletion / account delete).
+// 404 is treated as success — if the contact doesn't exist in Loops, the deletion goal
+// is already satisfied. Treating it as an error would block account-delete flows.
 async function loopsDeleteContact(email: string) {
   const res = await fetch(`${LOOPS_API_BASE}/contacts/delete`, {
     method: "POST",

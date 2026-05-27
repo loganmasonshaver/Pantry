@@ -45,6 +45,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       }
     } catch {}
 
+    // 3 attempts with 3s gaps — Replicate occasionally returns transient 5xx or
+    // queue timeouts; per-call retries are far cheaper than letting the meal
+    // card render image-less. Sequential not parallel — bursting Replicate
+    // causes cascading throttles.
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const { data, error } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames, steps } })
@@ -60,7 +64,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           return data.image
         }
       } catch (e) { console.log(`[MealImage] ${name} error:`, e) }
-      await new Promise(r => setTimeout(r, 3000))
+      await new Promise(r => setTimeout(r, 3000)) // 3s gap between retries
     }
     return null
   }
@@ -157,8 +161,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
       } catch {}
 
-      // images load progressively after meals are shown; errors must not block the UI
-      // Fetch all images in parallel
+      // Images load progressively after meals are shown; errors must not block the UI.
+      // Fetched in parallel here (different meal names → independent Replicate jobs);
+      // the per-image retry loop above is what's serialized to avoid burst throttling.
       const mealsToImage = [...generated]
       ;(async () => {
         await Promise.all(mealsToImage.map(async (meal, i) => {

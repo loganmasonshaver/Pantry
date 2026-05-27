@@ -13,6 +13,8 @@ export function identifyUser(userId: string, traits?: { email?: string }) {
   posthog.identify(userId, traits)
 }
 
+// Called on sign-out — clears the distinct_id and assigns a new anonymous one
+// so subsequent events from the same device aren't merged with the prior user.
 export function resetUser() {
   posthog.reset()
 }

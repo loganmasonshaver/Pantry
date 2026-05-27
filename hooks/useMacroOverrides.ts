@@ -13,6 +13,9 @@ export type MacroOverride = {
 
 // ── Key helpers ────────────────────────────────────────────────────────────
 
+// Prefixed keys keep barcode-based overrides separate from FatSecret-ID-based
+// ones — same physical product could have different IDs across sources, so we
+// never want them to collide on a single override row.
 /** Build a stable lookup key from a barcode or FatSecret food ID. */
 export function getFoodKey(opts: { barcode?: string; foodId?: string }): string {
   if (opts.barcode) return `barcode:${opts.barcode}`
@@ -66,7 +69,7 @@ export async function saveOverride(
     .from('macro_overrides')
     .upsert(
       { user_id: userId, ...override },
-      { onConflict: 'user_id,food_key' }
+      { onConflict: 'user_id,food_key' } // matches the compound unique index — one override per (user, food)
     )
   return { error: error?.message ?? null }
 }

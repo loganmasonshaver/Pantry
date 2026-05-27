@@ -41,6 +41,8 @@ Rules:
 
 Category:`
 
+    // Gemini Flash Lite first (free + commercial-OK), OpenAI mini as paid fallback.
+    // Gemini exposes an OpenAI-compatible endpoint so both providers share the same body shape.
     const providers = [
       googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite" },
       openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini" },
@@ -54,13 +56,15 @@ Category:`
           body: JSON.stringify({
             model: p.model,
             messages: [{ role: "user", content: prompt }],
-            temperature: 0,
-            max_tokens: 20,
+            temperature: 0,        // deterministic — categorization should always pick the same bucket for the same input
+            max_tokens: 20,        // category names are 1-2 words; 20 tokens is plenty and caps cost
           }),
         })
         const data = await res.json()
-        if (data.error) continue
+        if (data.error) continue   // try next provider on API error (quota, transient 5xx, etc.)
         const text = (data.choices?.[0]?.message?.content ?? "").trim()
+        // Strict case-insensitive match against the caller-supplied category list. If the LLM
+        // returns anything else (hallucinated category, prose, refusal), fall back to 'Other'.
         const matched = categories.find((c: string) => c.toLowerCase() === text.toLowerCase()) ?? 'Other'
         return new Response(JSON.stringify({ category: matched }), {
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },

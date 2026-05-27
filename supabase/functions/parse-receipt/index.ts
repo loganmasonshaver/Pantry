@@ -100,8 +100,9 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "No image provided" }), { status: 400 })
     }
 
-    // Gemini Flash primary (cheaper, receipt = structured text — quality identical)
-    // GPT-4o fallback if Gemini key missing or fails
+    // Gemini Flash primary (essentially free, and receipt OCR is structured-text territory
+    // where Gemini matches GPT-4o quality). GPT-4o fallback when Gemini errors — receipt
+    // quality is critical to UX and a single retry against the paid model is cheap insurance.
     let text: string
     if (googleAiKey) {
       try {

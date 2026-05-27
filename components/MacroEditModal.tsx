@@ -41,6 +41,8 @@ export default function MacroEditModal({
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // On open, check for an existing override for this (user, foodKey) pair. If one exists, prefill
+  // with overridden values so the user can refine; otherwise prefill with FatSecret originals.
   useEffect(() => {
     if (!visible) return
     setLoading(true)
@@ -66,7 +68,7 @@ export default function MacroEditModal({
     const prot = parseFloat(protein)
     const carb = parseFloat(carbs)
     const f = parseFloat(fat)
-    if (isNaN(cal) || isNaN(prot) || isNaN(carb) || isNaN(f)) return
+    if (isNaN(cal) || isNaN(prot) || isNaN(carb) || isNaN(f)) return // silently no-op on invalid input — keeps modal open so user can fix the field
     setSaving(true)
     const { error } = await saveOverride(userId, {
       food_key: foodKey,
