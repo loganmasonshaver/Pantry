@@ -2982,7 +2982,10 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
       <View style={f.root}>
         <TopBar onBack={onBack} pct={PROGRESS[20]} />
 
-        <ScrollView contentContainerStyle={[f.scrollContent, { alignItems: 'center' }]} showsVerticalScrollIndicator={false} bounces={false}>
+        {/* Non-scrolling flex layout — everything must fit on one viewport.
+            Headlines pinned to top, phone preview centered in flexible middle,
+            sticky CTA at the bottom (still absolute-positioned). */}
+        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 16, alignItems: 'center' }}>
           {/* Badge */}
           <View style={f.badge}>
             <Text style={f.badgeText}>EXCLUSIVE OFFER</Text>
@@ -2995,37 +2998,38 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
             Unlock your personalized meal plan at no cost. Your kitchen. Your goals. Zero risk.
           </Text>
 
-          {/* iPhone frame with actual pantry screenshot */}
-          <Animated.View style={{
-            opacity: phoneAnim,
-            transform: [{ translateY: phoneAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
-            alignSelf: 'center',
-            marginTop: 16,
-          }}>
-            {/* Hardware buttons — left side (volume) */}
-            <View style={{ position: 'absolute', left: -4, top: 72, gap: 10, zIndex: 10 }}>
-              <View style={{ width: 4, height: 28, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
-              <View style={{ width: 4, height: 28, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
-            </View>
-            {/* Hardware button — right side (power) */}
-            <View style={{ position: 'absolute', right: -4, top: 96, zIndex: 10 }}>
-              <View style={{ width: 4, height: 48, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
-            </View>
-            {/* Phone shell — looping intro video instead of static screenshot */}
-            <View style={f.phonePreview}>
-              <VideoView
-                player={videoPlayer}
-                style={{ width: '100%', height: '100%' }}
-                contentFit="cover"
-                nativeControls={false}
-                allowsFullscreen={false}
-                allowsPictureInPicture={false}
-              />
-            </View>
-          </Animated.View>
-
-          <View style={{ height: 150 }} />
-        </ScrollView>
+          {/* iPhone frame — flexible middle slot. flex:1 + justifyContent
+              centers the phone in whatever space remains between the
+              headlines above and the absolute CTA below. */}
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 180, marginTop: 16 }}>
+            <Animated.View style={{
+              opacity: phoneAnim,
+              transform: [{ translateY: phoneAnim.interpolate({ inputRange: [0, 1], outputRange: [40, 0] }) }],
+              alignSelf: 'center',
+            }}>
+              {/* Hardware buttons — left side (volume) */}
+              <View style={{ position: 'absolute', left: -4, top: 50, gap: 10, zIndex: 10 }}>
+                <View style={{ width: 4, height: 22, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+                <View style={{ width: 4, height: 22, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+              </View>
+              {/* Hardware button — right side (power) */}
+              <View style={{ position: 'absolute', right: -4, top: 68, zIndex: 10 }}>
+                <View style={{ width: 4, height: 38, backgroundColor: '#2A2A2A', borderRadius: 2 }} />
+              </View>
+              {/* Phone shell — looping intro video */}
+              <View style={f.phonePreview}>
+                <VideoView
+                  player={videoPlayer}
+                  style={{ width: '100%', height: '100%' }}
+                  contentFit="cover"
+                  nativeControls={false}
+                  allowsFullscreen={false}
+                  allowsPictureInPicture={false}
+                />
+              </View>
+            </Animated.View>
+          </View>
+        </View>
 
         {/* Bottom CTA */}
         <View style={f.bottomArea}>
@@ -3241,19 +3245,18 @@ const f = StyleSheet.create({
 
   // Real pantry-screen preview
   phonePreview: {
-    // Sized to fit below the headline + above the absolute bottom CTA on every
-    // iPhone we ship to. Previously 285×620 (real iPhone aspect) but the bottom
-    // of the phone shell got obscured by the sticky "Try Now" footer.
-    // 210×460 gives proper breathing room while still reading as "phone shape."
-    width: 210,
-    height: 460,
+    // Sized to fit ABOVE the absolute bottom CTA without scrolling. With the
+    // non-scrolling flex layout, parent's flex:1 slot is ~280-340pt on most
+    // iPhones after subtracting badge + headlines (~250pt) + bottom area
+    // (~180pt). 160×340 keeps real iPhone aspect (~1:2.13) and fits cleanly.
+    width: 160,
+    height: 340,
     backgroundColor: '#0A0A0A',
-    borderRadius: 28,
-    borderWidth: 2.5,
+    borderRadius: 24,
+    borderWidth: 2,
     borderColor: '#2A2A2A',
     overflow: 'hidden',
     alignSelf: 'center',
-    marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.5,
