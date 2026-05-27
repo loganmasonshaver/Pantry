@@ -8,7 +8,24 @@
       "mcp__Claude_in_Chrome__tabs_context_mcp",
       "mcp__computer-use__screenshot",
       "mcp__computer-use__request_access",
-      "mcp__plugin_claude-mem_mcp-search__get_observations"
+      "mcp__plugin_claude-mem_mcp-search__get_observations",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(supabase functions list)",
+      "Bash(supabase functions list *)",
+      "Bash(supabase functions download *)",
+      "Bash(sips -g *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"PROJECT CONVENTION — INLINE WHY COMMENTS: When you write or edit code in app/, components/, hooks/, lib/, context/, constants/, or supabase/functions/, add brief // comments next to non-obvious lines. Focus on WHY: API quirks, magic timing constants, state-machine transitions, edge cases, gotchas, security mechanisms. Rules: plain // only (no JSDoc /** */ blocks), 1-3 lines max, never restate what the code obviously does, never reference tasks/PRs/dates. Match the established style in context/AuthContext.tsx and constants/colors.ts. Skip files that are already saturated with comments.\"}}'"
+          }
+        ]
+      }
     ]
   }
 }
