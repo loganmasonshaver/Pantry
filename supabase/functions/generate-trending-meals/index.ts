@@ -658,6 +658,22 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     recipes = recipes.slice(0, 6)
     stageLog(`final survivor count: ${recipes.length}`)
 
+    // HARD MINIMUM GATE: abort without touching DB if we ended up below 6. The
+    // last 3 days of meals are still alive in trending_meals (lines below delete
+    // only stuff >3 days old), so yesterday's solid 6 stay visible on Discover.
+    // Half-empty rows look much worse than a slightly older "today" so this
+    // trades freshness for completeness whenever the funnel collapses.
+    const MIN_TRENDING_MEALS = 6
+    if (recipes.length < MIN_TRENDING_MEALS) {
+      console.log(`[abort] only ${recipes.length} of ${MIN_TRENDING_MEALS} survived the pipeline — keeping previous run's trending meals intact`)
+      return new Response(JSON.stringify({
+        skipped: true,
+        reason: 'min_threshold_not_met',
+        survivors: recipes.length,
+        min: MIN_TRENDING_MEALS,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+
     // Step 4: Match recipes back to YouTube thumbnails + persist video_id so future
     // cron runs can dedup against this video for the next 90 days.
     const meals = recipes.map((r: any) => {
