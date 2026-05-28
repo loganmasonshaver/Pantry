@@ -112,6 +112,46 @@ function getWholeUnitDisplay(name: string, gramsStr: string | undefined): { coun
   }
 }
 
+// Round grams to nearest 5 once we're above 20g. 44g→45g, 58g→60g — keeps
+// the displayed number psychologically "clean" without distorting recipe
+// accuracy on small doses (spices, supplements, etc. stay exact).
+function roundDisplayGrams(grams: number): number {
+  if (grams >= 20) return Math.round(grams / 5) * 5
+  return Math.round(grams)
+}
+
+// Whey/casein/plant protein universally scooped, not measured in tbsp or
+// weighed at home. One scoop ≈ 30g across major brands (5-10% variance is
+// fine — close-enough for the user's mental model).
+function gramsToProteinScoops(grams: number): string {
+  const scoops = grams / 30
+  if (scoops <= 0.4)  return '1/4 scoop'
+  if (scoops <= 0.6)  return '1/2 scoop'
+  if (scoops <= 0.85) return '3/4 scoop'
+  if (scoops <= 1.25) return '1 scoop'
+  if (scoops <= 1.75) return '1 1/2 scoops'
+  if (scoops <= 2.25) return '2 scoops'
+  if (scoops <= 2.75) return '2 1/2 scoops'
+  return `${Math.round(scoops * 2) / 2} scoops`
+}
+
+// Seeds (chia, flax, hemp, sesame) are sprinkled, not weighed. Chia is
+// ~4g/tsp, finer/lighter seeds ~3g/tsp. Numbers from common baking refs.
+function gramsToSeedsSpoons(name: string, grams: number): string {
+  const gPerTsp = /\bchia\b/i.test(name) ? 4 : 3
+  const tsp = grams / gPerTsp
+  if (tsp <= 0.37) return '1/4 tsp'
+  if (tsp <= 0.62) return '1/2 tsp'
+  if (tsp <= 0.87) return '3/4 tsp'
+  if (tsp <= 1.25) return '1 tsp'
+  if (tsp <= 1.75) return '1 1/2 tsp'
+  if (tsp <= 2.5)  return '2 tsp'
+  if (tsp <= 3.5)  return '1 tbsp'
+  if (tsp <= 5)    return '1 1/2 tbsp'
+  if (tsp <= 7)    return '2 tbsp'
+  return `${Math.round(tsp / 3 * 2) / 2} tbsp`
+}
+
 // Approximate g/tsp for powdered spices (paprika, cumin, etc.). Salt is denser
 // (~6g/tsp) and gets a special case. Good enough for cooking; not lab-grade.
 function gramsToSpiceTsp(name: string, grams: number): string {
@@ -129,14 +169,38 @@ function gramsToSpiceTsp(name: string, grams: number): string {
 }
 
 // For Measured mode: oils, sauces, seasonings, spices etc. are universally
-// measured in tbsp/tsp/cups, not grams. Three-tier resolution:
-//   1. Volume-measured ingredient + visual has a real unit → use visual
-//   2. Seasoning with no usable visual → convert grams to tsp (gramsToSpiceTsp)
-//   3. Fall back to grams (or visual as a last resort)
+// measured in tbsp/tsp/cups, not grams. Resolution order:
+//   1. Protein powder → scoops (always override; AI tends to spit out tbsp here)
+//   2. Seeds (chia/flax/hemp) → tsp/tbsp from grams
+//   3. Liquid or seasoning visual that already has a real unit → use visual
+//   4. Seasoning without a usable visual → convert grams to tsp
+//   5. Plain grams — rounded to nearest 5 above 20g for "psychologically clean" numbers
 function getMeasuredDisplay(name: string, gramsStr: string | undefined, visualStr: string | undefined): string {
   const n = name.toLowerCase()
   const isLiquid = /\b(oil|vinegar|sauce|dressing|honey|syrup|extract|juice|milk|broth|stock|wine|tahini|mayo|mustard|cream)\b/.test(n)
   const isSeasoning = /\b(salt|pepper|paprika|cumin|cinnamon|turmeric|oregano|thyme|basil|rosemary|parsley|cilantro|dill|chili|spice|powder|seasoning|flakes?|herbs?|sweetener|stevia|sugar)\b/.test(n)
+  const isProteinPowder = /\b(whey|casein|protein\s*powder|plant\s*protein)\b/i.test(n)
+  const isSeeds = /\b(chia|flax|hemp|sesame)\b/i.test(n) && /\bseeds?\b/i.test(n)
+
+  // Whey/casein/protein powder → scoops, always. Most users never measure
+  // protein in tbsp or grams — the scoop comes with the tub.
+  if (isProteinPowder) {
+    if (gramsStr) {
+      const grams = parseFloat(String(gramsStr).replace(/[^0-9.]/g, '')) || 0
+      if (grams > 0) return gramsToProteinScoops(grams)
+    }
+    // If AI gave "X tbsp" without grams, approximate: ~3 tbsp ≈ 1 scoop (~10g/tbsp dry).
+    if (visualStr) {
+      const tbspMatch = visualStr.match(/(\d+(?:\.\d+)?)\s*tbsp/i)
+      if (tbspMatch) return gramsToProteinScoops(parseFloat(tbspMatch[1]) * 10)
+    }
+  }
+
+  // Seeds (chia, flax, hemp, sesame) → tsp/tbsp. Sprinkled, not weighed.
+  if (isSeeds && gramsStr) {
+    const grams = parseFloat(String(gramsStr).replace(/[^0-9.]/g, '')) || 0
+    if (grams > 0) return gramsToSeedsSpoons(name, grams)
+  }
 
   // Tier 1: prefer template visual if it has a real measurement unit
   // (NOT "pinch"/"dash" — those are descriptors that belong in Eyeball).
@@ -151,7 +215,14 @@ function getMeasuredDisplay(name: string, gramsStr: string | undefined, visualSt
     if (grams > 0) return gramsToSpiceTsp(name, grams)
   }
 
-  // Tier 3: fall back to grams (or visual if no grams).
+  // Tier 3: plain grams — round to nearest 5 above 20g (44→45, 58→60) so the
+  // displayed number reads "clean." Strict ###g format only; anything more
+  // exotic falls through to the raw visual/grams string unchanged.
+  if (gramsStr && /^\d+(\.\d+)?\s*g$/i.test(gramsStr)) {
+    const grams = parseFloat(gramsStr) || 0
+    if (grams > 0) return `${roundDisplayGrams(grams)}g`
+  }
+
   return gramsStr || visualStr || ''
 }
 
