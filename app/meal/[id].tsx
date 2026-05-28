@@ -120,19 +120,29 @@ function roundDisplayGrams(grams: number): number {
   return Math.round(grams)
 }
 
+// Format a half-step number as a Unicode fraction. 1 → "1", 1.5 → "1½",
+// 0.5 → "½". Unicode fractions read like printed cookbook copy and take
+// less horizontal space than "1 1/2" (which looks like a typo at small sizes).
+function formatHalf(n: number): string {
+  const whole = Math.floor(n)
+  const isHalf = Math.abs((n - whole) - 0.5) < 0.01
+  if (isHalf) return whole === 0 ? '½' : `${whole}½`
+  return String(whole || Math.round(n))
+}
+
 // Whey/casein/plant protein universally scooped, not measured in tbsp or
 // weighed at home. One scoop ≈ 30g across major brands (5-10% variance is
 // fine — close-enough for the user's mental model).
 function gramsToProteinScoops(grams: number): string {
   const scoops = grams / 30
-  if (scoops <= 0.4)  return '1/4 scoop'
-  if (scoops <= 0.6)  return '1/2 scoop'
-  if (scoops <= 0.85) return '3/4 scoop'
+  if (scoops <= 0.4)  return '¼ scoop'
+  if (scoops <= 0.6)  return '½ scoop'
+  if (scoops <= 0.85) return '¾ scoop'
   if (scoops <= 1.25) return '1 scoop'
-  if (scoops <= 1.75) return '1 1/2 scoops'
+  if (scoops <= 1.75) return '1½ scoops'
   if (scoops <= 2.25) return '2 scoops'
-  if (scoops <= 2.75) return '2 1/2 scoops'
-  return `${Math.round(scoops * 2) / 2} scoops`
+  if (scoops <= 2.75) return '2½ scoops'
+  return `${formatHalf(scoops)} scoops`
 }
 
 // Seeds (chia, flax, hemp, sesame) are sprinkled, not weighed. Chia is
@@ -140,16 +150,16 @@ function gramsToProteinScoops(grams: number): string {
 function gramsToSeedsSpoons(name: string, grams: number): string {
   const gPerTsp = /\bchia\b/i.test(name) ? 4 : 3
   const tsp = grams / gPerTsp
-  if (tsp <= 0.37) return '1/4 tsp'
-  if (tsp <= 0.62) return '1/2 tsp'
-  if (tsp <= 0.87) return '3/4 tsp'
+  if (tsp <= 0.37) return '¼ tsp'
+  if (tsp <= 0.62) return '½ tsp'
+  if (tsp <= 0.87) return '¾ tsp'
   if (tsp <= 1.25) return '1 tsp'
-  if (tsp <= 1.75) return '1 1/2 tsp'
+  if (tsp <= 1.75) return '1½ tsp'
   if (tsp <= 2.5)  return '2 tsp'
   if (tsp <= 3.5)  return '1 tbsp'
-  if (tsp <= 5)    return '1 1/2 tbsp'
+  if (tsp <= 5)    return '1½ tbsp'
   if (tsp <= 7)    return '2 tbsp'
-  return `${Math.round(tsp / 3 * 2) / 2} tbsp`
+  return `${formatHalf(tsp / 3)} tbsp`
 }
 
 // Approximate g/tsp for powdered spices (paprika, cumin, etc.). Salt is denser
@@ -157,15 +167,15 @@ function gramsToSeedsSpoons(name: string, grams: number): string {
 function gramsToSpiceTsp(name: string, grams: number): string {
   const gPerTsp = /\bsalt\b/i.test(name) ? 6 : 2
   const tsp = grams / gPerTsp
-  if (tsp <= 0.18) return '1/8 tsp'
-  if (tsp <= 0.37) return '1/4 tsp'
-  if (tsp <= 0.62) return '1/2 tsp'
-  if (tsp <= 0.87) return '3/4 tsp'
+  if (tsp <= 0.18) return '⅛ tsp'
+  if (tsp <= 0.37) return '¼ tsp'
+  if (tsp <= 0.62) return '½ tsp'
+  if (tsp <= 0.87) return '¾ tsp'
   if (tsp <= 1.25) return '1 tsp'
-  if (tsp <= 1.75) return '1 1/2 tsp'
+  if (tsp <= 1.75) return '1½ tsp'
   if (tsp <= 2.5)  return '2 tsp'
   if (tsp <= 3.5)  return '1 tbsp'
-  return `${Math.round(tsp / 3 * 2) / 2} tbsp`
+  return `${formatHalf(tsp / 3)} tbsp`
 }
 
 // For Measured mode: oils, sauces, seasonings, spices etc. are universally
