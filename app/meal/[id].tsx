@@ -1151,9 +1151,12 @@ export default function MealDetailScreen() {
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                       {isAdded ? (
-                        <Check size={16} stroke="#4ADE80" strokeWidth={2.6} />
+                        // White check on solid teal — high contrast, signals "done"
+                        <Check size={16} stroke="#fff" strokeWidth={2.8} />
                       ) : (
-                        <Plus size={18} stroke="#fff" strokeWidth={2.6} />
+                        // Teal plus on dim teal — matches the app's accent palette without
+                        // competing with the white bulk CTA pill.
+                        <Plus size={18} stroke={COLORS.accent} strokeWidth={2.6} />
                       )}
                     </TouchableOpacity>
                   )}
@@ -1682,18 +1685,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // NEED row's + button. Green/teal accent so it pulls attention.
+  // NEED row's + button. Muted teal pill so it reads as available action without
+  // shouting over the white bulk CTA above. Flips to solid teal once added.
   addToGroceryBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: COLORS.accent,
+    backgroundColor: COLORS.accentDim,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Post-add state — same size so the row doesn't reflow, just swaps stroke.
+  // Post-add state — solid teal so the state change is obvious without resorting
+  // to green (keeps the row palette consistent with the rest of the app).
   addToGroceryBtnAdded: {
-    backgroundColor: 'rgba(74,222,128,0.16)',
+    backgroundColor: COLORS.accent,
   },
   ingredientBorder: {},
   ingredientThumb: {
