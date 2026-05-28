@@ -477,43 +477,53 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           const wordsOf = (s: string) => new Set(
             s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
           )
-          const jaccardTooClose = (a: Set<string>, b: Set<string>) => {
-            if (a.size === 0 || b.size === 0) return false
+          // Sanitize + collect scoring inputs. ONLY hard-reject things that are
+          // genuinely invalid (missing name / no macros / exact duplicate in same
+          // batch). Everything else — low density, similar to prev day, similar
+          // to earlier in this batch — becomes a SCORE input used by the MMR
+          // selection further down. This stops the historical whack-a-mole where
+          // a single over-aggressive filter could collapse the candidate pool.
+          const precomputeJaccard = (words: Set<string>, vsName: string): number => {
+            const pw = wordsOf(vsName)
+            if (pw.size === 0 || words.size === 0) return 0
             let overlap = 0
-            a.forEach(w => { if (b.has(w)) overlap++ })
-            const union = new Set([...a, ...b]).size
-            return (overlap / union) >= 0.5
+            words.forEach(w => { if (pw.has(w)) overlap++ })
+            const union = new Set([...words, ...pw]).size
+            return union > 0 ? overlap / union : 0
           }
-          const filtered = parsed.filter((r: any) => {
-            // Pre-FatSecret quality gate: density-based, not absolute. 25% cal-from-protein
-            // for meals, 22% for snacks (dropped from 25% — snacks have less calorie budget
-            // to hit ratios; was killing the whole tier), 20% for desserts (dessert protein
-            // density is genuinely harder to engineer). Scales with portion size.
+          const sanitized = parsed.filter((r: any) => {
+            const name = (r.name ?? '').trim()
+            if (!name) return false
             const protein = Number(r.protein) || 0
             const calories = Number(r.calories) || 0
-            if (calories <= 0) return false
-            const ratio = (protein * 4) / calories
-            const minRatio = r.category === 'dessert' ? 0.20 : r.category === 'snack' ? 0.22 : 0.25
-            if (ratio < minRatio) return false
-            const key = normalize(r.name)
+            if (calories <= 0 || protein <= 0) return false
+            const key = normalize(name)
             if (!key || seenNames.has(key)) return false
-            const candWords = wordsOf(r.name)
-            // Cross-day similarity check via Jaccard word overlap (≥50% shared meaningful
-            // words = reject). Replaces the previous "first AND last word match" heuristic
-            // which was both too loose (Crispy Chicken Wings vs Soy Glazed Chicken Bowl
-            // didn't trigger — both pass) and too strict at scale (anything with 'High'
-            // first word got rejected). Stopwords are dropped from both sides so common
-            // brand-voice words ("high", "protein", "recipe") don't dominate the overlap.
-            if (prevNames.some((prev: string) => jaccardTooClose(candWords, wordsOf(prev)))) return false
-            // Same-day similarity check — catches beef-chili + chicken-chili type pairs
-            // that the protein-source dedup misses (different proteins, same base dish).
-            if (seenWordSets.some(prev => jaccardTooClose(candWords, prev))) return false
+            const candWords = wordsOf(name)
+            // Precompute scoring inputs once so the MMR selection downstream doesn't
+            // re-walk the prevNames array for every candidate.
+            r._densityRatio = (protein * 4) / calories
+            r._maxJaccardPrev = prevNames.reduce(
+              (max: number, prev: string) => Math.max(max, precomputeJaccard(candWords, prev)),
+              0,
+            )
+            r._maxJaccardToday = seenWordSets.reduce(
+              (max: number, prev: Set<string>) => {
+                if (prev.size === 0) return max
+                let overlap = 0
+                candWords.forEach(w => { if (prev.has(w)) overlap++ })
+                const union = new Set([...candWords, ...prev]).size
+                const j = union > 0 ? overlap / union : 0
+                return Math.max(max, j)
+              },
+              0,
+            )
             seenNames.add(key)
             seenWordSets.push(candWords)
             return true
-          }).slice(0, 20)
-          if (!recipes || filtered.length > recipes.length) recipes = filtered
-          if (recipes.length >= 8) break // single provider; need ~8 to absorb dedup + density + sanity check losses and still hit the final 6 cap
+          }).slice(0, 30)
+          if (!recipes || sanitized.length > recipes.length) recipes = sanitized
+          if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
       } catch (e) {
         stageLog(`LLM call threw: ${(e as Error).message}`)
@@ -571,101 +581,104 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         .replace(/^./, c => c.toUpperCase()) // capitalize first letter after stripping
     }
 
-    // Variety enforcement: group by primary protein, keep the FIRST recipe per group
-    // (LLM-ordered = highest priority), drop subsequent duplicates. If we end up under
-    // the 6-meal target, we ship fewer rather than padding with duplicates.
-    const beforeVariety = recipes.length
-    const seenProteins = new Set<string>()
-    recipes = recipes.filter((r: any) => {
-      const protein = detectPrimaryProtein(r)
-      if (seenProteins.has(protein)) return false
-      seenProteins.add(protein)
-      return true
-    })
-    stageLog(`variety dedup: ${beforeVariety} → ${recipes.length} (proteins: ${[...seenProteins].join(', ')})`)
-
-    // Apply name cleanup
+    // Apply name cleanup (text normalization only, no filtering)
     for (const r of recipes) {
       const cleaned = cleanName(r.name ?? '')
       if (cleaned && cleaned !== r.name) r.name = cleaned
     }
 
-    // Step 3: FatSecret as a SANITY CHECK, not a macro override.
-    // The LLM was instructed to read macros from the video description verbatim (creators
-    // usually list them). Overriding those numbers with FatSecret database lookups was
-    // killing 50% of recipes — the LLM-claimed macros and FatSecret-recomputed macros
-    // disagree by 5-15% routinely, which is normal noise but failed our density gate.
-    // New behavior: we still call FatSecret to recompute, but only REJECT a recipe if
-    // the protein number is wildly off (>30% diff = likely clickbait or LLM hallucination).
-    // Otherwise we restore the LLM/creator macros and trust them.
+    // FatSecret macro lookup — for scoring only, never for rejection. Stash both
+    // LLM-claimed and FS-computed protein so the MMR selection can demote (not
+    // delete) candidates whose macros disagree wildly. After the stash we restore
+    // LLM values so display shows the creator's portion (FS tends to under-count
+    // on the same dish due to different cuts / fat %).
     if (fsKey && fsSecret) {
-      console.log('Running FatSecret sanity check (Option B)...')
-      const TOLERANCE = 0.50 // 50% — only reject WILDLY divergent macros. Two nutrition
-      // databases (LLM-claimed vs FatSecret) routinely disagree by 30-50% on the same
-      // dish (different cut of chicken, fat % of ground beef, brand of yogurt, etc.) —
-      // 30% was killing 60-70% of recipes as false-positive clickbait. 50% catches actual
-      // inflation cases (LLM says 40g protein, FatSecret says 18g) while letting normal
-      // noise through.
-      let killedAsClickbait = 0
-      const checked = await Promise.all(recipes.map(async (r: any) => {
+      console.log('Running FatSecret lookup (scoring input only, no rejections)...')
+      await Promise.all(recipes.map(async (r: any) => {
         const llmCalories = Number(r.calories) || 0
         const llmProtein = Number(r.protein) || 0
         const llmCarbs = Number(r.carbs) || 0
         const llmFat = Number(r.fat) || 0
-        await correctMealMacros(r) // mutates r.calories/protein/carbs/fat with FatSecret values
+        try {
+          await correctMealMacros(r) // mutates r.calories/protein/carbs/fat with FatSecret values
+        } catch { /* lookup failure → leave LLM values intact; scored as agreement = neutral */ }
         const fsProtein = Number(r.protein) || 0
-        // Sanity check: if FatSecret thinks the creator's protein is wildly off, reject.
-        // Skip the check if the lookup didn't actually run (correctMealMacros leaves the
-        // original values when it can't look up enough ingredients — that's already a
-        // "trust the LLM" signal).
-        if (llmProtein > 0 && fsProtein > 0) {
-          const diff = Math.abs(fsProtein - llmProtein) / llmProtein
-          if (diff > TOLERANCE) {
-            killedAsClickbait++
-            return null // reject — likely clickbait inflation
-          }
-        }
-        // Within tolerance — restore the creator's claimed macros (preserves their portions
-        // and avoids density-gate failures from FatSecret's conservative database numbers).
+        r._llmProtein = llmProtein
+        r._fsProtein = fsProtein
+        // Restore LLM/creator values for display.
         r.calories = llmCalories
         r.protein = llmProtein
         r.carbs = llmCarbs
         r.fat = llmFat
-        return r
       }))
-      recipes = checked.filter(Boolean)
-      console.log(`${recipes.length} recipes survived sanity check (rejected ${killedAsClickbait} as clickbait)`)
-
-      // Re-confirm density on the restored LLM macros (catches any LLM-claim that was
-      // already below the bar — should be rare since the prompt tells the LLM to skip).
-      const MEAL_RATIO_MIN = 0.25
-      const SNACK_RATIO_MIN = 0.22
-      const DESSERT_RATIO_MIN = 0.20
-      recipes = recipes.filter((r: any) => {
-        const protein = Number(r.protein) || 0
-        const calories = Number(r.calories) || 0
-        if (calories <= 0) return false
-        const ratio = (protein * 4) / calories
-        const min = r.category === 'dessert' ? DESSERT_RATIO_MIN
-                  : r.category === 'snack'   ? SNACK_RATIO_MIN
-                  : MEAL_RATIO_MIN
-        return ratio >= min
-      })
-      console.log(`${recipes.length} meals after density confirm (25% meals / 22% snacks / 20% desserts)`)
+      console.log(`FatSecret lookup complete for ${recipes.length} candidates`)
     }
 
-    // Final cap — display target is 6 meals on Discover. Anything beyond gets cut.
-    recipes = recipes.slice(0, 6)
-    stageLog(`final survivor count: ${recipes.length}`)
+    // Score-based MMR selection — the structural fix that replaces 4 separate
+    // kill-filters (density gate, jaccard dedup, variety dedup, FS sanity check)
+    // with a single composite ranking. Each candidate gets a base score from
+    // density + name-uniqueness + macro-agreement; then we greedy-pick the top 6
+    // with a per-pick penalty for same-protein duplicates. Result: always 6
+    // outputs when the candidate pool has 6+, with the LEAST-bad candidates
+    // surfaced even when the pool is weak.
+    function densityScore(ratio: number, category: string): number {
+      // Score 1.0 at category-appropriate target ratio; scales linearly below.
+      const target = category === 'dessert' ? 0.22 : category === 'snack' ? 0.25 : 0.30
+      return Math.min(Math.max(ratio, 0) / target, 1.0)
+    }
+    function nameUniquenessScore(maxJaccard: number): number {
+      // 0 jaccard (unique) → 1.0, 0.5 → 0.5, 1.0 (exact dupe) → 0.0
+      return Math.max(0, 1.0 - maxJaccard)
+    }
+    function macroAgreementScore(llmP: number, fsP: number): number {
+      // No comparison possible → neutral 1.0 (don't penalize)
+      if (llmP <= 0 || fsP <= 0) return 1.0
+      const diff = Math.abs(fsP - llmP) / llmP
+      return Math.max(0, 1.0 - diff)
+    }
+    function baseScore(r: any): number {
+      const dens = densityScore(r._densityRatio || 0, r.category)
+      const maxJac = Math.max(r._maxJaccardPrev || 0, r._maxJaccardToday || 0)
+      const uniq = nameUniquenessScore(maxJac)
+      const macro = macroAgreementScore(r._llmProtein || 0, r._fsProtein || 0)
+      // Weights chosen so density dominates (it's the core value prop), uniqueness
+      // is meaningful, and macro agreement breaks ties without killing recipes.
+      return dens * 0.45 + uniq * 0.30 + macro * 0.25
+    }
 
-    // HARD MINIMUM GATE: abort without touching DB if we ended up below 6. The
-    // last 3 days of meals are still alive in trending_meals (lines below delete
-    // only stuff >3 days old), so yesterday's solid 6 stay visible on Discover.
-    // Half-empty rows look much worse than a slightly older "today" so this
-    // trades freshness for completeness whenever the funnel collapses.
+    const PICK_TARGET = 6
+    const VARIETY_PENALTY = 0.20 // each prior same-protein pick subtracts this from candidate's effective score
+    const selected: any[] = []
+    const proteinCounts = new Map<string, number>()
+    const pool = [...recipes]
+    while (selected.length < PICK_TARGET && pool.length > 0) {
+      let bestIdx = -1
+      let bestEffective = -Infinity
+      for (let i = 0; i < pool.length; i++) {
+        const r = pool[i]
+        const protein = detectPrimaryProtein(r)
+        const count = proteinCounts.get(protein) || 0
+        const effective = baseScore(r) - count * VARIETY_PENALTY
+        if (effective > bestEffective) {
+          bestEffective = effective
+          bestIdx = i
+        }
+      }
+      if (bestIdx === -1) break
+      const picked = pool.splice(bestIdx, 1)[0]
+      selected.push(picked)
+      const pickedProtein = detectPrimaryProtein(picked)
+      proteinCounts.set(pickedProtein, (proteinCounts.get(pickedProtein) || 0) + 1)
+    }
+    recipes = selected
+    stageLog(`MMR selection: ${recipes.length} picked (proteins: ${[...proteinCounts.keys()].join(', ')})`)
+
+    // HARD MINIMUM GATE: only triggers if the candidate pool itself was under 6
+    // (LLM yielded too few names). With MMR replacing the kill-filters, this
+    // should be vanishingly rare — keeps the safety net in place for that case.
     const MIN_TRENDING_MEALS = 6
     if (recipes.length < MIN_TRENDING_MEALS) {
-      console.log(`[abort] only ${recipes.length} of ${MIN_TRENDING_MEALS} survived the pipeline — keeping previous run's trending meals intact`)
+      console.log(`[abort] candidate pool was ${recipes.length}, below min of ${MIN_TRENDING_MEALS} — keeping previous run's trending meals intact`)
       return new Response(JSON.stringify({
         skipped: true,
         reason: 'min_threshold_not_met',
