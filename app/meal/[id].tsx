@@ -75,6 +75,21 @@ const WHOLE_UNIT_FOODS: Array<{ match: RegExp; weight: number; singular: string;
   { match: /\bavocados?\b/i,        weight: 200, singular: 'avocado',     plural: 'avocados' },
   { match: /\bcloves?\b/i,          weight: 5,   singular: 'garlic clove', plural: 'garlic cloves' },
   { match: /\btortillas?\b/i,       weight: 60,  singular: 'tortilla',    plural: 'tortillas' },
+  // Protein fillets — typical home portion is one fillet/breast/chop. Without
+  // these entries the AI's visual (e.g. "1 small fillet") gets rendered next
+  // to the name ("salmon fillet"), producing "1 small fillet salmon fillet".
+  // Order: more-specific patterns first (so "salmon fillet" wins over "salmon").
+  { match: /\bsalmon\s*fillets?\b/i,    weight: 150, singular: 'salmon fillet',    plural: 'salmon fillets' },
+  { match: /\bcod\s*fillets?\b/i,       weight: 140, singular: 'cod fillet',       plural: 'cod fillets' },
+  { match: /\btilapia\s*fillets?\b/i,   weight: 120, singular: 'tilapia fillet',   plural: 'tilapia fillets' },
+  { match: /\bhalibut\s*fillets?\b/i,   weight: 150, singular: 'halibut fillet',   plural: 'halibut fillets' },
+  { match: /\btrout\s*fillets?\b/i,     weight: 140, singular: 'trout fillet',     plural: 'trout fillets' },
+  { match: /\bchicken\s*breasts?\b/i,   weight: 170, singular: 'chicken breast',   plural: 'chicken breasts' },
+  { match: /\bchicken\s*thighs?\b/i,    weight: 110, singular: 'chicken thigh',    plural: 'chicken thighs' },
+  { match: /\bpork\s*chops?\b/i,        weight: 175, singular: 'pork chop',        plural: 'pork chops' },
+  { match: /\blamb\s*chops?\b/i,        weight: 90,  singular: 'lamb chop',        plural: 'lamb chops' },
+  // Generic catchall — runs LAST so the specific ones above take precedence.
+  { match: /\bfillets?\b/i,             weight: 150, singular: 'fillet',           plural: 'fillets' },
 ]
 
 // Returns { count, name } when the ingredient is a whole-unit food (so the
