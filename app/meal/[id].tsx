@@ -54,23 +54,6 @@ function cleanIngredientName(name: string): string {
     .trim()
 }
 
-// Strips quantities, units, and articles from any ingredient string for image lookup.
-// "1/2 an avocado" → "avocado", "200g chicken breast" → "chicken breast"
-function extractFoodName(raw: string): string {
-  return raw
-    .toLowerCase()
-    .replace(/\s*\*\s*$/, '')
-    // leading number + optional fraction + optional unit
-    .replace(/^\d+\s*\/\s*\d+\s*/g, '')   // "1/2 "
-    .replace(/^\d+[\s.,-]*/g, '')          // "200 ", "2. "
-    .replace(/^[\d½¼¾⅓⅔]+\s*/g, '')       // unicode fractions
-    // measurement units
-    .replace(/^(kg|g|oz|lb|lbs|ml|l|cup|cups|tbsp|tsp|tablespoon|teaspoon|handful|pinch|dash|slice|slices|piece|pieces|clove|cloves|can|bunch|sprig|sprigs|stalk|stalks|head|heads|sheet|sheets)\s+(of\s+)?/gi, '')
-    // leading articles and quantity words
-    .replace(/^(a|an|the|half|quarter|some|few)\s+(of\s+)?(an?\s+)?/gi, '')
-    .trim()
-}
-
 function isNeedToBuy(name: string): boolean {
   return name.trim().endsWith('*')
 }
@@ -319,157 +302,10 @@ export default function MealDetailScreen() {
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
-  const [ingredientImages, setIngredientImages] = useState<Record<string, string>>({})
   const [generatedImage, setGeneratedImage] = useState<string | null>(null)
   // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
   // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
   const slideAnim = useRef(new Animated.Value(0)).current
-
-  // Normalize ambiguous ingredient names for image lookup
-  const IMAGE_ALIASES: Record<string, string> = {
-    'pepper': 'pepper',
-    'oil': 'olive oil',
-    'sugar': 'sugar',
-    'flour': 'flour',
-    'rice': 'rice',
-    'cream': 'heavy cream',
-    // Variations → cached image
-    'broccoli florets': 'broccoli',
-    'sweet potatoes': 'sweet potato',
-    'lamb chops': 'lamb',
-    'red kidney beans': 'kidney beans',
-    'lemon juice': 'lemon',
-    'lemon zest': 'lemon',
-    'lime juice': 'lime',
-    'lime zest': 'lime',
-    'lean ground beef': 'ground beef',
-    'extra lean ground beef': 'ground beef',
-    'baby kale': 'kale',
-    'baby spinach': 'spinach',
-    'chopped spinach': 'spinach',
-    'frozen spinach': 'spinach',
-    'sauteed spinach': 'spinach',
-    'persian cucumber': 'cucumber',
-    'english cucumber': 'cucumber',
-    'scallions': 'green onion',
-    'spring onions': 'green onion',
-    'fresh mint': 'mint',
-    'fresh basil': 'basil',
-    'fresh cilantro': 'cilantro',
-    'fresh parsley': 'parsley',
-    'fresh dill': 'dill',
-    'fresh thyme': 'thyme',
-    'fresh rosemary': 'rosemary',
-    'fresh ginger': 'ginger',
-    'cooked chicken': 'chicken breast',
-    'cooked chicken breast': 'chicken breast',
-    'shredded chicken': 'chicken breast',
-    'rotisserie chicken': 'chicken breast',
-    'grilled chicken': 'chicken breast',
-    'plain greek yogurt': 'greek yogurt',
-    'nonfat greek yogurt': 'greek yogurt',
-    'low fat greek yogurt': 'greek yogurt',
-    'vanilla greek yogurt': 'greek yogurt',
-    'pickle juice': 'pickles',
-    'chicken thighs': 'chicken thigh',
-    'chicken breasts': 'chicken breast',
-    'pork chops': 'pork chop',
-    'salmon fillet': 'salmon',
-    'salmon fillets': 'salmon',
-    'red bell pepper': 'bell pepper',
-    'green bell pepper': 'bell pepper',
-    'yellow bell pepper': 'bell pepper',
-    'cherry tomatoes': 'tomato',
-    'roma tomatoes': 'tomato',
-    'grape tomatoes': 'tomato',
-    'diced tomatoes': 'tomato',
-    'crushed tomatoes': 'tomato sauce',
-    'white rice': 'rice',
-    'jasmine rice': 'rice',
-    'basmati rice': 'rice',
-    'whole wheat pasta': 'pasta',
-    'spaghetti': 'pasta',
-    'penne': 'pasta',
-    'rotini': 'pasta',
-    'black pepper': 'pepper',
-    'ground cumin': 'cumin',
-    'ground cinnamon': 'cinnamon',
-    'ground turmeric': 'turmeric',
-    'smoked paprika': 'paprika',
-    'extra virgin olive oil': 'olive oil',
-    'evoo': 'olive oil',
-    'low sodium soy sauce': 'soy sauce',
-    'dijon mustard': 'mustard',
-    'yellow mustard': 'mustard',
-    'sea salt': 'salt',
-    'kosher salt': 'salt',
-    'garlic cloves': 'garlic',
-    'minced garlic': 'garlic',
-  }
-  const normalizeForImage = (name: string) => {
-    const lower = name.toLowerCase()
-    if (IMAGE_ALIASES[lower]) return IMAGE_ALIASES[lower]
-    // Fuzzy match: check if any alias key is contained in the name
-    for (const [key, value] of Object.entries(IMAGE_ALIASES)) {
-      if (lower.includes(key)) return value
-    }
-    return lower
-  }
-
-  // Fetch ingredient images from library + generate missing ones on-demand
-  useEffect(() => {
-    if (!meal) return
-    const names = meal.ingredients.map(i => normalizeForImage(extractFoodName(i.name)))
-
-    // Fetch existing images
-    supabase.from('ingredient_images').select('name, image_url').in('name', names)
-      .then(({ data }) => {
-        const imageMap: Record<string, string> = {}
-        data?.forEach(row => { imageMap[row.name] = row.image_url })
-        setIngredientImages(imageMap)
-
-        // Find ingredients not in library — generate on-demand
-        const missing = names.filter(n => !data?.some(d => d.name === n))
-        if (missing.length > 0) {
-          generateMissingIngredientImages(missing)
-        }
-      })
-  }, [meal?.name])
-
-  // Sequential generation with a 500ms gap between calls. Replicate (image gen
-  // backend) rate-limits parallel requests aggressively — running in parallel
-  // gives ~50% failure rate. Single retry pass after 3s for any that failed.
-  const generateMissingIngredientImages = async (names: string[]) => {
-    const failed: string[] = []
-    for (const name of names) {
-      try {
-        const res = await supabase.functions.invoke('generate-ingredient-images', {
-          body: { single: name },
-        })
-        if (res.data?.url) {
-          setIngredientImages(prev => ({ ...prev, [name]: res.data.url }))
-        } else {
-          failed.push(name)
-        }
-      } catch { failed.push(name) }
-      await new Promise(r => setTimeout(r, 500)) // pace to avoid Replicate rate-limit
-    }
-    // One retry pass after a longer pause — covers transient rate-limit / cold-start failures.
-    if (failed.length > 0) {
-      await new Promise(r => setTimeout(r, 3000))
-      for (const name of failed) {
-        try {
-          const res = await supabase.functions.invoke('generate-ingredient-images', {
-            body: { single: name },
-          })
-          if (res.data?.url) {
-            setIngredientImages(prev => ({ ...prev, [name]: res.data.url }))
-          }
-        } catch {}
-        await new Promise(r => setTimeout(r, 500))
-      }
-    }
-  }
 
   useEffect(() => {
     if (!user) return
@@ -1118,16 +954,11 @@ export default function MealDetailScreen() {
                   delayLongPress={350}
                   activeOpacity={0.9}
                 >
-                  {ingredientImages[normalizeForImage(extractFoodName(ing.name))] ? (
-                    <Image
-                      source={{ uri: ingredientImages[normalizeForImage(extractFoodName(ing.name))] }}
-                      style={[styles.ingredientThumb, isHaveRow && styles.ingredientThumbHave]}
-                    />
-                  ) : (
-                    <View style={[styles.ingredientThumbPlaceholder, isHaveRow && styles.ingredientThumbHave]}>
-                      <Text style={styles.ingredientThumbInitial}>{ing.name.charAt(0).toUpperCase()}</Text>
-                    </View>
-                  )}
+                  {/* Bullet dot replaces the per-ingredient thumbnail. AI-generated thumbs
+                      had a ~5-10% misgeneration rate (wrong food shown) — every comparable
+                      recipe app (Yummly, Paprika, Mealime, NYT Cooking) ships text-only
+                      ingredient lists, so we follow that convention. */}
+                  <View style={[styles.ingredientBullet, isHaveRow && styles.ingredientBulletHave]} />
                   <Text
                     style={[styles.ingredientLine, isHaveRow && styles.ingredientLineHave]}
                     numberOfLines={1}
@@ -1654,17 +1485,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 9,
-    gap: 12,
+    paddingVertical: 10,
+    gap: 10,
     backgroundColor: '#191919',
     borderRadius: 12,
   },
-  // HAVE rows fade back so NEED rows pop. Lower bg + lower opacity on contents.
+  // HAVE rows fade back so NEED rows pop. Lower bg + dimmed contents.
   ingredientRowHave: {
     backgroundColor: '#121212',
   },
-  ingredientThumbHave: {
-    opacity: 0.45,
+  // Tiny dot that replaces the per-row thumbnail — pure visual list-marker, no
+  // semantic meaning. Teal on NEED rows so it ties to the + button's palette.
+  ingredientBullet: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: COLORS.accent,
+    marginLeft: 4,
+  },
+  ingredientBulletHave: {
+    backgroundColor: COLORS.textMuted,
+    opacity: 0.5,
   },
   ingredientLineHave: {
     // RN doesn't compose textDecorationLine reliably from a parent Text onto nested Texts,
@@ -1699,26 +1540,6 @@ const styles = StyleSheet.create({
   // to green (keeps the row palette consistent with the rest of the app).
   addToGroceryBtnAdded: {
     backgroundColor: COLORS.accent,
-  },
-  ingredientBorder: {},
-  ingredientThumb: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#262626',
-  },
-  ingredientThumbPlaceholder: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#262626',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ingredientThumbInitial: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textMuted,
   },
   ingredientLine: {
     flex: 1,
