@@ -46,12 +46,28 @@ type PortionMode = 'Eyeball' | 'Measured'
 // Common cooking basics that everyone has — don't count as "missing"
 const COOKING_BASICS = new Set(['salt', 'pepper', 'black pepper', 'water', 'cooking spray'])
 
+// Modifier words that should follow the food noun, not precede it. AI
+// occasionally inverts the phrase ("juice lemon" instead of "lemon juice")
+// — this set drives the swap below.
+const POST_MODIFIERS = new Set([
+  'juice', 'zest', 'powder', 'paste', 'sauce', 'extract', 'puree', 'oil',
+])
+
 function cleanIngredientName(name: string): string {
-  return name
+  const cleaned = name
     .replace(/\s*\*\s*$/, '')          // strip trailing asterisk
     .replace(/^\d+[\s/.-]*/g, '')       // strip leading numbers ("4 eggs" → "eggs")
     .replace(/^[\d½¼¾⅓⅔]+\s*/g, '')   // strip unicode fractions
     .trim()
+
+  // Swap inverted modifier phrases: "juice lemon" → "lemon juice",
+  // "zest orange" → "orange zest", "extract vanilla" → "vanilla extract".
+  // Only acts on 2-word phrases where word[0] is a known post-modifier.
+  const parts = cleaned.split(/\s+/)
+  if (parts.length === 2 && POST_MODIFIERS.has(parts[0].toLowerCase())) {
+    return `${parts[1]} ${parts[0]}`
+  }
+  return cleaned
 }
 
 function isNeedToBuy(name: string): boolean {

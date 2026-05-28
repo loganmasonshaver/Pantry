@@ -20,9 +20,11 @@ function normalizeKey(name: string): string {
 // Lite is essentially free; OpenAI fallback is cheap. If both fail, the caller falls back
 // to the original static template so image generation never hard-stops.
 async function generateVisualDescription(mealName: string, ingredients: string[], steps: string[] = []): Promise<string | null> {
-  const sysPrompt = `You are a food stylist. In ONE concise sentence (under 35 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate.
+  const sysPrompt = `You are a food stylist. In ONE concise sentence (under 50 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate.
 
 CRITICAL — INGREDIENT FIDELITY: Compose the description from the SPECIFIC ingredients listed. If the dish name is generic (e.g., "Fruit", "Bowl", "Plate"), use the exact ingredient (e.g., "sliced apple" not "berries"). NEVER substitute photogenic alternatives or generic interpretations of the name.
+
+COVERAGE — every visible ingredient must appear: After applying the visibility rules below, EVERY ingredient that ends up visible on the plate MUST be named in the description. Do not silently drop ingredients for brevity. If 6+ ingredients are visible, briefly list them all (it's fine to extend the sentence). Do not invent ingredients that aren't listed (e.g., microgreens, herbs) unless the recipe explicitly includes them.
 
 ASSEMBLED, NOT STACKED: Describe the dish AS PLATED — fully assembled, integrated, ready to eat. Never describe separate visible components (e.g., a brownie with cottage cheese baked in, NOT cottage cheese piled on top of a brownie). Do NOT mention cooking process.
 
@@ -54,7 +56,7 @@ Examples:
           model: provider.model,
           messages: [{ role: "system", content: sysPrompt }, { role: "user", content: userPrompt }],
           temperature: 0.3,
-          max_tokens: 120,
+          max_tokens: 180,
         }),
       })
       const data = await res.json()
