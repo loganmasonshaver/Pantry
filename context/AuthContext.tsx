@@ -5,8 +5,8 @@ import { supabase } from '../lib/supabase';
 import { identifyUser, resetUser } from '../lib/analytics';
 import { syncProfileToLoops, fireLoopsEvent } from '../lib/loops';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as WebBrowser from 'expo-web-browser';
-import * as AuthSession from 'expo-auth-session';
+import * as Crypto from 'expo-crypto';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 
 const PENDING_OPT_IN_KEY = 'pending_email_marketing_opt_in'
 
@@ -68,6 +68,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Apple Sign-In is only available on real iOS devices with iOS 13+; always false in simulators
     AppleAuthentication.isAvailableAsync().then(setAppleSignInAvailable);
+  }, []);
+
+  useEffect(() => {
+    // webClientId is what Supabase verifies the Google ID token against — must match the
+    // OAuth client registered in Supabase Auth → Providers → Google. iosClientId drives the
+    // native sign-in sheet (its URL scheme is wired up by the google-signin Expo plugin in app.json).
+    GoogleSignin.configure({
+      iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID!,
+      webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID!,
+    });
   }, []);
 
   useEffect(() => {
@@ -149,49 +159,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    // Deep-link scheme registered in app.json — Supabase redirects back here after Google consent
-    const redirectUrl = 'pantry://callback';
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: redirectUrl,
-        // Don't let the Supabase client follow the redirect itself; we open it in a controlled browser session below
-        skipBrowserRedirect: true,
-        // Force the Google account picker even if a session is already cached in the system browser
-        queryParams: { prompt: 'select_account' },
-      },
-    });
-    if (error || !data.url) throw error || new Error('No OAuth URL');
-    // Opens Google consent in an in-app browser tab that auto-closes on redirect back to pantry://
-    const result = await WebBrowser.openAuthSessionAsync(data.url, redirectUrl);
-    // Code '12501' mirrors Android's GoogleSignIn cancellation code; callers can detect user-cancel vs real error
-    if (result.type !== 'success') throw { code: '12501', message: 'Google sign-in cancelled' };
-    // Supabase returns tokens in the URL hash fragment (not query params) to avoid server logs
-    const url = new URL(result.url);
-    const params = new URLSearchParams(url.hash.substring(1));
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
-    if (!accessToken || !refreshToken) throw new Error('Missing tokens from OAuth');
-    // Manually hydrate the Supabase session since we bypassed its default redirect handler
-    const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-    if (sessionError) throw sessionError;
+    // Standard OIDC nonce dance: client generates raw nonce, sends SHA256(rawNonce) in the
+    // OAuth request, Google embeds that hashed value as the id_token's `nonce` claim. Supabase
+    // re-hashes our rawNonce and compares — match means the token wasn't replayed.
+    // Both sides MUST present a nonce (or both must omit one) — GIDSignIn 9.x always emits one
+    // on iOS, so we control it here.
+    const rawNonce = Crypto.randomUUID() + Crypto.randomUUID();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
 
-    // Save full_name + avatar_url from Google profile to user metadata
-    const meta = sessionData.user?.user_metadata;
-    if (meta) {
-      const fullName = meta.full_name || meta.name || '';
-      const avatarUrl = meta.avatar_url || meta.picture || '';
-      if (fullName || avatarUrl) {
-        await supabase.auth.updateUser({
-          data: {
-            ...(fullName ? { full_name: fullName } : {}),
-            ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
-          },
-        });
-      }
+    // Native iOS sign-in sheet — no WebView, no Supabase project URL exposed to the user.
+    // `nonce` param is forwarded to GIDSignIn.signInWithPresentingViewController:hint:additionalScopes:nonce:
+    // via the patch-package patch in patches/@react-native-google-signin+google-signin+*.patch
+    // (the upstream lib's TS types don't expose nonce yet, hence the `as any`).
+    const response = await GoogleSignin.signIn({ nonce: hashedNonce } as any);
+    if (response.type === 'cancelled') {
+      // Re-throw with legacy '12501' code so existing user-cancel checks in signin.tsx
+      // and createaccount.tsx don't need to be updated.
+      throw { code: '12501', message: 'Google sign-in cancelled' };
+    }
+
+    const { idToken, user: googleUser } = response.data;
+    if (!idToken) throw new Error('No idToken from Google');
+
+    // Exchange Google's signed ID token for a Supabase session — Supabase hashes our rawNonce
+    // and matches against the claim baked into the id_token by Google.
+    const { error } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: idToken,
+      nonce: rawNonce,
+    });
+    if (error) throw error;
+
+    // Mirror name + avatar from the Google profile into Supabase user metadata
+    const fullName = googleUser.name || '';
+    const avatarUrl = googleUser.photo || '';
+    if (fullName || avatarUrl) {
+      await supabase.auth.updateUser({
+        data: {
+          ...(fullName ? { full_name: fullName } : {}),
+          ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
+        },
+      });
     }
   };
 
