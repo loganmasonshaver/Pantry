@@ -19,7 +19,7 @@ const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube } from 'lucide-react-native'
+import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, ChevronRight } from 'lucide-react-native'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -1067,13 +1067,40 @@ export default function MealDetailScreen() {
             </View>
           </View>
 
-          <View style={styles.ingredientList}>
-            {meal.ingredients.map((ing, i) => {
-              const inPantry = isAlreadyInList(ing.name, pantryNames)
-              // Whole-unit foods (eggs, avocado, etc.) always display as count
-              // regardless of mode — "233g eggs" reads weird in both modes.
-              // Returns split count + adjectivized name so render shows
-              // "5  large eggs" instead of redundant "5 eggs  large eggs".
+          {/* Bulk CTA — only shows when there are missing items not yet on the grocery list.
+              Anchors the dominant action (add the diff) above the per-row list so users don't
+              have to scan and tap each missing ingredient. */}
+          {missingNotInGrocery.length > 0 && (
+            <TouchableOpacity
+              style={styles.bulkAddCta}
+              onPress={addAllMissingToGrocery}
+              activeOpacity={0.85}
+            >
+              <View style={styles.bulkAddIconWrap}>
+                <ShoppingCart size={18} stroke="#000" strokeWidth={2.4} />
+              </View>
+              <Text style={styles.bulkAddText}>
+                Add {missingNotInGrocery.length} missing {missingNotInGrocery.length === 1 ? 'item' : 'items'} to grocery
+              </Text>
+              <ChevronRight size={18} stroke="#000" strokeWidth={2.2} />
+            </TouchableOpacity>
+          )}
+
+          {/* Split ingredients into NEED / HAVE buckets so the eye lands on what the user
+              needs to act on. "Have" = explicitly in pantry OR a cooking basic (salt, oil, etc.)
+              that everyone is assumed to have. */}
+          {(() => {
+            const isHave = (ing: any) =>
+              isAlreadyInList(ing.name, pantryNames) || COOKING_BASICS.has(ing.name.toLowerCase())
+            const needRows = meal.ingredients.filter(i => !isHave(i))
+            const haveRows = meal.ingredients.filter(isHave)
+
+            // Renders one ingredient row with section-aware styling and a single primary action.
+            // Long-press toggles pantry membership — moves the row between NEED and HAVE so the
+            // user can override the AI when it misclassifies (e.g. "actually I do have feta").
+            const renderRow = (ing: any, kind: 'need' | 'have') => {
+              // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
+              // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
               const wholeUnit = getWholeUnitDisplay(ing.name, ing.grams)
               const portion = wholeUnit
                 ? wholeUnit.count
@@ -1081,42 +1108,84 @@ export default function MealDetailScreen() {
                     ? toEyeball(ing.visual ?? ing.grams, ing.name)
                     : getMeasuredDisplay(ing.name, ing.grams, ing.visual))
               const displayName = wholeUnit ? wholeUnit.name : ing.name
+              const isAdded = addedToGrocery.has(ing.name)
+              const isHaveRow = kind === 'have'
               return (
-                <View key={ing.id} style={styles.ingredientRow}>
+                <TouchableOpacity
+                  key={ing.id}
+                  style={[styles.ingredientRow, isHaveRow && styles.ingredientRowHave]}
+                  onLongPress={() => toggleHaveIt(ing.name)}
+                  delayLongPress={350}
+                  activeOpacity={0.9}
+                >
                   {ingredientImages[normalizeForImage(extractFoodName(ing.name))] ? (
-                    <Image source={{ uri: ingredientImages[normalizeForImage(extractFoodName(ing.name))] }} style={styles.ingredientThumb} />
+                    <Image
+                      source={{ uri: ingredientImages[normalizeForImage(extractFoodName(ing.name))] }}
+                      style={[styles.ingredientThumb, isHaveRow && styles.ingredientThumbHave]}
+                    />
                   ) : (
-                    <View style={styles.ingredientThumbPlaceholder}>
+                    <View style={[styles.ingredientThumbPlaceholder, isHaveRow && styles.ingredientThumbHave]}>
                       <Text style={styles.ingredientThumbInitial}>{ing.name.charAt(0).toUpperCase()}</Text>
                     </View>
                   )}
-                  <Text style={styles.ingredientLine} numberOfLines={1}>
-                    <Text style={styles.ingredientPortionInline}>{portion}</Text>
+                  <Text
+                    style={[styles.ingredientLine, isHaveRow && styles.ingredientLineHave]}
+                    numberOfLines={1}
+                  >
+                    <Text style={[styles.ingredientPortionInline, isHaveRow && styles.ingredientPortionHave]}>{portion}</Text>
                     <Text>  </Text>
-                    <Text style={styles.ingredientNameInline}>{displayName}</Text>
+                    <Text style={[styles.ingredientNameInline, isHaveRow && styles.ingredientNameHave]}>{displayName}</Text>
                   </Text>
-                  <View style={styles.ingredientActions}>
+                  {isHaveRow ? (
+                    // HAVE row: just a quiet green check confirming state — no shopping action
+                    // because buying something you already have is the whole bug we're fixing.
+                    <View style={styles.haveIndicator}>
+                      <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
+                    </View>
+                  ) : (
+                    // NEED row: single + button that flips to ✓ once added to grocery list
                     <TouchableOpacity
-                      style={[styles.ingredientIconBtnSmall, inPantry && styles.ingredientIconBtnActiveBg]}
-                      onPress={() => toggleHaveIt(ing.name)}
-                      activeOpacity={0.7}
-                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                    >
-                      <Check size={14} stroke={inPantry ? '#4ADE80' : '#888'} strokeWidth={2.2} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.ingredientIconBtnSmall, addedToGrocery.has(ing.name) && styles.ingredientIconBtnActive]}
+                      style={[styles.addToGroceryBtn, isAdded && styles.addToGroceryBtnAdded]}
                       onPress={() => toggleGrocery(ing.name)}
                       activeOpacity={0.7}
-                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
-                      <ShoppingCart size={14} stroke={addedToGrocery.has(ing.name) ? '#4ADE80' : '#888'} strokeWidth={2.2} />
+                      {isAdded ? (
+                        <Check size={16} stroke="#4ADE80" strokeWidth={2.6} />
+                      ) : (
+                        <Plus size={18} stroke="#fff" strokeWidth={2.6} />
+                      )}
                     </TouchableOpacity>
-                  </View>
-                </View>
+                  )}
+                </TouchableOpacity>
               )
-            })}
-          </View>
+            }
+
+            return (
+              <>
+                {needRows.length > 0 && (
+                  <>
+                    <Text style={styles.ingredientGroupLabel}>YOU NEED</Text>
+                    <View style={styles.ingredientList}>
+                      {needRows.map(ing => renderRow(ing, 'need'))}
+                    </View>
+                  </>
+                )}
+                {haveRows.length > 0 && (
+                  <>
+                    <Text style={[styles.ingredientGroupLabel, needRows.length > 0 && styles.ingredientGroupLabelSpaced]}>YOU HAVE</Text>
+                    <View style={styles.ingredientList}>
+                      {haveRows.map(ing => renderRow(ing, 'have'))}
+                    </View>
+                  </>
+                )}
+                {/* Hint shown once, only when there are have+need rows to swap between */}
+                {needRows.length > 0 && haveRows.length > 0 && (
+                  <Text style={styles.ingredientHint}>Long-press a row to move it between sections</Text>
+                )}
+              </>
+            )
+          })()}
 
         </View>
 
@@ -1531,6 +1600,53 @@ const styles = StyleSheet.create({
   ingredientList: {
     gap: 4,
   },
+  // Small caps label that segments the list — drives the eye to NEED first, HAVE second.
+  ingredientGroupLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  // Adds extra top space when this label follows a previous section.
+  ingredientGroupLabelSpaced: {
+    marginTop: 20,
+  },
+  // One-shot hint under the lists explaining the override gesture. Italic + dim so it's
+  // findable but doesn't shout.
+  ingredientHint: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 12,
+  },
+  // Primary action that lives above the lists — white pill so it reads as the dominant
+  // affordance over any per-row + button.
+  bulkAddCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 10,
+    marginBottom: 16,
+  },
+  bulkAddIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bulkAddText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000',
+  },
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1539,6 +1655,45 @@ const styles = StyleSheet.create({
     gap: 12,
     backgroundColor: '#191919',
     borderRadius: 12,
+  },
+  // HAVE rows fade back so NEED rows pop. Lower bg + lower opacity on contents.
+  ingredientRowHave: {
+    backgroundColor: '#121212',
+  },
+  ingredientThumbHave: {
+    opacity: 0.45,
+  },
+  ingredientLineHave: {
+    // RN doesn't compose textDecorationLine reliably from a parent Text onto nested Texts,
+    // so the strike is repeated on portion + name spans below.
+  },
+  ingredientPortionHave: {
+    opacity: 0.5,
+    textDecorationLine: 'line-through',
+  },
+  ingredientNameHave: {
+    opacity: 0.5,
+    textDecorationLine: 'line-through',
+  },
+  // Quiet trailing checkmark on HAVE rows — confirms state, no tap target needed.
+  haveIndicator: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // NEED row's + button. Green/teal accent so it pulls attention.
+  addToGroceryBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Post-add state — same size so the row doesn't reflow, just swaps stroke.
+  addToGroceryBtnAdded: {
+    backgroundColor: 'rgba(74,222,128,0.16)',
   },
   ingredientBorder: {},
   ingredientThumb: {
