@@ -77,13 +77,26 @@ const RESULT_CATEGORIES = [
   'Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantry Staples',
 ]
 
-const LOADING_MESSAGES = [
-  { title: 'Scanning your kitchen...', sub: 'First pass — looking at every shelf and corner' },
-  { title: 'Reading labels & packaging...', sub: 'Checking brand names and product details' },
-  { title: 'Second pass — catching anything missed...', sub: 'Looking for small items, back rows, and door shelves' },
-  { title: 'Categorizing everything...', sub: 'Sorting items by grocery aisle' },
-  { title: 'Almost ready...', sub: 'You can add anything we missed on the next screen' },
+// Time-anchored loading stages — each maps to a real server-side step in
+// supabase/functions/scan-pantry/index.ts. Picked by elapsed-ms so the message
+// the user sees roughly matches what the AI is actually doing right now,
+// instead of random rotation that repeats mid-scan and shows misleading copy
+// (e.g. "second pass" before the first pass even returns).
+const LOADING_STAGES = [
+  { atMs: 0,      title: 'Uploading photos...',         sub: 'Sending your shelves to our AI vision model' },
+  { atMs: 4000,   title: 'Reading the shelves...',      sub: 'First pass — identifying every item we can see' },
+  { atMs: 20000,  title: 'Decoding labels & packaging', sub: 'Brand names, product types, sizes' },
+  { atMs: 40000,  title: 'Catching what we missed',     sub: 'Second pass — small items, back rows, door shelves' },
+  { atMs: 65000,  title: 'Looking up barcodes',         sub: 'Cross-referencing the Open Food Facts database' },
+  { atMs: 85000,  title: 'Categorizing everything',     sub: 'Sorting by produce, protein, condiments, dairy' },
+  { atMs: 110000, title: 'Almost there...',             sub: 'Big kitchens take a little longer to process' },
+  { atMs: 140000, title: 'Still working...',            sub: "Hang tight — we'll let you add anything we missed at the end" },
 ]
+
+// Hard ceiling. If the scan hasn't responded by this point something is wrong
+// (OpenAI hang, network drop, mobile data flake) — abort and surface a retry
+// path instead of leaving the user staring at a spinner forever.
+const SCAN_HARD_TIMEOUT_MS = 180000 // 3 minutes
 
 const EXTRA_OPTIONS = [
   { id: 'freezer', label: 'Freezer' },
@@ -202,9 +215,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       const ok = await requestConsent()
       if (!ok) { onClose(); return }
       try {
-        const { data, error } = await supabase.functions.invoke('scan-pantry', {
-          body: { images: base64Images },
-        })
+        // Race the invoke against a hard timeout. supabase-js doesn't honor an
+        // AbortSignal cleanly for functions.invoke, so we use Promise.race —
+        // the scan keeps running server-side but the client surfaces a recoverable
+        // error instead of leaving the user stuck on an infinite spinner.
+        const { data, error } = await Promise.race([
+          supabase.functions.invoke('scan-pantry', { body: { images: base64Images } }),
+          new Promise<{ data: null; error: Error }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: new Error('Scan is taking too long. Tap retry to try again.') }), SCAN_HARD_TIMEOUT_MS)
+          ),
+        ])
         if (error) throw error
         const result = data as { layout: string; zones: { zone: string; items: { name: string; category: string }[] }[] }
         let itemIndex = 0
@@ -238,14 +258,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     return () => { loop.stop() }
   }, [step])
 
-  // Cycle through loading messages while scan is in progress
+  // Pick the message stage based on actual elapsed scan time. Re-evaluates
+  // every second so the visible copy advances in lockstep with what the server
+  // is most likely doing — never repeats, never overshoots reality.
   useEffect(() => {
     if (step !== 5 || showDone) return
+    const startedAt = Date.now()
     setLoadingMessageIdx(0)
-    // rotate encouraging messages every 2.2s while AI processes
     const interval = setInterval(() => {
-      setLoadingMessageIdx(prev => (prev + 1) % LOADING_MESSAGES.length)
-    }, 2200)
+      const elapsed = Date.now() - startedAt
+      // Pick the latest stage whose atMs ≤ elapsed. Stages are ordered ascending.
+      let idx = 0
+      for (let i = 0; i < LOADING_STAGES.length; i++) {
+        if (LOADING_STAGES[i].atMs <= elapsed) idx = i
+        else break
+      }
+      setLoadingMessageIdx(idx)
+    }, 1000)
     return () => clearInterval(interval)
   }, [step, showDone])
 
@@ -569,10 +598,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 </View>
               </View>
               <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>
-                {showDone ? 'First pass complete' : LOADING_MESSAGES[loadingMessageIdx].title}
+                {showDone ? 'First pass complete' : LOADING_STAGES[loadingMessageIdx].title}
               </Text>
               <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>
-                {showDone ? `Spotted ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} — you can add anything we missed on the next screen` : LOADING_MESSAGES[loadingMessageIdx].sub}
+                {showDone ? `Spotted ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} — you can add anything we missed on the next screen` : LOADING_STAGES[loadingMessageIdx].sub}
               </Text>
             </View>
 
