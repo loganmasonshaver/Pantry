@@ -7,6 +7,47 @@ const posthog = new PostHog(process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? '', {
 
 export default posthog
 
+// ── Crash reporting ──────────────────────────────────────────────────────────
+// PostHog doesn't auto-capture uncaught JS errors or unhandled promise rejections,
+// so we wire React Native's global hooks ourselves. Without this, production JS
+// errors are invisible — users hit white screens and we never know.
+// Called once from app/_layout.tsx at the root.
+let crashHandlersInstalled = false
+export function setupCrashReporting() {
+  if (crashHandlersInstalled) return
+  crashHandlersInstalled = true
+
+  // ErrorUtils is the React Native global error router. Wrapping it preserves
+  // the default behavior (red box / app crash) while also reporting to PostHog.
+  const globalAny = global as any
+  const originalHandler = globalAny.ErrorUtils?.getGlobalHandler?.()
+  globalAny.ErrorUtils?.setGlobalHandler?.((error: Error, isFatal?: boolean) => {
+    try {
+      posthog.capture('app_error', {
+        message: error?.message ?? 'Unknown error',
+        stack: error?.stack ?? '',
+        is_fatal: !!isFatal,
+      })
+    } catch { /* never let the reporter itself crash the app */ }
+    if (originalHandler) originalHandler(error, isFatal)
+  })
+
+  // Unhandled promise rejections — separate path from synchronous errors. Hermes
+  // raises these on the `unhandledrejection` event in newer RN versions; we tap
+  // both so it works across environments.
+  if (typeof globalAny.addEventListener === 'function') {
+    globalAny.addEventListener('unhandledrejection', (e: any) => {
+      try {
+        const reason = e?.reason
+        posthog.capture('app_unhandled_rejection', {
+          message: reason?.message ?? String(reason),
+          stack: reason?.stack ?? '',
+        })
+      } catch { /* swallow */ }
+    })
+  }
+}
+
 // ── Identity ──────────────────────────────────────────────────────────────────
 
 export function identifyUser(userId: string, traits?: { email?: string }) {

@@ -149,7 +149,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
   const insets = useSafeAreaInsets()
-  const [step, setStep] = useState(1)
+  // Step 0 is the pre-scan tips screen — sets photo-quality expectations
+  // before the camera opens so users get a usable scan on the first try.
+  const [step, setStep] = useState(0)
+  // Bumped to force a re-run of the scan effect when the user taps "Retry"
+  // after a scan failure — keeps the captured photos intact.
+  const [retryNonce, setRetryNonce] = useState(0)
+  const [scanError, setScanError] = useState<string | null>(null)
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
   const [showDone, setShowDone] = useState(false)
   const [customLabel, setCustomLabel] = useState('')
@@ -169,9 +175,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const pulseScale   = useRef(new Animated.Value(1)).current
   const pulseOpacity = useRef(new Animated.Value(0.4)).current
 
-  // Loading animation + actual AI scan
+  // Loading animation + actual AI scan. retryNonce is in the dep list so the
+  // user's "Retry" tap on the error screen re-fires this effect without
+  // needing them to re-take photos.
   useEffect(() => {
     if (step !== 5) return
+    setScanError(null)
     const loop = Animated.loop(
       Animated.parallel([
         Animated.sequence([
@@ -248,15 +257,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
         setDetectedItems(allItems)
         setZones(zoneGroups)
+        setShowDone(true)
       } catch (e: any) {
-        Alert.alert('Scan failed', e.message || 'Failed to analyze photos')
+        // Surface the error inline (loading screen flips to error state with a
+        // Retry button) instead of bouncing to the empty review screen. Photos
+        // stay in state so the retry doesn't re-charge the user for re-shooting.
+        setScanError(e.message || 'Something went wrong analyzing your photos.')
       }
-      setShowDone(true)
     }
     scanPhotos()
 
     return () => { loop.stop() }
-  }, [step])
+  }, [step, retryNonce])
 
   // Pick the message stage based on actual elapsed scan time. Re-evaluates
   // every second so the visible copy advances in lockstep with what the server
@@ -286,7 +298,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   }, [visible])
 
   const handleClose = () => {
-    setStep(1)
+    setStep(0)
     setPhotos([])
     setShowDone(false)
     setCustomLabel('')
@@ -296,6 +308,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     setFlashOn(false)
     setMissedInput('')
     setAddingMissed(false)
+    setScanError(null)
+    setRetryNonce(0)
     onClose()
   }
 
@@ -413,6 +427,56 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
+
+        {/* ── Step 0: Pre-scan tips ── */}
+        {step === 0 && (
+          <View style={styles.step}>
+            <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+              <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+            </TouchableOpacity>
+            <View style={styles.tipsBody}>
+              <Text style={[styles.title, { textAlign: 'center', marginBottom: 8 }]}>Quick tips before scanning</Text>
+              <Text style={[styles.subtitle, { textAlign: 'center', marginBottom: 28 }]}>
+                A few seconds of prep means better recognition and fewer items missed.
+              </Text>
+              <View style={styles.tipsList}>
+                <View style={styles.tipRow}>
+                  <Text style={styles.tipEmoji}>📦</Text>
+                  <View style={styles.tipText}>
+                    <Text style={styles.tipTitle}>Pull items forward</Text>
+                    <Text style={styles.tipSub}>So back-row items aren't hidden behind taller things.</Text>
+                  </View>
+                </View>
+                <View style={styles.tipRow}>
+                  <Text style={styles.tipEmoji}>💡</Text>
+                  <View style={styles.tipText}>
+                    <Text style={styles.tipTitle}>Light it up</Text>
+                    <Text style={styles.tipSub}>Open the door fully, turn on a light, or use flash. Dim shelves hide items.</Text>
+                  </View>
+                </View>
+                <View style={styles.tipRow}>
+                  <Text style={styles.tipEmoji}>📐</Text>
+                  <View style={styles.tipText}>
+                    <Text style={styles.tipTitle}>Stand 3-4 ft back</Text>
+                    <Text style={styles.tipSub}>Fit the whole shelf in frame — closer = blurrier labels.</Text>
+                  </View>
+                </View>
+                <View style={styles.tipRow}>
+                  <Text style={styles.tipEmoji}>📸</Text>
+                  <View style={styles.tipText}>
+                    <Text style={styles.tipTitle}>One photo per zone</Text>
+                    <Text style={styles.tipSub}>Take separate shots for the pantry, fridge, and freezer.</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+            <View style={styles.tipsFooter}>
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep(1)} activeOpacity={0.85}>
+                <Text style={styles.primaryBtnText}>Got it — start scanning</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
@@ -594,19 +658,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]}
                 />
                 <View style={styles.pulseCore}>
-                  <ScanLine size={32} stroke="#4ADE80" strokeWidth={1.6} />
+                  <ScanLine size={32} stroke={scanError ? '#F87171' : '#4ADE80'} strokeWidth={1.6} />
                 </View>
               </View>
               <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>
-                {showDone ? 'First pass complete' : LOADING_STAGES[loadingMessageIdx].title}
+                {scanError ? 'Scan failed' : showDone ? 'First pass complete' : LOADING_STAGES[loadingMessageIdx].title}
               </Text>
               <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>
-                {showDone ? `Spotted ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} — you can add anything we missed on the next screen` : LOADING_STAGES[loadingMessageIdx].sub}
+                {scanError
+                  ? scanError
+                  : showDone
+                    ? `Spotted ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} — you can add anything we missed on the next screen`
+                    : LOADING_STAGES[loadingMessageIdx].sub}
               </Text>
             </View>
 
-            {/* View Results button (fixed at bottom) */}
-            {showDone && (
+            {/* Footer button — state-aware: View Results / Retry / nothing (still scanning) */}
+            {showDone && !scanError && (
               <View style={styles.loadingFooter}>
                 <TouchableOpacity
                   style={[styles.primaryBtn, { width: '100%' }]}
@@ -615,6 +683,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   activeOpacity={0.85}
                 >
                   <Text style={styles.primaryBtnText}>View Results</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            {scanError && (
+              <View style={styles.loadingFooter}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, { width: '100%' }]}
+                  // Bump retryNonce — photos stay in state, the scan effect re-fires.
+                  // No re-shoot, no re-charge against the user's lifetime scan count.
+                  onPress={() => setRetryNonce(n => n + 1)}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>Retry scan</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -1089,6 +1170,44 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   loadingFooter: {
+    paddingBottom: 8,
+    paddingHorizontal: 4,
+  },
+
+  // Pre-scan tips screen (step 0)
+  tipsBody: {
+    flex: 1,
+    paddingTop: 32,
+    paddingHorizontal: 8,
+  },
+  tipsList: {
+    gap: 18,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    gap: 14,
+    alignItems: 'flex-start',
+  },
+  tipEmoji: {
+    fontSize: 28,
+    width: 36,
+    textAlign: 'center',
+  },
+  tipText: {
+    flex: 1,
+  },
+  tipTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    marginBottom: 2,
+  },
+  tipSub: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    lineHeight: 18,
+  },
+  tipsFooter: {
     paddingBottom: 8,
     paddingHorizontal: 4,
   },

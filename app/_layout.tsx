@@ -26,6 +26,11 @@ import { SuperwallProvider, useUser } from 'expo-superwall'
 import { SuperwallContextProvider } from '../context/SuperwallContext'
 import { ShareIntentProvider, useShareIntent } from 'expo-share-intent'
 import { supabase } from '../lib/supabase'
+import { setupCrashReporting } from '../lib/analytics'
+
+// Install the global error + unhandled-rejection handlers as early as
+// possible — must run before the first render so we catch boot-time crashes.
+setupCrashReporting()
 
 const AppTheme = {
   ...DarkTheme,

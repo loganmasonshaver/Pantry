@@ -33,7 +33,7 @@ Deno.serve(async (req: Request) => {
       image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" as const },
     }))
 
-    const firstPassPrompt = `These are photos of a kitchen (fridge, pantry shelves, counter). Identify every visible food ingredient or grocery item.
+    const firstPassPrompt = `These are ${images.length} photo(s) of a kitchen (fridge, pantry shelves, counter), numbered 0 to ${images.length - 1} in the order shown. Identify every visible food ingredient or grocery item.
 
 You are a kitchen inventory scanner. Be EXHAUSTIVE — your job is to spot every single edible item in these photos, even ones that are small, partially hidden, in clear containers, on shelf edges, or at the very top/bottom/back of the frame. Better to over-include with a best-guess name than to silently miss something.
 
@@ -57,8 +57,8 @@ Return a JSON object with this structure:
     {
       "zone": "Top Shelf",
       "items": [
-        { "name": "Non-Fat Greek Yogurt", "category": "Dairy" },
-        { "name": "Whole Wheat Pasta", "category": "Carbs" }
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0 },
+        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1 }
       ]
     }
   ]
@@ -72,6 +72,7 @@ Zone detection rules:
 
 Item rules:
 - "name" must be a GENERIC ingredient name — no brand names in this field. Use the most specific generic name you can determine from all context clues (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani" and not just "Yogurt")
+- "photo" — 0-based index of which photo this item came from. Required for downstream density analysis. If you genuinely can't tell, use 0.
 - Use brand logos and nutrition labels as CONTEXT to make the generic name more specific, but never put the brand in the name field
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
@@ -84,6 +85,7 @@ Item rules:
 
 Return ONLY the raw JSON object, no markdown, no explanation.`
 
+    const t0 = Date.now()
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -111,6 +113,32 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     const text = data.choices?.[0]?.message?.content?.trim() ?? "{}"
     const clean = text.replace(/```json|```/g, "").trim()
     const result = JSON.parse(clean)
+    const firstPassMs = Date.now() - t0
+    const firstPassItemCount = (result.zones || []).reduce(
+      (acc: number, z: any) => acc + (z.items?.length || 0), 0,
+    )
+    console.log(`[scan-pantry] first pass: ${firstPassMs}ms, ${firstPassItemCount} items, ${images.length} photos`)
+
+    // Per-photo density check — drives the gate that decides whether the second
+    // pass is worth its ~30s cost. The "photo" field on each item is supplied by
+    // the first-pass prompt; if the LLM forgot to include it (older models, prompt
+    // drift) we conservatively treat everything as photo 0, which yields the
+    // densest possible distribution and triggers the second pass — safer default
+    // than skipping.
+    const photoCounts = new Map<number, number>()
+    for (const zone of (result.zones || [])) {
+      for (const item of (zone.items || [])) {
+        const idx = typeof item.photo === 'number' ? item.photo : 0
+        photoCounts.set(idx, (photoCounts.get(idx) || 0) + 1)
+      }
+    }
+    const maxPerPhoto = Math.max(...photoCounts.values(), 0)
+    // 20+ items in a single photo = GPT-4o's attention is spread thin enough
+    // that the second pass reliably finds missed items (small/back-row/edge).
+    // Below 20, first pass is exhaustive enough on its own and the second
+    // pass mostly returns duplicates wasting ~30s.
+    const shouldRunSecondPass = maxPerPhoto >= 20
+    console.log(`[scan-pantry] per-photo density: max=${maxPerPhoto} across ${photoCounts.size} photo(s), secondPass=${shouldRunSecondPass}`)
 
     // ── SECOND PASS: catch what the first pass missed ───────────────────
     // GPT-4o spreads attention thin on dense kitchen photos. A focused
@@ -118,7 +146,8 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     // small/partial/back-row items that got skipped. Cost ~2× per scan
     // but recognition rate jumps noticeably. Failures here are non-fatal —
     // if the second pass errors out, we just return the first-pass result.
-    try {
+    if (shouldRunSecondPass) try {
+      const secondPassStart = Date.now()
       const firstPassNames: string[] = (result.zones || []).flatMap(
         (z: any) => (z.items || []).map((i: any) => i.name)
       )
@@ -183,11 +212,20 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
           }
           zone.items.push({ name: item.name, category: item.category || 'Other' })
         }
-        console.log(`[scan-pantry] second pass added ${missed.length} items`)
+        console.log(`[scan-pantry] second pass: ${Date.now() - secondPassStart}ms, added ${missed.length} items`)
       }
     } catch (e) {
       console.log('[scan-pantry] second pass failed (non-fatal):', e)
     }
+
+    // Strip the photo index from the response — it's only used server-side for
+    // the density gate above; the client only consumes { name, category }.
+    for (const zone of (result.zones || [])) {
+      for (const item of (zone.items || [])) {
+        delete item.photo
+      }
+    }
+    console.log(`[scan-pantry] total: ${Date.now() - t0}ms`)
 
     return new Response(JSON.stringify(result), {
       headers: { "Content-Type": "application/json" },
