@@ -4,35 +4,6 @@ import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 
-// ── Barcode lookup via Open Food Facts → generic name ──────────────────
-async function lookupBarcode(barcode: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`)
-    if (!res.ok) return null
-    const json = await res.json()
-    if (json.status !== 1) return null
-    const p = json.product
-    // Build a generic name from the product data
-    const generic = p.generic_name_en ?? p.generic_name ?? null
-    const productName = p.product_name_en ?? p.product_name ?? null
-    const categories = p.categories_tags?.[0]?.replace('en:', '')?.replace(/-/g, ' ') ?? null
-    // Prefer generic name, fall back to product name stripped of brand
-    if (generic) return generic
-    if (productName) {
-      // Strip brand prefix if present
-      const brand = (p.brands?.split(',')[0]?.trim() ?? '').toLowerCase()
-      let name = productName
-      if (brand && name.toLowerCase().startsWith(brand)) {
-        name = name.slice(brand.length).trim()
-      }
-      return name || null
-    }
-    return categories || null
-  } catch {
-    return null
-  }
-}
-
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", {
@@ -66,11 +37,10 @@ Deno.serve(async (req: Request) => {
 
 You are a kitchen inventory scanner. Be EXHAUSTIVE — your job is to spot every single edible item in these photos, even ones that are small, partially hidden, in clear containers, on shelf edges, or at the very top/bottom/back of the frame. Better to over-include with a best-guess name than to silently miss something.
 
-Use these 4 detection strategies on every item:
+Use these 3 detection strategies on every item:
 1. VISUAL RECOGNITION — identify foods by their appearance, shape, color, container type
 2. BRAND/LOGO READING — if you can see a brand name, logo, or product label, use it to determine the exact product variant (e.g. "Non-Fat Greek Yogurt" instead of just "Greek Yogurt")
-3. BARCODE NUMBERS — if any barcodes or UPC numbers are visible and readable, include the number in the "barcode" field
-4. NUTRITION LABEL / INGREDIENT LIST — if a product is turned showing its back label, read any visible nutrition facts or ingredient lists to help identify the specific product (e.g. seeing "Whole Wheat" in ingredients → "Whole Wheat Bread" not just "Bread")
+3. NUTRITION LABEL / INGREDIENT LIST — if a product is turned showing its back label, read any visible nutrition facts or ingredient lists to help identify the specific product (e.g. seeing "Whole Wheat" in ingredients → "Whole Wheat Bread" not just "Bread")
 
 EXHAUSTIVENESS RULES (these matter more than naming precision):
 - Scan EVERY zone in the image — don't focus on the obvious centerpiece items and skip the rest
@@ -87,8 +57,8 @@ Return a JSON object with this structure:
     {
       "zone": "Top Shelf",
       "items": [
-        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "barcode": null },
-        { "name": "Whole Wheat Pasta", "category": "Carbs", "barcode": "076808006803" }
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy" },
+        { "name": "Whole Wheat Pasta", "category": "Carbs" }
       ]
     }
   ]
@@ -102,7 +72,6 @@ Zone detection rules:
 
 Item rules:
 - "name" must be a GENERIC ingredient name — no brand names in this field. Use the most specific generic name you can determine from all context clues (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani" and not just "Yogurt")
-- "barcode" — include ONLY if you can clearly read a UPC/EAN barcode number in the image. Set to null otherwise. Do not guess barcode numbers.
 - Use brand logos and nutrition labels as CONTEXT to make the generic name more specific, but never put the brand in the name field
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
@@ -212,30 +181,12 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
             zone = { zone: zoneName, items: [] }
             result.zones.push(zone)
           }
-          zone.items.push({ name: item.name, category: item.category || 'Other', barcode: null })
+          zone.items.push({ name: item.name, category: item.category || 'Other' })
         }
         console.log(`[scan-pantry] second pass added ${missed.length} items`)
       }
     } catch (e) {
       console.log('[scan-pantry] second pass failed (non-fatal):', e)
-    }
-
-    // Barcode enrichment — for any item where GPT-4o read a UPC, hit Open Food Facts to
-    // get the canonical generic product name. Avoids GPT's tendency to under-specify
-    // (e.g. label → "Whole Wheat Bread" instead of just "Bread"). Sequential because OFF
-    // can rate-limit a barrage of parallel requests from the same IP.
-    for (const zone of (result.zones || [])) {
-      for (const item of zone.items) {
-        if (item.barcode) {
-          const betterName = await lookupBarcode(item.barcode)
-          if (betterName) {
-            // Title-case the OFF response — "whole wheat bread" → "Whole Wheat Bread"
-            item.name = betterName
-              .toLowerCase()
-              .replace(/\b\w/g, (c: string) => c.toUpperCase())
-          }
-        }
-      }
     }
 
     return new Response(JSON.stringify(result), {
