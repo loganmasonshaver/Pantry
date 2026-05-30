@@ -424,13 +424,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     items: detectedItems.filter(i => i.category === cat),
   })).filter(g => g.items.length > 0)
 
+  // The modal's SafeAreaView intentionally excludes 'top' so the camera steps
+  // can be full-bleed. Every NON-camera step must compensate manually or the
+  // top-left close button renders behind the status bar / Dynamic Island.
+  // Use this style on every non-camera step container.
+  const stepWithSafeTop = [styles.step, { paddingTop: insets.top + 8 }]
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
 
         {/* ── Step 0: Pre-scan tips ── */}
         {step === 0 && (
-          <View style={styles.step}>
+          <View style={stepWithSafeTop}>
             <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
@@ -559,7 +565,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
         {/* ── Step 4: Add More ── */}
         {step === 4 && (
-          <View style={styles.step}>
+          <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
               <View style={{ flex: 1 }} />
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
@@ -646,8 +652,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
         {/* ── Step 5: Loading ── */}
         {step === 5 && (
-          <View style={styles.step}>
-            <TouchableOpacity style={[styles.closeBtn, styles.closeBtnAbs]} onPress={handleClose}>
+          <View style={stepWithSafeTop}>
+            {/* closeBtnAbs uses absolute positioning with top:0 by default —
+                push it down by the safe-area inset so it lands below the
+                status bar / Dynamic Island on every device size. */}
+            <TouchableOpacity
+              style={[styles.closeBtn, styles.closeBtnAbs, { top: insets.top + 8, right: 8 }]}
+              onPress={handleClose}
+            >
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
 
@@ -704,7 +716,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
         {/* ── Step 5.5: Zone-based visual review ── */}
         {step === 55 && (
-          <View style={styles.step}>
+          <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
               <Text style={styles.topTitle}>Detected Items</Text>
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
@@ -818,7 +830,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
         {/* ── Step 6: Results ── */}
         {step === 6 && (
-          <View style={styles.step}>
+          <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
               <View style={{ flex: 1 }} />
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
