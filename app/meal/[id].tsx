@@ -714,29 +714,13 @@ export default function MealDetailScreen() {
     }
     if (saved) return
 
-    // Free-tier save limit: 3 meals. Past that, triggers the Superwall upgrade
-    // prompt instead of saving. Premium users skip this check entirely.
+    // Premium-only model: non-subscribers can't save at all — paywall opens
+    // immediately, no "save 3 then upgrade" preview.
     if (!isPremium) {
-      const { count } = await supabase
-        .from('saved_meals')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id)
-        .then(r => ({ count: r.count ?? 0 }))
-      if (count >= 3) {
-        trackUpgradePromptShown('meal_save_limit')
-        trackMealSaveBlocked()
-        Alert.alert(
-          'Upgrade to Premium',
-          'Free accounts can save up to 3 meals. Upgrade for unlimited saves.',
-          [
-            { text: 'Not now', style: 'cancel' },
-            { text: 'Upgrade', onPress: () => {
-              triggerUpgrade('meal_save_limit')
-            }},
-          ]
-        )
-        return
-      }
+      trackUpgradePromptShown('meal_save_limit')
+      trackMealSaveBlocked()
+      await triggerUpgrade('meal_save_limit')
+      return
     }
 
     setSaving(true)

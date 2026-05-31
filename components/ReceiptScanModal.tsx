@@ -201,24 +201,13 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
 
   const processImage = async (uri: string, base64: string | null) => {
     if (!base64) { Alert.alert('Error', 'Could not read image.'); return }
+    // Premium-only model: non-subscribers hit paywall on every gated action,
+    // never get a "free preview" allotment.
     if (!isPremium) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('receipt_scan_count')
-        .eq('id', user!.id)
-        .single()
-      const count = profile?.receipt_scan_count ?? 0
-      // Lifetime cap of 3 free receipt scans (separate counter from pantry_scan_count)
-      if (count >= 3) {
-        trackUpgradePromptShown('scan_limit')
-        await triggerUpgrade('receipt_scan_limit') // Superwall placement — opens paywall
-        onClose()
-        return
-      }
-      await supabase
-        .from('profiles')
-        .update({ receipt_scan_count: count + 1 })
-        .eq('id', user!.id)
+      trackUpgradePromptShown('scan_limit')
+      await triggerUpgrade('receipt_scan_limit') // Superwall placement — opens paywall
+      onClose()
+      return
     }
     const ok = await requestConsent()
     if (!ok) return
