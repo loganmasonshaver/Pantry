@@ -348,25 +348,13 @@ CORE FIDELITY RULES — do not violate these:
 - NEVER add ingredients (protein powder, cottage cheese, Greek yogurt, egg whites, etc.) to engineer a recipe into a higher protein density. The recipe is what the creator made — period.
 - If the description doesn't list explicit macros, calculate ONLY from the ingredients exactly as the creator listed them — don't invent quantities.
 
-DENSITY GATE IS A SKIP RULE, NOT AN ENGINEER RULE:
-- The recipe must naturally hit 25% of calories from protein (≈6.25g per 100 kcal). 20% for desserts.
-- If a candidate's stated/calculated macros DON'T hit the bar, SKIP IT entirely. Pick a different video. Do not modify the recipe to make it pass.
-- Better to return fewer recipes than to serve modified ones that diverge from the source video.
+PROTEIN DENSITY — we rank on this downstream, so do NOT skip:
+- We prefer recipes where protein is ≈25% of calories (20% for desserts), but DO NOT drop a recipe for missing that bar. Include it with accurate macros — downstream scoring ranks by density and surfaces the highest-protein options automatically.
+- Never modify or engineer a recipe to hit a density target. Report it faithfully exactly as the creator made it; we handle ranking.
 
-VARIETY IS MANDATORY — TREAT THIS AS A HARD CONSTRAINT, NOT A SUGGESTION:
-
-Step 1 — when picking candidates, label each recipe's PRIMARY PROTEIN SOURCE. Examples of distinct sources: chicken, beef, ground turkey, pork, salmon, tuna, shrimp, eggs, cottage cheese, paneer, tofu, tempeh, greek yogurt, skyr, lentils, beans, chickpeas, protein powder.
-
-Step 2 — group your selections by primary protein source. If ANY group has more than 1 recipe, drop all but the highest-quality one from that group and replace with a recipe using a DIFFERENT protein source from your candidate pool. Repeat until every group has exactly 1 recipe.
-
-Step 3 — your final 15-20 picks must span AT LEAST 6 distinct primary protein sources. If the candidate pool doesn't allow this, return fewer recipes — never duplicate a source to hit 15.
-
-PROTEIN-SOURCE QUOTA — required minimum balance across the final set:
-- At least 3 recipes must use a primary ANIMAL protein (chicken / beef / turkey / pork / salmon / tuna / shrimp / eggs as PRIMARY anchor — not just present)
-- At least 2 recipes may use a primary DAIRY or PLANT-FORWARD protein (cottage cheese / paneer / greek yogurt / skyr / tofu / tempeh / lentils / chickpeas / protein powder)
-- Remaining slots are open
-
-Why: an all-dairy or all-meat slate looks weird and narrow. The user expects a fitness-recipe feed to span obvious categories. If you can't hit the animal-protein quota from the candidate pool, return fewer recipes rather than padding.
+VARIETY — extract broadly, we curate downstream:
+- Do NOT pre-curate for protein balance or drop recipes to "make room." Extract every distinct recipe you find across the videos. Our downstream selection is variety-aware (it penalizes repeated protein sources when picking the final set), so the MORE distinct candidates you hand us, the better the final spread — pre-filtering here only starves that selection.
+- The one same-recipe rule: don't output two recipes that are genuinely the same dish/format (e.g. two plain oatmeal bowls, two basic smoothies). Different protein, different format, or a clearly different flavor profile = keep both.
 
 ALSO MANDATORY:
 - No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
@@ -384,7 +372,7 @@ PORTION + MACRO DETAILS:
   - 800 kcal meal needs at least 50g protein (else SKIP)
   - 300 kcal snack needs at least 19g protein (else SKIP)
   - 250 kcal dessert needs at least 13g protein (else SKIP)
-- APPEAL TEST: Before finalizing each recipe, ask: "Would a food photographer be excited to shoot this? Would someone actually want to try this after seeing it scroll past?" If the answer is no, discard the candidate and pick a different video from the list.
+- APPEAL: Prefer recipes a food photographer would be excited to shoot and someone would want to try mid-scroll. Treat this as a soft preference, not a reason to drop candidates — include the recipe; we rank on appeal downstream.
 - NAMING (trending-specific voice): Pantry's user lives on TikTok/Instagram food content — they know what's trending and want names that reflect WHY a dish is having a moment, NOT generic restaurant prose AND NOT YouTube clickbait. The dish's format usually IS the trend (cottage cheese in unexpected places, viral folded sandwich, dense bean salad, etc.) — name it honestly and let the novelty carry the energy.
   ✅ Allowed:
     - Honest format names that capture the trend: "Cottage Cheese Pizza Bowl", "Dense Bean Salad", "Folded Egg Sandwich", "Cottage Cheese Brownie Bake"
@@ -408,7 +396,7 @@ ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-
   Scale step count to dish complexity — simple recipes 4-6 steps, complex 7-12 steps. Don't pad.
   This applies to the FORMAT of the steps, not the content — still respect the creator's recipe faithfully. Just break their consolidated instructions into individual actions.
 
-OUTPUT TARGET: Aim for 15-20 recipes total. We expect a meaningful number to be skipped due to the density gate, name dedup, or low appeal — outputting 15-20 candidates gives downstream filters enough to land at our 6-meal display target. Don't pad with weak picks just to hit 20; quality > quantity. But err on the higher side when in doubt.
+OUTPUT TARGET: Return 15-20 DISTINCT recipes — this is a floor of effort, not an aspiration. Extract every appetizing, faithful recipe you can from the ${uniqueVideos.length} videos. Do NOT self-filter for density, variety, appeal, or balance — downstream scoring + variety-aware selection picks the final 6 from YOUR pool, so a bigger pool directly means a better, more varied final feed. Returning fewer than ~12 risks the whole feed coming up short. Never invent recipes to pad, but with ${uniqueVideos.length} real source videos you should comfortably clear 15.
 
 Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in steps (oil, garlic, salt, pepper) appears in the ingredients array:
 [
@@ -466,7 +454,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           // max_tokens 6000 — 20-recipe output with full ingredient arrays + step arrays
           // pushes 4-5k tokens easily. Lower caps were silently truncating mid-JSON,
           // producing parse errors that masked as "0 recipes generated".
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 6000 }),
+          // 8000 (was 6000): now that the prompt asks for a generous 15-20 candidate
+          // pool, the JSON output is larger — too low a cap truncates mid-array and
+          // the parse fails, masquerading as "0 recipes generated".
+          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 8000 }),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId))
         const data = await res.json()
