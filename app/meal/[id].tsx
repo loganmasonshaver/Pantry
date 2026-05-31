@@ -1354,11 +1354,11 @@ const styles = StyleSheet.create({
   },
   heroContainer: {
     position: 'relative',
-    height: 340,
+    height: 400,
     overflow: 'hidden',
   },
   heroImage: {
-    height: 340,
+    height: 400,
     width: '100%',
   },
   heroGradient: {
