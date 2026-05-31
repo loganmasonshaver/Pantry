@@ -33,7 +33,10 @@ Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry St
 - Pantry Staples: canned goods, broth, baking items
 - Other: anything else that doesn't fit
 
-Only include actual food/grocery items. Skip non-food items, fees, taxes, and totals.
+Only include food a PERSON would cook with or eat. Skip fees, taxes, totals, and these non-pantry items:
+- Pet food and pet treats (cat food, dog food, kibble) — never include these
+- Non-edible household goods: cleaning supplies, paper towels, napkins, foil/wrap, dish soap, trash bags, batteries, toiletries
+When in doubt about whether something is human food, leave it out.
 Return ONLY the raw JSON array, no markdown, no explanation.`
 
 async function parseWithGemini(base64: string): Promise<string> {

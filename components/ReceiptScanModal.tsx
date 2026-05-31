@@ -114,6 +114,19 @@ async function parseReceiptImage(base64: string): Promise<ParsedItem[]> {
   }))
 }
 
+// Match the pantry scanner: cap the long edge at 2048px (the vision models'
+// effective input ceiling) and re-encode at 0.95. Full-res receipts were multi-MB
+// and slowed the upload; 2048/0.95 keeps the text legible for OCR while shrinking
+// the payload ~3-4x.
+async function downscaleReceipt(uri: string): Promise<string | null> {
+  const out = await ImageManipulator.manipulateAsync(
+    uri,
+    [{ resize: { width: 2048 } }],
+    { compress: 0.95, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+  )
+  return out.base64 ?? null
+}
+
 // ── Main modal ───────────────────────────────────────────────────────────
 
 type Props = {
@@ -179,14 +192,11 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
   const capturePhoto = async () => {
     if (!cameraRef.current) return
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 })
+      // Capture near-lossless, then a single resize + re-encode in downscaleReceipt.
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1 })
       if (photo) {
-        const fixed = await ImageManipulator.manipulateAsync(
-          photo.uri,
-          [],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-        )
-        await processImage(fixed.uri, fixed.base64 ?? null)
+        const base64 = await downscaleReceipt(photo.uri)
+        await processImage(photo.uri, base64)
       }
     } catch (e) {
       Alert.alert('Capture failed', 'Could not take photo.')
@@ -201,11 +211,11 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.8,
-      base64: true,
+      quality: 1,
     })
     if (!result.canceled && result.assets[0]) {
-      await processImage(result.assets[0].uri, result.assets[0].base64 ?? null)
+      const base64 = await downscaleReceipt(result.assets[0].uri)
+      await processImage(result.assets[0].uri, base64)
     }
   }
 
