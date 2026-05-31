@@ -1801,8 +1801,9 @@ const styles = StyleSheet.create({
   heroMealCard: {
     // Full-width hero (Netflix/Spotify style). Width is implicit via parent (ScrollView
     // gives full screen width); the marginHorizontal applied at the usage site pads
-    // it in from the screen edges. Height bumped from 280 for a more cinematic feel.
-    height: 360,
+    // it in from the screen edges. 300 (was 360) so the title + pills clear the tab
+    // bar instead of getting cut off at the fold.
+    height: 300,
     borderRadius: 28,
     overflow: 'hidden',
     position: 'relative',
