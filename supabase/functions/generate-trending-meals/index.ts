@@ -105,10 +105,17 @@ Deno.serve(async (req: Request) => {
   // pg_cron runs without a user session — service-role JWT is the only token it can attach.
   // Constant-time-ish comparison via === is acceptable here since both are 200+ char tokens
   // and any timing leak would only reveal whether the supplied token matches at byte-N.
+  // CRON_SECRET is a dedicated shared secret we control on both ends (function env
+  // + vault), so the cron auth doesn't depend on the opaque auto-injected
+  // SUPABASE_SERVICE_ROLE_KEY (whose format kept drifting and 401'ing the cron).
+  // SERVICE_ROLE_KEY stays as a fallback so a correctly-keyed caller still works.
+  const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? ""
   const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
   const authToken = (req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "")
     .replace(/^Bearer\s+/i, "").trim()
-  const isServiceRole = SERVICE_ROLE_KEY !== "" && authToken === SERVICE_ROLE_KEY
+  const isServiceRole =
+    (CRON_SECRET !== "" && authToken === CRON_SECRET) ||
+    (SERVICE_ROLE_KEY !== "" && authToken === SERVICE_ROLE_KEY)
 
   if (!isServiceRole) {
     // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
