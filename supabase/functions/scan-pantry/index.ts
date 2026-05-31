@@ -79,10 +79,10 @@ EXHAUSTIVENESS RULES (these matter more than naming precision):
 - If a single product is duplicated (3 cans of beans), list it ONCE — but don't skip a real second item because it "looks similar" to another
 - Partial labels still count — if you can see part of a label that suggests a product, include it with your best inference
 
-EXCLUDE these — they are NOT pantry ingredients even though they're groceries:
-- Pet food and pet treats (cat food, dog food, kibble, etc.) — never include these
+EXCLUDE only these (they're groceries but NOT pantry ingredients):
+- Pet food and pet treats (cat food, dog food, kibble) — never include these
 - Non-edible household goods: cleaning supplies, paper towels, napkins, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries
-- Only list items a PERSON would cook with or eat. When in doubt about whether something is human food, leave it out.
+These two categories are the ONLY exclusions. EVERY actual human food or drink item still follows the exhaustiveness rules above — when unsure whether a FOOD item is X or Y, still include it with a best-guess name. Never drop a real food/drink just because you're unsure what it is.
 
 Return a JSON object with this structure:
 {
@@ -189,11 +189,12 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
       }
     }
     const maxPerPhoto = Math.max(...photoCounts.values(), 0)
-    // 20+ items in a single photo = GPT-4o's attention is spread thin enough
-    // that the second pass reliably finds missed items (small/back-row/edge).
-    // Below 20, first pass is exhaustive enough on its own and the second
-    // pass mostly returns duplicates wasting ~30s.
-    const shouldRunSecondPass = maxPerPhoto >= 20
+    // 12+ items in a single photo triggers the second pass. Lowered from 20: a
+    // real fridge/pantry shot routinely has 20+ items but GPT-4o under-counts
+    // (a 13-detected fridge actually had ~21), so a high threshold meant the
+    // densest, most-missed scans never got the catch-misses pass. 12 errs toward
+    // recall — the ~30s second-pass cost is worth not dropping milk/eggs/PB.
+    const shouldRunSecondPass = maxPerPhoto >= 12
     console.log(`[scan-pantry] per-photo density: max=${maxPerPhoto} across ${photoCounts.size} photo(s), secondPass=${shouldRunSecondPass}`)
 
     // ── SECOND PASS: catch what the first pass missed ───────────────────
