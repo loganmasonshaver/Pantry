@@ -567,10 +567,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         {step === 4 && (
           <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
-              <View style={{ flex: 1 }} />
+              {/* X first, flex spacer after — keeps the close affordance in the
+                  same top-left position across every step of the modal. */}
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
+              <View style={{ flex: 1 }} />
             </View>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
               <Text style={styles.title}>Want to add more?</Text>
@@ -653,11 +655,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         {/* ── Step 5: Loading ── */}
         {step === 5 && (
           <View style={stepWithSafeTop}>
-            {/* closeBtnAbs uses absolute positioning with top:0 by default —
-                push it down by the safe-area inset so it lands below the
-                status bar / Dynamic Island on every device size. */}
+            {/* closeBtnAbs uses absolute positioning; override right→left and
+                push down by the safe-area inset so X lands below the status
+                bar at top-LEFT, matching the convention used by every other
+                step. */}
             <TouchableOpacity
-              style={[styles.closeBtn, styles.closeBtnAbs, { top: insets.top + 8, right: 8 }]}
+              style={[styles.closeBtn, styles.closeBtnAbs, { top: insets.top + 8, left: 8, right: undefined }]}
               onPress={handleClose}
             >
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
@@ -718,10 +721,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         {step === 55 && (
           <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
-              <Text style={styles.topTitle}>Detected Items</Text>
+              {/* X always on the LEFT; title sits to its right. */}
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
+              <Text style={[styles.topTitle, { marginLeft: 12 }]}>Detected Items</Text>
             </View>
 
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
@@ -832,10 +836,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         {step === 6 && (
           <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
-              <View style={{ flex: 1 }} />
+              {/* X on LEFT, spacer takes remaining width — consistent with every other step. */}
               <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
+              <View style={{ flex: 1 }} />
             </View>
             <Text style={styles.title}>Found {detectedItems.length} ingredients</Text>
             <Text style={[styles.subtitle, { marginBottom: 20, marginTop: 6 }]}>
