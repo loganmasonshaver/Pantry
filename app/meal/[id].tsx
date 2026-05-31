@@ -1048,9 +1048,11 @@ export default function MealDetailScreen() {
                 <TouchableOpacity
                   key={ing.id}
                   style={[styles.ingredientRow, isHaveRow && styles.ingredientRowHave]}
-                  onLongPress={() => toggleHaveIt(ing.name)}
-                  delayLongPress={350}
-                  activeOpacity={0.9}
+                  // Tap the row to mark "I have this" — moves it to YOU HAVE with the
+                  // right-side check (tap a HAVE row to move it back). The + button
+                  // keeps its own tap target for adding to grocery.
+                  onPress={() => toggleHaveIt(ing.name)}
+                  activeOpacity={0.7}
                 >
                   {/* Bullet dot replaces the per-ingredient thumbnail. AI-generated thumbs
                       had a ~5-10% misgeneration rate (wrong food shown) — every comparable
@@ -1113,7 +1115,7 @@ export default function MealDetailScreen() {
                 )}
                 {/* Hint shown once, only when there are have+need rows to swap between */}
                 {needRows.length > 0 && haveRows.length > 0 && (
-                  <Text style={styles.ingredientHint}>Long-press a row to move it between sections</Text>
+                  <Text style={styles.ingredientHint}>Tap a row to move it between sections</Text>
                 )}
               </>
             )
