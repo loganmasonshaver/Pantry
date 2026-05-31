@@ -1608,10 +1608,10 @@ const styles = StyleSheet.create({
     // strikethrough, which made the text hard to read.
   },
   ingredientPortionHave: {
-    opacity: 0.8,
+    opacity: 0.9,
   },
   ingredientNameHave: {
-    opacity: 0.8,
+    opacity: 0.9,
   },
   // Quiet trailing checkmark on HAVE rows — confirms state, no tap target needed.
   haveIndicator: {
