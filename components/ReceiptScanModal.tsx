@@ -94,7 +94,17 @@ async function parseReceiptImage(base64: string): Promise<ParsedItem[]> {
   const { data, error } = await supabase.functions.invoke('parse-receipt', {
     body: { base64 },
   })
-  if (error) throw error
+  if (error) {
+    // functions.invoke gives a generic message on error.message and the real
+    // server body ({ error, code }) on error.context — unwrap it so callers can
+    // tell a deliberate gate (daily cap) from a genuine OCR failure.
+    let body: { error?: string; code?: string } = {}
+    const ctx = (error as any).context
+    if (ctx && typeof ctx.json === 'function') { try { body = await ctx.json() } catch { /* ignore */ } }
+    const err = new Error(body.error || error.message) as Error & { code?: string }
+    err.code = body.code
+    throw err
+  }
   const parsed = data as { name: string; category: string }[]
   return parsed.map((item, i) => ({
     id: String(i),
@@ -224,7 +234,11 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
       setItems(parsed)
       setStep('visualReview')
     } catch (e: any) {
-      setError('Failed to read receipt. Make sure the image is clear and well-lit.')
+      // Show the server's reason for a deliberate gate (daily cap); keep friendly
+      // copy for OCR/parse failures where the raw error wouldn't help the user.
+      setError(e?.code === 'scan_cap_reached'
+        ? e.message
+        : 'Failed to read receipt. Make sure the image is clear and well-lit.')
       setStep('pick')
     }
   }

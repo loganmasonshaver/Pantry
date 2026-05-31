@@ -1,8 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
+
+// Daily per-user abuse ceiling. Real usage is a few scans/week; 5/day clears any
+// legit heavy day while capping OpenAI cost exposure if a client is scripted.
+const SCAN_CAP_PER_DAY = 5
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -34,6 +39,14 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
     }
     console.log(`[scan-pantry] received ${images.length} image(s)`)
+
+    // Gate the cost-bearing OpenAI call behind the daily cap. Atomic check+increment
+    // — counts the attempt up front; the 504/500 paths below refund on transient fail.
+    const { allowed, used } = await checkScanCap(req, 'pantry', SCAN_CAP_PER_DAY)
+    if (!allowed) {
+      console.log(`[scan-pantry] daily cap hit: ${used}/${SCAN_CAP_PER_DAY}`)
+      return scanCapResponse(SCAN_CAP_PER_DAY)
+    }
 
     const imageContent = images.map((base64: string) => ({
       type: "image_url" as const,
@@ -124,6 +137,7 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
         ? 'OpenAI vision timed out (90s). Try again with fewer or smaller photos.'
         : `OpenAI vision request failed: ${(e as Error).message}`
       console.log(`[scan-pantry] first pass aborted: ${msg}`)
+      await refundScan(req, 'pantry') // transient fail — don't burn the user's daily slot
       return new Response(JSON.stringify({ error: msg }), {
         status: 504, headers: { "Content-Type": "application/json" },
       })
@@ -133,6 +147,7 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
 
     const data = await response.json()
     if (data.error) {
+      await refundScan(req, 'pantry') // OpenAI rejected the call — refund the slot
       return new Response(JSON.stringify({ error: data.error.message || JSON.stringify(data.error) }), {
         status: 500, headers: { "Content-Type": "application/json" },
       })
@@ -258,6 +273,7 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    await refundScan(req, 'pantry') // first-pass parse / unexpected fail — refund the slot
     return new Response(
       JSON.stringify({ error: (error as Error).message }),
       { status: 500, headers: { "Content-Type": "application/json" } },

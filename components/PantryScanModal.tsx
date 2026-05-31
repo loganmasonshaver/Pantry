@@ -250,9 +250,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       } catch (e: any) {
         // Surface the error inline (loading screen flips to error state with a
         // Retry button) instead of bouncing to the empty review screen. Photos
-        // stay in state so the retry doesn't re-charge the user for re-shooting,
-        // and pantry_scan_count is NOT incremented because nothing succeeded.
-        setScanError(e.message || 'Something went wrong analyzing your photos.')
+        // stay in state so the retry doesn't re-charge the user for re-shooting.
+        // supabase functions.invoke puts a generic message on e.message and the
+        // real server body ({ error, code }) on e.context (a Response) — unwrap it
+        // so the user sees the actual reason (daily cap, OpenAI timeout, etc.).
+        let msg = e?.message || 'Something went wrong analyzing your photos.'
+        if (e?.context && typeof e.context.json === 'function') {
+          try { const body = await e.context.json(); if (body?.error) msg = body.error } catch { /* keep generic */ }
+        }
+        setScanError(msg)
       }
     }
     scanPhotos()

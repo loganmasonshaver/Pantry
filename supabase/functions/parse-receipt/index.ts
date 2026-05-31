@@ -1,9 +1,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey  = Deno.env.get("GOOGLE_AI_KEY")
+
+// Daily per-user abuse ceiling, tracked separately from pantry scans. Matches the
+// scan-pantry cap — a few receipts/week is normal; 5/day caps cost exposure.
+const RECEIPT_CAP_PER_DAY = 5
 
 const RECEIPT_PROMPT = `This is a grocery receipt. Extract every food or grocery item purchased.
 For each item, return a JSON array with objects: { "name": string, "category": string }
@@ -100,6 +105,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "No image provided" }), { status: 400 })
     }
 
+    // Daily cap gate — atomic check+increment before any AI call; outer catch refunds on fail.
+    const { allowed, used } = await checkScanCap(req, 'receipt', RECEIPT_CAP_PER_DAY)
+    if (!allowed) {
+      console.log(`[parse-receipt] daily cap hit: ${used}/${RECEIPT_CAP_PER_DAY}`)
+      return scanCapResponse(RECEIPT_CAP_PER_DAY)
+    }
+
     // Gemini Flash primary (essentially free, and receipt OCR is structured-text territory
     // where Gemini matches GPT-4o quality). GPT-4o fallback when Gemini errors — receipt
     // quality is critical to UX and a single retry against the paid model is cheap insurance.
@@ -122,6 +134,7 @@ Deno.serve(async (req: Request) => {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    await refundScan(req, 'receipt') // both models failed / parse error — refund the slot
     return new Response(
       JSON.stringify({ error: (error as Error).message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
