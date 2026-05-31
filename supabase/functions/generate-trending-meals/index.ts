@@ -103,18 +103,21 @@ async function correctMealMacros(recipe: any): Promise<any> {
 // Derive diet/allergen tags from a meal's ingredient list so Discover can build a
 // per-user feed. Keyword substring match — cheap, no extra API calls. Tags are
 // computed at generation time and stored on the row.
-const TAG_MEAT = ['chicken', 'beef', 'steak', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'ham', 'prosciutto', 'pepperoni', 'salami', 'duck', 'venison', 'bison', 'meatball', 'ground meat']
+const TAG_MEAT = ['chicken', 'beef', 'steak', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'prosciutto', 'pepperoni', 'salami', 'chorizo', 'carnitas', 'ribeye', 'sirloin', 'brisket', 'pastrami', 'jerky', 'duck', 'venison', 'bison', 'meatball', 'ground meat']
 const TAG_SEAFOOD = ['salmon', 'tuna', 'shrimp', 'prawn', 'crab', 'lobster', 'cod', 'tilapia', 'fish', 'anchovy', 'sardine', 'scallop', 'mussel', 'clam', 'oyster', 'squid']
-const TAG_DAIRY = ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein']
+// 'butter' handled separately so nut butters don't read as dairy.
+const TAG_DAIRY = ['milk', 'cheese', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein']
 const TAG_GLUTEN = ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'noodle', 'ramen', 'udon', 'couscous', 'cracker', 'bun', 'pita', 'bagel', 'wrap', 'seitan']
 const TAG_NUTS = ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter']
 function classifyDietTags(ingredients: any[]): { compatible_diets: string[]; is_dairy_free: boolean; is_gluten_free: boolean; is_nut_free: boolean } {
   const hay = (ingredients || []).map((i: any) => (i?.name ?? '').toLowerCase()).join(' | ')
   const has = (arr: string[]) => arr.some(k => hay.includes(k))
-  const hasMeat = has(TAG_MEAT)
+  const hasMeat = has(TAG_MEAT) || /\bham\b/.test(hay)   // \bham\b avoids "graham"
   const hasSeafood = has(TAG_SEAFOOD)
-  const hasDairy = has(TAG_DAIRY)
-  const hasEgg = /\begg/.test(hay)              // \b avoids matching "eggplant"
+  // Dairy butter only — a nut/seed butter (peanut, almond…) is not dairy.
+  const dairyButter = /\bbutter\b/.test(hay) && !/(peanut|almond|cashew|hazelnut|pecan|nut|seed|sun)[\s-]*butter/.test(hay)
+  const hasDairy = has(TAG_DAIRY) || dairyButter
+  const hasEgg = /\beggs?\b/.test(hay)          // whole word — avoids "eggplant"
   const hasHoney = hay.includes('honey')
   // Nested: every meal is Classic; no land meat → Pescatarian; also no seafood →
   // Vegetarian; also no dairy/egg/honey → Vegan.
