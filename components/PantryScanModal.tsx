@@ -16,6 +16,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
 import { X, ScanLine, Check, Plus, Zap, ImageIcon } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
@@ -346,19 +347,32 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     }
   }
 
+  // Full-res iPhone photos are 3-7MB each as base64; a multi-photo scan ballooned
+  // the upload to 15-35MB, stalling req.json() server-side for 60-90s before the
+  // scan even started. GPT-4o vision downscales anything past ~2048px anyway, so
+  // capping the long edge at 1536 and re-encoding once is a ~4-8x payload cut with
+  // no loss of label readability. Width 1536 keeps portrait shots' long edge ≤2048.
+  const downscaleToBase64 = async (uri: string): Promise<string | undefined> => {
+    const out = await manipulateAsync(uri, [{ resize: { width: 1536 } }], {
+      compress: 0.85, format: SaveFormat.JPEG, base64: true,
+    })
+    return out.base64 ?? undefined
+  }
+
   const capturePhoto = async (label: string, next: number) => {
     if (!cameraRef.current) return
     try {
-      // Single capture at quality 0.9 with base64 directly from the camera.
-      // Previous flow double-compressed (camera 0.8 → ImageManipulator 0.7),
-      // which destroyed label readability on small/back-shelf items.
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, base64: true })
+      // Capture near-lossless (quality 1, no base64), then do the single resize +
+      // re-encode in downscaleToBase64 — avoids the old double-compression that
+      // destroyed label readability while still keeping the upload small.
+      const photo = await cameraRef.current.takePictureAsync({ quality: 1 })
       if (photo) {
+        const base64 = await downscaleToBase64(photo.uri)
         setPhotos(prev => [...prev, {
           id: String(Date.now()),
           label,
           uri: photo.uri,
-          base64: photo.base64 ?? undefined,
+          base64,
         }])
       }
     } catch (e) {
@@ -376,14 +390,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
-      base64: true,
     })
     if (!result.canceled && result.assets[0]) {
+      const base64 = await downscaleToBase64(result.assets[0].uri)
       setPhotos(prev => [...prev, {
         id: String(Date.now()),
         label,
         uri: result.assets[0].uri,
-        base64: result.assets[0].base64 ?? undefined,
+        base64,
       }])
       setStep(next)
     }
@@ -395,14 +409,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
-      base64: true,
     })
     if (!result.canceled && result.assets[0]) {
+      const base64 = await downscaleToBase64(result.assets[0].uri)
       setPhotos(prev => [...prev, {
         id: String(Date.now()),
         label,
         uri: result.assets[0].uri,
-        base64: result.assets[0].base64 ?? undefined,
+        base64,
       }])
     }
   }

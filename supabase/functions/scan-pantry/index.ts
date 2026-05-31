@@ -38,7 +38,10 @@ Deno.serve(async (req: Request) => {
     if (!images || images.length === 0) {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
     }
-    console.log(`[scan-pantry] received ${images.length} image(s)`)
+    // Log payload size — a multi-MB body means the client isn't downscaling and
+    // req.json() above will have stalled for tens of seconds before this line.
+    const payloadKB = Math.round(images.reduce((a, b) => a + b.length, 0) / 1024)
+    console.log(`[scan-pantry] received ${images.length} image(s), ~${payloadKB}KB base64`)
 
     // Gate the cost-bearing OpenAI call behind the daily cap. Atomic check+increment
     // — counts the attempt up front; the 504/500 paths below refund on transient fail.
