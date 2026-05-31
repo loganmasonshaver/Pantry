@@ -347,14 +347,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     }
   }
 
-  // Full-res iPhone photos are 3-7MB each as base64; a multi-photo scan ballooned
-  // the upload to 15-35MB, stalling req.json() server-side for 60-90s before the
-  // scan even started. GPT-4o vision downscales anything past ~2048px anyway, so
-  // capping the long edge at 1536 and re-encoding once is a ~4-8x payload cut with
-  // no loss of label readability. Width 1536 keeps portrait shots' long edge ≤2048.
+  // Full-res iPhone photos are multi-MB as base64 and stall the upload before the
+  // scan can start. GPT-4o high-detail vision caps input at ~2048px long edge /
+  // 768px short edge internally, so 2048px is the exact ceiling the model uses —
+  // resizing to it loses ZERO model-visible detail while cutting the payload ~3-4x.
+  // Quality 0.95 keeps re-compression near-lossless so small label text stays crisp.
   const downscaleToBase64 = async (uri: string): Promise<string | undefined> => {
-    const out = await manipulateAsync(uri, [{ resize: { width: 1536 } }], {
-      compress: 0.85, format: SaveFormat.JPEG, base64: true,
+    const out = await manipulateAsync(uri, [{ resize: { width: 2048 } }], {
+      compress: 0.95, format: SaveFormat.JPEG, base64: true,
     })
     return out.base64 ?? undefined
   }
