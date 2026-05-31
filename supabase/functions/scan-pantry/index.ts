@@ -25,16 +25,22 @@ Deno.serve(async (req: Request) => {
   // call looks identical to a never-invoked one from the dashboard.
   console.log('[scan-pantry] invoked')
 
-  // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
+  // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility).
+  // Timed because verifyUser() hits the Auth API with no timeout; if a scan stalls
+  // between "invoked" and "received images", this log splits auth vs. body upload.
+  const tAuth = Date.now()
   const user = await verifyUser(req)
   if (!user) return unauthorizedResponse()
+  console.log(`[scan-pantry] auth ok: ${Date.now() - tAuth}ms`)
 
   const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
   const { allowed } = rateLimit(ip, 10, 60000)
   if (!allowed) return rateLimitResponse()
 
   try {
+    const tBody = Date.now()
     const { images } = await req.json() as { images: string[] }
+    console.log(`[scan-pantry] body read: ${Date.now() - tBody}ms`)
     if (!images || images.length === 0) {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
     }
