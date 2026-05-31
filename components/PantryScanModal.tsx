@@ -99,6 +99,16 @@ const LOADING_STAGES = [
 // path instead of leaving the user staring at a spinner forever.
 const SCAN_HARD_TIMEOUT_MS = 180000 // 3 minutes
 
+// Shown one-at-a-time under the camera, rotating to the next on each photo taken.
+// Replaces the old standalone pre-scan tips screen — same guidance, less friction.
+const CAMERA_TIPS = [
+  'Pull items forward so nothing hides behind taller things',
+  'Light it up — open the door fully or use flash in dim spots',
+  'Stand 3-4 ft back to fit the whole shelf and keep labels sharp',
+  'Tap the screen to focus before you shoot',
+  'One photo per zone — pantry, fridge, and freezer separately',
+]
+
 const EXTRA_OPTIONS = [
   { id: 'freezer', label: 'Freezer' },
   { id: 'fridge2', label: 'Second Fridge' },
@@ -150,9 +160,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
   const insets = useSafeAreaInsets()
-  // Step 0 is the pre-scan tips screen — sets photo-quality expectations
-  // before the camera opens so users get a usable scan on the first try.
-  const [step, setStep] = useState(0)
+  // Flow starts on the camera (step 1) — tips now live inline near the shutter
+  // instead of a separate pre-scan screen.
+  const [step, setStep] = useState(1)
   // Bumped to force a re-run of the scan effect when the user taps "Retry"
   // after a scan failure — keeps the captured photos intact.
   const [retryNonce, setRetryNonce] = useState(0)
@@ -295,19 +305,24 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   }, [visible])
 
   const handleClose = () => {
-    setStep(0)
-    setPhotos([])
-    setShowDone(false)
-    setCustomLabel('')
-    setShowCustomInput(false)
-    setDetectedItems([])
-    setZones([])
-    setFlashOn(false)
-    setMissedInput('')
-    setAddingMissed(false)
-    setScanError(null)
-    setRetryNonce(0)
     onClose()
+    // Defer the reset until after the slide-out animation (~300ms) so the current
+    // screen — e.g. the results view — collapses straight down instead of flashing
+    // the camera/first step on the way out. State is fresh by the next open.
+    setTimeout(() => {
+      setStep(1)
+      setPhotos([])
+      setShowDone(false)
+      setCustomLabel('')
+      setShowCustomInput(false)
+      setDetectedItems([])
+      setZones([])
+      setFlashOn(false)
+      setMissedInput('')
+      setAddingMissed(false)
+      setScanError(null)
+      setRetryNonce(0)
+    }, 350)
   }
 
   // Parse comma- or newline-separated names, categorize each via the LLM-backed
@@ -444,56 +459,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
 
-        {/* ── Step 0: Pre-scan tips ── */}
-        {step === 0 && (
-          <View style={stepWithSafeTop}>
-            <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-              <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-            </TouchableOpacity>
-            <View style={styles.tipsBody}>
-              <Text style={[styles.title, { textAlign: 'center', marginBottom: 8 }]}>Quick tips before scanning</Text>
-              <Text style={[styles.subtitle, { textAlign: 'center', marginBottom: 28 }]}>
-                A few seconds of prep means better recognition and fewer items missed.
-              </Text>
-              <View style={styles.tipsList}>
-                <View style={styles.tipRow}>
-                  <Text style={styles.tipEmoji}>📦</Text>
-                  <View style={styles.tipText}>
-                    <Text style={styles.tipTitle}>Pull items forward</Text>
-                    <Text style={styles.tipSub}>So back-row items aren't hidden behind taller things.</Text>
-                  </View>
-                </View>
-                <View style={styles.tipRow}>
-                  <Text style={styles.tipEmoji}>💡</Text>
-                  <View style={styles.tipText}>
-                    <Text style={styles.tipTitle}>Light it up</Text>
-                    <Text style={styles.tipSub}>Open the door fully, turn on a light, or use flash. Dim shelves hide items.</Text>
-                  </View>
-                </View>
-                <View style={styles.tipRow}>
-                  <Text style={styles.tipEmoji}>📐</Text>
-                  <View style={styles.tipText}>
-                    <Text style={styles.tipTitle}>Stand 3-4 ft back</Text>
-                    <Text style={styles.tipSub}>Fit the whole shelf in frame — closer = blurrier labels.</Text>
-                  </View>
-                </View>
-                <View style={styles.tipRow}>
-                  <Text style={styles.tipEmoji}>📸</Text>
-                  <View style={styles.tipText}>
-                    <Text style={styles.tipTitle}>One photo per zone</Text>
-                    <Text style={styles.tipSub}>Take separate shots for the pantry, fridge, and freezer.</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-            <View style={styles.tipsFooter}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep(1)} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>Got it — start scanning</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
           const stepConfig = {
@@ -549,7 +514,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   <Text style={styles.title}>{stepConfig.title}</Text>
                   <Text style={styles.subtitle}>{stepConfig.subtitle}</Text>
                   <Text style={styles.cameraTip}>
-                    Tip: stand 3-4 ft back · tap screen to focus · use flash in dim light
+                    💡 {CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}
                   </Text>
                 </View>
 
@@ -1197,44 +1162,6 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   loadingFooter: {
-    paddingBottom: 8,
-    paddingHorizontal: 4,
-  },
-
-  // Pre-scan tips screen (step 0)
-  tipsBody: {
-    flex: 1,
-    paddingTop: 32,
-    paddingHorizontal: 8,
-  },
-  tipsList: {
-    gap: 18,
-  },
-  tipRow: {
-    flexDirection: 'row',
-    gap: 14,
-    alignItems: 'flex-start',
-  },
-  tipEmoji: {
-    fontSize: 28,
-    width: 36,
-    textAlign: 'center',
-  },
-  tipText: {
-    flex: 1,
-  },
-  tipTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textWhite,
-    marginBottom: 2,
-  },
-  tipSub: {
-    fontSize: 13,
-    color: COLORS.textMuted,
-    lineHeight: 18,
-  },
-  tipsFooter: {
     paddingBottom: 8,
     paddingHorizontal: 4,
   },
