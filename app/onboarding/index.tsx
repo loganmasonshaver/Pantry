@@ -232,7 +232,7 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
   const zoom1 = useRef(new Animated.Value(0)).current  // focuses on bottom meal cards (deeper zoom)
   const zoom2 = useRef(new Animated.Value(0)).current  // centered meal card zoom (standard)
 
-  const player = useVideoPlayer(require('../../assets/onboarding-demo.mov'), (p) => {
+  const player = useVideoPlayer(require('../../assets/onboarding-preview.mov'), (p) => {
     p.loop = false
     p.muted = true
     p.playbackRate = 0.9
@@ -2948,10 +2948,9 @@ function STryFree({ onNext, onBack }: { onNext: () => void; onBack: () => void }
   const { refresh: refreshSuperwallUser, getEntitlements } = useUser()
   const [restoring, setRestoring] = useState(false)
 
-  // Reuse the intro onboarding demo video on this paywall — same asset as the
-  // welcome screen, but here it LOOPS so users lingering on the paywall keep
-  // seeing the product in motion. Placeholder until Logan ships new video.
-  const videoPlayer = useVideoPlayer(require('../../assets/onboarding-demo.mov'), (p) => {
+  // Same preview video as the welcome screen, but here it LOOPS so users lingering
+  // on the paywall keep seeing the product in motion.
+  const videoPlayer = useVideoPlayer(require('../../assets/onboarding-preview.mov'), (p) => {
     p.loop = true
     p.muted = true
     p.playbackRate = 0.9
