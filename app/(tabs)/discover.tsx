@@ -643,10 +643,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   railCard: {
-    // ~160 wide — a little bigger than the first pass while still letting the next
-    // card peek so the rail reads as scrollable.
-    width: 160,
-    height: 210,
+    width: 175,
+    height: 225,
     borderRadius: 18,
     overflow: 'hidden',
     position: 'relative',
@@ -670,7 +668,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    padding: 14,
+    // Tighter left/right inset gives the pill row more horizontal room so the
+    // protein pill stops wrapping to a second line. Vertical inset unchanged.
+    paddingHorizontal: 8,
+    paddingVertical: 14,
   },
   railName: {
     fontSize: 14,
