@@ -17,7 +17,7 @@ let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
 const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, ChevronRight } from 'lucide-react-native'
 import RecipeFormModal from '@/components/RecipeFormModal'
@@ -686,6 +686,7 @@ export default function MealDetailScreen() {
   // Previously these lived below `handleSave` / `logToSlot` and crashed with
   // "rendered more hooks than during the previous render" when meal loaded async.
   const [showCustomInput, setShowCustomInput] = useState(false)
+  const insets = useSafeAreaInsets()
   const slotScrollRef = useRef<ScrollView>(null)
   const lastHapticIndex = useRef(-1)
   const onSlotScroll = useCallback((e: any) => {
@@ -806,9 +807,10 @@ export default function MealDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-      {/* ── Header ── */}
-      <View style={styles.header}>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* ── Header — floats over the full-bleed hero so the photo fills to the very
+          top of the screen (status bar included), pulling the rest of the content up. ── */}
+      <View style={[styles.header, { top: insets.top }]}>
         <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} activeOpacity={0.7}>
           <ChevronLeft size={24} stroke={COLORS.textWhite} strokeWidth={2} />
         </TouchableOpacity>
@@ -1301,8 +1303,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
 
-  // Header
+  // Header — absolute overlay so the hero image can run full-bleed behind it.
+  // `top` is set inline to the safe-area inset so the buttons clear the notch.
   header: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
