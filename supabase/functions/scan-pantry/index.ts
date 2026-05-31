@@ -79,6 +79,11 @@ EXHAUSTIVENESS RULES (these matter more than naming precision):
 - If a single product is duplicated (3 cans of beans), list it ONCE — but don't skip a real second item because it "looks similar" to another
 - Partial labels still count — if you can see part of a label that suggests a product, include it with your best inference
 
+EXCLUDE these — they are NOT pantry ingredients even though they're groceries:
+- Pet food and pet treats (cat food, dog food, kibble, etc.) — never include these
+- Non-edible household goods: cleaning supplies, paper towels, napkins, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries
+- Only list items a PERSON would cook with or eat. When in doubt about whether something is human food, leave it out.
+
 Return a JSON object with this structure:
 {
   "layout": "shelves" | "horizontal",
@@ -217,6 +222,8 @@ Focus your attention on:
 - Top shelf and bottom shelf items (these get less attention)
 - Items in drawers, especially the produce drawer
 - Anything edible you previously dismissed as ambiguous — give a best-guess name now
+
+EXCLUDE pet food/treats and non-edible household goods (cleaning supplies, paper goods, toiletries) — only list things a person would cook with or eat.
 
 Use SAME zone names from first pass where possible: ${knownZones.join(', ') || '(none — invent zones based on layout)'}.
 Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
