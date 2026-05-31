@@ -431,18 +431,19 @@ export default function HomeScreen() {
     })
   }, [])
 
-  // Fetch pantry names and compute missing staples
-  useEffect(() => {
+  // Fetch pantry names and compute missing staples. Extracted so it can be re-run
+  // after a scan adds items — otherwise pantryNames stays empty and Home keeps
+  // showing the "Unlock recipes" card instead of flipping to the meal carousel.
+  const loadPantryNames = useCallback(async () => {
     if (!user) return
-    supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true)
-      .then(({ data }) => {
-        const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
-        setPantryNames(names)
-        setPantryFetched(true)
-        const missing = ESSENTIAL_STAPLES.filter(s => !names.has(s))
-        setMissingStaples(missing)
-      })
+    const { data } = await supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true)
+    const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
+    setPantryNames(names)
+    setPantryFetched(true)
+    setMissingStaples(ESSENTIAL_STAPLES.filter(s => !names.has(s)))
   }, [user])
+
+  useEffect(() => { loadPantryNames() }, [loadPantryNames])
 
   // Hero "Scan your pantry" card animations. Two loops run together to sell the
   // "actively scanning + identifying items" idea: a horizontal beam sweeps top→bottom
@@ -1462,6 +1463,9 @@ export default function HomeScreen() {
         onClose={() => setShowPantryScanFromHome(false)}
         onItemsAdded={async () => {
           setShowPantryScanFromHome(false)
+          // Refresh pantry so Home flips from the "Unlock recipes" card to the meal
+          // carousel now that the scan added items — the initial fetch only runs on load.
+          await loadPantryNames()
           // Fire the kitchen-basics nudge ONCE per user (per device) right after
           // a scan completes — natural moment to surface "you also have these
           // common things?" without dragging it across the home screen forever.
