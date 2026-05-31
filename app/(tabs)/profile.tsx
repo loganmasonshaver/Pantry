@@ -445,6 +445,8 @@ function SettingsRow({
 // ── Screen ─────────────────────────────────────────────────────────────
 
 const DIET_OPTIONS = ['None', 'Vegetarian', 'Dairy-free', 'Gluten-free', 'Nut-free']
+// Diet TYPE (single-select identity) — distinct from the multi-select restrictions above.
+const DIET_TYPES = ['Classic', 'Pescatarian', 'Vegetarian', 'Vegan']
 
 const ACTIVITY_OPTIONS = [
   { key: 'sedentary', label: 'Sedentary', sub: 'Desk job, little exercise', mult: 1.2 },
@@ -500,6 +502,7 @@ type Profile = {
   weight_kg: number | null
   target_weight_kg: number | null
   dietary_restrictions: string[] | null
+  diet_type: string | null
   age: number | null
   gender: string | null
   height_cm: number | null
@@ -589,6 +592,19 @@ export default function ProfileScreen() {
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setShowDietModal(false)
   }
+
+  // Diet type (Classic / Pescatarian / Vegetarian / Vegan) — single-select, writes diet_type.
+  const [showDietTypeModal, setShowDietTypeModal] = useState(false)
+  const saveDietType = async (value: string) => {
+    if (!user) return
+    await supabase.from('profiles').update({ diet_type: value }).eq('id', user.id)
+    setProfile(p => p ? { ...p, diet_type: value } : p)
+    // Diet shapes what meals we suggest — drop the daily cache so the change takes
+    // effect immediately instead of after the next midnight rollover.
+    await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
+    setShowDietTypeModal(false)
+  }
+
   // Calculator modal
   const [animatingGoals, setAnimatingGoals] = useState(false)
   const [displayCalories, setDisplayCalories] = useState<number | null>(null)
@@ -632,7 +648,7 @@ export default function ProfileScreen() {
     // Profile goals + starting weight
     supabase
       .from('profiles')
-      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions, age, gender, height_cm, activity_level, fitness_goal')
+      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions, diet_type, age, gender, height_cm, activity_level, fitness_goal')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -991,6 +1007,38 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* ── Diet Type Modal (single-select) ── */}
+        <Modal visible={showDietTypeModal} transparent animationType="fade" onRequestClose={() => setShowDietTypeModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Diet</Text>
+              <Text style={[styles.modalTitle, { fontSize: 13, fontWeight: '400', color: COLORS.textMuted, marginTop: -12, marginBottom: 16 }]}>
+                Shapes the meals we suggest for you
+              </Text>
+              <View style={styles.dietChipGrid}>
+                {DIET_TYPES.map(opt => {
+                  const active = (profile?.diet_type ?? 'Classic') === opt
+                  return (
+                    <TouchableOpacity
+                      key={opt}
+                      style={[styles.dietChip, active && styles.dietChipActive]}
+                      onPress={() => saveDietType(opt)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.dietChipText, active && styles.dietChipTextActive]}>{opt}</Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalCancel} onPress={() => setShowDietTypeModal(false)} activeOpacity={0.7}>
+                  <Text style={styles.modalCancelText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         {/* ── Dietary Restrictions Modal ── */}
         <Modal visible={showDietModal} transparent animationType="fade" onRequestClose={() => setShowDietModal(false)}>
           <View style={styles.modalOverlay}>
@@ -1331,6 +1379,7 @@ export default function ProfileScreen() {
               the chips screen, creating duplicate concepts. Diet style (Vegetarian
               etc.) is set during onboarding only. */}
           <SettingsRow label="Food Preferences" onPress={() => router.push('/food-preferences')} />
+          <SettingsRow label="Diet" value={profile?.diet_type ?? 'Classic'} onPress={() => setShowDietTypeModal(true)} />
           <SettingsRow label="Notifications" />
           <SettingsRow
             label="Dark Mode"
