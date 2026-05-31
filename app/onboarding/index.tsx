@@ -3910,10 +3910,11 @@ export default function Onboarding() {
           .filter(Boolean)
         const allDislikes = [...(finalData.foodDislikes || []), ...customDislikes]
 
-        const mergedRestrictions = [
-          ...(finalData.dietStyle && finalData.dietStyle !== 'Classic' ? [finalData.dietStyle] : []),
-          ...(finalData.diet || []),
-        ]
+        // dietary_restrictions now holds ONLY allergen-style restrictions
+        // (Dairy-free, Gluten-free, etc.). The diet style (Pescatarian/Vegetarian/
+        // Vegan) lives in its own diet_type column — no longer folded in here, so
+        // the trending feed can match on diet_type tags instead of hiding meals.
+        const mergedRestrictions = [...(finalData.diet || [])]
 
         // Auto-compute macros from the other onboarding data (no manual entry screen)
         let computedCals: number | null = parseInt(finalData.calories) || null

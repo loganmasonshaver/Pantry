@@ -102,6 +102,10 @@ type DiscoverMeal = {
   vote_score: number
   log_count: number
   generated_at: string
+  compatible_diets: string[] | null
+  is_dairy_free: boolean | null
+  is_gluten_free: boolean | null
+  is_nut_free: boolean | null
 }
 
 // Filter chips narrow the trending pool against derived signals. "All" is a no-op.
@@ -122,24 +126,11 @@ const MEAT_KEYWORDS = [
   'prosciutto', 'pepperoni', 'salami', 'ham', 'meat',
 ]
 
-// Dietary restriction → forbidden ingredient substrings. Ported from the now-deleted
-// trendingMealPassesFilters that used to live on Home — Phase 3b moved Trending to
-// Discover but didn't carry this filter, leaving a regression where vegan / nut-allergy
-// users could see meals they can't eat. Same structure, applied centrally on Discover.
-const RESTRICTION_KEYWORDS: Record<string, string[]> = {
-  vegetarian: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'pepperoni', 'prosciutto', 'salami', 'anchovies', 'tuna', 'salmon', 'shrimp', 'crab', 'lobster', 'fish', 'meat'],
-  vegan: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'fish', 'shrimp', 'tuna', 'salmon', 'crab', 'lobster', 'meat', 'egg', 'eggs', 'milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'honey'],
-  'gluten-free': ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumbs', 'croutons', 'tortilla', 'noodles', 'ramen', 'udon', 'couscous'],
-  'dairy-free': ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta'],
-  'nut-free': ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter'],
-  'nut allergy': ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter'],
-  'peanut allergy': ['peanut', 'peanut butter', 'peanut sauce'],
-  pescatarian: ['chicken', 'beef', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal'],
-  halal: ['pork', 'bacon', 'ham', 'prosciutto', 'lard', 'pepperoni', 'salami'],
-  kosher: ['pork', 'bacon', 'ham', 'shrimp', 'lobster', 'crab', 'shellfish'],
-}
 
-function passesDietary(meal: DiscoverMeal, dislikes: string[], restrictions: string[]): boolean {
+// Food dislikes are arbitrary user strings (can't be precomputed), so they stay a
+// runtime substring check. Diet identity + allergens now use the meal's precomputed
+// tags (see passesDietTags) instead of the old substring keyword scan.
+function passesDietary(meal: DiscoverMeal, dislikes: string[]): boolean {
   const ingredientNames = (meal.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
   const nameLower = meal.name.toLowerCase()
   for (const dislike of dislikes) {
@@ -147,11 +138,21 @@ function passesDietary(meal: DiscoverMeal, dislikes: string[], restrictions: str
     if (!d) continue
     if (ingredientNames.some(n => n.includes(d)) || nameLower.includes(d)) return false
   }
-  for (const restriction of restrictions) {
-    const keywords = RESTRICTION_KEYWORDS[restriction.toLowerCase()] ?? []
-    for (const kw of keywords) {
-      if (ingredientNames.some(n => n.includes(kw)) || nameLower.includes(kw)) return false
-    }
+  return true
+}
+
+// Diet identity (Classic/Pescatarian/Vegetarian/Vegan) + allergen restrictions,
+// matched against the generation-time tags. Classic matches everything. Legacy
+// rows with null tags pass permissively so nothing vanishes during rollout.
+function passesDietTags(meal: DiscoverMeal, dietType: string, restrictions: string[]): boolean {
+  if (dietType && dietType !== 'Classic' && meal.compatible_diets) {
+    if (!meal.compatible_diets.includes(dietType)) return false
+  }
+  for (const r of restrictions) {
+    const key = r.toLowerCase()
+    if (key === 'dairy-free' && meal.is_dairy_free === false) return false
+    if (key === 'gluten-free' && meal.is_gluten_free === false) return false
+    if (key === 'nut-free' && meal.is_nut_free === false) return false
   }
   return true
 }
@@ -183,6 +184,7 @@ export default function DiscoverScreen() {
   const [showCreatorModal, setShowCreatorModal] = useState(false)
   const [foodDislikes, setFoodDislikes] = useState<string[]>([])
   const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
+  const [dietType, setDietType] = useState<string>('Classic')
 
   // Profile-based dietary filters apply to every Discover view (always-on safety
   // filter — users with nut allergies should never see almond recipes regardless
@@ -190,7 +192,7 @@ export default function DiscoverScreen() {
   useEffect(() => {
     if (!user) return
     supabase.from('profiles')
-      .select('food_dislikes, dietary_restrictions')
+      .select('food_dislikes, dietary_restrictions, diet_type')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -198,6 +200,7 @@ export default function DiscoverScreen() {
         if (data?.dietary_restrictions) {
           setDietaryRestrictions((data.dietary_restrictions ?? []).filter((r: string) => r !== 'None'))
         }
+        if (data?.diet_type) setDietType(data.diet_type)
       })
   }, [user])
 
@@ -224,6 +227,10 @@ export default function DiscoverScreen() {
         vote_score: (m as any).vote_score ?? 0,
         log_count: (m as any).log_count ?? 0,
         generated_at: m.generated_at,
+        compatible_diets: (m as any).compatible_diets ?? null,
+        is_dairy_free: (m as any).is_dairy_free ?? null,
+        is_gluten_free: (m as any).is_gluten_free ?? null,
+        is_nut_free: (m as any).is_nut_free ?? null,
       }))
       // Sort by recency first (newest day → oldest), then by vote_score within each
       // day. So today's freshly-curated batch sits at the front of the rail and
@@ -233,9 +240,10 @@ export default function DiscoverScreen() {
         if (dateDiff !== 0) return dateDiff
         return (b.vote_score ?? 0) - (a.vote_score ?? 0)
       })
-    // Apply variety-fill on the sorted set so the front of the feed gets a varied
-    // mix instead of "today's 2 chicken-adjacent meals only" on concentrated days.
-    setTrending(applyVarietyFill(mapped))
+    // Store the FULL ranked pool. Variety-fill now runs AFTER the per-user diet
+    // filter (in `filtered` below) so a vegetarian's 6 are picked from the
+    // diet-compatible pool with backfill — not capped to 6 before filtering.
+    setTrending(mapped)
     setLoading(false)
   }, [])
 
@@ -270,10 +278,13 @@ export default function DiscoverScreen() {
   // vote_score); each rail excludes whatever is currently the hero. Search filtering
   // was wired in 3c but removed pre-launch — see v2 todo for restoration trigger.
   const filtered = useMemo(
-    () => trending
-      .filter(m => passesDietary(m, foodDislikes, dietaryRestrictions))
-      .filter(m => passesFilter(m, activeFilter)),
-    [trending, activeFilter, foodDislikes, dietaryRestrictions]
+    () => applyVarietyFill(
+      trending
+        .filter(m => passesDietTags(m, dietType, dietaryRestrictions))
+        .filter(m => passesDietary(m, foodDislikes))
+        .filter(m => passesFilter(m, activeFilter))
+    ),
+    [trending, activeFilter, foodDislikes, dietaryRestrictions, dietType]
   )
   const featured = filtered[0]
   // Rail caps keep the editorial density right (Spotify/NYT-ish ~6-8 per shelf) and
