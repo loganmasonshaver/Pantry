@@ -1604,16 +1604,14 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   ingredientLineHave: {
-    // RN doesn't compose textDecorationLine reliably from a parent Text onto nested Texts,
-    // so the strike is repeated on portion + name spans below.
+    // HAVE rows are de-emphasized with opacity + a trailing checkmark — no
+    // strikethrough, which made the text hard to read.
   },
   ingredientPortionHave: {
     opacity: 0.5,
-    textDecorationLine: 'line-through',
   },
   ingredientNameHave: {
     opacity: 0.5,
-    textDecorationLine: 'line-through',
   },
   // Quiet trailing checkmark on HAVE rows — confirms state, no tap target needed.
   haveIndicator: {
