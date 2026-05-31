@@ -643,8 +643,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   railCard: {
-    width: 200,
-    height: 240,
+    // ~145 wide so ~2.5 cards peek on screen — signals the rail scrolls for more
+    // instead of looking like a fixed pair.
+    width: 145,
+    height: 190,
     borderRadius: 18,
     overflow: 'hidden',
     position: 'relative',

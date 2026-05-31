@@ -757,7 +757,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const imgStart = Date.now()
     const { data: inserted } = await db.from('trending_meals').select('id, name, ingredients').eq('generated_at', today())
     if (inserted) {
-      await Promise.all(inserted.map(async (meal) => {
+      // Generate in small waves instead of firing all ~18 at FAL at once. The
+      // simultaneous burst saturated FAL's rate limit, so even generate-meal-image's
+      // internal 3-retry couldn't recover and meals were left on their YouTube
+      // thumbnail. Bounding concurrency keeps FAL un-saturated so retries succeed.
+      const IMG_CONCURRENCY = 5
+      const genImage = async (meal: any) => {
         try {
           const ingredientNames = (meal.ingredients || []).map((i: any) => i.name)
           const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
@@ -775,7 +780,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         } catch (e) {
           console.log(`Image gen failed for ${meal.name}:`, e)
         }
-      }))
+      }
+      for (let i = 0; i < inserted.length; i += IMG_CONCURRENCY) {
+        await Promise.all(inserted.slice(i, i + IMG_CONCURRENCY).map(genImage))
+      }
     }
     console.log(`Stage: image generation done in ${Date.now() - imgStart}ms`)
 
