@@ -14,6 +14,12 @@ Deno.serve(async (req: Request) => {
     })
   }
 
+  // Early log — fires on EVERY invocation including ones that abort at auth or
+  // rate-limit, so we can tell from logs whether the function was even reached.
+  // Critical when debugging client-side hangs: without this, an auth-rejected
+  // call looks identical to a never-invoked one from the dashboard.
+  console.log('[scan-pantry] invoked')
+
   // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
   const user = await verifyUser(req)
   if (!user) return unauthorizedResponse()
@@ -27,6 +33,7 @@ Deno.serve(async (req: Request) => {
     if (!images || images.length === 0) {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
     }
+    console.log(`[scan-pantry] received ${images.length} image(s)`)
 
     const imageContent = images.map((base64: string) => ({
       type: "image_url" as const,
@@ -86,23 +93,43 @@ Item rules:
 Return ONLY the raw JSON object, no markdown, no explanation.`
 
     const t0 = Date.now()
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openaiApiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",   // mini's vision is too weak to read partial labels / back-row items
-        max_tokens: 6000,  // dense kitchen scans were silently truncating at lower caps — losing whole zones at the end of the JSON
-        messages: [
-          {
-            role: "user",
-            content: [...imageContent, { type: "text", text: firstPassPrompt }],
-          },
-        ],
-      }),
-    })
+    // OpenAI vision endpoint occasionally hangs past the Supabase edge runtime's
+    // ~150s platform limit, getting the whole function force-killed with no logs
+    // and no response to the client. AbortController gives us a clean 90s ceiling
+    // so we fail with a real error message instead of silently dying.
+    const firstPassCtrl = new AbortController()
+    const firstPassTimeout = setTimeout(() => firstPassCtrl.abort(), 90000)
+    let response: Response
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${openaiApiKey}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",   // mini's vision is too weak to read partial labels / back-row items
+          max_tokens: 6000,  // dense kitchen scans were silently truncating at lower caps — losing whole zones at the end of the JSON
+          messages: [
+            {
+              role: "user",
+              content: [...imageContent, { type: "text", text: firstPassPrompt }],
+            },
+          ],
+        }),
+        signal: firstPassCtrl.signal,
+      })
+    } catch (e) {
+      const msg = (e as Error).name === 'AbortError'
+        ? 'OpenAI vision timed out (90s). Try again with fewer or smaller photos.'
+        : `OpenAI vision request failed: ${(e as Error).message}`
+      console.log(`[scan-pantry] first pass aborted: ${msg}`)
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 504, headers: { "Content-Type": "application/json" },
+      })
+    } finally {
+      clearTimeout(firstPassTimeout)
+    }
 
     const data = await response.json()
     if (data.error) {

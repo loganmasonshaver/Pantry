@@ -201,24 +201,24 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         setShowDone(true)
         return
       }
+      // Check the lifetime free-scan cap up front, but DO NOT increment yet —
+      // increment only on a successful response below. Otherwise failed scans
+      // (timeouts, OpenAI hangs, network drops) eat the user's free allotment
+      // and they hit paywall without ever getting a working scan.
+      let preScanCount = 0
       if (!isPremium) {
         const { data: profile } = await supabase
           .from('profiles')
           .select('pantry_scan_count')
           .eq('id', user!.id)
           .single()
-        const count = profile?.pantry_scan_count ?? 0
-        // Lifetime cap of 3 free pantry scans — counter increments below, never resets
-        if (count >= 3) {
+        preScanCount = profile?.pantry_scan_count ?? 0
+        if (preScanCount >= 3) {
           trackUpgradePromptShown('scan_limit')
           await triggerUpgrade('pantry_scan_limit') // Superwall placement — blocks until paywall dismissed
           handleClose()
           return
         }
-        await supabase
-          .from('profiles')
-          .update({ pantry_scan_count: count + 1 })
-          .eq('id', user!.id)
       }
       // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
       const ok = await requestConsent()
@@ -258,10 +258,20 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         setDetectedItems(allItems)
         setZones(zoneGroups)
         setShowDone(true)
+        // Only charge the lifetime cap on a successful scan. Fire-and-forget;
+        // the next-attempt check above reads the latest value anyway.
+        if (!isPremium) {
+          supabase
+            .from('profiles')
+            .update({ pantry_scan_count: preScanCount + 1 })
+            .eq('id', user!.id)
+            .then(() => {}, () => {})
+        }
       } catch (e: any) {
         // Surface the error inline (loading screen flips to error state with a
         // Retry button) instead of bouncing to the empty review screen. Photos
-        // stay in state so the retry doesn't re-charge the user for re-shooting.
+        // stay in state so the retry doesn't re-charge the user for re-shooting,
+        // and pantry_scan_count is NOT incremented because nothing succeeded.
         setScanError(e.message || 'Something went wrong analyzing your photos.')
       }
     }
