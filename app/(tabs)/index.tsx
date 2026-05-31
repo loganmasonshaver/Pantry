@@ -400,6 +400,15 @@ export default function HomeScreen() {
   const safeHeroIdx = Math.min(heroIdx, Math.max(meals.length - 1, 0))
   const heroMeal = meals[safeHeroIdx]
 
+  // Prefetch the hero images up front. Otherwise the first carousel cycles show the
+  // new title instantly (text re-render) while the uncached network image loads a
+  // beat later, so they look desynced until every image has been cached once.
+  useEffect(() => {
+    meals.slice(0, 3).forEach(m => {
+      if (m.image && m.image.startsWith('http')) Image.prefetch(m.image)
+    })
+  }, [meals])
+
   const ESSENTIAL_STAPLES = [
     'salt', 'pepper', 'olive oil', 'garlic', 'butter', 'onion',
     'soy sauce', 'eggs', 'rice', 'flour', 'sugar', 'milk',
