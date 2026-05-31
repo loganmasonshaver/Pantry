@@ -3972,6 +3972,7 @@ export default function Onboarding() {
             return null
           })(),
           dietary_restrictions: mergedRestrictions,
+          diet_type: finalData.dietStyle || 'Classic', // Classic / Pescatarian / Vegetarian / Vegan
           meals_per_day: parseInt(finalData.meals),
           cooking_skill: finalData.cookingSkill || null,
           max_prep_minutes: prepToMinutes(finalData.prep),
