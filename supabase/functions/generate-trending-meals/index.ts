@@ -100,6 +100,36 @@ async function correctMealMacros(recipe: any): Promise<any> {
   return recipe
 }
 
+// Derive diet/allergen tags from a meal's ingredient list so Discover can build a
+// per-user feed. Keyword substring match — cheap, no extra API calls. Tags are
+// computed at generation time and stored on the row.
+const TAG_MEAT = ['chicken', 'beef', 'steak', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'ham', 'prosciutto', 'pepperoni', 'salami', 'duck', 'venison', 'bison', 'meatball', 'ground meat']
+const TAG_SEAFOOD = ['salmon', 'tuna', 'shrimp', 'prawn', 'crab', 'lobster', 'cod', 'tilapia', 'fish', 'anchovy', 'sardine', 'scallop', 'mussel', 'clam', 'oyster', 'squid']
+const TAG_DAIRY = ['milk', 'cheese', 'butter', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein']
+const TAG_GLUTEN = ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'noodle', 'ramen', 'udon', 'couscous', 'cracker', 'bun', 'pita', 'bagel', 'wrap', 'seitan']
+const TAG_NUTS = ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter']
+function classifyDietTags(ingredients: any[]): { compatible_diets: string[]; is_dairy_free: boolean; is_gluten_free: boolean; is_nut_free: boolean } {
+  const hay = (ingredients || []).map((i: any) => (i?.name ?? '').toLowerCase()).join(' | ')
+  const has = (arr: string[]) => arr.some(k => hay.includes(k))
+  const hasMeat = has(TAG_MEAT)
+  const hasSeafood = has(TAG_SEAFOOD)
+  const hasDairy = has(TAG_DAIRY)
+  const hasEgg = /\begg/.test(hay)              // \b avoids matching "eggplant"
+  const hasHoney = hay.includes('honey')
+  // Nested: every meal is Classic; no land meat → Pescatarian; also no seafood →
+  // Vegetarian; also no dairy/egg/honey → Vegan.
+  const compatible = ['Classic']
+  if (!hasMeat) compatible.push('Pescatarian')
+  if (!hasMeat && !hasSeafood) compatible.push('Vegetarian')
+  if (!hasMeat && !hasSeafood && !hasDairy && !hasEgg && !hasHoney) compatible.push('Vegan')
+  return {
+    compatible_diets: compatible,
+    is_dairy_free: !hasDairy,
+    is_gluten_free: !has(TAG_GLUTEN),
+    is_nut_free: !has(TAG_NUTS),
+  }
+}
+
 Deno.serve(async (req: Request) => {
   // Allow service-role-key callers (pg_cron daily job) to bypass user auth and rate limit.
   // pg_cron runs without a user session — service-role JWT is the only token it can attach.
@@ -648,32 +678,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       return dens * 0.45 + uniq * 0.30 + macro * 0.25
     }
 
-    const PICK_TARGET = 6
-    const VARIETY_PENALTY = 0.20 // each prior same-protein pick subtracts this from candidate's effective score
-    const selected: any[] = []
-    const proteinCounts = new Map<string, number>()
-    const pool = [...recipes]
-    while (selected.length < PICK_TARGET && pool.length > 0) {
-      let bestIdx = -1
-      let bestEffective = -Infinity
-      for (let i = 0; i < pool.length; i++) {
-        const r = pool[i]
-        const protein = detectPrimaryProtein(r)
-        const count = proteinCounts.get(protein) || 0
-        const effective = baseScore(r) - count * VARIETY_PENALTY
-        if (effective > bestEffective) {
-          bestEffective = effective
-          bestIdx = i
-        }
-      }
-      if (bestIdx === -1) break
-      const picked = pool.splice(bestIdx, 1)[0]
-      selected.push(picked)
-      const pickedProtein = detectPrimaryProtein(picked)
-      proteinCounts.set(pickedProtein, (proteinCounts.get(pickedProtein) || 0) + 1)
-    }
-    recipes = selected
-    stageLog(`MMR selection: ${recipes.length} picked (proteins: ${[...proteinCounts.keys()].join(', ')})`)
+    // Store the full quality-ranked pool (not just 6). Discover now builds a
+    // per-user feed from this shared pool — filtering by the user's diet_type +
+    // allergen tags and applying variety per user — so the old MMR-to-6 narrowing
+    // moved client-side. We keep baseScore for ranking and cap at STORE_CAP to
+    // bound the daily image-generation cost.
+    const STORE_CAP = 18
+    recipes = [...recipes].sort((a, b) => baseScore(b) - baseScore(a)).slice(0, STORE_CAP)
+    stageLog(`pool ranked + capped: storing ${recipes.length} (cap ${STORE_CAP})`)
 
     // HARD MINIMUM GATE: only triggers if the candidate pool itself was under 6
     // (LLM yielded too few names). With MMR replacing the kill-filters, this
@@ -697,6 +709,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // Normalize category — LLM should output 'meal' / 'snack' / 'dessert', but guard against typos/missing
       const rawCat = (r.category || '').toLowerCase().trim()
       const category = rawCat === 'snack' ? 'snack' : rawCat === 'dessert' ? 'dessert' : 'meal'
+      const tags = classifyDietTags(r.ingredients)
       return {
         name: r.name,
         category,
@@ -711,6 +724,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         ingredients: r.ingredients,
         steps: r.steps,
         generated_at: today(),
+        compatible_diets: tags.compatible_diets,
+        is_dairy_free: tags.is_dairy_free,
+        is_gluten_free: tags.is_gluten_free,
+        is_nut_free: tags.is_nut_free,
       }
     })
 
