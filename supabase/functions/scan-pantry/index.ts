@@ -79,6 +79,15 @@ EXHAUSTIVENESS RULES (these matter more than naming precision):
 - If a single product is duplicated (3 cans of beans), list it ONCE — but don't skip a real second item because it "looks similar" to another
 - Partial labels still count — if you can see part of a label that suggests a product, include it with your best inference
 
+SCAN METHOD — work systematically so cluttered/back areas don't get skimmed:
+- Go shelf by shelf. For EACH shelf sweep front→back AND left→right. The BACK ROW behind the front items is where most misses happen — actively look past the front items for caps, lids, and label edges poking out behind or between them. A jar behind a jar, a tub behind a carton — each is a separate item.
+- Scan the DOOR shelves and built-in trays separately: condiments, butter/cheese compartments, and EGG TRAYS. Loose eggs sit in molded trays or on door shelves and blend into the tray shape — look for the rounded egg shapes and count them ("eggs").
+- Scan each DRAWER (produce, deli) separately — items there are dim and easy to skip.
+- If you can see even a SLIVER of something — a corner, a cap, an edge of a label peeking out — it counts. Include it with a best-guess name.
+- Stacked or nested items each count separately, even if mostly hidden.
+
+COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short for a full scene, you've skipped back-row and small items — go back to the back rows, door shelves, and shelf edges and look again before returning. (Only include items that are actually visible — never invent — but don't stop early.)
+
 EXCLUDE only these (they're groceries but NOT pantry ingredients):
 - Pet food and pet treats (cat food, dog food, kibble) — never include these
 - Non-edible household goods: cleaning supplies, paper towels, napkins, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries
@@ -218,8 +227,9 @@ NOW LOOK AGAIN more carefully. List ONLY items you MISSED in the first pass. DO 
 Focus your attention on:
 - Small items: spices, herbs in small jars, salt/pepper shakers, hot sauce bottles
 - Items in clear/transparent containers — identify the CONTENTS, not the container
-- Back-row items partially hidden behind front items
-- Door contents — fridge door condiments, butter shelf, egg shelf
+- Back-row items partially hidden behind front items — look PAST the front row for caps, lids, and label edges poking out behind/between items
+- Loose EGGS in molded door trays or egg shelves — they blend into the tray shape and are easy to miss
+- Door contents — fridge door condiments, butter/cheese compartments
 - Top shelf and bottom shelf items (these get less attention)
 - Items in drawers, especially the produce drawer
 - Anything edible you previously dismissed as ambiguous — give a best-guess name now
