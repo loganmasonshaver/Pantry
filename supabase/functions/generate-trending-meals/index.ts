@@ -316,6 +316,7 @@ Deno.serve(async (req: Request) => {
     // handles a 100-video selection problem fine, and the bigger pool helps after the
     // density-skip rule (recipes that don't naturally hit 25% get rejected upstream).
     const seen = new Set<string>()
+    console.log(`[funnel] raw YouTube candidates: ${allVideos.length}`)
     const uniqueVideos = allVideos.filter(v => {
       if (recentVideoIds.has(v.videoId)) return false
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
@@ -498,14 +499,16 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             const union = new Set([...words, ...pw]).size
             return union > 0 ? overlap / union : 0
           }
+          // Funnel counters — tally exactly why the LLM's raw output shrinks.
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
-            if (!name) return false
+            if (!name) { rejNoName++; return false }
             const protein = Number(r.protein) || 0
             const calories = Number(r.calories) || 0
-            if (calories <= 0 || protein <= 0) return false
+            if (calories <= 0 || protein <= 0) { rejNoMacros++; return false }
             const key = normalize(name)
-            if (!key || seenNames.has(key)) return false
+            if (!key || seenNames.has(key)) { rejDupName++; return false }
             const candWords = wordsOf(name)
             // Precompute scoring inputs once so the MMR selection downstream doesn't
             // re-walk the prevNames array for every candidate.
@@ -529,6 +532,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName})`)
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
@@ -727,7 +731,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // ones. Scoped to YouTube source so creator recipes posted today aren't wiped.
     await db.from('trending_meals').delete().eq('generated_at', today()).eq('trend_source', 'YouTube trending')
     const { error } = await db.from('trending_meals').insert(meals)
-    stageLog(`db insert done — error: ${error?.message ?? 'none'}`)
+    stageLog(`[funnel] db insert: ${error ? '0 (FAILED)' : meals.length} rows — error: ${error?.message ?? 'none'}`)
 
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
