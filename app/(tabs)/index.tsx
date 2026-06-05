@@ -366,15 +366,23 @@ export default function HomeScreen() {
   // Ken Burns slow-zoom — image scales from 1.0 to 1.12 over the full slide duration,
   // resets on idx change. Gives constant motion even when crossfade is idle.
   const heroScale = useRef(new RNAnimated.Value(1)).current
+  // Only cycle the hero through meals whose AI image has finished generating —
+  // otherwise the carousel flips through image-less placeholder cards while the FAL
+  // images are still rendering. We start on the first ready meal, and by the time it
+  // cycles (5s) the next image has usually landed.
+  const readyMeals = meals.filter(m => m.image && m.image.startsWith('http')).slice(0, 3)
+  // Until the first image is ready, fall back to the first meal so the hero is never
+  // blank — but cycling stays off until ≥2 images exist.
+  const carouselMeals = readyMeals.length > 0 ? readyMeals : meals.slice(0, 1)
   useEffect(() => {
-    if (loading || meals.length <= 1) return
+    if (loading || readyMeals.length <= 1) return // need ≥2 ready images to cycle
     const interval = setInterval(() => {
       RNAnimated.timing(heroFade, {
         toValue: 0,
         duration: HERO_FADE_MS,
         useNativeDriver: true,
       }).start(() => {
-        setHeroIdx(i => (i + 1) % Math.min(meals.length, 3))
+        setHeroIdx(i => (i + 1) % readyMeals.length)
         RNAnimated.timing(heroFade, {
           toValue: 1,
           duration: HERO_FADE_MS,
@@ -383,7 +391,7 @@ export default function HomeScreen() {
       })
     }, HERO_CYCLE_MS)
     return () => clearInterval(interval)
-  }, [loading, meals.length, heroFade])
+  }, [loading, readyMeals.length, heroFade])
   // Ken Burns zoom — restart on every heroIdx change. Linear easing for steady drift.
   useEffect(() => {
     heroScale.setValue(1)
@@ -394,11 +402,10 @@ export default function HomeScreen() {
       useNativeDriver: true,
     }).start()
   }, [heroIdx, heroScale])
-  // Guard heroIdx — meals.length can shrink between regens and leave us pointing at an empty slot.
-  // Without this, heroMeal would be undefined and the gradient/text overlay would render against
-  // a blank background until the next setHeroIdx tick.
-  const safeHeroIdx = Math.min(heroIdx, Math.max(meals.length - 1, 0))
-  const heroMeal = meals[safeHeroIdx]
+  // Index into carouselMeals (ready-imaged set), wrapping so a shrinking set never
+  // points at an empty slot and leaves the hero blank.
+  const safeHeroIdx = carouselMeals.length > 0 ? heroIdx % carouselMeals.length : 0
+  const heroMeal = carouselMeals[safeHeroIdx]
 
   // Prefetch the hero images up front. Otherwise the first carousel cycles show the
   // new title instantly (text re-render) while the uncached network image loads a
