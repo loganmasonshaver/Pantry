@@ -32,6 +32,7 @@ import { usePremium } from '../../context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated } from '../../lib/analytics'
 import AILogModal from '../../components/AILogModal'
+import { Shimmer } from '../../components/Shimmer'
 import FoodSearchModal from '../../components/FoodSearchModal'
 import EditPortionModal from '../../components/EditPortionModal'
 import PantryScanModal from '../../components/PantryScanModal'
@@ -1192,9 +1193,9 @@ export default function HomeScreen() {
                       {heroMeal.image && heroMeal.image.startsWith('http') ? (
                         <Image source={{ uri: heroMeal.image }} style={styles.heroMealImage} resizeMode="cover" />
                       ) : (
-                        <View style={[styles.heroMealImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
-                          <Utensils size={32} stroke="#555" strokeWidth={1.5} />
-                        </View>
+                        // Shimmer skeleton while the AI image is still rendering — reads as
+                        // "loading" instead of a static icon. Title/pills stay overlaid on top.
+                        <Shimmer style={styles.heroMealImage} />
                       )}
                     </RNAnimated.View>
                     <LinearGradient
