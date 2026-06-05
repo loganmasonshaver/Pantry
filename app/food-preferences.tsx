@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react'
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
   View,
   Text,
@@ -135,9 +134,10 @@ export default function FoodPreferencesScreen() {
         food_prefs_banner_dismissed: true,
       })
       .eq('id', user.id)
-    // Cache contains meals generated against the OLD dislike list — wipe both
-    // modes so the next Home render re-fetches with the new preferences applied.
-    await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
+    // Intentionally NOT wiping the daily meal cache here. A dislike change is minor
+    // and forcing an immediate regen each time burned API cost (LLM + ~3 images) and
+    // dodged the daily regen limit. The new dislikes apply on the next daily gen or a
+    // manual refresh; the diet-type change (which hard-filters valid meals) still wipes.
     setSaving(false)
     if (error) {
       Alert.alert('Save Failed', error.message)

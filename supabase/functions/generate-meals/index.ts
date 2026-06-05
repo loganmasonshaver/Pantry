@@ -1,8 +1,15 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+
+// Hard per-user daily ceiling on meal generations (LLM call + ~3 FAL images each).
+// Bounds API cost no matter what triggers a gen — auto-fire, manual refresh, a
+// diet/pref change, or a retry — since the client-side MAX_DAILY_REGENS only gates
+// the manual button. 3/day fits a real day (1 auto-gen + 1 refresh + 1 pref change).
+const MEAL_GEN_CAP_PER_DAY = 3
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
@@ -119,6 +126,17 @@ Deno.serve(async (req: Request) => {
   const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
   const { allowed } = rateLimit(ip, 10, 60000)
   if (!allowed) return rateLimitResponse()
+
+  // Per-user daily cap — atomic check+increment up front; refunded on failure below
+  // so a flaky-network retry doesn't burn the user's slot.
+  const cap = await checkScanCap(req, 'meal_gen', MEAL_GEN_CAP_PER_DAY)
+  if (!cap.allowed) {
+    console.log(`[generate-meals] daily cap hit: ${cap.used}/${MEAL_GEN_CAP_PER_DAY}`)
+    return new Response(
+      JSON.stringify({ error: `Daily meal limit reached (${MEAL_GEN_CAP_PER_DAY}/day). Check back tomorrow.`, code: 'meal_cap_reached' }),
+      { status: 429, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
 
   try {
     const {
@@ -348,6 +366,7 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     }
 
     if (!meals || meals.length === 0) {
+      await refundScan(req, 'meal_gen') // generation failed — don't burn the user's daily slot
       return new Response(JSON.stringify({ error: "All providers failed to generate meals" }), {
         status: 500, headers: { "Content-Type": "application/json" },
       })
@@ -409,6 +428,7 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    await refundScan(req, 'meal_gen') // unexpected failure — refund the slot
     return new Response(
       JSON.stringify({ error: (error as Error).message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
