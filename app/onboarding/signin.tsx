@@ -70,23 +70,7 @@ export default function SignInScreen() {
       const { data: { user } } = await supabase.auth.getUser()
       if (user?.email_confirmed_at) {
         await AsyncStorage.setItem('otp_verified', 'true')
-        // Returning users have onboarding_complete wiped on sign-out, so check
-        // the Supabase profile to decide where to land. If profile has goals,
-        // they're a real returning user — fast-path to tabs. If no profile,
-        // route through onboarding so they set up.
-        try {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('calorie_goal')
-            .eq('id', user.id)
-            .single()
-          if (profile?.calorie_goal) {
-            await AsyncStorage.setItem('onboarding_complete', 'true')
-            router.replace('/(tabs)')
-            return
-          }
-        } catch {}
-        router.replace('/onboarding')
+        await routeByProfile(user.id)
       } else {
         router.replace({ pathname: '/onboarding/verify-email', params: { email, isSignIn: 'true' } })
       }
@@ -118,23 +102,37 @@ export default function SignInScreen() {
     }
   }
 
-  // After OAuth sign-in: check local flag first, then Supabase profile.
-  // If onboarding was reset (dev testing or reinstall), treat as new user.
+  // Decide where a just-signed-in user lands. maybeSingle() doesn't throw on "no row",
+  // and we retry once on a real query error (RLS/session timing right after sign-in) so
+  // a transient blip can't dump a fully-onboarded user back into onboarding — which
+  // would risk re-running onboarding over their existing profile/data.
+  const routeByProfile = async (userId: string) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const { data, error } = await supabase
+        .from('profiles').select('calorie_goal').eq('id', userId).maybeSingle()
+      if (!error) {
+        if (data?.calorie_goal) {
+          await AsyncStorage.setItem('onboarding_complete', 'true')
+          router.replace('/(tabs)')
+        } else {
+          // Profile row missing or goals not set yet → genuinely needs onboarding.
+          router.replace('/onboarding')
+        }
+        return
+      }
+      await new Promise(r => setTimeout(r, 600)) // transient — give the session a beat, retry
+    }
+    // Persistent query failure for a returning user (this is the sign-in screen) — send to
+    // tabs rather than risk re-onboarding over real data; tabs re-fetches once it clears.
+    router.replace('/(tabs)')
+  }
+
+  // After OAuth sign-in: trust the local flag if set, else fall back to the profile check.
   const routeAfterSignIn = async () => {
     const done = await AsyncStorage.getItem('onboarding_complete')
     if (done === 'true') { router.replace('/(tabs)'); return }
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user?.id) {
-        const { data: profile } = await supabase
-          .from('profiles').select('calorie_goal').eq('id', session.user.id).single()
-        if (profile?.calorie_goal) {
-          await AsyncStorage.setItem('onboarding_complete', 'true')
-          router.replace('/(tabs)')
-          return
-        }
-      }
-    } catch {}
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.user?.id) { await routeByProfile(session.user.id); return }
     router.replace('/onboarding')
   }
 
