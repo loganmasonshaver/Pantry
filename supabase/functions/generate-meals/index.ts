@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -122,6 +123,9 @@ Deno.serve(async (req: Request) => {
   // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
   const user = await verifyUser(req)
   if (!user) return unauthorizedResponse()
+  // Server-side premium gate (dormant until PREMIUM_ENFORCEMENT=on; fails open on errors).
+  const denied = await requirePremium(user.id)
+  if (denied) return denied
 
   const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
   const { allowed } = rateLimit(ip, 10, 60000)
