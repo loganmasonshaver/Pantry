@@ -245,9 +245,13 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     let cancelled = false
     const pending: ReturnType<typeof setTimeout>[] = []
 
-    // Hold-phase zoom moments — ms after play() is called (player is pre-warmed so latency is consistent)
-    // Aligned to the "Suggested for you" meal cards appearing AFTER the pantry scan animation finishes.
-    const ZOOM_AT: number[] = [6000, 9400] // ms into hold
+    // Hold-phase zoom moments — wall-clock ms after play() is called. Because the
+    // video plays at 0.9× and the FIRST zoom pauses it for one ZOOM_CYCLE, these are
+    // NOT raw video timestamps: t = videoMs / 0.9 (+ ZOOM_CYCLE for any zoom after
+    // the first, to compensate for the earlier pause).
+    //   zoom1 (deep, bottom cards) → the 3 "Cook tonight" meal cards at ~13.5s video
+    //   zoom2 (centered)           → the meal detail "YOU HAVE" ingredients at ~15.5s video
+    const ZOOM_AT: number[] = [15000, 18400] // ≈ video 13.5s, 15.5s
     const ZOOM_ANIMS = [zoom1, zoom2]
     const ZOOM_IN_DURATION = 320
     const ZOOM_HOLD_DURATION = 520
@@ -255,8 +259,11 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     const ZOOM_CYCLE = ZOOM_IN_DURATION + ZOOM_HOLD_DURATION + ZOOM_OUT_DURATION
     // Hold the first frame (video paused at t=0) this long before starting playback on each cycle.
     const START_HOLD_DELAY = 250
-    // Hold must cover video length PLUS paused time (zooms + start hold) so every loop finishes cleanly.
-    const BASE_HOLD = 13500
+    // Hold must cover the FULL video before the exit animation. Video is 24.57s; at
+    // 0.9× that's ~27.3s of playback, so the loop was cutting off at ~12s with the old
+    // 13500 value. 27800 lets the whole flow play through (the +zoom-pause + start-hold
+    // are added into HOLD_DURATION below).
+    const BASE_HOLD = 27800
     const HOLD_DURATION = BASE_HOLD + START_HOLD_DELAY + ZOOM_AT.length * ZOOM_CYCLE
 
     const triggerZoom = (anim: Animated.Value) => {
