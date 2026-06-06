@@ -797,6 +797,14 @@ export default function MealDetailScreen() {
 
   const handleLog = () => {
     if (!meal || logged) return
+    // Premium-only model: non-subscribers can't log meals. Logging is a direct DB insert
+    // (not an edge function), so this client gate is the only gate — open the paywall instead
+    // of the slot picker. logToSlot is only reachable through this picker, so gating here covers it.
+    if (!isPremium) {
+      trackUpgradePromptShown('meal_log_limit')
+      triggerUpgrade('meal_log_limit')
+      return
+    }
     const defaultIdx = getDefaultSlotIndex()
     setSelectedSlotIndex(defaultIdx)
     setShowCustomInput(false)

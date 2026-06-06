@@ -3905,6 +3905,15 @@ export default function Onboarding() {
   const { step: stepParam } = useLocalSearchParams<{ step?: string }>()
   const [step, setStep] = useState(1)
   const [stepLoaded, setStepLoaded] = useState(false)
+
+  // Only honor in-range step deep-links (the real flow is steps 1–22). A crafted link
+  // with an out-of-range/garbage step is ignored so it can't jump past the age gate or
+  // straight into the paywall/completion steps. Returns null for invalid input.
+  const parseStepParam = (raw?: string): number | null => {
+    if (!raw) return null
+    const p = parseInt(raw, 10)
+    return Number.isInteger(p) && p >= 1 && p <= 22 ? p : null
+  }
   // finishing state removed — navigation is now immediate
   const fadeAnim = useRef(new Animated.Value(1)).current
   const [data, setData] = useState<OnboardingData>(DEFAULT_DATA)
@@ -3924,12 +3933,12 @@ export default function Onboarding() {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
-      if (stepParam) {
-        const p = parseInt(stepParam, 10)
-        if (!isNaN(p) && !cancelled) setStep(p)
-        if (!cancelled) setStepLoaded(true)
+      const deepLinkStep = parseStepParam(stepParam)
+      if (deepLinkStep !== null) {
+        if (!cancelled) { setStep(deepLinkStep); setStepLoaded(true) }
         return
       }
+      // No valid deep-link step → resume from the saved step instead.
       const saved = await AsyncStorage.getItem('onboarding_step')
       if (cancelled) return
       if (saved) {
@@ -3949,9 +3958,9 @@ export default function Onboarding() {
   // above won't re-run. Instantly hide → swap → fade-in to prevent the old screen
   // from flashing before the new one appears.
   useEffect(() => {
-    if (!stepParam || !stepLoaded) return
-    const p = parseInt(stepParam, 10)
-    if (isNaN(p) || p === step) return
+    if (!stepLoaded) return
+    const p = parseStepParam(stepParam)
+    if (p === null || p === step) return
     fadeAnim.setValue(0)
     setStep(p)
     requestAnimationFrame(() => {
