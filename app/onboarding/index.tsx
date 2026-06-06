@@ -318,13 +318,11 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     // almost always copy on screen. Times include the +0.4s shift from the opening freeze-frame
     // baked into the asset (video is now 25.37s; content starts 0.4s later).
     const CAPTIONS: { in: number; out: number; text: string }[] = [
-      { in: 1.0, out: 2.4, text: 'Scan your pantry in 30 seconds' },   // dashboard + Scan Now
-      { in: 2.7, out: 5.6, text: 'Just photograph your pantry' },      // camera screens
+      { in: 1.0, out: 5.6, text: 'Scan your pantry in 30 seconds' },   // holds over dashboard + camera
       { in: 5.9, out: 8.3, text: 'AI finds everything you have' },     // live count 5→8→19 spotted
       { in: 8.6, out: 13.3, text: 'Your whole pantry, instantly tracked' }, // detected items list
-      { in: 13.6, out: 15.0, text: "Instant meals from what's already there" }, // 3 Cook-tonight cards
-      { in: 15.3, out: 18.2, text: 'Built around your macros' },       // meal detail w/ macros visible
-      { in: 18.5, out: 21.8, text: 'Logged in one tap' },             // log sheet → Logged ✓ → back to pantry
+      { in: 13.6, out: 18.3, text: 'Instant meals built around your macros' }, // meal cards + meal detail
+      { in: 18.6, out: 21.8, text: 'Logged in one tap' },             // log sheet → Logged ✓ → back to pantry
       { in: 22.1, out: 24.9, text: 'Plus a feed of trending recipes' }, // Discover
     ]
     const RIPPLES: { v: number; anim: Animated.Value }[] = [
