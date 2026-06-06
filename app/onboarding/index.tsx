@@ -225,12 +225,46 @@ function PillButton({ label, onPress, variant = 'white', disabled }: { label: st
   )
 }
 
+// One-shot tap-ripple: an expanding ring + a finger-dot pulse, driven by a 0→1 Animated.Value.
+function TapRipple({ anim, style }: { anim: Animated.Value; style?: any }) {
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[w1.rippleWrap, style, { opacity: anim.interpolate({ inputRange: [0, 0.05, 0.7, 1], outputRange: [0, 0.9, 0.5, 0] }) }]}
+    >
+      <Animated.View style={[w1.rippleRing, { transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.3, 2.0] }) }] }]} />
+      <Animated.View style={[w1.rippleDot, { transform: [{ scale: anim.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0.6, 1, 0.85] }) }] }]} />
+    </Animated.View>
+  )
+}
+
+// ✓ success pop — scales in past 1 then settles, fades out. Reinforces the in-app "Logged ✓".
+function LoggedPop({ anim }: { anim: Animated.Value }) {
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[w1.popWrap, {
+        opacity: anim.interpolate({ inputRange: [0, 0.15, 0.75, 1], outputRange: [0, 1, 1, 0] }),
+        transform: [{ scale: anim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.4, 1.12, 1] }) }],
+      }]}
+    >
+      <View style={w1.popCircle}><Check size={36} stroke="#000000" strokeWidth={3.2} /></View>
+    </Animated.View>
+  )
+}
+
 function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => void }) {
   // 0 = offscreen below (pre-enter), 1 = at rest (visible), 2 = offscreen above (post-exit)
   const phoneAnim = useRef(new Animated.Value(0)).current
   // Separate zoom animations per meal callout so each can have its own scale + focal point
   const zoom1 = useRef(new Animated.Value(0)).current  // focuses on bottom meal cards (deeper zoom)
   const zoom2 = useRef(new Animated.Value(0)).current  // centered meal card zoom (standard)
+  // Overlay layer synced to the video: benefit captions, tap-ripples, and the "logged" pop.
+  const r1 = useRef(new Animated.Value(0)).current      // tap-ripple on Scan Now (~1s)
+  const r2 = useRef(new Animated.Value(0)).current      // tap-ripple on a meal card (~13s)
+  const logPop = useRef(new Animated.Value(0)).current  // ✓ success pop at logging (~19s)
+  const captionOpacity = useRef(new Animated.Value(0)).current
+  const [caption, setCaption] = useState<string | null>(null)
 
   const player = useVideoPlayer(require('../../assets/onboarding-preview.mov'), (p) => {
     p.loop = false
@@ -259,12 +293,36 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     const ZOOM_CYCLE = ZOOM_IN_DURATION + ZOOM_HOLD_DURATION + ZOOM_OUT_DURATION
     // Hold the first frame (video paused at t=0) this long before starting playback on each cycle.
     const START_HOLD_DELAY = 250
-    // Hold must cover the FULL video before the exit animation. Video is 24.57s; at
-    // 0.9× that's ~27.3s of playback, so the loop was cutting off at ~12s with the old
-    // 13500 value. 27800 lets the whole flow play through (the +zoom-pause + start-hold
-    // are added into HOLD_DURATION below).
-    const BASE_HOLD = 27800
+    // Hold must cover the FULL video before the exit animation. Video is 24.97s; at
+    // 0.9× that's ~27.7s of playback + 2×ZOOM_CYCLE pauses, so the video finishes
+    // ~31.3s after cycle start. 28400 leaves a ~650ms margin before the exit kicks in
+    // (the +zoom-pause + start-hold are added into HOLD_DURATION below).
+    const BASE_HOLD = 28400
     const HOLD_DURATION = BASE_HOLD + START_HOLD_DELAY + ZOOM_AT.length * ZOOM_CYCLE
+
+    // Convert a raw VIDEO timestamp (seconds) → wall-clock ms offset from cycle start,
+    // matching the same clock the zooms use. Video starts playing at (1000 + START_HOLD_DELAY),
+    // runs at 0.9×, and each zoom pauses it for one ZOOM_CYCLE — so any moment AFTER a zoom is
+    // pushed later by that pause. Mirrors the ZOOM_AT derivation (e.g. 15.5s → 18400).
+    const ZOOM_VIDEO_S = [13.5, 15.5] // video-time of zoom1 / zoom2 (keep in sync with ZOOM_AT)
+    const at = (videoSec: number) =>
+      1000 + START_HOLD_DELAY + (videoSec * 1000) / 0.9 + ZOOM_VIDEO_S.filter(z => videoSec > z).length * ZOOM_CYCLE
+
+    // Benefit captions, keyed to the verified screen timeline of the 24.97s preview.
+    // `in`/`out` are VIDEO seconds (when the screen is actually on-frame); `at()` handles the math.
+    const CAPTIONS: { in: number; out: number; text: string }[] = [
+      { in: 0.6, out: 1.9, text: 'Scan your pantry in 30 seconds' },   // dashboard + Scan Now (cuts at 1.9s)
+      { in: 5.6, out: 7.8, text: 'AI finds everything you have' },     // live count 5→8→19 spotted
+      { in: 13.2, out: 14.6, text: "Instant meals from what's already there" }, // 3 Cook-tonight cards
+      { in: 15.1, out: 17.9, text: 'Built around your macros' },       // meal detail w/ macros visible
+      { in: 18.5, out: 20.3, text: 'Logged in one tap' },             // log sheet → Logged ✓
+      { in: 22.0, out: 24.4, text: 'Plus a feed of trending recipes' }, // Discover (on-screen 21.7s+)
+    ]
+    const RIPPLES: { v: number; anim: Animated.Value }[] = [
+      { v: 1.1, anim: r1 },   // Scan Now button, before the 1.9s cut
+      { v: 13.3, anim: r2 },  // first meal card — taps right before zoom1 punches in at 13.5s
+    ]
+    const LOG_POP_AT = 19.4 // ✓ blooms as the in-app button flips to "Logged ✓" (verified ~19.8s)
 
     const triggerZoom = (anim: Animated.Value) => {
       try { player.pause() } catch {}
@@ -286,6 +344,11 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       phoneAnim.setValue(0)
       zoom1.setValue(0)
       zoom2.setValue(0)
+      r1.setValue(0)
+      r2.setValue(0)
+      logPop.setValue(0)
+      captionOpacity.setValue(0)
+      setCaption(null)
       try {
         ;(player as any).currentTime = 0
       } catch {}
@@ -300,6 +363,36 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
         const anim = ZOOM_ANIMS[i] ?? zoom1
         pending.push(setTimeout(() => triggerZoom(anim), 1000 + START_HOLD_DELAY + t))
       })
+
+      // Captions: crossfade in over the static headline at each in-time, fade back out at out-time.
+      CAPTIONS.forEach(c => {
+        pending.push(setTimeout(() => {
+          if (cancelled) return
+          setCaption(c.text)
+          Animated.timing(captionOpacity, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+        }, at(c.in)))
+        pending.push(setTimeout(() => {
+          if (cancelled) return
+          Animated.timing(captionOpacity, { toValue: 0, duration: 320, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start()
+        }, at(c.out)))
+      })
+
+      // Tap-ripples: one-shot expand+fade. Ripples live inside the phone screen so they inherit
+      // the zoom transform and stay glued to their target as the mockup pans/scales.
+      RIPPLES.forEach(r => {
+        pending.push(setTimeout(() => {
+          if (cancelled) return
+          r.anim.setValue(0)
+          Animated.timing(r.anim, { toValue: 1, duration: 750, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+        }, at(r.v)))
+      })
+
+      // ✓ Logged success pop
+      pending.push(setTimeout(() => {
+        if (cancelled) return
+        logPop.setValue(0)
+        Animated.timing(logPop, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+      }, at(LOG_POP_AT)))
 
       Animated.sequence([
         // Enter: slide up from below + fade in (1s)
@@ -330,6 +423,10 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       phoneAnim.stopAnimation()
       zoom1.stopAnimation()
       zoom2.stopAnimation()
+      r1.stopAnimation()
+      r2.stopAnimation()
+      logPop.stopAnimation()
+      captionOpacity.stopAnimation()
       pending.forEach(clearTimeout)
       try { player.pause() } catch {}
     }
@@ -400,13 +497,20 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
                 allowsFullscreen={false}
                 allowsPictureInPicture={false}
               />
+              {/* Synced overlays — inside the screen so they inherit the zoom transform */}
+              <TapRipple anim={r1} style={{ top: '76%', left: '50%' }} />
+              <TapRipple anim={r2} style={{ top: '66%', left: '50%' }} />
+              <LoggedPop anim={logPop} />
             </View>
           </Animated.View>
         </View>
 
-        {/* Headline */}
-        <View style={{ alignItems: 'center', paddingBottom: 12 }}>
+        {/* Headline — benefit captions crossfade over it, synced to the video */}
+        <View style={w1.headlineWrap}>
           <Text style={w1.headline}>Cook with{'\n'}what you have</Text>
+          <Animated.View pointerEvents="none" style={[w1.captionOverlay, { opacity: captionOpacity }]}>
+            <Text style={w1.captionText}>{caption}</Text>
+          </Animated.View>
         </View>
       </View>
 
@@ -457,6 +561,16 @@ const w1 = StyleSheet.create({
     right: -2,
   },
   headline: { fontSize: 32, fontWeight: '800', color: '#FFF', textAlign: 'center', letterSpacing: -0.5, lineHeight: 38, marginTop: 8 },
+  // Fixed-height zone so the caption can crossfade over the headline without shifting layout.
+  headlineWrap: { alignItems: 'center', justifyContent: 'center', paddingBottom: 12, minHeight: 92 },
+  captionOverlay: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000000', paddingHorizontal: 16 },
+  captionText: { fontSize: 23, fontWeight: '800', color: '#FFFFFF', textAlign: 'center', letterSpacing: -0.3, lineHeight: 29 },
+  // Tap-ripple + success-pop overlays (children of the phone screen, so they ride the zoom transform).
+  rippleWrap: { position: 'absolute', width: 90, height: 90, marginLeft: -45, marginTop: -45, alignItems: 'center', justifyContent: 'center', zIndex: 5 },
+  rippleRing: { position: 'absolute', width: 70, height: 70, borderRadius: 35, borderWidth: 2.5, borderColor: '#FFFFFF' },
+  rippleDot: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.55)' },
+  popWrap: { position: 'absolute', top: '46%', left: '50%', width: 90, height: 90, marginLeft: -45, marginTop: -45, alignItems: 'center', justifyContent: 'center', zIndex: 6 },
+  popCircle: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center', shadowColor: '#4ADE80', shadowOpacity: 0.6, shadowRadius: 16, shadowOffset: { width: 0, height: 0 } },
 })
 
 const GOALS = [
