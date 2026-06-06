@@ -177,6 +177,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
+  // Animated "Spotted N items" reveal — counts up from 0 when results land.
+  const [spottedCount, setSpottedCount] = useState(0)
 
   // Camera
   const cameraRef = useRef<CameraView>(null)
@@ -296,6 +298,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     }, 1000)
     return () => clearInterval(interval)
   }, [step, showDone])
+
+  // Count up 0 → N when the first-pass results land — a satisfying "the AI found N
+  // items" reveal (and what the onboarding demo video captures on this screen).
+  useEffect(() => {
+    const target = detectedItems.length
+    if (!showDone || target === 0) { setSpottedCount(0); return }
+    setSpottedCount(0)
+    let current = 0
+    const ticks = Math.min(target, 22)        // cap steps so large counts don't crawl
+    const step = Math.max(1, Math.ceil(target / ticks))
+    const id = setInterval(() => {
+      current = Math.min(current + step, target)
+      setSpottedCount(current)
+      if (current >= target) clearInterval(id)
+    }, 700 / ticks)                            // ~700ms total regardless of N
+    return () => clearInterval(id)
+  }, [showDone, detectedItems.length])
 
   // Request camera permission when modal opens
   useEffect(() => {
@@ -658,7 +677,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 {scanError
                   ? scanError
                   : showDone
-                    ? `Spotted ${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} — you can add anything we missed on the next screen`
+                    ? `Spotted ${spottedCount} item${spottedCount === 1 ? '' : 's'} — you can add anything we missed on the next screen`
                     : LOADING_STAGES[loadingMessageIdx].sub}
               </Text>
             </View>
