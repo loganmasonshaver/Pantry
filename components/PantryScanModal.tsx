@@ -177,8 +177,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
-  // Animated "Spotted N items" reveal — counts up from 0 when results land.
+  // Live-feel item counter: ramps up WHILE scanning (simulated — GPT returns all
+  // items at once, so there's nothing real to stream), then settles to the true
+  // total when results land. countRef mirrors it so the effects can read the latest
+  // value without re-subscribing on every tick.
   const [spottedCount, setSpottedCount] = useState(0)
+  const spottedCountRef = useRef(0)
+  useEffect(() => { spottedCountRef.current = spottedCount }, [spottedCount])
 
   // Camera
   const cameraRef = useRef<CameraView>(null)
@@ -299,20 +304,42 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     return () => clearInterval(interval)
   }, [step, showDone])
 
-  // Count up 0 → N when the first-pass results land — a satisfying "the AI found N
-  // items" reveal (and what the onboarding demo video captures on this screen).
+  // Phase 1 — live ramp WHILE scanning. Ticks up with a decelerating gap (fast at
+  // first, then crawling) toward a soft cap, so it feels like the AI is spotting
+  // items in real time during the 30s-2min scan. Resets when the scan (re)starts.
+  useEffect(() => {
+    if (step !== 5 || showDone || scanError) return
+    setSpottedCount(0)
+    spottedCountRef.current = 0
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    const tick = () => {
+      if (cancelled) return
+      const n = spottedCountRef.current
+      if (n >= 24) return // soft cap — real total replaces this on completion
+      const next = n + 1
+      spottedCountRef.current = next
+      setSpottedCount(next)
+      timer = setTimeout(tick, 350 + next * 110) // gap grows ~110ms per item
+    }
+    timer = setTimeout(tick, 450)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [step, showDone, scanError])
+
+  // Phase 2 — settle from the live value to the true total when results land
+  // (counts up or down a few from wherever the ramp was, so there's no jarring jump).
   useEffect(() => {
     const target = detectedItems.length
-    if (!showDone || target === 0) { setSpottedCount(0); return }
-    setSpottedCount(0)
-    let current = 0
-    const ticks = Math.min(target, 22)        // cap steps so large counts don't crawl
-    const step = Math.max(1, Math.ceil(target / ticks))
+    if (!showDone || target === 0) return
+    let current = spottedCountRef.current
+    if (current === target) return
+    const dir = target > current ? 1 : -1
     const id = setInterval(() => {
-      current = Math.min(current + step, target)
+      current += dir
+      spottedCountRef.current = current
       setSpottedCount(current)
-      if (current >= target) clearInterval(id)
-    }, 700 / ticks)                            // ~700ms total regardless of N
+      if (current === target) clearInterval(id)
+    }, 45)
     return () => clearInterval(id)
   }, [showDone, detectedItems.length])
 
@@ -670,16 +697,25 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   <ScanLine size={32} stroke={scanError ? '#F87171' : '#4ADE80'} strokeWidth={1.6} />
                 </View>
               </View>
-              <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>
-                {scanError ? 'Scan failed' : showDone ? 'First pass complete' : LOADING_STAGES[loadingMessageIdx].title}
-              </Text>
-              <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>
-                {scanError
-                  ? scanError
-                  : showDone
-                    ? `Spotted ${spottedCount} item${spottedCount === 1 ? '' : 's'} — you can add anything we missed on the next screen`
-                    : LOADING_STAGES[loadingMessageIdx].sub}
-              </Text>
+              {scanError ? (
+                <>
+                  <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>Scan failed</Text>
+                  <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>{scanError}</Text>
+                </>
+              ) : (
+                <>
+                  {/* Hero count — ramps live while scanning, settles to the real total. */}
+                  <Text style={styles.scanCount}>{spottedCount}</Text>
+                  <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 2, fontWeight: '700', color: COLORS.textWhite }]}>
+                    item{spottedCount === 1 ? '' : 's'} spotted
+                  </Text>
+                  <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 10, paddingHorizontal: 12 }]}>
+                    {showDone
+                      ? 'Tap below to review and add anything we missed'
+                      : LOADING_STAGES[loadingMessageIdx].title}
+                  </Text>
+                </>
+              )}
             </View>
 
             {/* Footer button — state-aware: View Results / Retry / nothing (still scanning) */}
@@ -1183,6 +1219,16 @@ const styles = StyleSheet.create({
   loadingFooter: {
     paddingBottom: 8,
     paddingHorizontal: 4,
+  },
+  // Hero live-count number on the scan loading screen.
+  scanCount: {
+    fontSize: 56,
+    fontWeight: '800',
+    color: COLORS.accent,
+    textAlign: 'center',
+    marginTop: 28,
+    letterSpacing: -1,
+    fontVariant: ['tabular-nums'], // fixed-width digits so the number doesn't jitter as it ticks
   },
 
   // Loading pulse
