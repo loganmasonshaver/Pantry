@@ -262,6 +262,8 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
   // Overlay layer synced to the video: benefit captions, tap-ripples, and the "logged" pop.
   const r1 = useRef(new Animated.Value(0)).current      // tap-ripple on Scan Now (~1s)
   const r2 = useRef(new Animated.Value(0)).current      // tap-ripple on a meal card (~13s)
+  const r3 = useRef(new Animated.Value(0)).current      // tap-ripple on the camera shutter (~3s)
+  const r4 = useRef(new Animated.Value(0)).current      // tap-ripple on Log Meal (~18s)
   const logPop = useRef(new Animated.Value(0)).current  // ✓ success pop at logging (~19s)
   const captionOpacity = useRef(new Animated.Value(0)).current
   const [caption, setCaption] = useState<string | null>(null)
@@ -285,7 +287,11 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     // the first, to compensate for the earlier pause).
     //   zoom1 (deep, bottom cards) → the 3 "Cook tonight" meal cards at ~13.5s video
     //   zoom2 (centered)           → the meal detail "YOU HAVE" ingredients at ~15.5s video
-    const ZOOM_AT: number[] = [15000, 18400] // ≈ video 13.5s, 15.5s
+    // Two zooms, each landing on a verified hero beat of the new cut (paired with a ripple/caption
+    // so they read as intentional, not random): 13.5s = the 3 Cook-tonight meal cards, 15.6s = the
+    // meal-detail parfait hero + macro stats. Wall-clock offsets via t = videoMs/0.9 (+ZOOM_CYCLE
+    // for zoom2 to cover zoom1's pause).
+    const ZOOM_AT: number[] = [15000, 18500] // ≈ video 13.5s, 15.6s
     const ZOOM_ANIMS = [zoom1, zoom2]
     const ZOOM_IN_DURATION = 320
     const ZOOM_HOLD_DURATION = 520
@@ -304,7 +310,7 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     // matching the same clock the zooms use. Video starts playing at (1000 + START_HOLD_DELAY),
     // runs at 0.9×, and each zoom pauses it for one ZOOM_CYCLE — so any moment AFTER a zoom is
     // pushed later by that pause. Mirrors the ZOOM_AT derivation (e.g. 15.5s → 18400).
-    const ZOOM_VIDEO_S = [13.5, 15.5] // video-time of zoom1 / zoom2 (keep in sync with ZOOM_AT)
+    const ZOOM_VIDEO_S = [13.5, 15.6] // video-time of zoom1 / zoom2 (keep in sync with ZOOM_AT)
     const at = (videoSec: number) =>
       1000 + START_HOLD_DELAY + (videoSec * 1000) / 0.9 + ZOOM_VIDEO_S.filter(z => videoSec > z).length * ZOOM_CYCLE
 
@@ -320,7 +326,9 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     ]
     const RIPPLES: { v: number; anim: Animated.Value }[] = [
       { v: 1.1, anim: r1 },   // Scan Now button, before the 1.9s cut
+      { v: 3.3, anim: r3 },   // camera shutter mid fridge-shot
       { v: 13.3, anim: r2 },  // first meal card — taps right before zoom1 punches in at 13.5s
+      { v: 18.0, anim: r4 },  // Log Meal button — tap that opens the log sheet → Logged ✓ pop
     ]
     const LOG_POP_AT = 19.4 // ✓ blooms as the in-app button flips to "Logged ✓" (verified ~19.8s)
 
@@ -346,6 +354,8 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       zoom2.setValue(0)
       r1.setValue(0)
       r2.setValue(0)
+      r3.setValue(0)
+      r4.setValue(0)
       logPop.setValue(0)
       captionOpacity.setValue(0)
       setCaption(null)
@@ -364,7 +374,7 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
         pending.push(setTimeout(() => triggerZoom(anim), 1000 + START_HOLD_DELAY + t))
       })
 
-      // Captions: crossfade in over the static headline at each in-time, fade back out at out-time.
+      // Captions: fade the synced line in at each in-time, fade it back out at out-time.
       CAPTIONS.forEach(c => {
         pending.push(setTimeout(() => {
           if (cancelled) return
@@ -425,6 +435,8 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       zoom2.stopAnimation()
       r1.stopAnimation()
       r2.stopAnimation()
+      r3.stopAnimation()
+      r4.stopAnimation()
       logPop.stopAnimation()
       captionOpacity.stopAnimation()
       pending.forEach(clearTimeout)
@@ -499,18 +511,18 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
               />
               {/* Synced overlays — inside the screen so they inherit the zoom transform */}
               <TapRipple anim={r1} style={{ top: '76%', left: '50%' }} />
+              <TapRipple anim={r3} style={{ top: '88%', left: '50%' }} />
               <TapRipple anim={r2} style={{ top: '66%', left: '50%' }} />
+              <TapRipple anim={r4} style={{ top: '91%', left: '33%' }} />
               <LoggedPop anim={logPop} />
             </View>
           </Animated.View>
         </View>
 
-        {/* Headline — benefit captions crossfade over it, synced to the video */}
+        {/* Synced benefit captions — the only text in this slot, so nothing flashes
+            through during the gaps between captions (just clean black). */}
         <View style={w1.headlineWrap}>
-          <Text style={w1.headline}>Cook with{'\n'}what you have</Text>
-          <Animated.View pointerEvents="none" style={[w1.captionOverlay, { opacity: captionOpacity }]}>
-            <Text style={w1.captionText}>{caption}</Text>
-          </Animated.View>
+          <Animated.Text style={[w1.captionText, { opacity: captionOpacity }]}>{caption}</Animated.Text>
         </View>
       </View>
 
@@ -560,10 +572,8 @@ const w1 = StyleSheet.create({
   btnRight: {
     right: -2,
   },
-  headline: { fontSize: 32, fontWeight: '800', color: '#FFF', textAlign: 'center', letterSpacing: -0.5, lineHeight: 38, marginTop: 8 },
-  // Fixed-height zone so the caption can crossfade over the headline without shifting layout.
-  headlineWrap: { alignItems: 'center', justifyContent: 'center', paddingBottom: 12, minHeight: 92 },
-  captionOverlay: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#000000', paddingHorizontal: 16 },
+  // Fixed-height zone for the synced captions so swapping lines never shifts layout.
+  headlineWrap: { alignItems: 'center', justifyContent: 'center', paddingBottom: 12, minHeight: 92, paddingHorizontal: 16 },
   captionText: { fontSize: 23, fontWeight: '800', color: '#FFFFFF', textAlign: 'center', letterSpacing: -0.3, lineHeight: 29 },
   // Tap-ripple + success-pop overlays (children of the phone screen, so they ride the zoom transform).
   rippleWrap: { position: 'absolute', width: 90, height: 90, marginLeft: -45, marginTop: -45, alignItems: 'center', justifyContent: 'center', zIndex: 5 },
