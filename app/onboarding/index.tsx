@@ -287,8 +287,9 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     //   zoom1 (deep, bottom cards) → the 3 "Cook tonight" meal cards at ~13.5s video
     //   zoom2 (centered)           → the meal detail "YOU HAVE" ingredients at ~15.5s video
     // One zoom only: it holds (no zoom) on the pantry meal-card list and punches in once we're
-    // inside the clicked meal — the parfait hero + macro stats at ~15.3s video. t = videoMs/0.9.
-    const ZOOM_AT: number[] = [17000] // ≈ video 15.3s
+    // inside the clicked meal — the parfait hero + macro stats at ~15.7s video (incl. +0.4s
+    // opening-freeze shift). t = videoMs/0.9.
+    const ZOOM_AT: number[] = [17444] // ≈ video 15.7s
     const ZOOM_ANIMS = [zoom2]
     const ZOOM_IN_DURATION = 320
     const ZOOM_HOLD_DURATION = 520
@@ -296,40 +297,41 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     const ZOOM_CYCLE = ZOOM_IN_DURATION + ZOOM_HOLD_DURATION + ZOOM_OUT_DURATION
     // Hold the first frame (video paused at t=0) this long before starting playback on each cycle.
     const START_HOLD_DELAY = 250
-    // Hold must cover the FULL video before the exit animation. Video is 24.97s; at
-    // 0.9× that's ~27.7s of playback + 2×ZOOM_CYCLE pauses, so the video finishes
-    // ~31.3s after cycle start. 28400 leaves a ~650ms margin before the exit kicks in
+    // Hold must cover the FULL video before the exit animation. Video is 25.37s (incl. the 0.4s
+    // opening freeze); at 0.9× that's ~28.2s of playback + 1×ZOOM_CYCLE pause, so the video
+    // finishes ~30.6s after cycle start. 28800 leaves a ~600ms margin before the exit kicks in
     // (the +zoom-pause + start-hold are added into HOLD_DURATION below).
-    const BASE_HOLD = 28400
+    const BASE_HOLD = 28800
     const HOLD_DURATION = BASE_HOLD + START_HOLD_DELAY + ZOOM_AT.length * ZOOM_CYCLE
 
     // Convert a raw VIDEO timestamp (seconds) → wall-clock ms offset from cycle start,
     // matching the same clock the zooms use. Video starts playing at (1000 + START_HOLD_DELAY),
     // runs at 0.9×, and each zoom pauses it for one ZOOM_CYCLE — so any moment AFTER a zoom is
     // pushed later by that pause. Mirrors the ZOOM_AT derivation (e.g. 15.5s → 18400).
-    const ZOOM_VIDEO_S = [15.3] // video-time of the single zoom (keep in sync with ZOOM_AT)
+    const ZOOM_VIDEO_S = [15.7] // video-time of the single zoom (keep in sync with ZOOM_AT)
     const at = (videoSec: number) =>
       1000 + START_HOLD_DELAY + (videoSec * 1000) / 0.9 + ZOOM_VIDEO_S.filter(z => videoSec > z).length * ZOOM_CYCLE
 
     // Benefit captions, keyed to the verified screen timeline of the 24.97s preview.
     // `in`/`out` are VIDEO seconds (when the screen is actually on-frame); `at()` handles the math.
     // Near-continuous: each line bridges to the next with only a ~0.3s crossfade gap, so there's
-    // almost always copy on screen. Connective lines (fridge, shelves) fill what were dead gaps.
+    // almost always copy on screen. Times include the +0.4s shift from the opening freeze-frame
+    // baked into the asset (video is now 25.37s; content starts 0.4s later).
     const CAPTIONS: { in: number; out: number; text: string }[] = [
-      { in: 0.6, out: 2.0, text: 'Scan your pantry in 30 seconds' },   // dashboard + Scan Now (cuts at 2s)
-      { in: 2.3, out: 5.2, text: 'Just photograph your fridge' },      // camera screens
-      { in: 5.5, out: 7.9, text: 'AI finds everything you have' },     // live count 5→8→19 spotted
-      { in: 8.2, out: 12.9, text: 'Sorted onto your shelves instantly' }, // detected items list by shelf
-      { in: 13.2, out: 14.6, text: "Instant meals from what's already there" }, // 3 Cook-tonight cards
-      { in: 14.9, out: 17.8, text: 'Built around your macros' },       // meal detail w/ macros visible
-      { in: 18.1, out: 21.4, text: 'Logged in one tap' },             // log sheet → Logged ✓ → back to pantry
-      { in: 21.7, out: 24.5, text: 'Plus a feed of trending recipes' }, // Discover (on-screen 21.7s+)
+      { in: 1.0, out: 2.4, text: 'Scan your pantry in 30 seconds' },   // dashboard + Scan Now
+      { in: 2.7, out: 5.6, text: 'Just photograph your pantry' },      // camera screens
+      { in: 5.9, out: 8.3, text: 'AI finds everything you have' },     // live count 5→8→19 spotted
+      { in: 8.6, out: 13.3, text: 'Your whole pantry, instantly tracked' }, // detected items list
+      { in: 13.6, out: 15.0, text: "Instant meals from what's already there" }, // 3 Cook-tonight cards
+      { in: 15.3, out: 18.2, text: 'Built around your macros' },       // meal detail w/ macros visible
+      { in: 18.5, out: 21.8, text: 'Logged in one tap' },             // log sheet → Logged ✓ → back to pantry
+      { in: 22.1, out: 24.9, text: 'Plus a feed of trending recipes' }, // Discover
     ]
     const RIPPLES: { v: number; anim: Animated.Value }[] = [
-      { v: 1.1, anim: r1 },   // Scan Now button, before the 2s cut
-      { v: 18.0, anim: r4 },  // Log Meal button — tap that opens the log sheet → Logged ✓ pop
+      { v: 1.5, anim: r1 },   // Scan Now button (incl. +0.4s opening-freeze shift)
+      { v: 18.4, anim: r4 },  // Log Meal button — tap that opens the log sheet → Logged ✓ pop
     ]
-    const LOG_POP_AT = 19.4 // ✓ blooms as the in-app button flips to "Logged ✓" (verified ~19.8s)
+    const LOG_POP_AT = 19.8 // ✓ blooms as the in-app button flips to "Logged ✓" (incl. +0.4s shift)
 
     const triggerZoom = (anim: Animated.Value) => {
       try { player.pause() } catch {}
