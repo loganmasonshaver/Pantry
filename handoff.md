@@ -1,160 +1,143 @@
-# Handoff — Scan-pantry overhaul + premium-only enforcement + trending cron debug
+# Handoff — Onboarding intro video polish (captions + ripples + logged pop) & session recap
 
-## TL;DR
-
-Sessions over the last ~24h cleaned up the pantry-scan pipeline end-to-end, fixed a recurring close-button clipping bug, removed freemium drift that contradicted the premium-only model, and diagnosed (but did not yet fix) why trending meals aren't generating via cron.
-
-Three things still need Logan's action:
-1. **Fix the cron service-role key in Vault** (legacy JWT format, not the new `sb_secret_` format) so the trending-meals daily job can authenticate
-2. **Reset `pantry_scan_count` and `receipt_scan_count` on his profile** so he can test scans (the count-gate code is stripped but his row still has the burn-through from yesterday)
-3. **Verify scan-pantry works end-to-end** with the new build (force-reload Metro first)
+**Branch:** `main`. Everything below is committed & pushed. Metro is running from
+`/Users/loganshaver/pantry` (localhost:8081); the dev build is installed on Logan's
+physical iPhone ("Logan's iphone", UDID `00008150-0001691A3688401C`). To see JS
+changes: open the app → shake → Reload (phone must be on the same network / Personal
+Hotspot per the iOS USB setup note).
 
 ---
 
-## Scan-pantry — full rewrite of the loading / failure / quota path
+## 🚧 THE BIG REMAINING TASK — onboarding intro video overlays
 
-Across commits `4a3a97f` → `8dfdcd1` → `02ab270` → `59fb4aa` → `0b77fa9` → `b93a151` → `94071ff`:
+Logan delivered a **new** preview video (already in place at
+`assets/onboarding-preview.mov`, **24.97s**, ~9MB). The intro screen plays it inside a
+phone mockup with two Ken-Burns zooms. Logan wants to layer on, **synced to the video**:
 
-### Architecture changes
+1. **Captions** — short benefit lines that fade/slide in at each key moment, building
+   toward the paywall. Approved copy (finalize/tweak voice as you build):
+   - **~1–2s** (dashboard / Scan Now): **"Scan your pantry in 30 seconds"** ← 30s claim is approved
+   - **~5–7s** (live count / detection): "AI finds everything you have" (the in-app live
+     counter is now captured in the footage — see below)
+   - **~13s** (3 meal cards): "Instant meals from what's already there"
+   - **~15s** (recipe / YOU HAVE ingredients): "Built around your macros"
+   - **~19s** (logging): "Logged in one tap"
+   - **~23s** (Discover): **add a Discover caption** — draft: "Plus a feed of trending recipes"
+2. **Tap-ripple beats** — a finger-pulse/ripple over the mockup at:
+   - **~1s** on the **"Scan Now"** button (bottom-center of the dashboard frame)
+   - **~13s** on a **meal card** (the "Cook tonight" list)
+   - Goal: signal "this is effortless" + subconsciously teach the gesture.
+3. **"✓ Logged" success pop** at **~19s** — clean checkmark pop for completion dopamine.
 
-**Barcode enrichment removed entirely.** It was hitting Open Food Facts sequentially for every item GPT-4o read a UPC for — 60-90s of latency on dense pantries and a real scale risk (1000 concurrent OFF requests at 10k MAU). GPT-4o's label-reading gives 90%+ of the canonicalization value with none of the cost. ~50 lines deleted. The `generate-ingredient-images` Storage bucket + edge function were also deleted from scan-pantry in this work.
+**After building, Logan explicitly asked: re-watch the WHOLE video again and verify every
+overlay lands on the right frame.** Don't trust the timestamps blindly — extract fresh
+frames and confirm (see method below).
 
-**Time-anchored loading messages.** Replaced the 2.2s-rotation of 5 random messages with 8 stages indexed by elapsed-ms, each matching a real server-side step. No more "Second pass..." showing 8 seconds in. Hard timeout at 180s flips the UI to error state.
+### Video flow → timestamp map (from frame extraction; near-identical to prior cut)
+| Video time | Screen |
+|---|---|
+| ~1s | Dashboard — calorie ring, "Unlock recipes built around what you already have", **Scan Now** |
+| ~3s | Camera — "Now photograph your fridge" |
+| ~5s | **Live count** — "3 items spotted / Uploading photos…" (the new in-app counter, captured) |
+| ~7s | "First pass complete — Spotted N items" / View Results |
+| ~9–11s | Detected Items list (by shelf) |
+| ~13s | Pantry "Cook tonight" — 3 meal cards |
+| ~15s | Meal detail — parfait, macros, "YOU HAVE" ingredients |
+| ~17s | Recipe instructions |
+| ~19s | "Logging…" |
+| ~21s | Back to pantry |
+| ~23s | Discover (featured + trending) |
 
-**Per-photo density gate for second pass.** First-pass prompt now returns `photo: <index>` per item. Server computes per-photo density; only runs the ~30s second pass if any single photo has 20+ items (the threshold where GPT-4o attention starts thinning out). Sparse scans skip second pass entirely. Pure score-based — no "items per photo total" averaging, the densest photo decides.
+⚠️ These are from the **previous** 24.57s cut + the new frames at 1/3/5s (which matched +
+showed the live counter). The new video is 24.97s. **Re-extract frames to confirm exact
+times before finalizing** — `ffmpeg`/`ffprobe` are installed:
+```bash
+ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 assets/onboarding-preview.mov
+for t in $(seq 1 2 24); do ffmpeg -loglevel error -ss $t -i assets/onboarding-preview.mov -frames:v 1 -vf scale=230:-1 /tmp/vf/f_${t}s.jpg; done
+```
+(`montage`/imagemagick is NOT installed — read frames individually.)
 
-**Stage timing logs throughout.** `[scan-pantry] invoked`, `first pass: Xms, Y items`, `per-photo density`, `second pass: Xms`, `total: Xms`. Next slow-scan debugging is a 30-second log read instead of guessing.
+### Where & how to implement (the animation system)
+All of this lives in the **W1 intro component** in `app/onboarding/index.tsx`:
+- Video player: `useVideoPlayer(require('../../assets/onboarding-preview.mov'))` at **line ~235**,
+  `playbackRate = 0.9` (so 24.97s footage = ~27.7s of wall-clock playback).
+- The phone mockup + video render starts at **line ~341** (`w1.phoneWrap` / `w1.phone` / `w1.video`).
+- The timing engine is the `runCycle()` effect (**lines ~244–330**):
+  - `phoneAnim` drives enter(1s)/hold/exit(1s). Video `play()` is scheduled at
+    `1000 + START_HOLD_DELAY` (=1250ms) after cycle start.
+  - **Zooms** fire via `setTimeout(triggerZoom, 1000 + START_HOLD_DELAY + t)` where `t` is in
+    `ZOOM_AT` (currently `[15000, 18400]`). **triggerZoom PAUSES the video** for one
+    `ZOOM_CYCLE` (~1160ms) — so wall-clock ≠ video time. Conversion: `t = videoMs / 0.9`
+    (+ `ZOOM_CYCLE` for any beat after the first zoom, to compensate for the pause).
+  - `BASE_HOLD = 27800` controls when the loop exits; must cover the full video
+    (24.97s / 0.9 ≈ 27.7s + zoom pauses). **Bump if the loop still cuts off early on the new cut.**
+- **Captions/ripples/pop should be new `Animated.Value`s scheduled the SAME way** as the zooms
+  (setTimeout off cycle start, cleared in `runCycle`'s `pending` array and the cleanup), so they
+  reset cleanly every loop. Use the `t = videoMs / 0.9 (+ pauses)` conversion to align to video time.
+- The two zooms have **fixed focal points**: zoom1 pans up to bottom meal cards (deep 1.30×) →
+  3 meal cards ~13s; zoom2 centered 1.15× → recipe ~15s. Verify these still frame correctly on
+  the new cut; the timing was set for the prior 24.57s video and may need a small nudge.
 
-**Explicit 90s timeout on OpenAI vision fetch.** AbortController wraps the first-pass call. Without this, when OpenAI hangs past Supabase's ~150s platform timeout, the function got force-killed with NO logs and NO response. Now we 504 cleanly with `"OpenAI vision timed out (90s)..."` and the client sees a real error message.
-
-### UX changes
-
-**Pre-scan tips screen (step 0).** New onboarding step before the camera opens. 4 tips: pull items forward, light it up, stand 3-4ft back, one photo per zone. Educates users BEFORE bad photos, not after.
-
-**Photo retention + Retry on failure.** Failed scans no longer dump the user to an empty review screen. Loading view flips to red error state with a "Retry scan" button. Photos stay in state, retry just bumps a `retryNonce` that re-fires the scan effect — no re-shoot, and (post the count-gate strip) no charge against quota since there's no quota anymore.
-
-**Close button safe-area fix.** Modal uses `SafeAreaView edges={['bottom']}` so the camera can be full-bleed, but every non-camera step rendered `styles.step` which had only `paddingTop: 8` — insufficient to clear the ~54-59px status bar / Dynamic Island. The close X was rendering BEHIND the status bar on the tips screen, loading screen, results screen, etc. Derived `stepWithSafeTop = [styles.step, { paddingTop: insets.top + 8 }]` once per render and applied to every non-camera step container. Same defect exists latently in `RecipeFormModal.tsx` (uses hardcoded `paddingTop: 56`) — not fixed in this pass.
-
-**All close buttons moved to top-left** for cross-step consistency. Loading screen's absolute-positioned variant got `left: 8, right: undefined` override. Title-bar steps got `<TouchableOpacity ... /><Text style={[..., { marginLeft: 12 }]}>...` layout.
-
-### Removal of freemium count gates
-
-The codebase had drift: three count-based "3 free then paywall" mechanics that contradicted the documented premium-only model.
-
-Stripped in commit `94071ff`:
-- `pantry_scan_count` read/check/increment in PantryScanModal
-- `receipt_scan_count` read/check/increment in ReceiptScanModal
-- `saved_meals` count query + Alert dialog in meal/[id].tsx save flow
-
-All three replaced with the AILogModal pattern (already correct): when `!isPremium`, fire `triggerUpgrade(placement)` immediately. Superwall placements stay wired, they just fire on every gated action instead of after N free uses.
-
-DB columns (`profiles.pantry_scan_count`, `.receipt_scan_count`) are now dead. **Leave them in place** — post-launch cleanup, not blocking.
-
-### Global error capture
-
-PostHog had no auto error capture. Added `setupCrashReporting()` in `lib/analytics.ts` that wires React Native's `ErrorUtils.setGlobalHandler` and the `unhandledrejection` event to PostHog as `app_error` / `app_unhandled_rejection` events with stack traces. Installed at `app/_layout.tsx` module-load time so boot crashes are also caught.
-
----
-
-## Trending meals — diagnosed but not yet fixed
-
-**Symptom:** Discover row shows 1 stale meal from May 12. Cron is supposed to run daily at 05:00 UTC and write 6 fresh YouTube-sourced meals.
-
-**Diagnosis chain (last night):**
-1. `trending_meals` table contains 1 row — `creator` source, 18+ days old, NOT YouTube-sourced
-2. `cron.job_run_details` shows the daily job has run successfully every day at 05:00 UTC for the last 5+ days, status: `succeeded`
-3. Function logs (`generate-trending-meals` → Logs) show NO boot/shutdown activity at 05:00 UTC — only a single manual May 26 invocation
-4. `net._http_response` shows the cron's HTTP POST returns `status_code: NULL` and `content: NULL` — pg_net never received a response
-5. Vault secret check: `cron_service_role_key` exists with `length: 41, prefix: 'sb_s', starts_with_jwt_marker: false`
-
-**Root cause:** The vault holds the new `sb_secret_...` format API key (41 chars), but the edge function's auto-injected `SUPABASE_SERVICE_ROLE_KEY` env var is the **legacy JWT format** (~200 chars, starts with `eyJ`). The function does literal string comparison — mismatch → 401 at gateway → function never boots → no logs → null response.
-
-**Fix Logan needs to do:**
-
-1. Get the legacy JWT service-role key from Supabase Dashboard → Project Settings → **API Keys** → "Legacy API keys" section (may need to click "Show legacy keys" — collapsed by default)
-2. In SQL Editor:
-   ```sql
-   SELECT vault.update_secret(
-     (SELECT id FROM vault.secrets WHERE name = 'cron_service_role_key'),
-     'PASTE_LEGACY_JWT_HERE'
-   );
-   ```
-3. Verify with:
-   ```sql
-   SELECT length(decrypted_secret) AS key_length,
-          decrypted_secret ~ '^eyJ' AS is_jwt
-   FROM vault.decrypted_secrets WHERE name = 'cron_service_role_key';
-   ```
-   Expect `key_length ~200+`, `is_jwt: true`
-4. Trigger a test run immediately (don't wait for 05:00 UTC):
-   ```sql
-   SELECT net.http_post(
-     url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true',
-     headers := jsonb_build_object(
-       'Content-Type', 'application/json',
-       'Authorization', 'Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'cron_service_role_key' LIMIT 1)
-     ),
-     body := '{}'::jsonb
-   );
-   ```
-5. Wait ~2 min, then check:
-   - Function logs for `[stage]` lines from MMR pipeline
-   - `SELECT count(*), generated_at FROM trending_meals GROUP BY generated_at ORDER BY generated_at DESC LIMIT 5` — should show 6 rows from today
-
-### Trending meals MMR refactor (`73e6d13`)
-
-Separately, the trending-meals pipeline was structurally rewritten last night to replace 4 serial kill-filters with score-based MMR (Maximal Marginal Relevance) selection. The whack-a-mole pattern of "only N meals survived" should be structurally impossible now — pipeline always picks the least-bad 6 from whatever pool exists. Won't be visible until the cron auth is fixed and a successful run completes.
+### Already done (do NOT re-do)
+- The **live item count-up is a real feature in the app** now (`components/PantryScanModal.tsx`),
+  NOT a video overlay — it ramps 0→N live during the scan and settles to the true total. It's
+  captured in the new recording, which is why the 5s frame shows "3 items spotted / Uploading photos".
+- The two **zooms** already exist and are roughly timed (just re-verify on the new cut).
 
 ---
 
-## Other meaningful work in the session window
+## 📦 Everything else shipped this session (context for continuity)
 
-- **Native Google Sign-In** (commit `d0e5e34` from prior session, verified working this session) — replaced WebView OAuth with `@react-native-google-signin/google-signin` + custom nonce-handling patch (`patches/`) so we control the OIDC nonce flow that Supabase requires. Native iOS bottom sheet, no Supabase project URL exposed.
-- **Meal ingredient redesign** — NEED/HAVE split, bullet dots replacing AI thumbnails (Flux generation removed for quality + cost reasons), Unicode fractions (½, ¼, 1½), bulk "Add N missing items to grocery" CTA, long-press to swap section.
-- **Portion display improvements** — `formatHalf` helper, `gramsToProteinScoops` for whey/casein/protein powder (1 scoop ≈ 30g), `gramsToSeedsSpoons` for chia/flax/hemp/sesame, `roundDisplayGrams` (44g → 45g, 58g → 60g for psychologically clean numbers).
-- **Whole-unit foods expanded** to include salmon fillet, cod fillet, chicken breast, pork chop, etc. — so the meal screen renders "1 salmon fillet" instead of "1 small fillet salmon fillet".
-- **Inverted ingredient name normalizer** — client-side swap so the AI's occasional "juice lemon" / "zest orange" malformations render as "lemon juice" / "orange zest".
-- **Meal-image gen prompt** — added explicit "every visible ingredient must appear in the description" rule + raised max_tokens 120→180. Mostly fixes "the image has salmon but not the cucumber from the recipe" bug for future generations.
+**Scan pipeline**
+- Daily **scan cap 5/day** per user, server-side, both `scan-pantry` + `parse-receipt`
+  (`_shared/scan-cap.ts`, migration `20260530000000_scan_daily_cap.sql`, atomic RPC, refund on fail).
+- **Photo downscale to 2048px / q0.95** before upload (pantry + receipt) — fixed multi-minute
+  `req.json()` stalls (was uploading full-res multi-MB base64).
+- **Recall fixes**: scoped the pet-food exclusion (was over-skipping real food), lowered second-pass
+  gate 20→12 per photo, added systematic SCAN METHOD + egg-tray/back-row prompt guidance.
+- Pet-food / non-edible exclusion added to both pantry and receipt prompts.
+
+**Meals / cost control**
+- **Meal-gen daily cap 3/day** server-side (`generate-meals`, scan_type `meal_gen`, refund on fail) —
+  closes the regen cost leak (cache-invalidation + retries previously dodged the client `MAX_DAILY_REGENS=1`).
+- Food-dislike changes no longer wipe the meal cache (diet/allergen changes still do).
+- LLM made a **generous extractor** (15-20 candidates, no self-skip) — fixed thin trending counts.
+
+**Trending / Discover (diet decouple)**
+- Fixed trending cron auth via a **`CRON_SECRET`** shared secret (value:
+  `4745ed4c77f8af82bd04058dfd2cbed0bed3861a150fc063`, set as function secret + must match vault
+  `cron_service_role_key`). The old service-role-key match kept 401'ing.
+- Trending now stores a **full ~18-meal tagged pool** (`compatible_diets[]`, `is_dairy_free/gluten_free/nut_free`),
+  generated by `generate-trending-meals` (eager image gen in **waves of 5** to avoid FAL rate-limit).
+- **Discover builds a per-user feed** by `diet_type` + allergen tags with variety + backfill
+  (`app/(tabs)/discover.tsx`). New `profiles.diet_type` column + editable **Diet** row in Settings.
+- Memory written: `project_trending_diet_pool.md`, `project_v2_meal_rotation.md`, `project_scan_cap.md`.
+
+**Auth / onboarding**
+- **`profiles.onboarding_completed`** flag (migrations `20260606000000` + `..0001`) — routing no longer
+  infers completion from `calorie_goal` (which is skippable). `finish()` sets the flag AND defaults goals
+  (2000 kcal / 150g) so the dashboard never breaks. signin.tsx + `_layout.tsx` route on the flag, with a
+  server-profile fallback when the local AsyncStorage flag is missing (reinstall-proof). Hardened the
+  profile check (`.maybeSingle()` + retry) so a transient query failure can't dump a real user into onboarding.
+- Sign-in shows a friendlier error for bad creds (Supabase returns generic "Invalid login credentials" for
+  both no-account and wrong-password — can't distinguish, so we nudge to "Create account").
+
+**UI**
+- Meal screen: removed strikethrough on HAVE ingredients (opacity 0.9), **tap an ingredient to move it to
+  YOU HAVE**, full-bleed hero image (height 500), hero pulled to top.
+- Home: hero card 360→300 (was cut off), carousel only cycles **image-ready** meals, **shimmer** skeleton
+  while images load, prefetch hero images, pantry refresh after scan (carousel replaces "unlock" card).
+- Discover rail cards 200→175 wide (2.5 peek) + tighter inset so pills don't wrap.
+- Scan modal: removed pre-scan tips screen (tips now rotate inline by the shutter), close collapses cleanly.
+
+**Spawned task chip (pending, may be unstarted):** "Downscale receipt photo before upload" — already done
+inline, the chip is redundant; dismiss it.
 
 ---
 
-## State Logan needs to verify on next session
-
-### Action required
-- [ ] Reset his row's `pantry_scan_count` (and `receipt_scan_count` if at limit) to 0 in `profiles` so he can test scans — the count gate code is gone but his existing row still has the burn-through value:
-  ```sql
-  UPDATE profiles SET pantry_scan_count = 0, receipt_scan_count = 0 WHERE id = '<his_user_id>';
-  ```
-- [ ] Fix the cron vault key per the steps above
-- [ ] Force-reload the app (shake → Reload, or kill+reopen) so the latest JS bundle loads with the close-button-left positioning, the count-gate removal, and the photo retention / retry UX
-
-### Verify after action
-- [ ] Pantry scan: tap "Scan Pantry" → tips screen appears with X on left → take photos → loading screen with time-anchored messages → either success (~50-90s) or clean 504 error with Retry button (if OpenAI hangs)
-- [ ] Trending row populates with 6 fresh meals after cron secret update + test run
-- [ ] Meal screen: ingredients show NEED/HAVE sections with teal bullets, Unicode fractions, "1 salmon fillet" rendering, "Add N missing items" white pill CTA at top
-
-### Known latent defect (not blocking)
-- [ ] `RecipeFormModal.tsx` uses hardcoded `paddingTop: 56` for status-bar compensation instead of `insets.top + 8`. Works on most iPhones but isn't device-correct everywhere. Migrate when convenient.
-
----
-
-## File pointers
-
-**Scan-pantry work:**
-- `supabase/functions/scan-pantry/index.ts` — early log, 90s OpenAI timeout, photo-index density gate, stage timings, no more barcode enrichment
-- `components/PantryScanModal.tsx` — step 0 tips, retryNonce + scanError state, stepWithSafeTop derived style, all close buttons left-aligned, count-gate stripped
-
-**Freemium drift cleanup:**
-- `components/PantryScanModal.tsx`, `components/ReceiptScanModal.tsx`, `app/meal/[id].tsx` — count gates stripped in commit `94071ff`
-
-**Trending diagnosis context:**
-- `supabase/migrations/20260512000012_schedule_trending_cron.sql` — the cron job schedule, references vault secret
-- `supabase/functions/generate-trending-meals/index.ts` — MMR refactor lives here, untouched since `73e6d13`
-
-**Global error capture:**
-- `lib/analytics.ts` — `setupCrashReporting()` exported
-- `app/_layout.tsx` — calls `setupCrashReporting()` at module-load
-
----
-
-Branch: `main`. Working tree clean as of `94071ff`. Solo dev, no PRs. All work pushed.
+## Current state / test checklist
+- Metro running; app on device. **Reload** to pull all the above JS.
+- Test: pantry scan → live count ramps then settles; meal screen tap-to-HAVE; Discover diet filtering
+  (flip the Settings → Diet between Classic/Vegetarian); sign-in with a completed vs incomplete account.
+- Trending: if Discover is empty, re-trigger generation (needs the vault `cron_service_role_key` = the
+  CRON_SECRET above); see `project_trending_diet_pool.md`.
