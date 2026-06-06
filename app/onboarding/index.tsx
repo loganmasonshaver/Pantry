@@ -256,13 +256,12 @@ function LoggedPop({ anim }: { anim: Animated.Value }) {
 function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => void }) {
   // 0 = offscreen below (pre-enter), 1 = at rest (visible), 2 = offscreen above (post-exit)
   const phoneAnim = useRef(new Animated.Value(0)).current
-  // Separate zoom animations per meal callout so each can have its own scale + focal point
-  const zoom1 = useRef(new Animated.Value(0)).current  // focuses on bottom meal cards (deeper zoom)
-  const zoom2 = useRef(new Animated.Value(0)).current  // centered meal card zoom (standard)
+  // zoom1 stays inert (kept only so the transform math below is unchanged) — we no longer zoom the
+  // pantry meal-card list. zoom2 is the single zoom: it fires once we're INSIDE the clicked meal.
+  const zoom1 = useRef(new Animated.Value(0)).current
+  const zoom2 = useRef(new Animated.Value(0)).current  // meal-detail zoom (the "tapped a card" moment)
   // Overlay layer synced to the video: benefit captions, tap-ripples, and the "logged" pop.
   const r1 = useRef(new Animated.Value(0)).current      // tap-ripple on Scan Now (~1s)
-  const r2 = useRef(new Animated.Value(0)).current      // tap-ripple on a meal card (~13s)
-  const r3 = useRef(new Animated.Value(0)).current      // tap-ripple on the camera shutter (~3s)
   const r4 = useRef(new Animated.Value(0)).current      // tap-ripple on Log Meal (~18s)
   const logPop = useRef(new Animated.Value(0)).current  // ✓ success pop at logging (~19s)
   const captionOpacity = useRef(new Animated.Value(0)).current
@@ -287,12 +286,10 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     // the first, to compensate for the earlier pause).
     //   zoom1 (deep, bottom cards) → the 3 "Cook tonight" meal cards at ~13.5s video
     //   zoom2 (centered)           → the meal detail "YOU HAVE" ingredients at ~15.5s video
-    // Two zooms, each landing on a verified hero beat of the new cut (paired with a ripple/caption
-    // so they read as intentional, not random): 13.5s = the 3 Cook-tonight meal cards, 15.6s = the
-    // meal-detail parfait hero + macro stats. Wall-clock offsets via t = videoMs/0.9 (+ZOOM_CYCLE
-    // for zoom2 to cover zoom1's pause).
-    const ZOOM_AT: number[] = [15000, 18500] // ≈ video 13.5s, 15.6s
-    const ZOOM_ANIMS = [zoom1, zoom2]
+    // One zoom only: it holds (no zoom) on the pantry meal-card list and punches in once we're
+    // inside the clicked meal — the parfait hero + macro stats at ~15.3s video. t = videoMs/0.9.
+    const ZOOM_AT: number[] = [17000] // ≈ video 15.3s
+    const ZOOM_ANIMS = [zoom2]
     const ZOOM_IN_DURATION = 320
     const ZOOM_HOLD_DURATION = 520
     const ZOOM_OUT_DURATION = 320
@@ -310,24 +307,26 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
     // matching the same clock the zooms use. Video starts playing at (1000 + START_HOLD_DELAY),
     // runs at 0.9×, and each zoom pauses it for one ZOOM_CYCLE — so any moment AFTER a zoom is
     // pushed later by that pause. Mirrors the ZOOM_AT derivation (e.g. 15.5s → 18400).
-    const ZOOM_VIDEO_S = [13.5, 15.6] // video-time of zoom1 / zoom2 (keep in sync with ZOOM_AT)
+    const ZOOM_VIDEO_S = [15.3] // video-time of the single zoom (keep in sync with ZOOM_AT)
     const at = (videoSec: number) =>
       1000 + START_HOLD_DELAY + (videoSec * 1000) / 0.9 + ZOOM_VIDEO_S.filter(z => videoSec > z).length * ZOOM_CYCLE
 
     // Benefit captions, keyed to the verified screen timeline of the 24.97s preview.
     // `in`/`out` are VIDEO seconds (when the screen is actually on-frame); `at()` handles the math.
+    // Near-continuous: each line bridges to the next with only a ~0.3s crossfade gap, so there's
+    // almost always copy on screen. Connective lines (fridge, shelves) fill what were dead gaps.
     const CAPTIONS: { in: number; out: number; text: string }[] = [
-      { in: 0.6, out: 1.9, text: 'Scan your pantry in 30 seconds' },   // dashboard + Scan Now (cuts at 1.9s)
-      { in: 5.6, out: 7.8, text: 'AI finds everything you have' },     // live count 5→8→19 spotted
+      { in: 0.6, out: 2.0, text: 'Scan your pantry in 30 seconds' },   // dashboard + Scan Now (cuts at 2s)
+      { in: 2.3, out: 5.2, text: 'Just photograph your fridge' },      // camera screens
+      { in: 5.5, out: 7.9, text: 'AI finds everything you have' },     // live count 5→8→19 spotted
+      { in: 8.2, out: 12.9, text: 'Sorted onto your shelves instantly' }, // detected items list by shelf
       { in: 13.2, out: 14.6, text: "Instant meals from what's already there" }, // 3 Cook-tonight cards
-      { in: 15.1, out: 17.9, text: 'Built around your macros' },       // meal detail w/ macros visible
-      { in: 18.5, out: 20.3, text: 'Logged in one tap' },             // log sheet → Logged ✓
-      { in: 22.0, out: 24.4, text: 'Plus a feed of trending recipes' }, // Discover (on-screen 21.7s+)
+      { in: 14.9, out: 17.8, text: 'Built around your macros' },       // meal detail w/ macros visible
+      { in: 18.1, out: 21.4, text: 'Logged in one tap' },             // log sheet → Logged ✓ → back to pantry
+      { in: 21.7, out: 24.5, text: 'Plus a feed of trending recipes' }, // Discover (on-screen 21.7s+)
     ]
     const RIPPLES: { v: number; anim: Animated.Value }[] = [
-      { v: 1.1, anim: r1 },   // Scan Now button, before the 1.9s cut
-      { v: 3.3, anim: r3 },   // camera shutter mid fridge-shot
-      { v: 13.3, anim: r2 },  // first meal card — taps right before zoom1 punches in at 13.5s
+      { v: 1.1, anim: r1 },   // Scan Now button, before the 2s cut
       { v: 18.0, anim: r4 },  // Log Meal button — tap that opens the log sheet → Logged ✓ pop
     ]
     const LOG_POP_AT = 19.4 // ✓ blooms as the in-app button flips to "Logged ✓" (verified ~19.8s)
@@ -353,8 +352,6 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       zoom1.setValue(0)
       zoom2.setValue(0)
       r1.setValue(0)
-      r2.setValue(0)
-      r3.setValue(0)
       r4.setValue(0)
       logPop.setValue(0)
       captionOpacity.setValue(0)
@@ -379,11 +376,11 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
         pending.push(setTimeout(() => {
           if (cancelled) return
           setCaption(c.text)
-          Animated.timing(captionOpacity, { toValue: 1, duration: 320, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+          Animated.timing(captionOpacity, { toValue: 1, duration: 250, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
         }, at(c.in)))
         pending.push(setTimeout(() => {
           if (cancelled) return
-          Animated.timing(captionOpacity, { toValue: 0, duration: 320, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start()
+          Animated.timing(captionOpacity, { toValue: 0, duration: 250, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start()
         }, at(c.out)))
       })
 
@@ -434,8 +431,6 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
       zoom1.stopAnimation()
       zoom2.stopAnimation()
       r1.stopAnimation()
-      r2.stopAnimation()
-      r3.stopAnimation()
       r4.stopAnimation()
       logPop.stopAnimation()
       captionOpacity.stopAnimation()
@@ -511,8 +506,6 @@ function S1Welcome({ onNext, onSignIn }: { onNext: () => void; onSignIn: () => v
               />
               {/* Synced overlays — inside the screen so they inherit the zoom transform */}
               <TapRipple anim={r1} style={{ top: '76%', left: '50%' }} />
-              <TapRipple anim={r3} style={{ top: '88%', left: '50%' }} />
-              <TapRipple anim={r2} style={{ top: '66%', left: '50%' }} />
               <TapRipple anim={r4} style={{ top: '91%', left: '33%' }} />
               <LoggedPop anim={logPop} />
             </View>
