@@ -94,7 +94,25 @@ export default function SignInScreen() {
       setFailCount(f => f + 1)
       setCaptchaToken(null)
       setTurnstileKey(k => k + 1)
-      Alert.alert('Sign In Failed', error.message)
+      const msg = (error?.message ?? '').toLowerCase()
+      if (msg.includes('invalid login credentials')) {
+        // Supabase returns this SAME error for both "no account" and "wrong password"
+        // (anti-enumeration), so we can't truthfully say which — guide new users to
+        // sign up while still covering the wrong-password case.
+        Alert.alert(
+          "Can't sign in",
+          "That email and password didn't match an account. Double-check your password — or if you're new here, create an account.",
+          [
+            { text: 'Try again', style: 'cancel' },
+            { text: 'Create account', onPress: () => router.replace('/onboarding') },
+          ],
+        )
+      } else if (msg.includes('email not confirmed')) {
+        // Account exists but the email was never verified — send them to the OTP step.
+        router.replace({ pathname: '/onboarding/verify-email', params: { email, isSignIn: 'true' } })
+      } else {
+        Alert.alert('Sign In Failed', error.message)
+      }
     } finally {
       setLoading(false)
     }
