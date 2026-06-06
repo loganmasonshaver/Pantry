@@ -1,11 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const replicateToken = Deno.env.get("REPLICATE_API_TOKEN")!
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+// Shared admin secret — this is an admin/seeding tool, never called by the app at runtime.
+const adminSecret = Deno.env.get("ADMIN_SECRET")
 const db = createClient(supabaseUrl, supabaseServiceKey)
 
 const INGREDIENTS = [
@@ -225,13 +225,14 @@ async function uploadToStorage(ingredient: string, imageUrl: string): Promise<st
 }
 
 Deno.serve(async (req: Request) => {
-  // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
-  const user = await verifyUser(req)
-  if (!user) return unauthorizedResponse()
-
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 5, 60000)
-  if (!allowed) return rateLimitResponse()
+  // Admin/seeding tool only. clear/uploadUrl wipe or overwrite the SHARED ingredient
+  // image cache+bucket, and the batch path drives paid Flux generation of the whole
+  // catalog — so the entire function is gated behind the shared admin secret. Fail
+  // closed if the secret env isn't set.
+  const providedSecret = req.headers.get('x-admin-secret') ?? ''
+  if (!adminSecret || providedSecret !== adminSecret) {
+    return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+  }
 
   // Handle POST requests
   if (req.method === 'POST') {

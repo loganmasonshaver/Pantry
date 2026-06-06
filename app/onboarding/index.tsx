@@ -4115,13 +4115,20 @@ export default function Onboarding() {
           activity_level: finalData.activityLevel || null,
           fitness_goal: resolvedFitnessGoal,
           referral_code_used: finalData.referralCode ? finalData.referralCode.toUpperCase().trim() : null,
-          promo_active: !!finalData.grantsPromo,
+          // promo_active is SERVER-controlled (DB trigger blocks client writes). Granted below
+          // via redeem_referral_code, which re-validates the code server-side.
           cuisine_preferences: finalData.cuisinePreferences || [],
         }, { onConflict: 'id' })
 
         if (error) {
           Alert.alert('Save Error', error.message)
           return
+        }
+
+        // Redeem the referral code server-side: the RPC re-validates it and sets promo_active
+        // itself if it legitimately grants premium. Never trust the client grantsPromo flag.
+        if (finalData.referralCode) {
+          try { await supabase.rpc('redeem_referral_code', { p_code: finalData.referralCode }) } catch {}
         }
 
         // Tag Superwall with the referral code immediately so the paywall view
