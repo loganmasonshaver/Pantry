@@ -1423,11 +1423,8 @@ export default function ProfileScreen() {
           </Text>
         </TouchableOpacity>
 
-        {__DEV__ && (
-          <TouchableOpacity style={styles.resetOnboarding} onPress={resetOnboarding} activeOpacity={0.7}>
-            <Text style={styles.resetOnboardingText}>Reset Onboarding</Text>
-          </TouchableOpacity>
-        )}
+        {/* Reset Onboarding (dev tool) hidden from the profile screen — resetOnboarding() kept
+            below for manual re-wiring during testing if needed. */}
 
       </ScrollView>
     </SafeAreaView>
