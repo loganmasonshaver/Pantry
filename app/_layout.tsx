@@ -70,6 +70,9 @@ function RootLayoutNav() {
     if (loading) return
     if (session?.user?.id) {
       superwallIdentify(session.user.id).catch(() => {})
+      // Also stash the Supabase id as a user attribute so the Superwall webhook can map
+      // events to a profile even on legacy SDK versions where originalAppUserId may be null.
+      superwallUpdate({ supabaseUserId: session.user.id }).catch(() => {})
       supabase
         .from('profiles')
         .select('referral_code_used')

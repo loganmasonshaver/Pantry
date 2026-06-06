@@ -47,3 +47,7 @@ verify_jwt = false
 
 [functions.loops-import-waitlist]
 verify_jwt = false
+
+# Superwall posts here (not a logged-in Supabase user) — auth is the Svix signature instead.
+[functions.superwall-webhook]
+verify_jwt = false
