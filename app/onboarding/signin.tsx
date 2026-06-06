@@ -108,14 +108,17 @@ export default function SignInScreen() {
   // would risk re-running onboarding over their existing profile/data.
   const routeByProfile = async (userId: string) => {
     for (let attempt = 0; attempt < 2; attempt++) {
+      // onboarding_completed is the authoritative signal. calorie_goal is kept as a
+      // fallback so users who finished before the flag existed (and have goals) aren't
+      // bounced during the transition.
       const { data, error } = await supabase
-        .from('profiles').select('calorie_goal').eq('id', userId).maybeSingle()
+        .from('profiles').select('onboarding_completed, calorie_goal').eq('id', userId).maybeSingle()
       if (!error) {
-        if (data?.calorie_goal) {
+        if (data?.onboarding_completed || data?.calorie_goal) {
           await AsyncStorage.setItem('onboarding_complete', 'true')
           router.replace('/(tabs)')
         } else {
-          // Profile row missing or goals not set yet → genuinely needs onboarding.
+          // Profile row missing or onboarding genuinely never finished.
           router.replace('/onboarding')
         }
         return

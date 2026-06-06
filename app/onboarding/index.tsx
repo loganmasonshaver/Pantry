@@ -3932,6 +3932,11 @@ export default function Onboarding() {
           computedCals = computedCals ?? result.calories
           computedProt = computedProt ?? result.protein
         }
+        // Never leave goals null — the dashboard's calorie ring + macro math depend on
+        // them, and the goal/body-metric steps are skippable. Fall back to sensible
+        // high-protein defaults so a skipped-through user still gets a working app.
+        if (!computedCals) computedCals = 2000
+        if (!computedProt) computedProt = 150
         // Derive carbs/fat from the calorie target. Without this, Home falls back to
         // hardcoded 250g carbs / 80g fat defaults that have nothing to do with the
         // user's actual goal. Split: 27% of calories from fat (within ISSN range),
@@ -3980,6 +3985,7 @@ export default function Onboarding() {
           })(),
           dietary_restrictions: mergedRestrictions,
           diet_type: finalData.dietStyle || 'Classic', // Classic / Pescatarian / Vegetarian / Vegan
+          onboarding_completed: true, // authoritative "finished onboarding" signal — routing reads this
           meals_per_day: parseInt(finalData.meals),
           cooking_skill: finalData.cookingSkill || null,
           max_prep_minutes: prepToMinutes(finalData.prep),

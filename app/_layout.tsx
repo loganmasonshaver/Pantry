@@ -116,7 +116,7 @@ function RootLayoutNav() {
     Promise.all([
       AsyncStorage.getItem('onboarding_complete'),
       AsyncStorage.getItem('otp_verified'),
-    ]).then(([onboardingValue, otpValue]) => {
+    ]).then(async ([onboardingValue, otpValue]) => {
       if (session) {
         const provider = session.user?.app_metadata?.provider
         const isOAuthUser = provider === 'google' || provider === 'apple'
@@ -129,7 +129,21 @@ function RootLayoutNav() {
         } else if (onboardingValue === 'true') {
           router.replace('/(tabs)')
         } else {
-          router.replace('/onboarding')
+          // Local flag missing (reinstall / previously signed out) — fall back to the
+          // server profile so a user who already finished onboarding isn't sent back
+          // through it (and re-onboarded over their data).
+          let completed = false
+          try {
+            const { data } = await supabase
+              .from('profiles').select('onboarding_completed, calorie_goal').eq('id', session.user.id).maybeSingle()
+            completed = !!(data?.onboarding_completed || data?.calorie_goal)
+          } catch {}
+          if (completed) {
+            await AsyncStorage.setItem('onboarding_complete', 'true')
+            router.replace('/(tabs)')
+          } else {
+            router.replace('/onboarding')
+          }
         }
       } else {
         router.replace('/onboarding')
