@@ -78,6 +78,11 @@ const RESULT_CATEGORIES = [
   'Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantry Staples',
 ]
 
+// Max photos per scan — bounds the per-call GPT-4o vision cost. Mirrored server-side in
+// scan-pantry/index.ts (which truncates) so a modified client can't exceed it. A full
+// fridge + pantry fits comfortably in this many.
+const MAX_PHOTOS_PER_SCAN = 8
+
 // Time-anchored loading stages — each maps to a real server-side step in
 // supabase/functions/scan-pantry/index.ts. Picked by elapsed-ms so the message
 // the user sees roughly matches what the AI is actually doing right now,
@@ -422,6 +427,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
   const capturePhoto = async (label: string, next: number) => {
     if (!cameraRef.current) return
+    if (photos.length >= MAX_PHOTOS_PER_SCAN) {
+      Alert.alert('Photo limit', `You can include up to ${MAX_PHOTOS_PER_SCAN} photos per scan.`)
+      return
+    }
     try {
       // Capture near-lossless (quality 1, no base64), then do the single resize +
       // re-encode in downscaleToBase64 — avoids the old double-compression that
@@ -443,6 +452,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   }
 
   const launchGallery = async (label: string, next: number) => {
+    if (photos.length >= MAX_PHOTOS_PER_SCAN) {
+      Alert.alert('Photo limit', `You can include up to ${MAX_PHOTOS_PER_SCAN} photos per scan.`)
+      return
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
     if (status !== 'granted') {
       Alert.alert('Photo access needed', 'Please allow photo library access in Settings.')
@@ -465,6 +478,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   }
 
   const addExtraPhoto = async (label: string) => {
+    if (photos.length >= MAX_PHOTOS_PER_SCAN) {
+      Alert.alert('Photo limit', `You can include up to ${MAX_PHOTOS_PER_SCAN} photos per scan.`)
+      return
+    }
     const { status } = await ImagePicker.requestCameraPermissionsAsync()
     if (status !== 'granted') return
     const result = await ImagePicker.launchCameraAsync({

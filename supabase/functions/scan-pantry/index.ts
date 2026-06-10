@@ -2,13 +2,18 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
-import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
+import { checkScanCapWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 
-// Daily per-user abuse ceiling. Real usage is a few scans/week; 5/day clears any
-// legit heavy day while capping OpenAI cost exposure if a client is scripted.
-const SCAN_CAP_PER_DAY = 5
+// Pantry scan is the priciest call (GPT-4o vision, sometimes 2 passes). One scan =
+// one whole-kitchen session (all photos batched), so a few/week covers normal use.
+// Rolling 7-day window stops sustained abuse without a rigid daily wall.
+const SCAN_CAP_PER_WEEK = 7
+const SCAN_WINDOW_DAYS = 7
+// Hard backstop on payload size — a single scan can't exceed this many photos, which
+// bounds the per-call token cost the count cap can't (client enforces the same limit).
+const MAX_PHOTOS_PER_SCAN = 8
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -43,22 +48,28 @@ Deno.serve(async (req: Request) => {
 
   try {
     const tBody = Date.now()
-    const { images } = await req.json() as { images: string[] }
+    const { images: rawImages } = await req.json() as { images: string[] }
     console.log(`[scan-pantry] body read: ${Date.now() - tBody}ms`)
-    if (!images || images.length === 0) {
+    if (!rawImages || rawImages.length === 0) {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
+    }
+    // Hard-cap photos per scan (server backstop — the client enforces the same limit).
+    // Bounds the per-call token cost that the frequency cap alone can't.
+    const images = rawImages.slice(0, MAX_PHOTOS_PER_SCAN)
+    if (rawImages.length > MAX_PHOTOS_PER_SCAN) {
+      console.log(`[scan-pantry] truncated ${rawImages.length} -> ${MAX_PHOTOS_PER_SCAN} photos`)
     }
     // Log payload size — a multi-MB body means the client isn't downscaling and
     // req.json() above will have stalled for tens of seconds before this line.
     const payloadKB = Math.round(images.reduce((a, b) => a + b.length, 0) / 1024)
     console.log(`[scan-pantry] received ${images.length} image(s), ~${payloadKB}KB base64`)
 
-    // Gate the cost-bearing OpenAI call behind the daily cap. Atomic check+increment
+    // Gate the cost-bearing OpenAI call behind the rolling weekly cap. Atomic check+increment
     // — counts the attempt up front; the 504/500 paths below refund on transient fail.
-    const { allowed, used } = await checkScanCap(req, 'pantry', SCAN_CAP_PER_DAY)
+    const { allowed, used } = await checkScanCapWindow(req, 'pantry', SCAN_CAP_PER_WEEK, SCAN_WINDOW_DAYS)
     if (!allowed) {
-      console.log(`[scan-pantry] daily cap hit: ${used}/${SCAN_CAP_PER_DAY}`)
-      return scanCapResponse(SCAN_CAP_PER_DAY)
+      console.log(`[scan-pantry] weekly cap hit: ${used}/${SCAN_CAP_PER_WEEK}`)
+      return scanCapResponse(SCAN_CAP_PER_WEEK, 'week')
     }
 
     const imageContent = images.map((base64: string) => ({

@@ -32,6 +32,23 @@ export async function checkScanCap(
   return { allowed: data[0].allowed, used: data[0].used }
 }
 
+// Rolling-window variant (e.g. cap=7 over days=7). Same atomic guarantees + fail-open
+// behavior as checkScanCap; backs the weekly ceiling on the pricey GPT-4o vision scans.
+export async function checkScanCapWindow(
+  req: Request,
+  scanType: string,
+  cap: number,
+  days: number,
+): Promise<{ allowed: boolean; used: number }> {
+  const { data, error } = await userClient(req)
+    .rpc("check_and_increment_scan_window", { p_scan_type: scanType, p_cap: cap, p_days: days })
+  if (error || !data?.[0]) {
+    console.log(`[scan-cap] window rpc error, failing open: ${error?.message ?? "no row"}`)
+    return { allowed: true, used: 0 }
+  }
+  return { allowed: data[0].allowed, used: data[0].used }
+}
+
 // Best-effort: give the slot back after a transient OpenAI failure. Never throws.
 export async function refundScan(req: Request, scanType: string): Promise<void> {
   try {
@@ -41,10 +58,11 @@ export async function refundScan(req: Request, scanType: string): Promise<void> 
   }
 }
 
-export function scanCapResponse(cap: number): Response {
+export function scanCapResponse(cap: number, period: "day" | "week" = "day"): Response {
+  const retry = period === "week" ? "in a few days" : "tomorrow"
   return new Response(
     JSON.stringify({
-      error: `Daily scan limit reached (${cap}/day). Try again tomorrow.`,
+      error: `Scan limit reached (${cap}/${period}). Try again ${retry}.`,
       code: "scan_cap_reached",
     }),
     { status: 429, headers: { "Content-Type": "application/json" } },
