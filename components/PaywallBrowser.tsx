@@ -93,7 +93,7 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
 
             {/* Trial badge */}
             <View style={s.trialBadge}>
-              <Text style={s.trialBadgeText}>3-DAY FREE TRIAL · CANCEL ANYTIME</Text>
+              <Text style={s.trialBadgeText}>7-DAY FREE TRIAL · CANCEL ANYTIME</Text>
             </View>
 
             {/* Features */}
@@ -170,9 +170,9 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
             style={s.bottomGradient}
           >
             <TouchableOpacity style={[s.ctaButton, purchasing && { opacity: 0.6 }]} onPress={handleStartTrial} activeOpacity={0.9} disabled={purchasing}>
-              <Text style={s.ctaText}>{purchasing ? 'Loading…' : 'Start 3-Day Free Trial'}</Text>
+              <Text style={s.ctaText}>{purchasing ? 'Loading…' : 'Start 7-Day Free Trial'}</Text>
             </TouchableOpacity>
-            <Text style={s.ctaSubtext}>No commitment. Cancel before Day 3 to pay nothing.</Text>
+            <Text style={s.ctaSubtext}>No commitment. Cancel before Day 7 to pay nothing.</Text>
           </LinearGradient>
         </SafeAreaView>
       </View>
