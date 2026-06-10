@@ -517,7 +517,6 @@ export default function ProfileScreen() {
   const { registerPlacement } = useSuperwall()
   const { refresh: refreshSuperwallUser, getEntitlements } = useUser()
   const { isPremium, promoActive, triggerUpgrade } = usePremium()
-  const [darkMode, setDarkMode] = useState(true)
   const [restoring, setRestoring] = useState(false)
   const [profile, setProfile] = useState<Profile | null>(null)
 
@@ -1381,10 +1380,6 @@ export default function ProfileScreen() {
           <SettingsRow label="Food Preferences" onPress={() => router.push('/food-preferences')} />
           <SettingsRow label="Diet" value={profile?.diet_type ?? 'Classic'} onPress={() => setShowDietTypeModal(true)} />
           <SettingsRow label="Notifications" />
-          <SettingsRow
-            label="Dark Mode"
-            toggle={{ value: darkMode, onChange: setDarkMode }}
-          />
           <SettingsRow
             label="AI Data Processing"
             value={acceptedAt ? `Accepted ${new Date(acceptedAt).toLocaleDateString()}` : 'Not accepted'}

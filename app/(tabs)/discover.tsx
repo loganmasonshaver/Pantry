@@ -484,7 +484,7 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
       })()}
       <View style={styles.railContent}>
         <Text style={styles.railName} numberOfLines={2}>{meal.name}</Text>
-        <View style={{ flexDirection: 'row', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
+        <View style={{ flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
           {meal.prepTime > 0 && <Pill label={`${meal.prepTime}m`} tint="amber" small />}
           <Pill label={`${meal.calories} CAL`} tint="white" small />
           {meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" small />}
@@ -668,9 +668,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    // Tighter left/right inset gives the pill row more horizontal room so the
-    // protein pill stops wrapping to a second line. Vertical inset unchanged.
-    paddingHorizontal: 8,
+    // Tight left/right inset gives the pill row max horizontal room so the protein
+    // pill stays on one line even with a 2-digit prep time (e.g. "20m"). Pills keep
+    // their own size; only this edge spacing + the row gap were reduced. Vertical unchanged.
+    paddingHorizontal: 4,
     paddingVertical: 14,
   },
   railName: {
