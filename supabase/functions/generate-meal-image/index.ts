@@ -3,9 +3,12 @@ import { verifyUser } from '../_shared/auth.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
-// Per-user daily ceiling on actual generations (cache hits don't count). Generous —
-// images are globally cached, so a normal user generates only a handful of new ones/day.
-const IMAGE_GEN_DAILY_CAP = 60
+// Per-user daily ceiling on actual generations (cache hits are exempt). Derived from the
+// real max a user can drive: meal-gen is capped at 3/day server-side × up to 5 meals per
+// Cook Now generation = 15 images, plus a small buffer for the onboarding plan reveal and
+// the occasional uncached meal-detail view. 20 covers legit heavy use; anything past it is
+// abuse. (Hitting it just means "no photo" for the extra meals — never blocks the meal.)
+const IMAGE_GEN_DAILY_CAP = 20
 
 const falApiKey = Deno.env.get("FAL_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
