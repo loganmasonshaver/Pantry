@@ -61,11 +61,15 @@ function premiumFor(type: string, data: any): boolean | null {
     case "initial_purchase":
     case "renewal":
     case "uncancellation":
+    case "non_renewing_purchase": // lifetime / one-time premium purchase
+    case "subscription_extended":
       return true
     case "expiration":
+    case "subscription_paused": // Play-store pause = access suspended (iOS won't send this)
       return false
-    case "cancellation":
-    case "billing_issue":
+    case "cancellation":   // auto-renew off, but access continues until expiration
+    case "billing_issue":  // Apple grace/retry period — don't revoke yet
+    case "product_change": // up/downgrade; entitlement unchanged
       return null
     default:
       // Refunds are signalled by a negative price on a transaction event.
