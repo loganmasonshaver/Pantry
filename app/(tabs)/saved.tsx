@@ -186,6 +186,8 @@ export default function SavedScreen() {
 
   const toastOpacity = useRef(new Animated.Value(0)).current
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Guards against overlapping image backfills when the tab is refocused rapidly.
+  const backfillRef = useRef(false)
 
   const fetchMeals = useCallback(async () => {
     if (!user) { setLoading(false); return }
@@ -205,25 +207,39 @@ export default function SavedScreen() {
         is_user_created: row.is_user_created ?? false,
       }))
       setMeals(mealsWithTags)
-      // Lazy backfill: fire per-meal image generation in parallel for legacy saves.
-      // Each completes independently — no blocking, no Promise.all (we want progressive
-      // reveal as each thumbnail lands). Errors are swallowed so one failure doesn't
-      // block the others. The closure captures `i` so we splice into the right slot.
-      mealsWithTags.forEach(async (meal, i) => {
-        if (meal.image) return // already have stored image — skip regeneration
-        try {
-          const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
-            body: { mealName: meal.name },
-          })
-          if (imgData?.image) {
-            setMeals(prev => {
-              const updated = [...prev]
-              if (updated[i]) updated[i] = { ...updated[i], image: imgData.image }
-              return updated
-            })
+      // Lazy backfill for legacy saves with no stored image. Two key guards vs the old
+      // version: (1) we PERSIST the generated image back to saved_meals.image_url, so it's
+      // generated once ever — not re-fetched on every tab focus; (2) we process in small
+      // concurrent batches instead of firing one request per meal all at once (which was a
+      // thundering herd at scale). A ref guard also prevents overlapping runs on refocus.
+      const toFill = mealsWithTags
+        .map((meal, i) => ({ meal, i }))
+        .filter(x => !x.meal.image)
+      if (toFill.length && !backfillRef.current) {
+        backfillRef.current = true
+        ;(async () => {
+          const BATCH = 3
+          for (let b = 0; b < toFill.length; b += BATCH) {
+            await Promise.all(toFill.slice(b, b + BATCH).map(async ({ meal, i }) => {
+              try {
+                const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
+                  body: { mealName: meal.name },
+                })
+                if (imgData?.image) {
+                  setMeals(prev => {
+                    const updated = [...prev]
+                    if (updated[i]) updated[i] = { ...updated[i], image: imgData.image }
+                    return updated
+                  })
+                  // Persist so future loads read it directly and skip the function entirely.
+                  supabase.from('saved_meals').update({ image_url: imgData.image }).eq('id', meal.id).then(() => {}, () => {})
+                }
+              } catch {}
+            }))
           }
-        } catch {}
-      })
+          backfillRef.current = false
+        })()
+      }
     }
     setLoading(false)
   }, [user])

@@ -7,12 +7,17 @@ import {
   StyleSheet,
   Animated,
   Modal,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, Scan, ShoppingBasket, BarChart3, Sparkles } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
+import { useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackPaywallViewed } from '../lib/analytics'
+
+const PRIVACY_URL = 'https://heypantry.app/privacy'
+const TERMS_URL = 'https://heypantry.app/terms'
 
 const TEAL = '#4ADE80'
 
@@ -30,7 +35,9 @@ const FEATURES = [
 
 export default function PaywallBrowser({ visible, onClose, source = 'browse' }: Props) {
   const { registerPlacement } = usePremium()
+  const { update: updateSuperwallUser } = useUser()
   const [selectedPlan, setSelectedPlan] = useState<'annual' | 'monthly'>('annual')
+  const [purchasing, setPurchasing] = useState(false)
   const fadeAnim = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -46,9 +53,21 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
   // native StoreKit sheet (registerPlacement). Without that delegation, no Apple IAP receipt
   // is created and entitlement never flips on.
   const handleStartTrial = async () => {
+    if (purchasing) return // in-flight guard — prevents double-presenting the StoreKit sheet
+    setPurchasing(true)
     try {
+      // Communicate the chosen plan to Superwall so the campaign can default its native
+      // sheet to that product. (Fully honoring it requires the dashboard campaign to read
+      // this attribute / use distinct paywalls — the actual purchase happens in that sheet.)
+      try { await updateSuperwallUser({ selectedPlan }) } catch {}
       await registerPlacement('usage_paywall')
     } catch {}
+    setPurchasing(false)
+    onClose()
+  }
+
+  const restore = async () => {
+    try { await registerPlacement('restore_purchases') } catch {}
     onClose()
   }
 
@@ -107,8 +126,8 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
                     <Text style={s.planSub}>Just $2.50/month</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={s.planPrice}>$29.99<Text style={s.planPer}>/yr</Text></Text>
-                    <Text style={s.saveText}>Save 75%</Text>
+                    <Text style={s.planPrice}>$30<Text style={s.planPer}>/yr</Text></Text>
+                    <Text style={s.saveText}>Save 69%</Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -124,7 +143,7 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
                     <Text style={s.planName}>Monthly</Text>
                     <Text style={s.planSub}>Flexible access</Text>
                   </View>
-                  <Text style={s.planPrice}>$9.99<Text style={s.planPer}>/mo</Text></Text>
+                  <Text style={s.planPrice}>$7.99<Text style={s.planPer}>/mo</Text></Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -135,11 +154,11 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
             </Text>
 
             <View style={s.footerLinks}>
-              <TouchableOpacity activeOpacity={0.7}><Text style={s.footerLink}>Restore Purchase</Text></TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.7} onPress={restore}><Text style={s.footerLink}>Restore Purchase</Text></TouchableOpacity>
               <Text style={s.footerDot}>·</Text>
-              <TouchableOpacity activeOpacity={0.7}><Text style={s.footerLink}>Privacy Policy</Text></TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => Linking.openURL(PRIVACY_URL)}><Text style={s.footerLink}>Privacy Policy</Text></TouchableOpacity>
               <Text style={s.footerDot}>·</Text>
-              <TouchableOpacity activeOpacity={0.7}><Text style={s.footerLink}>Terms</Text></TouchableOpacity>
+              <TouchableOpacity activeOpacity={0.7} onPress={() => Linking.openURL(TERMS_URL)}><Text style={s.footerLink}>Terms</Text></TouchableOpacity>
             </View>
 
             <View style={{ height: 120 }} />
@@ -150,8 +169,8 @@ export default function PaywallBrowser({ visible, onClose, source = 'browse' }: 
             colors={['transparent', '#000000CC', '#000000']}
             style={s.bottomGradient}
           >
-            <TouchableOpacity style={s.ctaButton} onPress={handleStartTrial} activeOpacity={0.9}>
-              <Text style={s.ctaText}>Start 3-Day Free Trial</Text>
+            <TouchableOpacity style={[s.ctaButton, purchasing && { opacity: 0.6 }]} onPress={handleStartTrial} activeOpacity={0.9} disabled={purchasing}>
+              <Text style={s.ctaText}>{purchasing ? 'Loading…' : 'Start 3-Day Free Trial'}</Text>
             </TouchableOpacity>
             <Text style={s.ctaSubtext}>No commitment. Cancel before Day 3 to pay nothing.</Text>
           </LinearGradient>

@@ -103,6 +103,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Monotonic search id — lets a newer search discard a slower older one's late response.
+  const searchSeq = useRef(0)
 
   // Recent foods
   type RecentFood = { food_id: string; food_name: string; brand_name?: string; cal: number; prot: number; serving: string }
@@ -172,34 +174,30 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
   const doSearch = useCallback(async (q: string) => {
     if (!q.trim()) { setResults([]); setResultMacros({}); return }
+    const seq = ++searchSeq.current
     setSearching(true)
     setResultMacros({})
     try {
       const res = await searchFoods(q.trim())
+      if (seq !== searchSeq.current) return // a newer search started — drop this stale response
       setResults(res)
-      // FatSecret's foods.search endpoint returns a description string but not the full
-      // serving object — fetch details per-row in the background so the list can show
-      // calories/protein without blocking the initial render.
-      res.forEach(async (food) => {
-        try {
-          const detail = await getFoodById(food.food_id)
-          const s = detail.servings[0]
-          if (s) {
-            setResultMacros(prev => ({
-              ...prev,
-              [food.food_id]: {
-                cal: Math.round(parseFloat(s.calories) || 0),
-                prot: Math.round(parseFloat(s.protein) || 0),
-                serving: s.serving_description,
-              },
-            }))
-          }
-        } catch {}
-      })
+      // Parse cal/protein/serving straight from each result's description (via the local
+      // quickMacros) instead of firing a getFoodById per row — that was N+1 against the
+      // shared FatSecret key. Full detail loads only when a row is tapped (openDetail).
+      const macros: Record<string, { cal: number; prot: number; serving: string }> = {}
+      for (const food of res) {
+        const q = quickMacros(food.food_description)
+        macros[food.food_id] = {
+          cal: Math.round(parseFloat(q.cal)) || 0,
+          prot: Math.round(parseFloat(q.prot)) || 0,
+          serving: q.per,
+        }
+      }
+      setResultMacros(macros)
     } catch {
-      Alert.alert('Search failed', 'Could not reach FatSecret. Check your connection.')
+      if (seq === searchSeq.current) Alert.alert('Search failed', 'Could not reach FatSecret. Check your connection.')
     } finally {
-      setSearching(false)
+      if (seq === searchSeq.current) setSearching(false)
     }
   }, [])
 
