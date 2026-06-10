@@ -42,6 +42,9 @@ export default function FoodPreferencesScreen() {
   const [inputText, setInputText] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // True if the initial load failed — blocks save() so we never overwrite real prefs
+  // with the empty state a failed fetch leaves behind.
+  const [loadFailed, setLoadFailed] = useState(false)
   const inputRef = useRef<TextInput>(null)
 
   useEffect(() => {
@@ -51,12 +54,20 @@ export default function FoodPreferencesScreen() {
   const loadPreferences = async () => {
     if (!user) { setLoading(false); return }
     setLoading(true)
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('food_dislikes')
       .eq('id', user.id)
       .single()
 
+    // On a load error, bail WITHOUT populating empty selections — otherwise a later save
+    // would write [] over the user's real dislikes. Block save until a reload succeeds.
+    if (error) {
+      setLoadFailed(true)
+      setLoading(false)
+      return
+    }
+    setLoadFailed(false)
     const dislikes: string[] = data?.food_dislikes ?? []
     const knownSelected = dislikes.filter(d => DISLIKE_CHIPS.includes(d))
     const custom = dislikes.filter(d => !DISLIKE_CHIPS.includes(d))
@@ -107,6 +118,8 @@ export default function FoodPreferencesScreen() {
 
   const save = async () => {
     if (!user) return
+    // Never save if the initial load failed — the empty UI state would wipe real prefs.
+    if (loadFailed) { Alert.alert('Couldn’t load your preferences', 'Please reopen this screen and try again.'); return }
     // Commit any pending text before saving
     const pending = inputText.trim()
     let finalCustomChips = customChips

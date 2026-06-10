@@ -114,7 +114,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   useEffect(() => {
     if (visible) {
       AsyncStorage.getItem(RECENT_FOODS_KEY).then(data => {
-        if (data) setRecentFoods(JSON.parse(data))
+        // Guard JSON.parse — a corrupt/partial value would otherwise throw and break the modal.
+        if (!data) return
+        try { setRecentFoods(JSON.parse(data)) } catch {}
       })
     }
   }, [visible])

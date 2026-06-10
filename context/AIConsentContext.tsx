@@ -117,10 +117,13 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
 
   const revokeConsent = async () => {
     if (!user) return
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ ai_consent_accepted_at: null })
       .eq('id', user.id)
+    // Only flip local state if the server write succeeded — otherwise local and server
+    // consent diverge (UI shows revoked while the DB still has consent).
+    if (error) return
     setAcceptedAt(null)
     setHasConsent(false)
     hasConsentRef.current = false

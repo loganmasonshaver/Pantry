@@ -273,26 +273,31 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
           body: { description: recipeDesc, existingSteps: rawSteps },
         }))
       }
-      const results = await Promise.all(calls)
-      let idx = 0
-      if (macrosBlank) {
-        const m = results[idx++]?.data
-        if (m && !m.error) {
-          cal = Math.round(m.calories ?? 0)
-          pro = Math.round(m.protein ?? 0)
-          carb = Math.round(m.carbs ?? 0)
-          fat_ = Math.round(m.fat ?? 0)
-        }
-      }
-      if (prepBlank || needTitles) {
-        const r = results[idx++]?.data
-        if (r && !r.error) {
-          if (prepBlank) prep = Math.round(r.prepTime ?? 0)
-          if (needTitles && Array.isArray(r.titles) && r.titles.length === rawSteps.length) {
-            stepTitles = r.titles.map((t: any) => String(t).trim())
+      // Wrap the estimation calls — a network error here previously threw out of submit and
+      // left the button stuck on "Estimating…" forever. On failure, proceed with whatever the
+      // user entered (or zeros) so Save never freezes.
+      try {
+        const results = await Promise.all(calls)
+        let idx = 0
+        if (macrosBlank) {
+          const m = results[idx++]?.data
+          if (m && !m.error) {
+            cal = Math.round(m.calories ?? 0)
+            pro = Math.round(m.protein ?? 0)
+            carb = Math.round(m.carbs ?? 0)
+            fat_ = Math.round(m.fat ?? 0)
           }
         }
-      }
+        if (prepBlank || needTitles) {
+          const r = results[idx++]?.data
+          if (r && !r.error) {
+            if (prepBlank) prep = Math.round(r.prepTime ?? 0)
+            if (needTitles && Array.isArray(r.titles) && r.titles.length === rawSteps.length) {
+              stepTitles = r.titles.map((t: any) => String(t).trim())
+            }
+          }
+        }
+      } catch {}
       setSubmitLabel(isEditMode ? 'Save Changes' : 'Post Recipe')
     }
 

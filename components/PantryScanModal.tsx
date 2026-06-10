@@ -924,7 +924,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   const selected = detectedItems.filter(i => i.checked)
                   if (selected.length === 0) { handleClose(); return }
                   setSaving(true)
-                  await supabase.from('pantry_items').insert(
+                  const { error } = await supabase.from('pantry_items').insert(
                     selected.map(item => ({
                       user_id: user.id,
                       name: item.name,
@@ -933,6 +933,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                     }))
                   )
                   setSaving(false)
+                  // Surface insert failures instead of silently dropping the scanned items
+                  // (the user would otherwise think their whole scan saved when nothing did).
+                  if (error) { Alert.alert('Could not save items', 'Please try again.'); return }
                   onItemsAdded?.()
                   handleClose()
                 }}
