@@ -145,7 +145,9 @@ Deno.serve(async (req: Request) => {
       if (body.userId && body.userId !== callerUser.id) {
         return new Response(JSON.stringify({ error: "cannot delete other users" }), { status: 403, headers: jsonCors })
       }
-      const email = body.email ?? callerUser.email
+      // Always the verified caller's OWN email — never a caller-supplied body.email, which
+      // would let any authenticated user delete ANY contact from the Loops list.
+      const email = callerUser.email
       if (!email) return new Response(JSON.stringify({ error: "no email to delete" }), { status: 400, headers: jsonCors })
       await loopsDeleteContact(email)
       return new Response(JSON.stringify({ ok: true }), { headers: jsonCors })

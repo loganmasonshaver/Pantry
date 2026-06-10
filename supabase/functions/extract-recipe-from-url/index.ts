@@ -175,8 +175,8 @@ Deno.serve(async (req: Request) => {
   const denied = await requirePremium(user.id)
   if (denied) return denied
 
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 10, 60000)
+  // Rate-limit by the authenticated user id (un-spoofable) instead of a client-padded IP.
+  const { allowed } = rateLimit(`u:${user.id}`, 10, 60000)
   if (!allowed) return rateLimitResponse()
 
   try {

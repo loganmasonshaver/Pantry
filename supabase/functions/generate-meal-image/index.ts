@@ -1,6 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
+import { verifyUser } from '../_shared/auth.ts'
+import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+
+// Per-user daily ceiling on actual generations (cache hits don't count). Generous —
+// images are globally cached, so a normal user generates only a handful of new ones/day.
+const IMAGE_GEN_DAILY_CAP = 60
 
 const falApiKey = Deno.env.get("FAL_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
@@ -83,13 +88,7 @@ const corsHeaders = {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
-  // No auth required — images are globally cached (shared across all users).
-  // The global Supabase image_cache table means one user's generation benefits everyone.
-  // IP rate limiting below is sufficient to prevent abuse.
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 15, 60000)
-  if (!allowed) return rateLimitResponse()
-
+  let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
     const { mealName, ingredients = [], steps = [], bypassCache = false } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
@@ -101,8 +100,8 @@ Deno.serve(async (req: Request) => {
 
     const cacheKey = normalizeKey(mealName)
 
-    // Check DB cache unless explicitly bypassed (used for testing prompt changes
-    // against a recipe that already has a cached image).
+    // Check DB cache FIRST (free, no auth) — globally-cached images are shared across all
+    // users, so serving a hit costs nothing and preserves pre-auth use (e.g. onboarding).
     if (!bypassCache) {
       const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
       if (cached?.image_url) {
@@ -110,10 +109,21 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Cache MISS = we're about to spend FAL/LLM credits. Require a logged-in user so
+    // anonymous callers can't drain image-generation credits by enumerating meal names.
+    const user = await verifyUser(req)
+    if (!user) return new Response(JSON.stringify({ image: null, error: 'auth required' }), { status: 401, headers: jsonHeaders })
+
     if (!falApiKey) {
       console.log('FAL_API_KEY is missing or empty')
       return new Response(JSON.stringify({ image: null, error: 'no FAL key' }), { headers: jsonHeaders })
     }
+
+    // Per-user daily generation ceiling (atomic, server-side). Cache hits above are exempt;
+    // only real generations count. Refunded below if generation ultimately fails.
+    const { allowed } = await checkScanCap(req, 'image_gen', IMAGE_GEN_DAILY_CAP)
+    if (!allowed) return scanCapResponse(IMAGE_GEN_DAILY_CAP)
+    capConsumed = true
 
     // STAGE 1: ask an LLM to visually describe the finished dish. If it succeeds we use
     // that as the basis for the Flux prompt; if it fails we fall back to a static template
@@ -227,8 +237,12 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // All attempts failed — give the user's cap slot back so a failure they must retry
+    // doesn't cost them quota.
+    if (capConsumed) await refundScan(req, 'image_gen')
     return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
   } catch (error) {
+    if (capConsumed) await refundScan(req, 'image_gen')
     return new Response(JSON.stringify({ image: null, error: (error as Error).message }), {
       status: 500, headers: jsonHeaders,
     })

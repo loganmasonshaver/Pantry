@@ -3,9 +3,10 @@
 // scripts/seed_recipe_templates.py, then deleted. Uses the existing GOOGLE_AI_KEY
 // from Supabase secrets so we never have to extract or share the API key locally.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
+// Admin/seeding tool — gated by the shared admin secret so it isn't an open Google-AI proxy.
+const adminSecret = Deno.env.get("ADMIN_SECRET")
 
 const jsonHeaders = {
   "Content-Type": "application/json",
@@ -48,16 +49,17 @@ Deno.serve(async (req: Request) => {
     return new Response("ok", { headers: jsonHeaders })
   }
 
+  // Admin-only seeding tool. Fail closed if the secret isn't configured.
+  const providedSecret = req.headers.get('x-admin-secret') ?? ''
+  if (!adminSecret || providedSecret !== adminSecret) {
+    return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: jsonHeaders })
+  }
+
   if (!googleAiKey) {
     return new Response(JSON.stringify({ error: "GOOGLE_AI_KEY not configured" }), {
       status: 500, headers: jsonHeaders,
     })
   }
-
-  // Generous rate limit — script paces itself but allow burst recovery
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 30, 60000)
-  if (!allowed) return rateLimitResponse()
 
   try {
     const { mealName } = await req.json()
