@@ -266,6 +266,8 @@ export default function SavedScreen() {
     if (timerRef.current) clearTimeout(timerRef.current)
     // Re-insert with the SAME id so any references (e.g. routing, meal_logs.food_id)
     // remain valid. Supabase respects client-provided uuid as long as the row is gone.
+    // Re-insert ALL columns — not just name/macros — or the meal reloads truncated on the
+    // next fetch (NULL carbs/fat/ingredients/steps/image, lost is_user_created flag).
     await supabase.from('saved_meals').insert({
       id: removed.meal.id,
       user_id: user.id,
@@ -273,6 +275,12 @@ export default function SavedScreen() {
       prep_time: removed.meal.prep_time,
       calories: removed.meal.calories,
       protein: removed.meal.protein,
+      carbs: removed.meal.carbs,
+      fat: removed.meal.fat,
+      ingredients: removed.meal.ingredients,
+      steps: removed.meal.steps,
+      image_url: removed.meal.image ?? null,
+      is_user_created: removed.meal.is_user_created,
     })
     setMeals(prev => {
       const next = [...prev]

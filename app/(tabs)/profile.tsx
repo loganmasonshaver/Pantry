@@ -558,7 +558,10 @@ export default function ProfileScreen() {
     if (!editGoal || !user) return
     const num = parseInt(editValue)
     if (isNaN(num) || num <= 0) { Alert.alert('Invalid value'); return }
-    await supabase.from('profiles').update({ [editGoal.field]: num }).eq('id', user.id)
+    // Only update local state if the DB write actually succeeded — otherwise the UI would
+    // show a "saved" value the DB never got (and meal-gen would keep using the old goal).
+    const { error } = await supabase.from('profiles').update({ [editGoal.field]: num }).eq('id', user.id)
+    if (error) { Alert.alert('Save failed', error.message); return }
     setProfile(p => p ? { ...p, [editGoal.field]: num } : p)
     setEditGoal(null)
   }
@@ -772,13 +775,15 @@ export default function ProfileScreen() {
     const heightCm = Math.round((ft * 12 + inches) * 2.54)
     const weightKg = weightLbs * 0.453592
     const result = calculateGoals(age, calcGender, heightCm, weightKg, calcActivity, calcGoal)
-    // Save profile fields + goals
-    await supabase.from('profiles').update({
+    // Save profile fields + goals — bail (keep the modal open, no animation) if it fails,
+    // so we never show recalculated goals the DB didn't actually store.
+    const { error: saveErr } = await supabase.from('profiles').update({
       age, gender: calcGender, height_cm: heightCm, weight_kg: weightKg,
       activity_level: calcActivity, fitness_goal: calcGoal,
       calorie_goal: result.calories, protein_goal: result.protein,
       carbs_goal: result.carbs, fat_goal: result.fat,
     }).eq('id', user!.id)
+    if (saveErr) { Alert.alert('Save failed', saveErr.message); return }
     setShowCalcModal(false)
 
     // Animate numbers counting up

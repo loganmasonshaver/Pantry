@@ -27,7 +27,7 @@ type Props = {
   initialQuantity: number
   currentCalories: number
   currentProtein: number
-  onUpdated: (logId: string, calories: number, protein: number) => void
+  onUpdated: (logId: string, calories: number, protein: number, carbs?: number, fat?: number) => void
 }
 
 export default function EditPortionModal({
@@ -71,6 +71,10 @@ export default function EditPortionModal({
     setSaving(true)
     let calories: number
     let protein: number
+    // carbs/fat only change on a serving-based (quantity) edit; left undefined on the
+    // manual cal/protein fallback so the stored carbs/fat aren't disturbed.
+    let carbs: number | undefined
+    let fat: number | undefined
     let updatePayload: Record<string, any>
 
     if (food && selectedServing) {
@@ -80,7 +84,10 @@ export default function EditPortionModal({
       const base = parseMacros(selectedServing)
       calories = Math.round(base.calories * qty)
       protein = Math.round(base.protein * qty)
-      updatePayload = { calories, protein, serving_id: selectedServing.serving_id, quantity: qty }
+      // Scale carbs+fat by qty too — omitting them left stale macros and corrupted daily totals.
+      carbs = Math.round(base.carbs * qty)
+      fat = Math.round(base.fat * qty)
+      updatePayload = { calories, protein, carbs, fat, serving_id: selectedServing.serving_id, quantity: qty }
     } else {
       calories = parseInt(editCals) || 0
       protein = parseInt(editProt) || 0
@@ -94,7 +101,7 @@ export default function EditPortionModal({
 
     setSaving(false)
     if (error) { Alert.alert('Error', error.message); return }
-    onUpdated(logId, calories, protein)
+    onUpdated(logId, calories, protein, carbs, fat)
     onClose()
   }
 

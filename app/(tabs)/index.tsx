@@ -736,11 +736,12 @@ export default function HomeScreen() {
     setSlots(prev => prev.filter(s => s.id !== slotId))
     setExpandedSlots(prev => { const next = new Set(prev); next.delete(slotId); return next })
     if (slot && user) {
-      const today = new Date().toISOString().split('T')[0]
+      // Delete from the day being VIEWED, not always today — otherwise removing a slot
+      // while looking at a past date wipes today's logs and orphans the viewed day's.
       await supabase.from('meal_logs').delete()
         .eq('user_id', user.id)
         .eq('slot', slot.label)
-        .eq('logged_at', today)
+        .eq('logged_at', selectedDate)
     }
   }
 
@@ -750,10 +751,14 @@ export default function HomeScreen() {
   const ratingToastOpacity = useRef(new RNAnimated.Value(0)).current
   const [editEntry, setEditEntry] = useState<LogEntry | null>(null)
 
-  const handleEntryUpdated = (logId: string, calories: number, protein: number) => {
+  const handleEntryUpdated = (logId: string, calories: number, protein: number, carbs?: number, fat?: number) => {
+    // Update carbs/fat too when provided (serving edits) so the daily macro bars don't
+    // show stale totals until the next refetch. Manual cal/protein edits leave them as-is.
     setSlots(prev => prev.map(s => ({
       ...s,
-      entries: s.entries.map(e => e.id === logId ? { ...e, calories, protein } : e),
+      entries: s.entries.map(e => e.id === logId
+        ? { ...e, calories, protein, ...(carbs !== undefined ? { carbs } : {}), ...(fat !== undefined ? { fat } : {}) }
+        : e),
     })))
   }
 
