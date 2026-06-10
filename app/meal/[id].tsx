@@ -549,7 +549,10 @@ export default function MealDetailScreen() {
   const removeFromPantry = async (ingredientName: string) => {
     if (!user) return
     setPantryNames(prev => { const n = new Set(prev); n.delete(ingredientName.toLowerCase()); return n })
-    await supabase.from('pantry_items').update({ in_stock: false }).eq('user_id', user.id).ilike('name', ingredientName)
+    // Escape LIKE metacharacters so a name like "100% juice" matches literally instead of
+    // letting the % act as a wildcard that marks unrelated pantry rows out of stock.
+    const safe = ingredientName.replace(/[%_\\]/g, '\\$&')
+    await supabase.from('pantry_items').update({ in_stock: false }).eq('user_id', user.id).ilike('name', safe)
   }
 
   const toggleHaveIt = (ingredientName: string) => {

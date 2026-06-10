@@ -186,14 +186,15 @@ export default function GroceryScreen() {
         return { ...item, name: cleanName }
       })
 
-      // fuzzy dedup: substring match in either direction collapses "chicken" + "chicken breast"
-      // duplicates that the AI meal-generator sometimes emits when the same dish is suggested twice.
-      const seen: string[] = []
+      // Exact (case-insensitive) dedup only. The old substring-based fuzzy match permanently
+      // HID distinct items — e.g. "brown rice" collapsed under "rice", "almond milk" under
+      // "milk" — and those DB rows were never cleaned up, so the user just lost groceries from
+      // the list. Showing an occasional AI near-dupe is far better than hiding a real item.
+      const seen = new Set<string>()
       const deduped = fixed.filter(item => {
-        const lower = item.name.toLowerCase()
-        const isDupe = seen.some(s => s.includes(lower) || lower.includes(s))
-        if (isDupe) return false
-        seen.push(lower)
+        const lower = item.name.toLowerCase().trim()
+        if (seen.has(lower)) return false
+        seen.add(lower)
         return true
       })
 

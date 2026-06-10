@@ -563,6 +563,9 @@ export default function ProfileScreen() {
     const { error } = await supabase.from('profiles').update({ [editGoal.field]: num }).eq('id', user.id)
     if (error) { Alert.alert('Save failed', error.message); return }
     setProfile(p => p ? { ...p, [editGoal.field]: num } : p)
+    // Calorie/protein/meals/prep all size meal generation — drop the cached daily meals so
+    // they regenerate to the new target instead of serving stale, wrong-sized suggestions.
+    await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setEditGoal(null)
   }
 
@@ -784,6 +787,8 @@ export default function ProfileScreen() {
       carbs_goal: result.carbs, fat_goal: result.fat,
     }).eq('id', user!.id)
     if (saveErr) { Alert.alert('Save failed', saveErr.message); return }
+    // Recalculated calorie/protein goals resize meals — invalidate the cached daily meals.
+    await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     setShowCalcModal(false)
 
     // Animate numbers counting up

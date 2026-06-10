@@ -427,6 +427,13 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       console.log(`Prep-time validation: dropped ${droppedCount}/${originalCount} meals that exceeded maxPrepMinutes=${maxPrepMinutes}`)
     }
 
+    // If every candidate got filtered out (bad input, impossible macro/prep constraints),
+    // refund the slot — the user got nothing usable, so it shouldn't count against their cap.
+    if (meals.length === 0) {
+      await refundScan(req, 'meal_gen')
+      return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } })
+    }
+
     // Return meals immediately, images will be fetched by a separate function
     return new Response(JSON.stringify(meals.map((m: any) => ({ ...m, image: null }))), {
       headers: { "Content-Type": "application/json" },
