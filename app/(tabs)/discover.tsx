@@ -510,7 +510,9 @@ function Pill({ label, tint, small }: { label: string; tint: 'amber' | 'green' |
     ]}>
       <Text style={[
         styles.pillText,
-        small && { fontSize: 9 },
+        // Slightly larger text on the rail cards; tighter letter-spacing keeps all three
+        // pills on one line within the reclaimed edge spacing (no wrap even at "20m").
+        small && { fontSize: 10, letterSpacing: 0.4 },
         { color: tintMap.color },
       ]}>{label}</Text>
     </View>
