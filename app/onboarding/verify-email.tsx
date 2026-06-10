@@ -121,10 +121,13 @@ export default function VerifyEmailScreen() {
             if (session?.user?.id) {
               const { data: profile } = await supabase
                 .from('profiles')
-                .select('calorie_goal')
+                .select('onboarding_completed, calorie_goal')
                 .eq('id', session.user.id)
-                .single()
-              if (profile?.calorie_goal) {
+                .maybeSingle()
+              // onboarding_completed is the authoritative signal (calorie_goal is skippable) —
+              // match signin.tsx's routeByProfile so a finished-but-goal-skipped user isn't
+              // wrongly sent back through onboarding.
+              if (profile?.onboarding_completed || profile?.calorie_goal) {
                 await AsyncStorage.setItem('onboarding_complete', 'true')
                 router.replace('/(tabs)')
                 return

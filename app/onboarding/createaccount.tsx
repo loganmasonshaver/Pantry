@@ -18,6 +18,7 @@ import { trackAccountCreated, trackMarketingOptIn } from '../../lib/analytics'
 import TurnstileWebView, { type TurnstileRef } from '../../components/TurnstileWebView'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { generateMeals } from '../../lib/meals'
+import { supabase } from '../../lib/supabase'
 
 // Email marketing opt-in is captured on this screen for all 3 signup paths
 // (email, Apple, Google). Because Apple/Google flows redirect through OAuth,
@@ -89,8 +90,22 @@ export default function CreateAccountScreen() {
   // Account age is NOT used — a reset clears the flag, enabling new-user testing
   // with an existing account.
   const isReturningUser = async () => {
-    const done = await AsyncStorage.getItem('onboarding_complete')
-    return done === 'true'
+    if (await AsyncStorage.getItem('onboarding_complete') === 'true') return true
+    // Local flag missing (fresh install / reset) — fall back to the server profile so an
+    // already-onboarded user signing in via OAuth on a new device isn't sent back through
+    // onboarding (which would re-run it over their existing data). Mirrors routeByProfile.
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user?.id) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('onboarding_completed, calorie_goal')
+          .eq('id', session.user.id)
+          .maybeSingle()
+        return !!(data?.onboarding_completed || data?.calorie_goal)
+      }
+    } catch {}
+    return false
   }
 
   const handleAppleSignIn = async () => {

@@ -116,10 +116,15 @@ function RootLayoutNav() {
       return
     }
 
+    // Cancellation guard: this effect re-runs on every session identity change (incl. silent
+    // TOKEN_REFRESHED events). Without this, a stale in-flight chain could call router.replace
+    // after a newer one and bounce the user.
+    let cancelled = false
     Promise.all([
       AsyncStorage.getItem('onboarding_complete'),
       AsyncStorage.getItem('otp_verified'),
     ]).then(async ([onboardingValue, otpValue]) => {
+      if (cancelled) return
       if (session) {
         const provider = session.user?.app_metadata?.provider
         const isOAuthUser = provider === 'google' || provider === 'apple'
@@ -141,6 +146,7 @@ function RootLayoutNav() {
               .from('profiles').select('onboarding_completed, calorie_goal').eq('id', session.user.id).maybeSingle()
             completed = !!(data?.onboarding_completed || data?.calorie_goal)
           } catch {}
+          if (cancelled) return // a newer session change superseded this chain
           if (completed) {
             await AsyncStorage.setItem('onboarding_complete', 'true')
             router.replace('/(tabs)')
@@ -151,8 +157,9 @@ function RootLayoutNav() {
       } else {
         router.replace('/onboarding')
       }
-      setChecking(false)
+      if (!cancelled) setChecking(false)
     })
+    return () => { cancelled = true }
   }, [session, loading])
 
   return (

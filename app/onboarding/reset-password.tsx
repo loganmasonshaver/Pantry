@@ -161,8 +161,25 @@ export default function ResetPasswordScreen() {
       if (error) {
         Alert.alert('Error', error.message)
       } else {
-        await AsyncStorage.setItem('onboarding_complete', 'true')
-        router.replace('/(tabs)')
+        // Don't assume onboarding is finished — a reset can happen on a fresh/incomplete
+        // account. Route by the profile (same authoritative check as signin.tsx) so we don't
+        // drop a half-onboarded user into a broken dashboard.
+        const { data: { session } } = await supabase.auth.getSession()
+        let completed = false
+        if (session?.user?.id) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('onboarding_completed, calorie_goal')
+            .eq('id', session.user.id)
+            .maybeSingle()
+          completed = !!(profile?.onboarding_completed || profile?.calorie_goal)
+        }
+        if (completed) {
+          await AsyncStorage.setItem('onboarding_complete', 'true')
+          router.replace('/(tabs)')
+        } else {
+          router.replace('/onboarding')
+        }
       }
     } catch (e: any) {
       Alert.alert('Error', e.message)
