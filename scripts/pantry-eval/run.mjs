@@ -165,6 +165,24 @@ async function callModel(m, base64, mime) {
   return { names, ms, error }
 }
 
+// ── LIST mode: print the Gemini models this key can actually call, then exit. ──
+// Use this to find the real Pro id (gemini-3.1-pro 404'd). Run: LIST=1 GOOGLE_AI_KEY=... node ...
+if (process.env.LIST) {
+  const key = process.env.GOOGLE_AI_KEY
+  if (!key) { console.error('Set GOOGLE_AI_KEY to list models.'); process.exit(1) }
+  const data = await (await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`)).json()
+  const errObj = Array.isArray(data) ? data[0]?.error : data.error
+  if (errObj) { console.error('Error:', errObj.message ?? JSON.stringify(errObj)); process.exit(1) }
+  const models = (data.models ?? [])
+    .filter((m) => /gemini/i.test(m.name) && (m.supportedGenerationMethods ?? []).includes('generateContent'))
+    .map((m) => m.name.replace(/^models\//, ''))
+    .sort()
+  console.log('\nGemini models your key can call (support generateContent):\n')
+  for (const m of models) console.log('  ' + m)
+  console.log(`\n${models.length} models. Look for the "pro" one — that's the id to use.\n`)
+  process.exit(0)
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────
 const active = MODELS.filter((m) => {
   if (!m.apiKey) { console.log(`⚠️  skipping ${m.label} — no API key in env`); return false }
