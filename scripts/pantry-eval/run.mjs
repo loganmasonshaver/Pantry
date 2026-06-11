@@ -24,6 +24,8 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const IMAGES_DIR = path.join(__dirname, 'images')
+// Per-request timeout in seconds — override with TIMEOUT_S=180 to give slow models more rope.
+const TIMEOUT_MS = (Number(process.env.TIMEOUT_S) || 90) * 1000
 
 // Models under test. Adjust ids here if Google/OpenAI rename them — these are the
 // current (June 2026) ids; verify against the provider docs if a call 404s.
@@ -195,7 +197,7 @@ async function callModel(m, base64, mime) {
   // on OpenRouter) blocks the whole run forever, since each photo awaits ALL models. 90s is
   // generous; anything slower is disqualified for a scan anyway.
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 90000)
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS)
   let res
   try {
     res = await fetch(m.endpoint, {
@@ -217,7 +219,7 @@ async function callModel(m, base64, mime) {
     })
   } catch (e) {
     return { names: [], removed: [], collapsed: 0, ms: Date.now() - t0,
-      error: e.name === 'AbortError' ? 'TIMED OUT (>90s) — too slow for a scan' : `request failed: ${e.message}` }
+      error: e.name === 'AbortError' ? `TIMED OUT (>${TIMEOUT_MS / 1000}s) — too slow for a scan` : `request failed: ${e.message}` }
   } finally {
     clearTimeout(timer)
   }
@@ -299,19 +301,26 @@ for (const file of files) {
   const base64 = buf.toString('base64')
   console.log(`\n${'='.repeat(70)}\n📷 ${file}  [${mime}]\n${'='.repeat(70)}`)
 
-  // Run all models on this image concurrently.
-  const results = await Promise.all(active.map(async (m) => ({ m, r: await callModel(m, base64, mime) })))
+  // Show which models are in flight, so a model that never prints below is the clog.
+  console.log(`  ⏳ running: ${active.map((m) => m.label).join(' · ')}`)
 
-  // Per-model summary line. Shows item count (after non-food filter), latency, and — when
-  // the filter caught hallucinated non-food — exactly what it stripped, so we can verify it.
-  for (const { m, r } of results) {
+  // Run all models concurrently, but PRINT each the instant it finishes (completion order).
+  // Fast models show up immediately; the slow/hung one is whatever's still missing — that's
+  // how you SEE what's clogging the run in real time.
+  const results = await Promise.all(active.map(async (m) => {
+    const r = await callModel(m, base64, mime)
     const t = totals[m.label]
-    if (r.error) { t.errors++; console.log(`  ${m.label.padEnd(26)} ERROR: ${r.error}`); continue }
-    t.items += r.names.length; t.ms += r.ms; t.removed += (r.removed?.length ?? 0); t.collapsed += (r.collapsed ?? 0)
-    const filtered = r.removed?.length ? `  🚫 ${r.removed.join(', ')}` : ''
-    const merged = r.collapsed ? `  🔁 ${r.collapsed} over-splits merged` : ''
-    console.log(`  ${m.label.padEnd(26)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${merged}${filtered}`)
-  }
+    if (r.error) {
+      t.errors++
+      console.log(`  ✗ ${m.label.padEnd(24)} ERROR: ${r.error}`)
+    } else {
+      t.items += r.names.length; t.ms += r.ms; t.removed += (r.removed?.length ?? 0); t.collapsed += (r.collapsed ?? 0)
+      const filtered = r.removed?.length ? `  🚫 ${r.removed.join(', ')}` : ''
+      const merged = r.collapsed ? `  🔁 ${r.collapsed} over-splits merged` : ''
+      console.log(`  ✓ ${m.label.padEnd(24)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${merged}${filtered}`)
+    }
+    return { m, r }
+  }))
 
   // Recall matrix: union of every item any model found, with ✓/· per model.
   const byModel = Object.fromEntries(results.map(({ m, r }) => [m.label, new Set(r.names.map(norm))]))
