@@ -41,25 +41,30 @@ When in doubt about whether something is human food, leave it out.
 Return ONLY the raw JSON array, no markdown, no explanation.`
 
 async function parseWithGemini(base64: string): Promise<string> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${googleAiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inlineData: { mimeType: "image/jpeg", data: base64 } },
-            { text: RECEIPT_PROMPT },
-          ],
-        }],
-        generationConfig: { maxOutputTokens: 1000 }, // receipts rarely exceed 50 items; 1000 tokens is sufficient
-      }),
-    }
-  )
+  // Use Google's OpenAI-compatible endpoint — the SAME proven config as generate-meals.
+  // The old native v1beta `:generateContent` shape was silently 4xx-ing every receipt,
+  // so we paid GPT-4o on every scan via the fallback. This matches the working caller.
+  const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${googleAiKey}`,
+    },
+    body: JSON.stringify({
+      model: "gemini-3.1-flash-lite",
+      max_tokens: 1000, // receipts rarely exceed 50 items; 1000 tokens is sufficient
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" } }, // high detail improves OCR on receipt text
+          { type: "text", text: RECEIPT_PROMPT },
+        ],
+      }],
+    }),
+  })
   const data = await res.json()
   if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error))
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "[]"
+  return data.choices?.[0]?.message?.content?.trim() ?? "[]"
 }
 
 async function parseWithOpenAI(base64: string): Promise<string> {
