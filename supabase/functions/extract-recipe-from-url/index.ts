@@ -2,8 +2,26 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
+import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
+
+// Daily per-user ceiling. Scraping social pages is ToS-fragile and each extraction
+// ends in a GPT call, so this bounds both cost and abuse of the scrape path.
+const URL_EXTRACT_CAP_PER_DAY = 15
+
+// External fetches (YouTube watch page, oEmbed proxies, OpenAI) can hang indefinitely
+// and force-kill the whole function past the edge runtime limit. A per-call ceiling
+// fails cleanly instead. Default 10s suits the scrape/oEmbed hops; AI call passes 30s.
+async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 10000): Promise<Response> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
 
 // Detect platform from URL
 function detectPlatform(url: string): 'youtube' | 'tiktok' | null {
@@ -27,7 +45,7 @@ async function getYouTubeContent(videoId: string): Promise<string | null> {
   // with captionTracks[].baseUrl pointing to the XML transcript. Requires a real browser
   // UA — bare fetches get a 429 or cookie-consent wall.
   try {
-    const html = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    const html = await fetchWithTimeout(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -39,7 +57,7 @@ async function getYouTubeContent(videoId: string): Promise<string | null> {
     if (captionMatch) {
       // YouTube escapes & as & in the JSON blob — must un-escape before fetching
       const captionUrl = captionMatch[1].replace(/\\u0026/g, '&')
-      const xml = await fetch(captionUrl).then(r => r.text())
+      const xml = await fetchWithTimeout(captionUrl).then(r => r.text())
       const lines = [...xml.matchAll(/<text[^>]*>(.*?)<\/text>/gs)].map(m =>
         m[1].replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
       )
@@ -60,7 +78,7 @@ async function getYouTubeContent(videoId: string): Promise<string | null> {
 
   // Approach 2: YouTube oEmbed for title
   try {
-    const oembedResp = await fetch(
+    const oembedResp = await fetchWithTimeout(
       `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`
     )
     if (oembedResp.ok) {
@@ -71,7 +89,7 @@ async function getYouTubeContent(videoId: string): Promise<string | null> {
 
   // Approach 3: noembed.com (free proxy)
   try {
-    const noembedResp = await fetch(
+    const noembedResp = await fetchWithTimeout(
       `https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`
     )
     if (noembedResp.ok) {
@@ -86,7 +104,7 @@ async function getYouTubeContent(videoId: string): Promise<string | null> {
 // Fetch TikTok caption via oEmbed API
 async function getTikTokCaption(url: string): Promise<string | null> {
   try {
-    const resp = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`)
+    const resp = await fetchWithTimeout(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`)
     if (!resp.ok) return null
     const data = await resp.json()
     // Combine title and author for more context
@@ -136,7 +154,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
   ]
 }`
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -148,7 +166,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       temperature: 0.7,     // moderate variety — recipe reconstructions benefit from some creativity when source is sparse
       max_tokens: 2000,     // full recipe JSON with 8+ ingredients and 6+ steps fits comfortably
     }),
-  })
+  }, 30000) // AI call gets a longer ceiling than the scrape hops
 
   const data = await response.json()
   if (data.error) throw new Error(data.error.message)
@@ -194,6 +212,14 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // Daily cap gate — checked after URL/platform validation so malformed links don't
+    // burn a slot. Atomic check+increment; refunded below on no-content and error paths.
+    const { allowed, used } = await checkScanCap(req, 'url_extract', URL_EXTRACT_CAP_PER_DAY)
+    if (!allowed) {
+      console.log(`[extract-recipe] daily cap hit: ${used}/${URL_EXTRACT_CAP_PER_DAY}`)
+      return scanCapResponse(URL_EXTRACT_CAP_PER_DAY)
+    }
+
     // Extract text content based on platform
     let text: string | null = null
 
@@ -210,6 +236,7 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!text || text.trim().length < 5) {
+      await refundScan(req, 'url_extract') // nothing extracted — don't charge the user's slot
       return new Response(JSON.stringify({ error: 'Could not extract content from this video. Try a different link.' }), {
         status: 422, headers: { "Content-Type": "application/json" },
       })
@@ -222,6 +249,7 @@ Deno.serve(async (req: Request) => {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    await refundScan(req, 'url_extract') // scrape/AI/parse failure after increment — refund
     return new Response(
       JSON.stringify({ error: (error as Error).message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
