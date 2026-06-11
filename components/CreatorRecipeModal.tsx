@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight, Camera, Plus, Pencil, Clock, Instagram, Youtube } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
+import * as Crypto from 'expo-crypto'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 
@@ -178,7 +179,9 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
       // on some iOS versions). ArrayBuffer round-trip through fetch() works consistently.
       const response = await fetch(uri)
       const arrayBuffer = await response.arrayBuffer()
-      const filename = `creator-recipes/${Date.now()}.jpg`
+      // Random UUID, not Date.now(): the bucket is public and we upsert, so a guessable/
+      // colliding timestamp name let one creator's upload overwrite another's photo.
+      const filename = `creator-recipes/${Crypto.randomUUID()}.jpg`
       const { error } = await supabase.storage
         .from('meal-images')
         .upload(filename, arrayBuffer, { contentType: 'image/jpeg', upsert: true })
