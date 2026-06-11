@@ -458,6 +458,13 @@ export default function DiscoverScreen() {
   )
 }
 
+// Creator social links are user-submitted and written straight to the DB, so a
+// malicious creator could store a javascript:/file:/custom-scheme URL — Linking.openURL
+// on that is an injection vector. Only follow plain http(s) web links; ignore the rest.
+function safeOpenSocialUrl(url: string) {
+  if (/^https?:\/\//i.test(url)) Linking.openURL(url).catch(() => {})
+}
+
 // Reusable rail card — same dimensions for both Trending Now and From Creators
 // rails so the two shelves visually rhyme.
 function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }) {
@@ -482,7 +489,7 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
           </View>
         )
         return socialUrl
-          ? <TouchableOpacity onPress={() => Linking.openURL(socialUrl)} activeOpacity={0.7}>{badge}</TouchableOpacity>
+          ? <TouchableOpacity onPress={() => safeOpenSocialUrl(socialUrl)} activeOpacity={0.7}>{badge}</TouchableOpacity>
           : badge
       })()}
       <View style={styles.railContent}>
