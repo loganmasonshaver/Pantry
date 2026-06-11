@@ -35,12 +35,20 @@ const MODELS = [
     apiKey: process.env.OPENAI_API_KEY,
   },
   {
-    // DEBUG: single Pro variant while we figure out the empty-output. Big budget, no thinking
-    // knob (it wasn't taking) — the diagnostic below dumps finish_reason + response shape so we
-    // can see WHY content is empty. Re-expand to the low/med/max curve once Pro returns items.
+    // Mid-tier flash — newer/stronger than 3.1-flash-lite, far cheaper than Pro. The candidate
+    // sweet spot: hopefully fixes Lite's hallucinations/produce misses without Pro's cost.
+    label: 'Gemini 3.5 Flash',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.5-flash',
+    apiKey: process.env.GOOGLE_AI_KEY,
+    maxTokens: 16000,
+  },
+  {
+    // The real 3.1 Pro id is gemini-3.1-pro-preview (the bare "gemini-3.1-pro" 404'd). Big
+    // token budget in case it does heavy "thinking" before answering.
     label: 'Gemini 3.1 Pro',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-3.1-pro',
+    model: 'gemini-3.1-pro-preview',
     apiKey: process.env.GOOGLE_AI_KEY,
     maxTokens: 32000,
   },
