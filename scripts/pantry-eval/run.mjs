@@ -92,14 +92,29 @@ const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(
 function flattenItems(raw) {
   const clean = String(raw).replace(/```json|```/g, '').trim()
   let parsed
-  try { parsed = JSON.parse(clean) } catch { return { names: [], error: 'JSON parse failed' } }
+  try { parsed = JSON.parse(clean) } catch {
+    // Show what actually came back so a non-JSON reply (prose, an error string) is debuggable.
+    return { names: [], error: `JSON parse failed — got: "${clean.slice(0, 120).replace(/\s+/g, ' ')}"` }
+  }
   const zones = parsed.zones ?? []
   const names = []
   for (const z of zones) for (const it of (z.items ?? [])) if (it?.name) names.push(it.name)
   return { names, error: null }
 }
 
-async function callModel(m, base64) {
+// Detect the REAL image type from magic bytes, not the extension — internet/phone
+// downloads routinely mislabel files (a webp named .jpg, a HEIC named .jpeg). Returns
+// the correct mime, or null for formats the vision APIs don't accept (HEIC/DNG/etc).
+function sniffMime(buf) {
+  if (buf.length < 12) return null
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png'
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp'
+  if (buf.toString('ascii', 0, 4) === 'GIF8') return 'image/gif'
+  return null // unsupported (HEIC, DNG raw, etc.)
+}
+
+async function callModel(m, base64, mime) {
   const t0 = Date.now()
   const res = await fetch(m.endpoint, {
     method: 'POST',
@@ -110,7 +125,7 @@ async function callModel(m, base64) {
       messages: [{
         role: 'user',
         content: [
-          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}`, detail: 'high' } },
+          { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: 'high' } },
           { type: 'text', text: buildPrompt(1) },
         ],
       }],
@@ -141,11 +156,14 @@ console.log(`\nTesting ${files.length} photo(s) across ${active.length} model(s)
 const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0 }]))
 
 for (const file of files) {
-  const base64 = fs.readFileSync(path.join(IMAGES_DIR, file)).toString('base64')
-  console.log(`\n${'='.repeat(70)}\n📷 ${file}\n${'='.repeat(70)}`)
+  const buf = fs.readFileSync(path.join(IMAGES_DIR, file))
+  const mime = sniffMime(buf)
+  if (!mime) { console.log(`\n⚠️  skipping ${file} — not a jpeg/png/webp/gif (vision APIs can't read it)`); continue }
+  const base64 = buf.toString('base64')
+  console.log(`\n${'='.repeat(70)}\n📷 ${file}  [${mime}]\n${'='.repeat(70)}`)
 
   // Run all models on this image concurrently.
-  const results = await Promise.all(active.map(async (m) => ({ m, r: await callModel(m, base64) })))
+  const results = await Promise.all(active.map(async (m) => ({ m, r: await callModel(m, base64, mime) })))
 
   // Per-model summary line.
   for (const { m, r } of results) {
