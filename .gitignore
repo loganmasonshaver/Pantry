@@ -42,3 +42,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Pantry-scan eval test photos (local only)
+scripts/pantry-eval/images/*
+!scripts/pantry-eval/images/.gitkeep
