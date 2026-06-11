@@ -2,8 +2,15 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
+import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
+
+// Daily ceiling on the PHOTO path only — that's the GPT-4o vision call that costs real
+// money. Generous enough that a heavy logger (every meal by photo) never hits it; low
+// enough to cap a runaway/abuse loop. Text-only mode runs on cheap gpt-4o-mini and stays
+// on the in-memory rate-limiter alone.
+const MACRO_PHOTO_CAP_PER_DAY = 25
 const fsKey = Deno.env.get("FATSECRET_KEY") ?? ""
 const fsSecret = Deno.env.get("FATSECRET_SECRET") ?? ""
 
@@ -93,13 +100,25 @@ Deno.serve(async (req: Request) => {
   const { allowed } = rateLimit(`u:${user.id}`, 15, 60000)
   if (!allowed) return rateLimitResponse()
 
+  let photoMode = false // declared out here so the catch can refund the right cap slot
   try {
     const { mode, description, base64 } = await req.json()
+    photoMode = mode === "photo" && !!base64
+
+    // Daily cap gate on the costly vision path — atomic check+increment before any AI call.
+    // Outer catch refunds the slot on transient failure (mirrors scan-pantry / parse-receipt).
+    if (photoMode) {
+      const { allowed, used } = await checkScanCap(req, 'macro_est', MACRO_PHOTO_CAP_PER_DAY)
+      if (!allowed) {
+        console.log(`[estimate-meal-macros] daily photo cap hit: ${used}/${MACRO_PHOTO_CAP_PER_DAY}`)
+        return scanCapResponse(MACRO_PHOTO_CAP_PER_DAY)
+      }
+    }
 
     // Step 1: GPT-4o identifies food items + estimates weight in grams
     let messages: any[]
 
-    if (mode === "photo" && base64) {
+    if (photoMode) {
       messages = [
         {
           role: "user",
@@ -166,19 +185,38 @@ Rules:
 
     // Vision (photo) needs full gpt-4o — mini's vision is too weak to estimate portion grams
     // reliably. Text-only descriptions get mini since it's just nutritional reasoning.
-    const model = mode === "photo" ? "gpt-4o" : "gpt-4o-mini"
+    const model = photoMode ? "gpt-4o" : "gpt-4o-mini"
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${openaiApiKey}`,
-      },
-      body: JSON.stringify({ model, max_tokens: 500, messages }),
-    })
+    // OpenAI vision occasionally hangs past the edge runtime's ~150s limit, getting the
+    // whole function force-killed with no logs/response. A 90s ceiling fails cleanly instead.
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), 90000)
+    let response: Response
+    try {
+      response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${openaiApiKey}`,
+        },
+        body: JSON.stringify({ model, max_tokens: 500, messages }),
+        signal: ctrl.signal,
+      })
+    } catch (e) {
+      const msg = (e as Error).name === 'AbortError'
+        ? 'Macro estimation timed out (90s). Try again with a smaller photo.'
+        : `OpenAI request failed: ${(e as Error).message}`
+      if (photoMode) await refundScan(req, 'macro_est') // transient fail — don't burn the slot
+      return new Response(JSON.stringify({ error: msg }), {
+        status: 504, headers: { "Content-Type": "application/json" },
+      })
+    } finally {
+      clearTimeout(timeout)
+    }
 
     const data = await response.json()
     if (data.error) {
+      if (photoMode) await refundScan(req, 'macro_est') // OpenAI rejected — refund the slot
       return new Response(JSON.stringify({ error: data.error.message || JSON.stringify(data.error) }), {
         status: 500, headers: { "Content-Type": "application/json" },
       })
@@ -252,6 +290,7 @@ Calculate macros by adding up each ingredient at the listed gram weight. Be accu
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    if (photoMode) await refundScan(req, 'macro_est') // parse/JSON error after increment — refund
     return new Response(
       JSON.stringify({ error: (error as Error).message }),
       { status: 500, headers: { "Content-Type": "application/json" } },
