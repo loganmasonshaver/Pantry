@@ -52,7 +52,15 @@ async function estimateFromText(description: string): Promise<MacroEstimate> {
   return data as MacroEstimate
 }
 
+// Hard ceiling on the base64 we'll send. The downscale should keep a 2048px JPEG well
+// under this (~1-2MB); this only trips if something abnormal slips through, so we fail
+// with a clear message instead of firing a multi-MB payload at the edge fn.
+const MAX_PHOTO_BASE64_CHARS = 12_000_000 // ~9MB decoded
+
 async function estimateFromPhoto(base64: string): Promise<MacroEstimate> {
+  if (base64.length > MAX_PHOTO_BASE64_CHARS) {
+    throw new Error('That photo is too large. Try taking a new one.')
+  }
   const { data, error } = await supabase.functions.invoke('estimate-meal-macros', {
     body: { mode: 'photo', base64 },
   })
@@ -144,18 +152,27 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     }
   }, [visible])
 
+  // Resize to a 2048px long edge before base64 — full-res iPhone photos are multi-MB
+  // and we send the base64 straight to the edge fn. GPT-4o high-detail vision caps
+  // input at ~2048px internally, so this loses zero model-visible detail while bounding
+  // the payload (matches PantryScanModal). Also our backstop against an unbounded upload.
+  const downscaleToBase64 = async (uri: string): Promise<{ uri: string; base64: string | null }> => {
+    const out = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 2048 } }],
+      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+    )
+    return { uri: out.uri, base64: out.base64 ?? null }
+  }
+
   const capturePhoto = async () => {
     if (!cameraRef.current) return
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 })
       if (photo) {
-        const fixed = await ImageManipulator.manipulateAsync(
-          photo.uri,
-          [],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
-        )
+        const fixed = await downscaleToBase64(photo.uri)
         setImageUri(fixed.uri)
-        setImageBase64(fixed.base64 ?? null)
+        setImageBase64(fixed.base64)
       }
     } catch (e) {
       Alert.alert('Capture failed', 'Could not take photo.')
@@ -171,11 +188,14 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.8,
-      base64: true,
+      // Don't grab the raw full-res base64 here — downscale the uri first so a huge
+      // library photo can't be sent unbounded to the edge fn.
+      base64: false,
     })
     if (!result.canceled && result.assets[0]) {
-      setImageUri(result.assets[0].uri)
-      setImageBase64(result.assets[0].base64 ?? null)
+      const fixed = await downscaleToBase64(result.assets[0].uri)
+      setImageUri(fixed.uri)
+      setImageBase64(fixed.base64)
     }
   }
 
