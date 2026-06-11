@@ -243,11 +243,12 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
 
     setSubmitting(true)
 
-    let cal = parseInt(calories) || 0
-    let pro = parseInt(protein) || 0
-    let carb = parseInt(carbs) || 0
-    let fat_ = parseInt(fat) || 0
-    let prep = parseInt(prepTime) || 0
+    // Math.round(parseFloat) not parseInt — parseInt floors fractional AI macros (22.7 → 22).
+    let cal = Math.round(parseFloat(calories)) || 0
+    let pro = Math.round(parseFloat(protein)) || 0
+    let carb = Math.round(parseFloat(carbs)) || 0
+    let fat_ = Math.round(parseFloat(fat)) || 0
+    let prep = Math.round(parseFloat(prepTime)) || 0
     let stepTitles: string[] | null = null
 
     const macrosBlank = cal === 0 && pro === 0 && carb === 0 && fat_ === 0

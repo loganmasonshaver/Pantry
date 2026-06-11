@@ -183,7 +183,9 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
       .map(i => ({
         name: i.name.trim(),
         visual: i.visual.trim() || null,
-        grams: i.grams ? parseInt(i.grams) : null,
+        // Math.round(parseFloat) not parseInt — parseInt floors, so AI values like 22.7g
+        // or 187.5kcal stored as 22/187 and the error compounded across a day's meals.
+        grams: i.grams ? Math.round(parseFloat(i.grams)) : null,
       }))
 
     const stepsList = steps.filter(s => s.trim())
@@ -191,11 +193,11 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
     const payload = {
       user_id: user.id,
       name: name.trim(),
-      prep_time: prepTime ? parseInt(prepTime) : null,
-      calories: calories ? parseInt(calories) : null,
-      protein: protein ? parseInt(protein) : null,
-      carbs: carbs ? parseInt(carbs) : null,
-      fat: fat ? parseInt(fat) : null,
+      prep_time: prepTime ? Math.round(parseFloat(prepTime)) : null,
+      calories: calories ? Math.round(parseFloat(calories)) : null,
+      protein: protein ? Math.round(parseFloat(protein)) : null,
+      carbs: carbs ? Math.round(parseFloat(carbs)) : null,
+      fat: fat ? Math.round(parseFloat(fat)) : null,
       ingredients: ingredientsList,
       steps: stepsList,
       is_user_created: true,

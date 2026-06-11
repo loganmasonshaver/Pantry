@@ -68,7 +68,16 @@ export default function MacroEditModal({
     const prot = parseFloat(protein)
     const carb = parseFloat(carbs)
     const f = parseFloat(fat)
-    if (isNaN(cal) || isNaN(prot) || isNaN(carb) || isNaN(f)) return // silently no-op on invalid input — keeps modal open so user can fix the field
+    // Reject empty/NaN AND negatives (and 0 calories) — these were silently persisting to
+    // macro_overrides and corrupting log entries. Tell the user instead of no-op'ing.
+    if (isNaN(cal) || isNaN(prot) || isNaN(carb) || isNaN(f)) {
+      Alert.alert('Check your numbers', 'Please enter a value for calories and each macro.')
+      return
+    }
+    if (cal <= 0 || prot < 0 || carb < 0 || f < 0) {
+      Alert.alert('Check your numbers', 'Calories must be above 0 and macros can’t be negative.')
+      return
+    }
     setSaving(true)
     const { error } = await saveOverride(userId, {
       food_key: foodKey,

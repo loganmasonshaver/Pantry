@@ -41,9 +41,10 @@ export type TurnstileRef = {
 
 type Props = {
   onToken: (token: string) => void
+  onError?: () => void // fired when Turnstile reports a failed/expired challenge
 }
 
-export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onToken }, ref) {
+export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onToken, onError }, ref) {
   const webviewRef = useRef<WebView>(null)
 
   useImperativeHandle(ref, () => ({
@@ -58,11 +59,13 @@ export default forwardRef<TurnstileRef, Props>(function TurnstileWebView({ onTok
   const handleMessage = useCallback(
     (event: { nativeEvent: { data: string } }) => {
       const token = event.nativeEvent.data
-      if (token && token !== 'ERROR') {
+      if (token === 'ERROR') {
+        onError?.() // surface the failure so the caller can stop spinning / offer retry
+      } else if (token) {
         onToken(token)
       }
     },
-    [onToken],
+    [onToken, onError],
   )
 
   return (

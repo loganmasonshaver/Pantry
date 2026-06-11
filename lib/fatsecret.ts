@@ -156,12 +156,29 @@ async function productNameFromBarcode(barcode: string): Promise<string | null> {
   }
 }
 
+// Fraction of the Open Food Facts product words that also appear in the FatSecret match.
+// OFF and FatSecret name the same product differently, so a blind results[0] can be a
+// totally different food (wrong macros). Require a minimum word overlap before trusting it.
+function nameOverlap(a: string, b: string): number {
+  const tokenize = (s: string) => new Set(
+    s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w.length > 2)
+  )
+  const ta = tokenize(a), tb = tokenize(b)
+  if (ta.size === 0) return 0
+  let hits = 0
+  for (const w of ta) if (tb.has(w)) hits++
+  return hits / ta.size
+}
+
 export async function findFoodByBarcode(barcode: string): Promise<FoodDetail | null> {
   try {
     const productName = await productNameFromBarcode(barcode)
     if (!productName) return null
     const results = await searchFoods(productName)
     if (!results.length) return null
+    // Reject a mismatched top result (< 40% word overlap) so we don't log a different
+    // food's macros — let the user search manually instead of silently being wrong.
+    if (nameOverlap(productName, results[0].food_name) < 0.4) return null
     return getFoodById(results[0].food_id)
   } catch {
     return null

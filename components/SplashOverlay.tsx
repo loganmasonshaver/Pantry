@@ -31,24 +31,29 @@ export default function SplashOverlay() {
   const glow = useRef(new Animated.Value(0.4)).current
   const [taglineIdx, setTaglineIdx] = useState(0)
   const [reduceMotion, setReduceMotion] = useState(false)
+  // Don't run motion until we KNOW the user's preference — reduceMotion starts false,
+  // so without this gate a Reduce-Motion user sees a flash of the prohibited animation
+  // before isReduceMotionEnabled() resolves.
+  const [motionReady, setMotionReady] = useState(false)
 
   // Check accessibility reduce-motion preference. If on, we skip the animated
   // progress bar + glow pulse and show a static "Loading…" instead.
   useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion)
+    AccessibilityInfo.isReduceMotionEnabled().then(v => { setReduceMotion(v); setMotionReady(true) })
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion)
     return () => sub.remove()
   }, [])
 
   useEffect(() => {
-    // 200ms fade-in so the transition from native splash → JS splash doesn't snap-cut
+    // 200ms fade-in so the transition from native splash → JS splash doesn't snap-cut.
+    // A plain opacity fade is allowed under Reduce Motion, so it's not gated.
     Animated.timing(fadeIn, {
       toValue: 1,
       duration: 200,
       useNativeDriver: true,
     }).start()
 
-    if (reduceMotion) return
+    if (!motionReady || reduceMotion) return
 
     // Progress bar fills exactly during the splash window — feels purposeful
     Animated.timing(progressWidth, {
@@ -86,7 +91,7 @@ export default function SplashOverlay() {
       glowLoop.stop()
       clearInterval(taglineInterval)
     }
-  }, [reduceMotion])
+  }, [reduceMotion, motionReady])
 
   // Interpolate glow value to a shadow radius (4-12px) for subtle pulsing
   const shadowRadius = glow.interpolate({

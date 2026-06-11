@@ -89,7 +89,9 @@ function SuperwallContextProviderProd({ children }: { children: React.ReactNode 
       const prevStatus = prevStatusRef.current
       prevStatusRef.current = newStatus
 
-      setIsPremium(newStatus === 'ACTIVE')
+      // Include promoActive — promo users have no Superwall subscription, so an INACTIVE
+      // event would otherwise flash them as non-premium until the re-sync effect runs.
+      setIsPremium(newStatus === 'ACTIVE' || promoActive)
 
       // Transition INACTIVE → ACTIVE means the user just started a trial (or purchased)
       if (newStatus === 'ACTIVE' && prevStatus !== 'ACTIVE') {
