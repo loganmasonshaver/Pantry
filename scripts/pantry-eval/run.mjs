@@ -37,23 +37,7 @@ const MODELS = [
     model: 'gpt-4o',
     apiKey: process.env.OPENAI_API_KEY,
   },
-  // Gemini 3.1 Pro — needs a billing-enabled key (free tier = limit 0). Low + med thinking only.
-  {
-    label: 'Gemini 3.1 Pro (low think)',
-    endpoint: GEMINI,
-    model: 'gemini-3.1-pro-preview',
-    apiKey: process.env.GOOGLE_AI_KEY,
-    extra: { reasoning_effort: 'low' },
-    maxTokens: 16000,
-  },
-  {
-    label: 'Gemini 3.1 Pro (med think)',
-    endpoint: GEMINI,
-    model: 'gemini-3.1-pro-preview',
-    apiKey: process.env.GOOGLE_AI_KEY,
-    extra: { reasoning_effort: 'medium' },
-    maxTokens: 24000,
-  },
+  // Pro dropped — slower than Flash-Lite (10-15s), pricier, and over-splits worse. Worst of both.
   {
     label: 'Gemini 3.1 Flash-Lite',
     endpoint: GEMINI,
@@ -164,9 +148,25 @@ function flattenItems(raw) {
   const zones = parsed.zones ?? []
   const all = []
   for (const z of zones) for (const it of (z.items ?? [])) if (it?.name) all.push(it.name)
-  const removed = all.filter(isNonFood)          // what the filter caught (shown so we can verify)
-  const names = all.filter((n) => !isNonFood(n)) // food only
-  return { names, removed, error: null }
+  const removed = all.filter(isNonFood)            // non-food hallucinations the filter caught
+  const food = all.filter((n) => !isNonFood(n))
+
+  // De-over-split: strip parenthetical qualifiers ("Hot Sauce (Red Cap)" → "Hot Sauce")
+  // then collapse exact duplicates. Fixes the cap-color/can-color over-splitting. Does NOT
+  // touch semantic dupes ("Protein Powder" vs "Whey Protein Isolate") — that needs fuzzy
+  // matching which risks merging genuinely distinct items.
+  const seen = new Set()
+  const names = []
+  let collapsed = 0
+  for (const orig of food) {
+    const canon = orig.replace(/\s*\([^)]*\)/g, '').trim()
+    const key = norm(canon)
+    if (!key) continue
+    if (seen.has(key)) { collapsed++; continue }
+    seen.add(key)
+    names.push(canon)
+  }
+  return { names, removed, collapsed, error: null }
 }
 
 // Detect the REAL image type from magic bytes, not the extension — internet/phone
@@ -203,7 +203,7 @@ async function callModel(m, base64, mime) {
   const data = await res.json()
   // Google sometimes returns errors as an ARRAY ([{error:...}]) — check both shapes.
   const errObj = Array.isArray(data) ? data[0]?.error : data.error
-  if (errObj) return { names: [], removed: [], ms, error: errObj.message ?? JSON.stringify(errObj) }
+  if (errObj) return { names: [], removed: [], collapsed: 0, ms, error: errObj.message ?? JSON.stringify(errObj) }
   const choice = data.choices?.[0]
   const content = choice?.message?.content ?? ''
   // Diagnose empty output (the Pro problem): dump finish_reason, which fields the message
@@ -212,10 +212,10 @@ async function callModel(m, base64, mime) {
     const fr = choice?.finish_reason ?? '(no choice)'
     const mkeys = choice?.message ? Object.keys(choice.message).join(',') : '(no message)'
     const rawPeek = JSON.stringify(data).slice(0, 240)
-    return { names: [], removed: [], ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
+    return { names: [], removed: [], collapsed: 0, ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
   }
-  const { names, removed, error } = flattenItems(content)
-  return { names, removed, ms, error }
+  const { names, removed, collapsed, error } = flattenItems(content)
+  return { names, removed, collapsed, ms, error }
 }
 
 // ── LIST mode: print the Gemini models this key can actually call, then exit. ──
@@ -268,7 +268,7 @@ if (files.length === 0) { console.error(`No images in ${IMAGES_DIR}. Drop some p
 
 console.log(`\nTesting ${files.length} photo(s) across ${active.length} model(s): ${active.map((m) => m.label).join(', ')}\n`)
 
-const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0, removed: 0 }]))
+const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0, removed: 0, collapsed: 0 }]))
 
 for (const file of files) {
   const buf = fs.readFileSync(path.join(IMAGES_DIR, file))
@@ -285,9 +285,10 @@ for (const file of files) {
   for (const { m, r } of results) {
     const t = totals[m.label]
     if (r.error) { t.errors++; console.log(`  ${m.label.padEnd(26)} ERROR: ${r.error}`); continue }
-    t.items += r.names.length; t.ms += r.ms; t.removed += (r.removed?.length ?? 0)
-    const filtered = r.removed?.length ? `  🚫 filtered: ${r.removed.join(', ')}` : ''
-    console.log(`  ${m.label.padEnd(26)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${filtered}`)
+    t.items += r.names.length; t.ms += r.ms; t.removed += (r.removed?.length ?? 0); t.collapsed += (r.collapsed ?? 0)
+    const filtered = r.removed?.length ? `  🚫 ${r.removed.join(', ')}` : ''
+    const merged = r.collapsed ? `  🔁 ${r.collapsed} over-splits merged` : ''
+    console.log(`  ${m.label.padEnd(26)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${merged}${filtered}`)
   }
 
   // Recall matrix: union of every item any model found, with ✓/· per model.
@@ -310,7 +311,7 @@ for (const m of active) {
   const t = totals[m.label]
   const avgItems = (t.items / files.length).toFixed(1)
   const avgMs = (t.ms / Math.max(1, files.length - t.errors) / 1000).toFixed(1)
-  console.log(`  ${m.label.padEnd(26)} avg ${avgItems} items/photo   avg ${avgMs}s   errors: ${t.errors}   non-food filtered: ${t.removed}`)
+  console.log(`  ${m.label.padEnd(26)} avg ${avgItems} items/photo   avg ${avgMs}s   errors: ${t.errors}   non-food filtered: ${t.removed}   over-splits merged: ${t.collapsed}`)
 }
 console.log(`
 How to read this:
