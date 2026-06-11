@@ -32,52 +32,45 @@ const TIMEOUT_MS = (Number(process.env.TIMEOUT_S) || 90) * 1000
 const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
 const OPENROUTER = 'https://openrouter.ai/api/v1/chat/completions'
 
+const OPENAI = 'https://api.openai.com/v1/chat/completions'
+
 const MODELS = [
+  // First-party only — these all scale safely (no OpenRouter gateway). Goal: a model cheaper
+  // than the 2024-era gpt-4o with equal/better accuracy. The gpt-4.1 family is newer + cheaper.
   {
     label: 'GPT-4o (current)',
-    endpoint: 'https://api.openai.com/v1/chat/completions',
+    endpoint: OPENAI,
     model: 'gpt-4o',
     apiKey: process.env.OPENAI_API_KEY,
   },
-  // Pro dropped — slower than Flash-Lite (10-15s), pricier, and over-splits worse. Worst of both.
+  {
+    label: 'GPT-4.1',
+    endpoint: OPENAI,
+    model: 'gpt-4.1',
+    apiKey: process.env.OPENAI_API_KEY,
+  },
+  {
+    label: 'GPT-4.1-mini (~6x cheaper)',
+    endpoint: OPENAI,
+    model: 'gpt-4.1-mini',
+    apiKey: process.env.OPENAI_API_KEY,
+  },
   {
     label: 'Gemini 3.1 Flash-Lite',
     endpoint: GEMINI,
     model: 'gemini-3.1-flash-lite',
     apiKey: process.env.GOOGLE_AI_KEY,
   },
-  // Via OpenRouter (one key, OpenAI-compatible) — auto-skipped if OPENROUTER_API_KEY is unset.
-  // Qwen3-VL tops open-weight vision/OCR benchmarks and is NOT a thinking model (so it should be
-  // fast). Pixtral = Mistral's small cheap VLM. Fix ids if they 404 (openrouter.ai/models).
-  // Qwen3-VL instruct (non-thinking) — purpose-built vision models, tested across the size
-  // range to find the cheapest that's good enough. 235B flagship → 30B-a3b efficient MoE
-  // (likely sweet spot) → 8B tiny/cheapest. All via OpenRouter, skipped without that key.
-  // require_parameters: only route to OpenRouter providers that honor max_tokens, so the
-  // small models stop getting truncated at a provider's low default output cap.
-  {
-    label: 'Qwen3-VL 235B (OR)',
-    endpoint: OPENROUTER,
-    model: 'qwen/qwen3-vl-235b-a22b-instruct',
-    apiKey: process.env.OPENROUTER_API_KEY,
-    maxTokens: 8000,
-    extra: { provider: { require_parameters: true } },
-  },
-  {
+  // Qwen dropped: malformed JSON + hallucinations + OpenRouter gateway = not scale-safe.
+  // Kept as an OPTIONAL reference row — only appears if OPENROUTER_API_KEY is set.
+  ...(process.env.OPENROUTER_API_KEY ? [{
     label: 'Qwen3-VL 30B-a3b (OR)',
     endpoint: OPENROUTER,
     model: 'qwen/qwen3-vl-30b-a3b-instruct',
     apiKey: process.env.OPENROUTER_API_KEY,
     maxTokens: 8000,
     extra: { provider: { require_parameters: true } },
-  },
-  {
-    label: 'Qwen3-VL 8B (OR)',
-    endpoint: OPENROUTER,
-    model: 'qwen/qwen3-vl-8b-instruct',
-    apiKey: process.env.OPENROUTER_API_KEY,
-    maxTokens: 8000,
-    extra: { provider: { require_parameters: true } },
-  },
+  }] : []),
 ]
 
 // The production first-pass prompt, verbatim, parameterized on photo count.
