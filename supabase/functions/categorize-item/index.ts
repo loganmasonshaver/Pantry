@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { sanitizeStr, sanitizeList } from '../_shared/sanitize.ts'
 
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
@@ -23,8 +24,14 @@ Deno.serve(async (req: Request) => {
   if (!allowed) return rateLimitResponse()
 
   try {
-    const { name, categories } = await req.json()
-    if (!name || typeof name !== 'string' || !Array.isArray(categories) || categories.length === 0) {
+    const { name: rawName, categories: rawCategories } = await req.json()
+    if (!rawName || typeof rawName !== 'string' || !Array.isArray(rawCategories) || rawCategories.length === 0) {
+      return new Response(JSON.stringify({ error: "name and categories[] required" }), { status: 400 })
+    }
+    // Sanitize before interpolation — item name and the category list are both caller-supplied.
+    const name = sanitizeStr(rawName, 80)
+    const categories = sanitizeList(rawCategories, 30, 40)
+    if (!name || categories.length === 0) {
       return new Response(JSON.stringify({ error: "name and categories[] required" }), { status: 400 })
     }
 

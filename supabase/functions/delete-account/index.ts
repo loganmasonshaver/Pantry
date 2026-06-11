@@ -38,8 +38,11 @@ async function deleteLoopsContact(email: string): Promise<void> {
   }
 }
 
+// Restrict CORS to our own web origin (not '*') on this destructive endpoint. The native
+// app doesn't enforce CORS so it's unaffected; this stops a browser on any other site from
+// invoking account deletion cross-origin with a stolen JWT (e.g. via XSS elsewhere).
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://heypantry.app',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
@@ -94,25 +97,35 @@ Deno.serve(async (req) => {
       await adminClient.from('trending_meals').delete().eq('creator_id', creatorRow.id)
     }
 
-    // Parallel-delete all user-owned rows. .then() with empty callbacks swallow
-    // table-missing errors so a single absent table doesn't block the whole flow.
-    await Promise.all([
-      adminClient.from('saved_meals').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('meal_logs').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('meal_ratings').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('grocery_items').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('pantry_items').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('weight_logs').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('macro_overrides').delete().eq('user_id', user.id).then(() => {}, () => {}),
-      adminClient.from('creators').delete().eq('user_id', user.id).then(() => {}, () => {}),
-    ])
-
+    // Delete all user-owned rows and COLLECT errors instead of swallowing them. If any
+    // child delete fails we must NOT delete the auth row — doing so would orphan that data
+    // permanently (auth.users is the FK target), a GDPR erasure failure. These tables all
+    // exist, so a delete error is transient (pool/network) and the caller can safely retry.
+    const childTables = [
+      'saved_meals', 'meal_logs', 'meal_ratings', 'grocery_items',
+      'pantry_items', 'weight_logs', 'macro_overrides', 'scan_usage', 'creators',
+    ]
+    const results = await Promise.all(
+      childTables.map(t => adminClient.from(t).delete().eq('user_id', user.id))
+    )
     // Profile last — other tables may FK to it.
-    await adminClient.from('profiles').delete().eq('id', user.id).then(() => {}, () => {})
+    const profileRes = await adminClient.from('profiles').delete().eq('id', user.id)
+
+    const failed = [...results, profileRes].filter(r => r.error)
+    if (failed.length) {
+      const detail = failed.map(r => r.error!.message).join('; ')
+      console.log('[delete-account] child cleanup failed, aborting before auth delete:', detail)
+      return new Response(
+        JSON.stringify({ error: 'Could not fully delete your data. Please try again.', detail }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
+    }
   } catch (e) {
-    console.log('Child row cleanup partial failure (continuing to auth delete):', (e as Error).message)
-    // Don't bail — even if cleanup partially fails, attempt the auth.users delete.
-    // The user can re-run if it errors and we'll have at least made progress.
+    console.log('[delete-account] cleanup threw, aborting before auth delete:', (e as Error).message)
+    return new Response(
+      JSON.stringify({ error: 'Could not fully delete your data. Please try again.' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    )
   }
 
   // GDPR: remove the user's email from Loops before deleting the auth row so

@@ -3,6 +3,7 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
+import { sanitizeStr } from '../_shared/sanitize.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 
@@ -102,7 +103,9 @@ Deno.serve(async (req: Request) => {
 
   let photoMode = false // declared out here so the catch can refund the right cap slot
   try {
-    const { mode, description, base64 } = await req.json()
+    const { mode, description: rawDescription, base64 } = await req.json()
+    // Cap + strip the free-text meal description before it enters the prompt (injection + bloat).
+    const description = sanitizeStr(rawDescription, 500)
     photoMode = mode === "photo" && !!base64
 
     // Daily cap gate on the costly vision path — atomic check+increment before any AI call.

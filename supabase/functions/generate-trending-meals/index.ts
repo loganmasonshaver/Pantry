@@ -93,8 +93,11 @@ async function correctMealMacros(recipe: any): Promise<any> {
 
   for (const macros of results) {
     if (macros) {
-      // Skip obviously bad lookups (e.g. FatSecret returned wrong food)
-      if (macros.cal > 900 || macros.p > 100) continue
+      // Skip only truly impossible single-ingredient lookups (wrong-food matches). The old
+      // 900cal/100g-protein cap also rejected legitimate calorie-dense ingredients (e.g.
+      // 200g peanut butter ≈ 1180cal), undercounting totals and unfairly lowering the
+      // macro-agreement score used in selection. Raise to a sane per-ingredient ceiling.
+      if (macros.cal > 2500 || macros.p > 250) continue
       totalCal += macros.cal
       totalP += macros.p
       totalC += macros.c
@@ -762,11 +765,19 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Previously we wiped every run which left zero-meal days when filters rejected recipes.
     const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
     await db.from('trending_meals').delete().lt('generated_at', threeDaysAgo).eq('trend_source', 'YouTube trending')
-    // Remove existing YouTube-source rows for today (in case of re-run) before inserting new
-    // ones. Scoped to YouTube source so creator recipes posted today aren't wiped.
-    await db.from('trending_meals').delete().eq('generated_at', today()).eq('trend_source', 'YouTube trending')
+    // Swap-then-cleanup instead of delete-then-insert: capture the prior run's today-rows,
+    // insert the new ones FIRST, then delete the old ones by id. Avoids the empty-feed
+    // window a reader would hit between a plain delete and the multi-second insert. Scoped
+    // to YouTube source so creator recipes posted today aren't touched.
+    const { data: priorRows } = await db.from('trending_meals')
+      .select('id').eq('generated_at', today()).eq('trend_source', 'YouTube trending')
+    const priorIds = (priorRows ?? []).map((r: any) => r.id)
     const { error } = await db.from('trending_meals').insert(meals)
     stageLog(`[funnel] db insert: ${error ? '0 (FAILED)' : meals.length} rows — error: ${error?.message ?? 'none'}`)
+    // Only remove the stale rows once the new ones are safely in (keeps them as fallback on failure).
+    if (!error && priorIds.length) {
+      await db.from('trending_meals').delete().in('id', priorIds)
+    }
 
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })

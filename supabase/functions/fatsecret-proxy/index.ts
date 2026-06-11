@@ -113,8 +113,13 @@ Deno.serve(async (req: Request) => {
     const data = await res.json()
 
     if (data.error) {
-      return new Response(JSON.stringify({ error: data.error.message }), {
-        status: 400,
+      // Map FatSecret error codes to real HTTP statuses so the client can tell a
+      // rate-limit/auth failure (retry/backoff) from a genuinely bad query (don't retry).
+      // 6 = too many requests, 8 = invalid/expired auth. Include the code in the body.
+      const code = Number(data.error.code)
+      const status = code === 6 ? 429 : code === 8 ? 502 : 400
+      return new Response(JSON.stringify({ error: data.error.message, code }), {
+        status,
         headers: { "Content-Type": "application/json" },
       })
     }

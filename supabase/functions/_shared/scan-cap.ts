@@ -6,13 +6,39 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
 
+function authHeaderOf(req: Request) {
+  return req.headers.get("Authorization") ?? req.headers.get("authorization") ?? ""
+}
+
 // Build a client bound to the caller's JWT so auth.uid() resolves inside the RPC
 // to the real user — the cap can't be spoofed onto another account.
 function userClient(req: Request) {
-  const authHeader = req.headers.get("Authorization") ?? req.headers.get("authorization") ?? ""
   return createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: authHeader } },
+    global: { headers: { Authorization: authHeaderOf(req) } },
   })
+}
+
+// In-memory backstop used ONLY on the fail-open path. If the DB cap check errors, we still
+// let the caller through (a transient hiccup shouldn't block a paying user) — but without
+// a limit, a DB outage would remove the cost ceiling entirely and let abusers burn unlimited
+// OpenAI/FAL spend until it recovers. This caps fail-open grants per caller+type per hour.
+// Per-isolate (not global), which is fine: it only needs to blunt a single abuser's burst.
+const FAIL_OPEN_MAX = 15
+const FAIL_OPEN_WINDOW_MS = 3_600_000
+const failOpenHits = new Map<string, number[]>()
+
+function failOpenAllowed(req: Request, scanType: string): boolean {
+  const key = `${authHeaderOf(req)}:${scanType}`
+  const now = Date.now()
+  const recent = (failOpenHits.get(key) ?? []).filter(t => now - t < FAIL_OPEN_WINDOW_MS)
+  if (recent.length >= FAIL_OPEN_MAX) {
+    failOpenHits.set(key, recent)
+    return false
+  }
+  recent.push(now)
+  failOpenHits.set(key, recent)
+  if (failOpenHits.size > 5000) failOpenHits.delete(failOpenHits.keys().next().value) // crude eviction
+  return true
 }
 
 export async function checkScanCap(
@@ -26,8 +52,9 @@ export async function checkScanCap(
   // user from scanning. The in-memory IP rate-limit still backstops burst abuse,
   // and this is a cost ceiling, not a data-security boundary.
   if (error || !data?.[0]) {
-    console.log(`[scan-cap] rpc error, failing open: ${error?.message ?? "no row"}`)
-    return { allowed: true, used: 0 }
+    const allowed = failOpenAllowed(req, scanType) // bounded fail-open, not unlimited
+    console.log(`[scan-cap] rpc error, fail-open ${allowed ? 'ALLOW' : 'DENY (backstop)'}: ${error?.message ?? "no row"}`)
+    return { allowed, used: 0 }
   }
   return { allowed: data[0].allowed, used: data[0].used }
 }
@@ -43,8 +70,9 @@ export async function checkScanCapWindow(
   const { data, error } = await userClient(req)
     .rpc("check_and_increment_scan_window", { p_scan_type: scanType, p_cap: cap, p_days: days })
   if (error || !data?.[0]) {
-    console.log(`[scan-cap] window rpc error, failing open: ${error?.message ?? "no row"}`)
-    return { allowed: true, used: 0 }
+    const allowed = failOpenAllowed(req, scanType) // bounded fail-open, not unlimited
+    console.log(`[scan-cap] window rpc error, fail-open ${allowed ? 'ALLOW' : 'DENY (backstop)'}: ${error?.message ?? "no row"}`)
+    return { allowed, used: 0 }
   }
   return { allowed: data[0].allowed, used: data[0].used }
 }

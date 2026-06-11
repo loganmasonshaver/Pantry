@@ -6,6 +6,19 @@ const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const adminSecret = Deno.env.get("ADMIN_SECRET")!
 const db = createClient(supabaseUrl, supabaseServiceKey)
 
+// Constant-time secret check: compare SHA-256 digests so the comparison time doesn't
+// leak how many leading chars matched (a timing side-channel on a service-role endpoint).
+async function sha256(s: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))
+}
+async function secretMatches(provided: unknown): Promise<boolean> {
+  if (typeof provided !== "string") return false
+  const [a, b] = await Promise.all([sha256(provided), sha256(adminSecret)])
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i] // fixed-length digests → constant-time XOR
+  return diff === 0
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 })
@@ -16,7 +29,7 @@ Deno.serve(async (req) => {
 
   // Shared-secret auth — this function isn't user-facing, it's invoked manually by Logan
   // from a curl/script to seed creator content. Service-role client below bypasses RLS.
-  if (body.secret !== adminSecret) {
+  if (!(await secretMatches(body.secret))) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })
   }
 

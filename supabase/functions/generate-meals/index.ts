@@ -4,6 +4,7 @@ import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
+import { sanitizeList } from '../_shared/sanitize.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -153,14 +154,24 @@ Deno.serve(async (req: Request) => {
       mealsPerDay,
       cookingSkill,
       maxPrepMinutes,
-      dietaryRestrictions,
-      foodDislikes = [],
-      dislikedMeals = [],
-      likedMeals = [],
-      cuisinePreferences = [],
-      recentMealNames = [],
+      dietaryRestrictions: rawRestrictions,
+      foodDislikes: rawDislikes = [],
+      dislikedMeals: rawDislikedMeals = [],
+      likedMeals: rawLikedMeals = [],
+      cuisinePreferences: rawCuisines = [],
+      recentMealNames: rawRecent = [],
       mode = "cookNow",
     } = await req.json()
+
+    // Sanitize every user-controlled list before it hits the prompt — strips injection
+    // newlines/quotes and caps count + length (token-bloat DoS). Downstream code uses
+    // these names unchanged.
+    const dietaryRestrictions = sanitizeList(rawRestrictions)
+    const foodDislikes = sanitizeList(rawDislikes)
+    const dislikedMeals = sanitizeList(rawDislikedMeals)
+    const likedMeals = sanitizeList(rawLikedMeals)
+    const cuisinePreferences = sanitizeList(rawCuisines)
+    const recentMealNames = sanitizeList(rawRecent, 30)
 
     // Overgenerate-then-rank: ask the LLM for MORE meals than we'll display, filter against
     // tight bands, then return the top N by macro fit. Compensates for LLM non-compliance
