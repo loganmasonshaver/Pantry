@@ -148,6 +148,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
 
   // Camera
   const cameraRef = useRef<CameraView>(null)
+  const savingRef = useRef(false) // in-flight guard against double-insert on rapid taps
   const [permission, requestPermission] = useCameraPermissions()
   const [flashOn, setFlashOn] = useState(false)
 
@@ -263,8 +264,10 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
 
   const saveItems = async () => {
     if (!user) return
+    if (savingRef.current) return // synchronous guard so a double-tap can't insert the rows twice
     const selected = items.filter(i => i.checked)
     if (selected.length === 0) { handleClose(); return }
+    savingRef.current = true
     setStep('saving')
     const rows = selected.map(item => ({
       user_id: user.id,
@@ -274,10 +277,12 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     }))
     const { error } = await supabase.from('pantry_items').insert(rows)
     if (error) {
+      savingRef.current = false
       Alert.alert('Save failed', error.message)
       setStep('visualReview')
       return
     }
+    savingRef.current = false
     onItemsAdded?.()
     handleClose()
   }

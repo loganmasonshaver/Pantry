@@ -74,6 +74,10 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
   const [creator, setCreator] = useState<CreatorProfile>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false) // synchronous double-submit guard
+  // Tracks mount so we don't insert/setState after the modal closed mid-estimation.
+  const mountedRef = useRef(true)
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   const [submitLabel, setSubmitLabel] = useState(isEditMode ? 'Save Changes' : 'Post Recipe')
   const [todayCount, setTodayCount] = useState(0)
 
@@ -231,6 +235,8 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
       Alert.alert('Daily limit reached', `You can post ${DAILY_LIMIT} recipes per day. Come back tomorrow!`)
       return
     }
+    if (submittingRef.current) return // ignore re-entry while a submit is in flight
+    submittingRef.current = true
 
     const ingredients = ingredientsList.map(l => l.trim()).filter(Boolean)
     // Strip leading numbers ("1.", "01)", "Step 1:") so they don't double up with the rendered step badge.
@@ -317,6 +323,10 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
       imageUrl = await uploadPhoto(photoUri) ?? existingImageUrl ?? null
     }
 
+    // The estimation + photo upload above are async; if the modal closed in the meantime,
+    // don't write a row or setState on an unmounted component.
+    if (!mountedRef.current) { submittingRef.current = false; return }
+
     const payload = {
       name: name.trim(), calories: cal, protein: pro, carbs: carb, fat: fat_,
       prep_time: prep, ingredients, steps, image: imageUrl,
@@ -329,6 +339,7 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
         .eq('id', mealToEdit.id)
         .select('id')
       setSubmitting(false)
+      submittingRef.current = false
       if (error) { Alert.alert('Save failed', error.message); return }
       if (!updated || updated.length === 0) {
         Alert.alert('Save failed', `No matching row found (id: ${mealToEdit.id ?? 'undefined'})`)
@@ -343,6 +354,7 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
         vote_score: 0,
       })
       setSubmitting(false)
+      submittingRef.current = false
       if (error) { Alert.alert('Error', error.message); return }
       setTodayCount(c => c + 1)
     }

@@ -179,6 +179,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
@@ -356,6 +357,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   }, [visible])
 
   const handleClose = () => {
+    if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
     onClose()
     // Defer the reset until after the slide-out animation (~300ms) so the current
     // screen — e.g. the results view — collapses straight down instead of flashing
@@ -851,8 +853,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 activeOpacity={0.85}
                 onPress={async () => {
                   if (!user) return
+                  if (savingRef.current) return // synchronous guard — disabled prop updates async
                   const selected = detectedItems.filter(i => i.checked)
                   if (selected.length === 0) { handleClose(); return }
+                  savingRef.current = true
                   setSaving(true)
                   const rows = selected.map(item => ({
                     user_id: user.id,
@@ -862,6 +866,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   }))
                   const { error } = await supabase.from('pantry_items').insert(rows)
                   setSaving(false)
+                  savingRef.current = false
                   if (error) {
                     Alert.alert('Save failed', error.message)
                     return
@@ -921,8 +926,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 activeOpacity={0.85}
                 onPress={async () => {
                   if (!user) { handleClose(); return }
+                  if (savingRef.current) return // synchronous guard against double-tap
                   const selected = detectedItems.filter(i => i.checked)
                   if (selected.length === 0) { handleClose(); return }
+                  savingRef.current = true
                   setSaving(true)
                   const { error } = await supabase.from('pantry_items').insert(
                     selected.map(item => ({
@@ -933,6 +940,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                     }))
                   )
                   setSaving(false)
+                  savingRef.current = false
                   // Surface insert failures instead of silently dropping the scanned items
                   // (the user would otherwise think their whole scan saved when nothing did).
                   if (error) { Alert.alert('Could not save items', 'Please try again.'); return }

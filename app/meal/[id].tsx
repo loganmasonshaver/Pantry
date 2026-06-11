@@ -404,6 +404,7 @@ export default function MealDetailScreen() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [logging, setLogging] = useState(false)
+  const loggingRef = useRef(false) // synchronous double-log guard (slot picker → insert)
   const [logged, setLogged] = useState(false)
   const [userRating, setUserRating] = useState<1 | -1 | null>(null)
   const [ratingToast, setRatingToast] = useState<string | null>(null)
@@ -754,6 +755,9 @@ export default function MealDetailScreen() {
 
   const logToSlot = async (slot: string) => {
     if (!user || !meal) return
+    if (loggingRef.current) return // ignore a second slot tap while the first insert is in flight
+    loggingRef.current = true
+    setShowSlotPicker(false) // close immediately so a second slot can't be tapped mid-insert
     setLogging(true)
     const today = new Date().toISOString().split('T')[0]
 
@@ -789,6 +793,7 @@ export default function MealDetailScreen() {
       },
     })
     setLogging(false)
+    loggingRef.current = false
     if (error) {
       Alert.alert('Error', error.message)
     } else {
