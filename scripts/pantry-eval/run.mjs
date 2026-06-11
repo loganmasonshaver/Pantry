@@ -43,13 +43,31 @@ const MODELS = [
     apiKey: process.env.GOOGLE_AI_KEY,
     maxTokens: 16000,
   },
+  // The real 3.1 Pro id is gemini-3.1-pro-preview (bare "gemini-3.1-pro" 404'd). Test the
+  // full thinking curve — does more reasoning catch more items on a perception task, or plateau?
+  // Each needs token headroom so thinking doesn't starve the answer.
   {
-    // The real 3.1 Pro id is gemini-3.1-pro-preview (the bare "gemini-3.1-pro" 404'd). Big
-    // token budget in case it does heavy "thinking" before answering.
-    label: 'Gemini 3.1 Pro',
+    label: 'Gemini 3.1 Pro (low think)',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     model: 'gemini-3.1-pro-preview',
     apiKey: process.env.GOOGLE_AI_KEY,
+    extra: { reasoning_effort: 'low' },
+    maxTokens: 16000,
+  },
+  {
+    label: 'Gemini 3.1 Pro (med think)',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.1-pro-preview',
+    apiKey: process.env.GOOGLE_AI_KEY,
+    extra: { reasoning_effort: 'medium' },
+    maxTokens: 24000,
+  },
+  {
+    label: 'Gemini 3.1 Pro (high think)',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.1-pro-preview',
+    apiKey: process.env.GOOGLE_AI_KEY,
+    extra: { reasoning_effort: 'high' },
     maxTokens: 32000,
   },
   {
