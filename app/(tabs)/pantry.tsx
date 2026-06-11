@@ -25,6 +25,7 @@ import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { supabase } from '@/lib/supabase'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
@@ -95,6 +96,7 @@ const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
   iconColor: CATEGORY_COLORS[name] ?? '#888888',
 }))
 
+const CATEGORY_ORDER_KEY = 'pantry_category_order' // device-local saved drag order of categories
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
@@ -224,6 +226,7 @@ export default function PantryScreen() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [newIngredientName, setNewIngredientName] = useState('')
   const [addSaving, setAddSaving] = useState(false)
+  const addingRef = useRef(false) // synchronous in-flight guard for addIngredient (double-tap)
   const [disambigChoices, setDisambigChoices] = useState<string[]>([])
   const searchRef = useRef<TextInput>(null)
 
@@ -306,6 +309,17 @@ export default function PantryScreen() {
       }
     }
 
+    // Apply the user's saved drag order if present: saved names first (in saved order),
+    // then anything new that wasn't in the saved order, appended in config order.
+    try {
+      const savedRaw = await AsyncStorage.getItem(CATEGORY_ORDER_KEY)
+      if (savedRaw) {
+        const savedOrder: string[] = JSON.parse(savedRaw)
+        const rank = new Map(savedOrder.map((name, i) => [name, i]))
+        result.sort((a, b) => (rank.get(a.name) ?? 999) - (rank.get(b.name) ?? 999))
+      }
+    } catch {}
+
     setCategories(result)
   }, [user?.id])
 
@@ -365,6 +379,10 @@ export default function PantryScreen() {
       }
     }
 
+    // Ref guard (not the addSaving state, which updates async) so a fast double-tap can't
+    // slip a second insert through the categorizeItem await before the first completes.
+    if (addingRef.current) return
+    addingRef.current = true
     setAddSaving(true)
     // Falls back to async categorizeItem (LLM-backed) when local matcher returned exactly 0 or 1.
     // Always single category at this point — disambig case already handled above.
@@ -376,6 +394,7 @@ export default function PantryScreen() {
       .select('id, name, category, in_stock')
       .single()
     setAddSaving(false)
+    addingRef.current = false
     if (error || !data) return
 
     const newIng: Ingredient = { id: data.id, name: data.name, inStock: data.in_stock }
@@ -421,7 +440,12 @@ export default function PantryScreen() {
           data={visibleCategories}
           keyExtractor={(item) => item.id}
           onDragEnd={({ data }) => {
-            if (!isSearching) setCategories(data)
+            if (!isSearching) {
+              setCategories(data)
+              // Persist the order (device-local — it's a UI preference) so fetchItems can
+              // restore it instead of always re-sorting by CATEGORY_CONFIG on next focus.
+              AsyncStorage.setItem(CATEGORY_ORDER_KEY, JSON.stringify(data.map(c => c.name))).catch(() => {})
+            }
           }}
           keyboardDismissMode="on-drag"
           keyboardShouldPersistTaps="handled"

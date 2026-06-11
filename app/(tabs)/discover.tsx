@@ -70,13 +70,16 @@ function detectPrimaryProtein(meal: any): string {
 // MAX_PER_PROTEIN to keep the feed varied. Solves the "today only produced 2 meals
 // and they're both chicken-adjacent" problem by backfilling from prior days with
 // other proteins, while preventing any single source from dominating.
-const TARGET_DISCOVER_COUNT = 6
 const MAX_PER_PROTEIN = 2
-function applyVarietyFill(meals: any[]): any[] {
+// Variety-fill a single rail's pool: newest-first, capping each primary protein at
+// MAX_PER_PROTEIN so one source can't dominate, up to `limit`. Applied PER RAIL — the old
+// version capped the combined pool to 6 BEFORE the per-rail caps (8/6), so the rails were
+// permanently starved and could never reach their intended density.
+function applyVarietyFill(meals: any[], limit: number): any[] {
   const result: any[] = []
   const proteinCounts = new Map<string, number>()
   for (const m of meals) {
-    if (result.length >= TARGET_DISCOVER_COUNT) break
+    if (result.length >= limit) break
     const protein = detectPrimaryProtein(m)
     const count = proteinCounts.get(protein) ?? 0
     if (count >= MAX_PER_PROTEIN) continue
@@ -280,13 +283,13 @@ export default function DiscoverScreen() {
   // Featured is then the top item from the combined filtered pool (already sorted by
   // vote_score); each rail excludes whatever is currently the hero. Search filtering
   // was wired in 3c but removed pre-launch — see v2 todo for restoration trigger.
+  // Full diet/chip-filtered pool (NOT variety-capped here — variety-fill is applied per
+  // rail below so the global cap can't starve the rails).
   const filtered = useMemo(
-    () => applyVarietyFill(
-      trending
-        .filter(m => passesDietTags(m, dietType, dietaryRestrictions))
-        .filter(m => passesDietary(m, foodDislikes))
-        .filter(m => passesFilter(m, activeFilter))
-    ),
+    () => trending
+      .filter(m => passesDietTags(m, dietType, dietaryRestrictions))
+      .filter(m => passesDietary(m, foodDislikes))
+      .filter(m => passesFilter(m, activeFilter)),
     [trending, activeFilter, foodDislikes, dietaryRestrictions, dietType]
   )
   const featured = filtered[0]
@@ -295,8 +298,10 @@ export default function DiscoverScreen() {
   // grows past a dozen items. Overflow goes to the future v2 vertical "Discover more"
   // grid below the rails.
   const RAIL_CAPS = { youtube: 8, creator: 6 }
+  // YouTube rail gets the protein-variety cap (it's the large algorithmic pool). Creators
+  // are hand-submitted/curated, so they're just sliced — no protein cap dropping their posts.
   const youtubeRail = useMemo(
-    () => filtered.filter(m => m.id !== featured?.id && !m.creator).slice(0, RAIL_CAPS.youtube),
+    () => applyVarietyFill(filtered.filter(m => m.id !== featured?.id && !m.creator), RAIL_CAPS.youtube),
     [filtered, featured]
   )
   const creatorRail = useMemo(

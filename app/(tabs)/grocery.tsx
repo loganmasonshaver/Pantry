@@ -160,6 +160,11 @@ export default function GroceryScreen() {
   const [inlineName, setInlineName] = useState('')
   const inlineInputRef = useRef<TextInput>(null)
   const scrollRef = useRef<ScrollView>(null)
+  // In-flight guards: submitInline awaits categorizeItem (network) before inserting, and
+  // handleReorder inserts a batch — without these a fast double-tap inserts duplicate rows
+  // because the dedup check reads stale state during the async gap.
+  const submittingRef = useRef(false)
+  const reorderingRef = useRef(false)
   const toastOpacity = useRef(new Animated.Value(0)).current
   const [recentOrder, setRecentOrder] = useState<{ meals: string[]; orderedAt: Date } | null>(null)
   const [lastOrder, setLastOrder] = useState<{ items: any[]; createdAt: Date } | null>(null)
@@ -171,6 +176,7 @@ export default function GroceryScreen() {
       .select('id, name, meal, category, checked')
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
+      .limit(500) // a grocery list never realistically exceeds this; bounds the per-focus fetch
     if (data) {
       // Lazy migration: items inserted before the category taxonomy was renamed
       // (Pantry Staples / Condiments / Dairy → new STORE_CATEGORIES) get re-bucketed
@@ -327,6 +333,9 @@ export default function GroceryScreen() {
   const submitInline = async () => {
     const name = inlineName.trim()
     if (!name || !user) return
+    if (submittingRef.current) return // ignore re-entry while a prior add is in flight
+    submittingRef.current = true
+    try {
 
     // Inline mode auto-picks the first category match — disambig modal is gone.
     // For ambiguous items the user can long-press to reassign later (future).
@@ -363,6 +372,9 @@ export default function GroceryScreen() {
       inlineInputRef.current?.focus()
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)
     }
+    } finally {
+      submittingRef.current = false
+    }
   }
 
   const endInlineAdd = () => {
@@ -373,16 +385,27 @@ export default function GroceryScreen() {
 
   const handleReorder = async () => {
     if (!user || !lastOrder) return
-    await supabase.from('grocery_items').insert(
-      lastOrder.items.map(i => ({
-        user_id: user.id,
-        name: i.name,
-        meal: i.meal || '',
-        category: i.category || 'Other',
-        checked: false,
-      })),
-    )
-    fetchItems()
+    if (reorderingRef.current) return // ignore double-tap on Reorder
+    reorderingRef.current = true
+    try {
+      // Skip items already on the list (case-insensitive) so reorder doesn't pile on dupes.
+      const existing = new Set(items.map(i => i.name.toLowerCase().trim()))
+      const toInsert = lastOrder.items.filter(i => !existing.has(i.name.toLowerCase().trim()))
+      if (toInsert.length) {
+        await supabase.from('grocery_items').insert(
+          toInsert.map(i => ({
+            user_id: user.id,
+            name: i.name,
+            meal: i.meal || '',
+            category: i.category || 'Other',
+            checked: false,
+          })),
+        )
+        fetchItems()
+      }
+    } finally {
+      reorderingRef.current = false
+    }
   }
 
   const checkedCount = items.filter(i => i.checked).length

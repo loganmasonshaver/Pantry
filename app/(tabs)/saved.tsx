@@ -186,6 +186,9 @@ export default function SavedScreen() {
 
   const toastOpacity = useRef(new Animated.Value(0)).current
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Clear the undo-toast timer on unmount — otherwise dismissToast fires after the user
+  // navigates away, calling setState on a dead component.
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
   // Guards against overlapping image backfills when the tab is refocused rapidly.
   const backfillRef = useRef(false)
 
