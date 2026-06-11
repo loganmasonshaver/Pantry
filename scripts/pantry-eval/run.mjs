@@ -142,6 +142,7 @@ const NONFOOD_CONTAINS = [
   'nail polish', 'dish soap', 'hand soap', 'paper towel', 'cutting board', 'trash bag',
   'garbage bag', 'dog food', 'dog biscuit', 'dog treat', 'cat food', 'cat treat', 'kibble',
   'toothpaste', 'shampoo', 'toiletr', 'dishware', 'cookware', 'kitchenware', 'plastic wrap',
+  'tissue', 'napkin', 'q-tip', 'cotton',
 ]
 function isNonFood(name) {
   const n = norm(name)
