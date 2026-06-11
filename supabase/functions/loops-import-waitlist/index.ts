@@ -28,14 +28,24 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // Resumable batching: at ~8 req/sec (Loops rate limit) a large waitlist would blow
+    // past the edge function timeout in a single pass. Process a bounded batch per
+    // invocation and hand back nextOffset so the caller loops until it comes back null.
+    // Offset pagination is safe here because the waitlist is frozen during a one-shot import.
+    const body = await req.json().catch(() => ({})) as { offset?: number; limit?: number }
+    const offset = Math.max(0, body.offset ?? 0)
+    const limit = Math.min(800, Math.max(1, body.limit ?? 500)) // ~500 @ 8/sec ≈ 62s, inside the timeout
+
     const { data: rows, error } = await db
       .from("waitlist")
       .select("email, source, created_at")
       .order("created_at", { ascending: true })
+      .order("email", { ascending: true }) // deterministic tie-break so offsets don't skip/repeat
+      .range(offset, offset + limit - 1)
 
     if (error) throw error
     if (!rows || rows.length === 0) {
-      return new Response(JSON.stringify({ ok: true, imported: 0 }), { headers: { "Content-Type": "application/json" } })
+      return new Response(JSON.stringify({ ok: true, imported: 0, nextOffset: null }), { headers: { "Content-Type": "application/json" } })
     }
 
     let imported = 0
@@ -76,7 +86,11 @@ Deno.serve(async (req: Request) => {
       await new Promise(r => setTimeout(r, 120))
     }
 
-    return new Response(JSON.stringify({ ok: true, imported, skipped, errors: errors.slice(0, 20) }), {
+    // A full batch means more rows may remain — tell the caller where to resume.
+    // A short batch means we reached the end.
+    const nextOffset = rows.length === limit ? offset + limit : null
+
+    return new Response(JSON.stringify({ ok: true, imported, skipped, nextOffset, errors: errors.slice(0, 20) }), {
       headers: { "Content-Type": "application/json" },
     })
   } catch (err) {
