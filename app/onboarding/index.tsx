@@ -1501,6 +1501,14 @@ function S5Birthday({
     onChange(`${yearStr}-${monthStr}-${dayStr}`)
   }
 
+  // Commit the visible default (the wheels' initial positions) as the value on mount.
+  // Without this, a user who never scrolls continues with birthday === '', which makes
+  // age null downstream and breaks goal calculation. WYSIWYG: the date shown IS the value.
+  useEffect(() => {
+    if (!value) update(monthIdx, dayIdx, yearIdx >= 0 ? yearIdx : 12)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const age = computeAge(value)
   const underage = value !== '' && age < 13
 
