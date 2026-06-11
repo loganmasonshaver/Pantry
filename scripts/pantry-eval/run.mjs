@@ -69,12 +69,22 @@ EXHAUSTIVENESS RULES:
 - Common misses: spices in small jars, condiment bottles on fridge doors, sauces, oils, items in CLEAR or SEMI-TRANSPARENT containers, back-row items partially hidden behind front items, frozen drawer contents, top-shelf items, bottom items that look like packaging
 - For items in clear containers, identify the CONTENTS not the container
 - If you see something edible but can't ID it precisely, use a best-guess generic name — DO NOT skip it
-- If a single product is duplicated (3 cans of beans), list it ONCE
 - Partial labels still count — include with your best inference
 
-COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short, go back to back rows, door shelves, and shelf edges. (Only include items that are actually visible — never invent.)
+FRESH FOOD COUNTS TOO (don't only scan labeled/packaged goods):
+- Actively sweep produce/crisper drawers, the main fridge compartment, and shelves for FRESH items: vegetables, fruit, eggs, herbs, cheese, leftovers, raw meat. In a fridge these hide behind door condiments and in dim drawers — look for them on purpose. Missing the carrots, eggs, lettuce, and lemons is a failure.
 
-EXCLUDE only: pet food/treats, and non-edible household goods (cleaning supplies, paper towels, foil, dish soap, sponges, trash bags, batteries, toiletries).
+ONE PHYSICAL ITEM = ONE ENTRY (do not over-split):
+- If you can see only ONE container, list it exactly ONCE with your single best name. NEVER output multiple near-synonyms or alternate guesses for the same object — e.g. do not list both "Protein Powder" and "Protein Supplement" for one tub, or "Chicken Soup" and "Chicken Broth" for one can. When unsure of the exact identity, commit to ONE best name, not several.
+- If a single product is duplicated (3 identical cans of beans), still list it ONCE.
+
+COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short, go back to back rows, door shelves, drawers, and shelf edges. (Only include items that are actually visible — never invent.)
+
+EXCLUDE — never list these (they are NOT food):
+- Pet food/treats, and non-edible household goods (cleaning supplies, paper towels, foil, dish soap, sponges, trash bags, batteries, toiletries)
+- Dishware, cookware, and kitchen tools: plates, bowls, cups, mugs, glasses, utensils, cutting boards, pots, pans, kettles, trays
+- Small appliances (coffee makers, toasters, blenders), cookbooks, and any container that is clearly EMPTY
+Only actual food and drink items go in the list.
 
 Return a JSON object:
 {
