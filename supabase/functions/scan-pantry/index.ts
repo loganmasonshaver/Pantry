@@ -5,8 +5,14 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCapWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
+const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
 
-// Pantry scan is the priciest call (GPT-4o vision, sometimes 2 passes). One scan =
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+// Google's OpenAI-compatible endpoint — same request/response shape as OpenAI, so the
+// exact same messages work as a drop-in fallback.
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+// Pantry scan is the priciest call (vision, sometimes 2 passes). One scan =
 // one whole-kitchen session (all photos batched), so a few/week covers normal use.
 // Rolling 7-day window stops sustained abuse without a rigid daily wall.
 const SCAN_CAP_PER_WEEK = 7
@@ -14,6 +20,81 @@ const SCAN_WINDOW_DAYS = 7
 // Hard backstop on payload size — a single scan can't exceed this many photos, which
 // bounds the per-call token cost the count cap can't (client enforces the same limit).
 const MAX_PHOTOS_PER_SCAN = 8
+
+// One vision call with a hard timeout. Throws on error/timeout/empty so the caller can fall back.
+async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, timeoutMs = 90000): Promise<string> {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+      signal: ctrl.signal,
+    })
+    const data = await res.json()
+    if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error))
+    const content = data.choices?.[0]?.message?.content?.trim()
+    if (!content) throw new Error("empty content")
+    return content
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// Primary GPT-4.1 (best recall in our eval), fallback Gemini 3.1 Flash-Lite. The fallback
+// keeps the paid scan alive during an OpenAI outage / rate-limit spike — only fires on failure,
+// so ~all scans run on the primary. Same messages work on both (OpenAI-compatible endpoints).
+async function scanVision(messages: any[], maxTokens: number): Promise<string> {
+  try {
+    return await visionCall(OPENAI_URL, openaiApiKey!, "gpt-4.1", messages, maxTokens)
+  } catch (e) {
+    if (!googleAiKey) throw e
+    console.log(`[scan-pantry] gpt-4.1 failed (${(e as Error).message}); falling back to Gemini Flash-Lite`)
+    return await visionCall(GEMINI_URL, googleAiKey, "gemini-3.1-flash-lite", messages, maxTokens)
+  }
+}
+
+// ── Post-generation cleanup (deterministic safety net over whatever the model returns) ──
+const NONFOOD_EXACT = new Set([
+  'plate', 'plates', 'dinner plate', 'dinner plates', 'bowl', 'bowls', 'cup', 'cups', 'mug', 'mugs',
+  'glass', 'glasses', 'pot', 'pots', 'pan', 'pans', 'skillet', 'kettle', 'tray', 'trays', 'utensil',
+  'utensils', 'fork', 'knife', 'spoon', 'spatula', 'container', 'containers', 'plastic container',
+  'plastic food container', 'food container', 'prepared food container', 'toaster', 'blender',
+  'coffee maker', 'appliance', 'sponge', 'sponges', 'napkin', 'napkins', 'foil', 'aluminum foil',
+  'battery', 'batteries', 'cookbook', 'cookbooks',
+])
+const NONFOOD_CONTAINS = [
+  'nail polish', 'dish soap', 'hand soap', 'paper towel', 'cutting board', 'trash bag', 'garbage bag',
+  'dog food', 'dog biscuit', 'dog treat', 'cat food', 'cat treat', 'kibble', 'toothpaste', 'shampoo',
+  'toiletr', 'dishware', 'cookware', 'kitchenware', 'plastic wrap', 'tissue', 'q-tip', 'cotton',
+]
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+function isNonFood(name: string): boolean {
+  const n = normName(name)
+  if (NONFOOD_EXACT.has(n)) return true
+  return NONFOOD_CONTAINS.some((t) => n.includes(t))
+}
+
+// Drop hallucinated non-food, strip parenthetical qualifiers ("Hot Sauce (Red Cap)" → "Hot
+// Sauce"), and collapse exact dupes — across the WHOLE result, per zone. Mutates result.zones.
+function cleanupResult(result: any): void {
+  const seen = new Set<string>()
+  for (const zone of (result.zones || [])) {
+    const kept: any[] = []
+    for (const item of (zone.items || [])) {
+      if (!item?.name || typeof item.name !== 'string') continue
+      if (isNonFood(item.name)) continue
+      const canon = item.name.replace(/\s*\([^)]*\)/g, '').trim()
+      const key = normName(canon)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      kept.push({ ...item, name: canon })
+    }
+    zone.items = kept
+  }
+  result.zones = (result.zones || []).filter((z: any) => (z.items?.length ?? 0) > 0)
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -103,10 +184,16 @@ SCAN METHOD — work systematically so cluttered/back areas don't get skimmed:
 
 COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short for a full scene, you've skipped back-row and small items — go back to the back rows, door shelves, and shelf edges and look again before returning. (Only include items that are actually visible — never invent — but don't stop early.)
 
-EXCLUDE only these (they're groceries but NOT pantry ingredients):
-- Pet food and pet treats (cat food, dog food, kibble) — never include these
-- Non-edible household goods: cleaning supplies, paper towels, napkins, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries
-These two categories are the ONLY exclusions. EVERY actual human food or drink item still follows the exhaustiveness rules above — when unsure whether a FOOD item is X or Y, still include it with a best-guess name. Never drop a real food/drink just because you're unsure what it is.
+ONE PHYSICAL ITEM = ONE ENTRY (do not over-split or pad the list):
+- If you can see only ONE container, list it exactly ONCE with your single best name. NEVER output multiple near-synonyms or alternate guesses for the same object (e.g. don't list both "Tomato Soup" and "Tomato Rice Soup" for one can, or "Protein Powder" + "Whey Protein Isolate" for one tub).
+- Name each item at the generic product-type level — do NOT invent finer sub-variants you're only guessing at. When unsure of the exact variant, use the single broader generic name.
+
+EXCLUDE — these are NOT food and must NEVER appear in the list:
+- Pet food and pet treats (cat food, dog food, kibble)
+- Non-edible household goods: cleaning supplies, paper towels, napkins, tissues, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries, nail polish
+- Dishware, cookware, and kitchen tools: plates, bowls, cups, mugs, glasses, utensils, cutting boards, pots, pans, kettles, trays
+- Small appliances (coffee makers, toasters, blenders), cookbooks, and any container that is clearly EMPTY
+Apart from these exclusions, EVERY actual human food or drink item still follows the exhaustiveness rules above — when unsure whether a FOOD item is X or Y, still include it with a best-guess name. Never drop a real food/drink just because you're unsure what it is.
 
 Return a JSON object with this structure:
 {
@@ -129,9 +216,8 @@ Zone detection rules:
 - Order zones top-to-bottom for shelves, left-to-right for horizontal
 
 Item rules:
-- "name" must be a GENERIC ingredient name — no brand names in this field. Use the most specific generic name you can determine from all context clues (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani" and not just "Yogurt")
+- "name" must be a GENERIC ingredient name. NEVER put a brand name in it — even if the brand is clearly visible, write only the generic product type ("Cream of Mushroom Soup" not "Campbell's Cream of Mushroom Soup", "Rice" not "Uncle Ben's Rice"). Brand-in-name creates duplicate entries. Use the brand/label only as CONTEXT to make the generic name more specific (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani", and not just "Yogurt").
 - "photo" — 0-based index of which photo this item came from. Required for downstream density analysis. If you genuinely can't tell, use 0.
-- Use brand logos and nutrition labels as CONTEXT to make the generic name more specific, but never put the brand in the name field
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
   - Carbs: bread, pasta, rice, cereals, flour
@@ -144,53 +230,25 @@ Item rules:
 Return ONLY the raw JSON object, no markdown, no explanation.`
 
     const t0 = Date.now()
-    // OpenAI vision endpoint occasionally hangs past the Supabase edge runtime's
-    // ~150s platform limit, getting the whole function force-killed with no logs
-    // and no response to the client. AbortController gives us a clean 90s ceiling
-    // so we fail with a real error message instead of silently dying.
-    const firstPassCtrl = new AbortController()
-    const firstPassTimeout = setTimeout(() => firstPassCtrl.abort(), 90000)
-    let response: Response
+    const firstPassMessages = [{
+      role: "user",
+      content: [...imageContent, { type: "text", text: firstPassPrompt }],
+    }]
+    // gpt-4.1 primary (best recall in eval), Gemini Flash-Lite fallback. Each call has a 90s
+    // ceiling (vision can hang past the edge runtime's ~150s limit and force-kill the function).
+    let text: string
     try {
-      response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${openaiApiKey}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",   // mini's vision is too weak to read partial labels / back-row items
-          max_tokens: 6000,  // dense kitchen scans were silently truncating at lower caps — losing whole zones at the end of the JSON
-          messages: [
-            {
-              role: "user",
-              content: [...imageContent, { type: "text", text: firstPassPrompt }],
-            },
-          ],
-        }),
-        signal: firstPassCtrl.signal,
-      })
+      text = await scanVision(firstPassMessages, 6000) // 6000: dense scans truncate at lower caps
     } catch (e) {
       const msg = (e as Error).name === 'AbortError'
-        ? 'OpenAI vision timed out (90s). Try again with fewer or smaller photos.'
-        : `OpenAI vision request failed: ${(e as Error).message}`
-      console.log(`[scan-pantry] first pass aborted: ${msg}`)
-      await refundScan(req, 'pantry') // transient fail — don't burn the user's daily slot
+        ? 'Scan timed out. Try again with fewer or smaller photos.'
+        : `Scan failed: ${(e as Error).message}`
+      console.log(`[scan-pantry] first pass failed (both providers): ${msg}`)
+      await refundScan(req, 'pantry') // transient fail — don't burn the user's weekly slot
       return new Response(JSON.stringify({ error: msg }), {
         status: 504, headers: { "Content-Type": "application/json" },
       })
-    } finally {
-      clearTimeout(firstPassTimeout)
     }
-
-    const data = await response.json()
-    if (data.error) {
-      await refundScan(req, 'pantry') // OpenAI rejected the call — refund the slot
-      return new Response(JSON.stringify({ error: data.error.message || JSON.stringify(data.error) }), {
-        status: 500, headers: { "Content-Type": "application/json" },
-      })
-    }
-    const text = data.choices?.[0]?.message?.content?.trim() ?? "{}"
     const clean = text.replace(/```json|```/g, "").trim()
     const result = JSON.parse(clean)
     const firstPassMs = Date.now() - t0
@@ -258,25 +316,10 @@ Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "..." }] }
 
 Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] }.`
 
-        const secondResp = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${openaiApiKey}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            max_tokens: 2000,
-            messages: [
-              {
-                role: "user",
-                content: [...imageContent, { type: "text", text: secondPassPrompt }],
-              },
-            ],
-          }),
-        })
-        const secondData = await secondResp.json()
-        const secondText = secondData.choices?.[0]?.message?.content?.trim() ?? "{}"
+        const secondText = await scanVision(
+          [{ role: "user", content: [...imageContent, { type: "text", text: secondPassPrompt }] }],
+          2000,
+        )
         const secondClean = secondText.replace(/```json|```/g, "").trim()
         const secondResult = JSON.parse(secondClean)
         const missed: any[] = Array.isArray(secondResult.missed) ? secondResult.missed : []
@@ -301,6 +344,14 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
     } catch (e) {
       console.log('[scan-pantry] second pass failed (non-fatal):', e)
     }
+
+    // Deterministic safety net over the model output: drop hallucinated non-food (dishes,
+    // nail polish, pet food), strip parenthetical qualifiers, and collapse dupes across the
+    // whole result. Catches what even a good model occasionally slips through.
+    const beforeCleanup = (result.zones || []).reduce((a: number, z: any) => a + (z.items?.length || 0), 0)
+    cleanupResult(result)
+    const afterCleanup = (result.zones || []).reduce((a: number, z: any) => a + (z.items?.length || 0), 0)
+    if (beforeCleanup !== afterCleanup) console.log(`[scan-pantry] cleanup: ${beforeCleanup} -> ${afterCleanup} items`)
 
     // Strip the photo index from the response — it's only used server-side for
     // the density gate above; the client only consumes { name, category }.
