@@ -35,13 +35,24 @@ const MODELS = [
     apiKey: process.env.OPENAI_API_KEY,
   },
   {
-    label: 'Gemini 3.1 Pro',
+    label: 'Gemini 3.1 Pro (low think)',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     model: 'gemini-3.1-pro',
     apiKey: process.env.GOOGLE_AI_KEY,
-    // Pro is a "thinking" model — on the first run its reasoning tokens consumed the whole
-    // output budget and content came back empty. Cap the thinking so it actually answers.
+    // Realistic production config — minimal thinking keeps cost/latency sane. Also fixes the
+    // empty-output we saw when reasoning ate the whole token budget.
     extra: { reasoning_effort: 'low' },
+  },
+  {
+    label: 'Gemini 3.1 Pro (max think)',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.1-pro',
+    apiKey: process.env.GOOGLE_AI_KEY,
+    // The fairness control: full reasoning so we can SEE whether thinking actually buys more
+    // item recall on a perception task. Needs a big token budget so thinking doesn't starve
+    // the answer. (Costly + slow — this is a test config, not something you'd ship.)
+    extra: { reasoning_effort: 'high' },
+    maxTokens: 32000,
   },
   {
     label: 'Gemini 3.1 Flash-Lite',
@@ -124,7 +135,7 @@ async function callModel(m, base64, mime) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${m.apiKey}` },
     body: JSON.stringify({
       model: m.model,
-      max_tokens: 12000, // headroom so a thinking model's reasoning doesn't starve the answer
+      max_tokens: m.maxTokens ?? 12000, // headroom so a thinking model's reasoning doesn't starve the answer
       ...(m.extra ?? {}), // per-model knobs (e.g. Pro's reasoning_effort)
       messages: [{
         role: 'user',
