@@ -3,6 +3,7 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
+import { mapLimit } from '../_shared/concurrency.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -78,10 +79,12 @@ async function correctMealMacros(meal: any): Promise<any> {
   let totalCal = 0, totalP = 0, totalC = 0, totalF = 0
   let lookedUp = 0
 
-  const results = await Promise.all(ingredients.map((ing: any) => {
+  // Cap ingredient lookups at 5 concurrent — combined with the meal-level cap below,
+  // total in-flight FatSecret requests stays bounded (~15) instead of N×M all at once.
+  const results = await mapLimit(ingredients, 5, (ing: any) => {
     const grams = parseInt(String(ing.grams)) || 100
     return lookupMacros(ing.name, grams)
-  }))
+  })
 
   for (const macros of results) {
     if (macros) {
@@ -379,7 +382,9 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     // Correct macros using FatSecret nutrition data
     if (fsKey && fsSecret) {
       console.log('Correcting macros via FatSecret...')
-      meals = await Promise.all(meals.map((m: any) => correctMealMacros(m)))
+      // 3 meals at a time × 5 ingredients each = ≤15 concurrent FatSecret calls,
+      // vs. the old N×M unbounded fan-out that tripped rate limits on dense batches.
+      meals = await mapLimit(meals, 3, (m: any) => correctMealMacros(m))
       console.log('Macros corrected')
     }
 

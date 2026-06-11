@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
+import { mapLimit } from '../_shared/concurrency.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
@@ -70,10 +71,12 @@ async function correctMealMacros(recipe: any): Promise<any> {
   let totalCal = 0, totalP = 0, totalC = 0, totalF = 0
   let lookedUp = 0
 
-  const results = await Promise.all(ingredients.map((ing: any) => {
+  // Bounded fan-out (5 concurrent) so the meal-level cap below keeps total
+  // in-flight FatSecret requests sane instead of N×M all at once.
+  const results = await mapLimit(ingredients, 5, (ing: any) => {
     const grams = parseInt(String(ing.grams)) || 100
     return lookupIngredientMacros(ing.name, grams)
-  }))
+  })
 
   for (const macros of results) {
     if (macros) {
@@ -629,7 +632,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // on the same dish due to different cuts / fat %).
     if (fsKey && fsSecret) {
       console.log('Running FatSecret lookup (scoring input only, no rejections)...')
-      await Promise.all(recipes.map(async (r: any) => {
+      // 3 recipes at a time × 5 ingredients each = ≤15 concurrent FatSecret calls.
+      await mapLimit(recipes, 3, async (r: any) => {
         const llmCalories = Number(r.calories) || 0
         const llmProtein = Number(r.protein) || 0
         const llmCarbs = Number(r.carbs) || 0
@@ -645,7 +649,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         r.protein = llmProtein
         r.carbs = llmCarbs
         r.fat = llmFat
-      }))
+      })
       console.log(`FatSecret lookup complete for ${recipes.length} candidates`)
     }
 
