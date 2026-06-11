@@ -13,6 +13,19 @@ const fsKey = Deno.env.get("FATSECRET_KEY") ?? ""
 const fsSecret = Deno.env.get("FATSECRET_SECRET") ?? ""
 const db = createClient(supabaseUrl, supabaseServiceKey)
 
+// YouTube Data API calls run sequentially in this cron; a single hung request would
+// stall the whole run and risk the function being force-killed past the edge limit.
+// A 15s per-call ceiling lets one bad hop be skipped instead of dragging everything down.
+async function fetchWithTimeout(url: string, ms = 15000): Promise<Response> {
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, { signal: ctrl.signal })
+  } finally {
+    clearTimeout(t)
+  }
+}
+
 const today = () => new Date().toISOString().split('T')[0]
 
 // ── FatSecret OAuth 1.0 helpers ──
@@ -286,36 +299,43 @@ Deno.serve(async (req: Request) => {
     const isNotRecipeContent = (t: string) => /mukbang|asmr|review|what i ate|day of eating|vlog/i.test(t.toLowerCase())
 
     for (const config of queryConfigs) {
-      const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
-      // Step 1a: Search for video IDs with this query/sort/window combo
-      const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=20&publishedAfter=${publishedAfter}&key=${youtubeKey}`
-      const ytRes = await fetch(ytUrl)
-      const ytData = await ytRes.json()
+      try {
+        const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
+        // Step 1a: Search for video IDs with this query/sort/window combo
+        const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=20&publishedAfter=${publishedAfter}&key=${youtubeKey}`
+        const ytRes = await fetchWithTimeout(ytUrl)
+        const ytData = await ytRes.json()
 
-      if (ytData.error) {
-        console.log(`YouTube search error (${config.query}, ${config.order}, ${config.windowDays}d):`, ytData.error.message)
-        continue
-      }
-      if (!ytData.items) continue
-
-      // Step 1b: Get full descriptions for these videos
-      const videoIds = ytData.items.map((item: any) => item.id.videoId).filter(Boolean).join(',')
-      if (!videoIds) continue
-
-      const detailUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoIds}&key=${youtubeKey}`
-      const detailRes = await fetch(detailUrl)
-      const detailData = await detailRes.json()
-
-      if (detailData.items) {
-        for (const item of detailData.items) {
-          const videoId = item.id
-          const title = item.snippet.title
-          const description = item.snippet.description || ''
-          const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
-          if (!videoId || !title || !thumbnail) continue
-          if (isNotRecipeContent(title)) continue
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500) })
+        if (ytData.error) {
+          console.log(`YouTube search error (${config.query}, ${config.order}, ${config.windowDays}d):`, ytData.error.message)
+          continue
         }
+        if (!ytData.items) continue
+
+        // Step 1b: Get full descriptions for these videos
+        const videoIds = ytData.items.map((item: any) => item.id.videoId).filter(Boolean).join(',')
+        if (!videoIds) continue
+
+        const detailUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoIds}&key=${youtubeKey}`
+        const detailRes = await fetchWithTimeout(detailUrl)
+        const detailData = await detailRes.json()
+
+        if (detailData.items) {
+          for (const item of detailData.items) {
+            const videoId = item.id
+            const title = item.snippet.title
+            const description = item.snippet.description || ''
+            const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
+            if (!videoId || !title || !thumbnail) continue
+            if (isNotRecipeContent(title)) continue
+            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500) })
+          }
+        }
+      } catch (e) {
+        // Timeout/network on one query/sort/window combo shouldn't abort the whole
+        // cron — skip this combo and keep gathering from the others.
+        console.log(`YouTube fetch failed (${config.query}, ${config.order}, ${config.windowDays}d):`, (e as Error).message)
+        continue
       }
     }
 
@@ -323,7 +343,7 @@ Deno.serve(async (req: Request) => {
     // ranker considers viral RIGHT NOW. Independent of our keyword queries.
     try {
       const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=25&key=${youtubeKey}`
-      const trendingRes = await fetch(trendingUrl)
+      const trendingRes = await fetchWithTimeout(trendingUrl)
       const trendingData = await trendingRes.json()
       if (trendingData.items) {
         for (const item of trendingData.items) {
