@@ -52,23 +52,31 @@ const MODELS = [
   // Qwen3-VL instruct (non-thinking) — purpose-built vision models, tested across the size
   // range to find the cheapest that's good enough. 235B flagship → 30B-a3b efficient MoE
   // (likely sweet spot) → 8B tiny/cheapest. All via OpenRouter, skipped without that key.
+  // require_parameters: only route to OpenRouter providers that honor max_tokens, so the
+  // small models stop getting truncated at a provider's low default output cap.
   {
     label: 'Qwen3-VL 235B (OR)',
     endpoint: OPENROUTER,
     model: 'qwen/qwen3-vl-235b-a22b-instruct',
     apiKey: process.env.OPENROUTER_API_KEY,
+    maxTokens: 8000,
+    extra: { provider: { require_parameters: true } },
   },
   {
     label: 'Qwen3-VL 30B-a3b (OR)',
     endpoint: OPENROUTER,
     model: 'qwen/qwen3-vl-30b-a3b-instruct',
     apiKey: process.env.OPENROUTER_API_KEY,
+    maxTokens: 8000,
+    extra: { provider: { require_parameters: true } },
   },
   {
     label: 'Qwen3-VL 8B (OR)',
     endpoint: OPENROUTER,
     model: 'qwen/qwen3-vl-8b-instruct',
     apiKey: process.env.OPENROUTER_API_KEY,
+    maxTokens: 8000,
+    extra: { provider: { require_parameters: true } },
   },
 ]
 
@@ -244,7 +252,12 @@ async function callModel(m, base64, mime) {
     return { names: [], removed: [], collapsed: 0, ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
   }
   const { names, removed, collapsed, error } = flattenItems(content)
-  return { names, removed, collapsed, ms, error }
+  // If parsing failed, append finish_reason + output token count — finish=length means the
+  // provider truncated (token cap); finish=stop means the model itself ended early/malformed.
+  const augErr = error
+    ? `${error}  [finish=${choice?.finish_reason ?? '?'}, out_tokens=${data.usage?.completion_tokens ?? '?'}]`
+    : error
+  return { names, removed, collapsed, ms, error: augErr }
 }
 
 // ── LIST mode: print the Gemini models this key can actually call, then exit. ──
