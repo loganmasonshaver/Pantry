@@ -1,9 +1,37 @@
-# Handoff — Security/quality review continuation (Mediums M4–M6 + Lows)
+# Handoff — Security/quality review continuation (Lows only remain)
 
-**For the next chat.** This session ran a full multi-agent code review (87 findings) and shipped
-**all Critical + all High + the first 3 Medium batches**. What's left: Medium batches **M4
-(scaling/cost), M5 (security), M6 (nits)** and the 27 Lows. Everything below is committed +
-pushed to `main`. Read `CODE_REVIEW.md` (repo root, committed) for the full finding list.
+**For the next chat.** The code review (87 findings) is now **done through all Mediums**:
+**all Critical + all High + M1–M3 (prior session)** and **M4 (scaling/cost), M5 (security),
+M6 (worth-doing nits) — shipped this session.** The ONLY thing left is the **27 Lows**
+(polish, listed in `CODE_REVIEW.md`). Everything is committed + pushed to `main`.
+
+## ✅ Shipped THIS session (2026-06-10) — M4 + M5 + M6
+**M4 (scaling/cost):**
+1. parse-receipt was silently paying GPT-4o every scan (native Gemini endpoint 4xx'd) → switched to the OpenAI-compat endpoint like generate-meals. Real $ fix.
+2. estimate-meal-macros: added daily cap (25/day, 'macro_est', photo path only) + 90s timeout.
+3. FatSecret N+1: new `_shared/concurrency.ts` `mapLimit()`; capped meal-gen + trending fan-out to ≤15 concurrent.
+4. Discover: `.limit(300)` on trending query + removed duplicate mount fetch (useFocusEffect already covers mount).
+5. extract-recipe-from-url: `fetchWithTimeout` on all hops (10s scrape / 30s AI) + daily cap (15/day, 'url_extract').
+6. generate-trending-meals cron: 15s timeouts on YouTube calls + try/catch so one bad combo isn't fatal. (Image fan-out already waved by 5.)
+7. loops-import-waitlist: now resumable via offset pagination (batch 500, returns nextOffset) instead of whole-table load.
+8. onboarding image preloads (plan reveal + swipe): batched ×3 instead of unbounded parallel.
+
+**M5 (security):**
+1. fatsecret-proxy: method + per-method param allowlist (was signing arbitrary calls on our account).
+2. trending_meals INSERT policy: requires trend_source='creator' + owned creator_id + promo_active (migration `20260610010000`); client `safeOpenSocialUrl` only follows http(s) creator links.
+3. CreatorRecipeModal: random-UUID photo filenames (was guessable Date.now() in a public upsert bucket).
+4. AILogModal: downscale photos to 2048px + 12M-char ceiling before upload.
+5. `creators.user_id` partial unique index (migration `20260610000000`, dedupe+repoint first).
+6. loops-sync: contact-upsert failure no longer drops the lifecycle event (upsert made non-fatal, surfaces `upsertFailed`).
+
+**M6 (worth-doing nits):** OFF barcode 8s timeout; delivery-webview onError/onHttpError + originWhitelist; AILogModal calorie-sync moved out of render into a useEffect; AIConsentContext resolver queue (was leaking concurrent promises); onboarding birthday gate commits the visible default so age is never null.
+
+**Migrations applied this session (on remote):** `20260610000000_creators_user_id_unique.sql`, `20260610010000_trending_insert_hardening.sql`.
+
+---
+
+**(Prior session — already shipped, do NOT redo: all Critical + all High + M1–M3.)**
+Read `CODE_REVIEW.md` (repo root, committed) for the full finding list.
 
 ---
 
@@ -49,7 +77,7 @@ pushed to `main`. Read `CODE_REVIEW.md` (repo root, committed) for the full find
 - **Trial length is 7 days** (confirmed by Logan). PaywallBrowser copy was fixed to 7 before deletion; the live Superwall paywall must also say 7 days + **$7.99/mo, $30/yr** — **Logan to verify in the Superwall dashboard** (can't be done from code).
 - `DEV_FORCE_PAYWALL = false` in `context/SuperwallContext.tsx` — KEEP false for real builds (was flipped true to test, flipped back).
 - Secrets set: `PREMIUM_ENFORCEMENT=on`, `SUPERWALL_WEBHOOK_SECRET`, `ADMIN_SECRET`. Kill switch: `supabase secrets set PREMIUM_ENFORCEMENT=off` if real subscribers report being blocked.
-- **Migrations applied through `20260606040000_scan_window_cap.sql`.** All on remote.
+- **Migrations applied through `20260610010000_trending_insert_hardening.sql`.** All on remote (latest two added this session).
 - **Metro is NOT running** (was killed). Restart from project root for device testing: `cd /Users/loganshaver/pantry && npx expo start`. Client changes this session need a **reload or rebuild** to reach the device.
 - **Deploy commands:** `supabase db push --yes` (migrations), `supabase functions deploy <name>`.
 - **Service-role key** (for DB verification curls): `supabase projects api-keys --project-ref fdafjnkqqtpsjtddbfdz`.
@@ -59,47 +87,18 @@ pushed to `main`. Read `CODE_REVIEW.md` (repo root, committed) for the full find
 
 ---
 
-## 📋 REMAINING WORK
+## 📋 REMAINING WORK — only Lows left
 
-### Medium M4 — Scaling / cost (HIGH value; mostly edge functions → need `supabase functions deploy`)
-1. **`parse-receipt` invalid Gemini model name → silently falls back to GPT-4o every scan.** `supabase/functions/parse-receipt/index.ts:44` (`parseWithGemini`). Verify the model string (cross-check the working one in generate-meals: `gemini-3.1-flash-lite` via the OpenAI-compat endpoint `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Receipt should use Gemini primary (cheap); right now it's paying GPT-4o on every receipt. **Real $ impact.**
-2. **`estimate-meal-macros` has no per-user daily cap + no timeout** on a GPT-4o (vision) call. `supabase/functions/estimate-meal-macros/index.ts:88-90,167-241`. Add `checkScanCap(req,'macro_est',N)` (reuse `_shared/scan-cap.ts`) + an AbortController timeout like scan-pantry has.
-3. **FatSecret N+1 in meal generation** — concurrent per-ingredient macro lookups. `generate-meals/index.ts:80,376-380` (also generate-trending-meals:73,632; estimate-meal-macros:195-206). Batch/limit concurrency (p-limit style) or cache.
-4. **Discover trending query: no row limit + stale diet filter, and triple/duplicate fetch.** `app/(tabs)/discover.tsx:192-217` (add `.limit()`), `250-264` (dedupe the effect triggers — performance finding too).
-5. **`extract-recipe-from-url` (YouTube HTML scrape): no timeout, no daily cap.** `extract-recipe-from-url/index.ts:29-58,160-226`. Add timeout + per-user cap; it's also ToS-fragile.
-6. **`generate-trending-meals` cron:** sequential YouTube calls, no timeout, no quota handling (`:285-322`); image fan-out (~54 FAL calls) in the cron critical path (`:757-787`). Add timeouts; move/queue image gen out of the critical path or wave-limit (it already waves by 5 — verify).
-7. **`loops-import-waitlist` loads the whole table + serial processing** → times out for large waitlists. `loops-import-waitlist/index.ts:31-34,76,79`. Paginate/batch.
-8. **Onboarding plan-reveal parallel image fetches unbounded.** `app/onboarding/index.tsx:2871-2885, 3677`. Batch like the Saved-tab fix (×3).
+All Critical + High + Mediums (M1–M6) are shipped. The **27 Lows** in `CODE_REVIEW.md`
+are the only remaining items — polish/cosmetic, no security or cost impact. Tackle if
+desired; none are launch blockers.
 
-### Medium M5 — Security hardening (mix of edge + DB migration)
-1. **`fatsecret-proxy` passes caller-supplied `method` + `params` unsanitized** into the signed request. `fatsecret-proxy/index.ts:84-93`. Add an allowlist of permitted methods (foods.search, food.get, foods.autocomplete) + strip unexpected params.
-2. **`trending_meals` INSERT policy lacks promo_active/creator enforcement + unvalidated social URLs.** (RLS migration + `discover.tsx:398-406,472-483`). Scope INSERT to real creators; validate/sanitize creator social URLs before render (Linking.openURL on attacker URLs).
-3. **CreatorRecipeModal photo → public bucket with guessable timestamp filename.** `CreatorRecipeModal.tsx:181`. Use a random UUID filename.
-4. **AILogModal sends raw base64 photo, no size validation.** `AILogModal.tsx:55-61`. Add a size cap before invoke (mirror the pantry downscale).
-5. **Creator profile INSERT has no server-side uniqueness on `user_id`.** `CreatorRecipeModal.tsx:205-221`. Add a UNIQUE constraint/index on `creators.user_id` (migration) so a user can't create duplicate creator rows.
-6. **(deferred from M2) `loops-sync` drops lifecycle events when the contact upsert fails** — `loops-sync/index.ts:186-216`. Retry/queue or at least surface so the Loops sequence isn't silently skipped.
+Intentionally left (decided, not forgotten):
+- **Blanket optimistic-update rollback** across grocery/pantry/meal/home — failures self-correct on refresh; high churn, low ROI.
+- **Cosmetic M6 items:** array-index React keys (RecipeFormModal/CreatorRecipeModal), staples prompt reappearing on swipe-dismiss.
 
-### Medium M6 — Correctness nits (LOWEST value — cherry-pick; skip pure cosmetics)
-Worth doing:
-- **Birthday age gate doesn't block continuation when birthday empty.** `app/(tabs)/index.tsx:1505-1516` (note: the review may have meant onboarding age step — verify location). Block Continue when no birthday.
-- **delivery-webview: no error handler (perpetual spinner) + no `originWhitelist`.** `app/delivery-webview.tsx:46-52`. Add onError + originWhitelist.
-- **Open Food Facts barcode fetch: no timeout.** `lib/fatsecret.ts:139-151`. AbortController.
-- **AILogModal setState-in-render via setTimeout(0) → possible render loop.** `AILogModal.tsx:457-471`. Move to a guarded useEffect.
-- **AIConsentContext concurrent requestConsent overwrites pendingResolve** (leaks promises). `AIConsentContext.tsx:84-91`.
-Likely skip (cosmetic): array-index React keys (RecipeFormModal/CreatorRecipeModal), staples prompt reappearing on swipe-dismiss.
-
-### Deferred earlier (decide whether to do):
-- **Blanket optimistic-update rollback** across grocery/pantry/meal/home — failures self-correct on refresh; high churn, low ROI. Left intentionally.
-- **G4 Saved-tab backfill captured-index** (`saved.tsx`) — the G4 rewrite still uses the positional index; it's correct because order matches fetch order, but worth a quick re-verify.
-
-### Lows (27) — all in `CODE_REVIEW.md`. Polish only; tackle after M4/M5 if desired.
-
----
-
-## Suggested order for next chat
-1. **M4 #1 (parse-receipt model)** — quick, real $ savings. Then the rest of M4.
-2. **M5** — security hardening (one small migration for creators uniqueness).
-3. Cherry-pick **M6** (age gate, webview, OFF timeout). Skip cosmetics.
-4. Lows only if time.
-
-After each batch: typecheck (`npx tsc --noEmit` — note the codebase has many PRE-EXISTING tsc errors: VideoView props, profile setState, ref-callback returns, DetectedItem `zone` mock, `startsWith` on `never`, JSX namespace — filter those out), commit, push, and `supabase functions deploy` any changed edge fns.
+## Workflow reminders
+After each change: typecheck (`npx tsc --noEmit` — the codebase has many PRE-EXISTING tsc errors:
+VideoView props, profile setState (`onboarding/index.tsx` ~504/3167 "No overload"), ref-callback
+returns, DetectedItem `zone` mock, `startsWith` on `never`, JSX namespace — filter those out),
+commit, push, and `supabase functions deploy <name>` any changed edge fns.
