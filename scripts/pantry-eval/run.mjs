@@ -149,11 +149,16 @@ function isNonFood(name) {
 }
 
 function flattenItems(raw) {
-  const clean = String(raw).replace(/```json|```/g, '').trim()
+  let clean = String(raw).replace(/```json|```/g, '').trim()
+  // Extract the JSON object if the model wrapped it in prose — first { to last }.
+  const first = clean.indexOf('{'), last = clean.lastIndexOf('}')
+  if (first >= 0 && last > first) clean = clean.slice(first, last + 1)
   let parsed
   try { parsed = JSON.parse(clean) } catch {
-    // Show what actually came back so a non-JSON reply (prose, an error string) is debuggable.
-    return { names: [], removed: [], error: `JSON parse failed — got: "${clean.slice(0, 120).replace(/\s+/g, ' ')}"` }
+    // Show length + the TAIL: if it ends mid-object the response was truncated (raise tokens);
+    // if it ends with }]} but still fails, it's a formatting quirk.
+    return { names: [], removed: [], collapsed: 0,
+      error: `JSON parse failed (len ${clean.length}) — tail: "...${clean.slice(-90).replace(/\s+/g, ' ')}"` }
   }
   const zones = parsed.zones ?? []
   const all = []
