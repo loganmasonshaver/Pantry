@@ -156,17 +156,39 @@ function isNonFood(name) {
   return NONFOOD_CONTAINS.some((t) => n.includes(t))
 }
 
+// Balance unclosed brackets so we can still read items from a model that stopped without
+// closing its JSON (small Qwen models do this). NOTE: needing this is itself a reliability
+// red flag — a production model should return valid JSON every time.
+function repairJson(s) {
+  const stack = []
+  let inStr = false, esc = false
+  for (const ch of s) {
+    if (esc) { esc = false; continue }
+    if (ch === '\\') { esc = true; continue }
+    if (ch === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (ch === '{' || ch === '[') stack.push(ch)
+    else if (ch === '}' || ch === ']') stack.pop()
+  }
+  let out = inStr ? s + '"' : s
+  out = out.replace(/,\s*$/, '')
+  while (stack.length) out += stack.pop() === '{' ? '}' : ']'
+  return out
+}
+
 function flattenItems(raw) {
   let clean = String(raw).replace(/```json|```/g, '').trim()
   // Extract the JSON object if the model wrapped it in prose — first { to last }.
   const first = clean.indexOf('{'), last = clean.lastIndexOf('}')
   if (first >= 0 && last > first) clean = clean.slice(first, last + 1)
   let parsed
-  try { parsed = JSON.parse(clean) } catch {
-    // Show length + the TAIL: if it ends mid-object the response was truncated (raise tokens);
-    // if it ends with }]} but still fails, it's a formatting quirk.
-    return { names: [], removed: [], collapsed: 0,
-      error: `JSON parse failed (len ${clean.length}) — tail: "...${clean.slice(-90).replace(/\s+/g, ' ')}"` }
+  try { parsed = JSON.parse(clean) }
+  catch {
+    try { parsed = JSON.parse(repairJson(clean)) } // salvage a model that forgot to close brackets
+    catch {
+      return { names: [], removed: [], collapsed: 0,
+        error: `JSON parse failed (len ${clean.length}) — tail: "...${clean.slice(-90).replace(/\s+/g, ' ')}"` }
+    }
   }
   const zones = parsed.zones ?? []
   const all = []
