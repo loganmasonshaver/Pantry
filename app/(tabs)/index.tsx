@@ -124,7 +124,9 @@ function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
       setDisplayRemaining(Math.round(goal - goal * value))
       setDisplayOffset(circumference * (1 - value))
     })
-    return () => animProgress.removeListener(listener)
+    // stopAnimation() too — otherwise an in-flight ring animation keeps firing the
+    // listener (setState) after unmount, warning on a dead component.
+    return () => { animProgress.removeListener(listener); animProgress.stopAnimation() }
   }, [consumed, goal])
 
   return (
@@ -149,6 +151,7 @@ function MacroBar({ label, consumed, goal, color, emphasized = false }: { label:
   useEffect(() => {
     animWidth.setValue(0)
     RNAnimated.timing(animWidth, { toValue: progress * 100, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
+    return () => animWidth.stopAnimation() // halt in-flight animation on unmount
   }, [consumed, goal])
 
   // Emphasized = the headline macro (Protein on home). Thicker bar + bigger text
@@ -422,6 +425,18 @@ export default function HomeScreen() {
     'soy sauce', 'eggs', 'rice', 'flour', 'sugar', 'milk',
     'paprika', 'cumin', 'chili powder', 'oregano', 'lemon', 'vinegar',
   ]
+  // Real category per staple — was hardcoded 'Spices & Seasonings', which mis-filed
+  // eggs/rice/milk/oil everywhere categories show. Names match pantry CATEGORY_CONFIG.
+  const STAPLE_CATEGORY: Record<string, string> = {
+    'salt': 'Spices & Seasonings', 'pepper': 'Spices & Seasonings', 'paprika': 'Spices & Seasonings',
+    'cumin': 'Spices & Seasonings', 'chili powder': 'Spices & Seasonings', 'oregano': 'Spices & Seasonings',
+    'olive oil': 'Oils & Vinegars', 'vinegar': 'Oils & Vinegars',
+    'garlic': 'Produce', 'onion': 'Produce', 'lemon': 'Produce',
+    'butter': 'Dairy & Eggs', 'eggs': 'Dairy & Eggs', 'milk': 'Dairy & Eggs',
+    'soy sauce': 'Sauces & Condiments', 'rice': 'Grains & Pasta',
+    'flour': 'Baking', 'sugar': 'Baking',
+  }
+  const stapleCategory = (name: string) => STAPLE_CATEGORY[name.toLowerCase()] ?? 'Spices & Seasonings'
   const [missingStaples, setMissingStaples] = useState<string[]>([])
   // Staples prompt now fires ONCE as a modal right after a pantry scan
   // completes (instead of a persistent home card). Dismissal is stored in
@@ -444,7 +459,7 @@ export default function HomeScreen() {
   // showing the "Unlock recipes" card instead of flipping to the meal carousel.
   const loadPantryNames = useCallback(async () => {
     if (!user) return
-    const { data } = await supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true)
+    const { data } = await supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true).limit(500) // in-stock pantry never realistically exceeds this; bounds payload on every focus
     const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
     setPantryNames(names)
     setPantryFetched(true)
@@ -479,14 +494,14 @@ export default function HomeScreen() {
     if (existing && existing.length > 0) {
       await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
     } else {
-      await supabase.from('pantry_items').insert({ user_id: user.id, name, category: 'Spices & Seasonings', in_stock: true })
+      await supabase.from('pantry_items').insert({ user_id: user.id, name, category: stapleCategory(name), in_stock: true })
     }
   }
 
   const addStapleToGrocery = async (name: string) => {
     if (!user) return
     setMissingStaples(prev => prev.filter(s => s !== name))
-    await supabase.from('grocery_items').insert({ user_id: user.id, name, category: 'Spices & Seasonings' })
+    await supabase.from('grocery_items').insert({ user_id: user.id, name, category: stapleCategory(name) })
   }
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
@@ -644,7 +659,11 @@ export default function HomeScreen() {
     setSelectedDate(d.toISOString().split('T')[0])
   }
   const goForwardDay = () => {
-    if (isToday) return
+    // Recompute today HERE rather than trusting the render-time isToday constant — if the
+    // app sat open across midnight, isToday would still reflect yesterday and wrongly block
+    // navigating into the real new day. String date compare is safe for YYYY-MM-DD.
+    const todayStr = new Date().toISOString().split('T')[0]
+    if (selectedDate >= todayStr) return
     const d = new Date(selectedDate + 'T12:00:00')
     d.setDate(d.getDate() + 1)
     setSelectedDate(d.toISOString().split('T')[0])
