@@ -207,8 +207,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    // Clear the local flag that gates post-OTP screens before ending the Supabase session
-    await AsyncStorage.removeItem('otp_verified');
+    // Clear the local flag that gates post-OTP screens before ending the Supabase session.
+    // Also wipe the per-device meal + image caches — these aren't user-scoped, so on a
+    // shared device the next person to sign in would otherwise see the prior user's meals.
+    await AsyncStorage.multiRemove([
+      'otp_verified',
+      'pantry_daily_meals_cookNow',
+      'pantry_daily_meals_mealPlan',
+      'pantry_image_urls_v1',
+      'pantry_recent_meal_names_cookNow',
+      'pantry_recent_meal_names_mealPlan',
+    ]);
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   };

@@ -57,8 +57,14 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           // Persist to device cache so future renders are instant
           try {
             const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
-            const localCache: Record<string, string> = raw ? JSON.parse(raw) : {}
+            let localCache: Record<string, string> = raw ? JSON.parse(raw) : {}
             localCache[name] = data.image
+            // Cap the image-URL cache so it doesn't grow unbounded (synchronous Hermes
+            // reads of a huge blob jank the JS thread). Keep the newest ~200 entries.
+            const keys = Object.keys(localCache)
+            if (keys.length > 200) {
+              localCache = Object.fromEntries(keys.slice(keys.length - 200).map(k => [k, localCache[k]]))
+            }
             await AsyncStorage.setItem(IMAGE_URL_CACHE_KEY, JSON.stringify(localCache))
           } catch {}
           return data.image
@@ -107,6 +113,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         .eq('user_id', userId)
         .eq('in_stock', true)
         .order('created_at', { ascending: true })
+        .limit(200) // bound the list serialized into the GPT prompt (token cost + truncation risk)
 
       // Oldest items first — GPT prompt will prioritize using them up
       const ingredients = pantryItems?.map(i => i.name) || []
@@ -117,6 +124,8 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         .select('meal_name, rating')
         .eq('user_id', userId)
         .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(100) // most-recent ratings only — bounds prompt size as history grows
 
       const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
       const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
