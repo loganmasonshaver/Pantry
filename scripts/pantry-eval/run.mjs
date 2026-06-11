@@ -47,17 +47,25 @@ const MODELS = [
   // Via OpenRouter (one key, OpenAI-compatible) — auto-skipped if OPENROUTER_API_KEY is unset.
   // Qwen3-VL tops open-weight vision/OCR benchmarks and is NOT a thinking model (so it should be
   // fast). Pixtral = Mistral's small cheap VLM. Fix ids if they 404 (openrouter.ai/models).
+  // Qwen3-VL instruct (non-thinking) — purpose-built vision models, tested across the size
+  // range to find the cheapest that's good enough. 235B flagship → 30B-a3b efficient MoE
+  // (likely sweet spot) → 8B tiny/cheapest. All via OpenRouter, skipped without that key.
   {
-    // Best-guess current ids — if these 404, run LISTOR=1 (below) to get the exact strings.
-    label: 'Qwen3.6 Flash (OpenRouter)',
+    label: 'Qwen3-VL 235B (OR)',
     endpoint: OPENROUTER,
-    model: 'qwen/qwen3.6-flash',
+    model: 'qwen/qwen3-vl-235b-a22b-instruct',
     apiKey: process.env.OPENROUTER_API_KEY,
   },
   {
-    label: 'Qwen3.7 Plus (OpenRouter)',
+    label: 'Qwen3-VL 30B-a3b (OR)',
     endpoint: OPENROUTER,
-    model: 'qwen/qwen3.7-plus-20260602',
+    model: 'qwen/qwen3-vl-30b-a3b-instruct',
+    apiKey: process.env.OPENROUTER_API_KEY,
+  },
+  {
+    label: 'Qwen3-VL 8B (OR)',
+    endpoint: OPENROUTER,
+    model: 'qwen/qwen3-vl-8b-instruct',
     apiKey: process.env.OPENROUTER_API_KEY,
   },
 ]
