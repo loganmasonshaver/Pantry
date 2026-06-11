@@ -64,15 +64,16 @@ const MODELS = [
   // Qwen3-VL tops open-weight vision/OCR benchmarks and is NOT a thinking model (so it should be
   // fast). Pixtral = Mistral's small cheap VLM. Fix ids if they 404 (openrouter.ai/models).
   {
-    label: 'Qwen3-VL (OpenRouter)',
+    // Best-guess current ids — if these 404, run LISTOR=1 (below) to get the exact strings.
+    label: 'Qwen3.6 Flash (OpenRouter)',
     endpoint: OPENROUTER,
-    model: 'qwen/qwen3-vl-72b-instruct',
+    model: 'qwen/qwen3.6-flash',
     apiKey: process.env.OPENROUTER_API_KEY,
   },
   {
-    label: 'Pixtral Large (OpenRouter)',
+    label: 'Qwen3.7 Plus (OpenRouter)',
     endpoint: OPENROUTER,
-    model: 'mistralai/pixtral-large-2411',
+    model: 'qwen/qwen3.7-plus-20260602',
     apiKey: process.env.OPENROUTER_API_KEY,
   },
 ]
@@ -232,6 +233,23 @@ if (process.env.LIST) {
   console.log('\nGemini models your key can call (support generateContent):\n')
   for (const m of models) console.log('  ' + m)
   console.log(`\n${models.length} models. Look for the "pro" one — that's the id to use.\n`)
+  process.exit(0)
+}
+
+// ── LISTOR mode: print OpenRouter VISION models (image input), then exit. ──
+// Run: LISTOR=1 OPENROUTER_API_KEY=sk-or-... node run.mjs  → get exact Qwen/Pixtral ids.
+if (process.env.LISTOR) {
+  const key = process.env.OPENROUTER_API_KEY
+  if (!key) { console.error('Set OPENROUTER_API_KEY to list models.'); process.exit(1) }
+  const data = await (await fetch('https://openrouter.ai/api/v1/models', { headers: { Authorization: `Bearer ${key}` } })).json()
+  const models = (data.data ?? [])
+    .filter((m) => JSON.stringify(m.architecture ?? {}).includes('image')) // image-capable
+    .map((m) => m.id)
+    .filter((id) => /qwen|pixtral|mistral|llama|gemini|gpt/i.test(id))     // the families worth testing
+    .sort()
+  console.log('\nOpenRouter vision models (image input) worth testing:\n')
+  for (const m of models) console.log('  ' + m)
+  console.log(`\n${models.length} shown. Grab the qwen/pixtral ids and paste them to me.\n`)
   process.exit(0)
 }
 
