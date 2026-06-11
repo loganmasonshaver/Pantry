@@ -2868,21 +2868,26 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       // Always write to AsyncStorage even if cancelled (user navigated away) — the home
       // screen needs these URLs cached so it doesn't have to re-fetch.
       const updatedCache = { ...localCache }
-      await Promise.all(mealsForDisplay.map(async (m) => {
-        if (localCache[m.name]) return // already have it
-        try {
-          const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
-            body: { mealName: m.name, ingredients: [] },
-          })
-          if (imgData?.image) {
-            updatedCache[m.name] = imgData.image
-            // Only update React state if still mounted
-            if (!cancelled) setMealImages(prev => ({ ...prev, [m.name]: imgData.image }))
-            // Always persist — home screen reads this cache
-            AsyncStorage.setItem(IMAGE_URL_CACHE_KEY, JSON.stringify(updatedCache))
-          }
-        } catch {}
-      }))
+      const toFetch = mealsForDisplay.filter(m => !localCache[m.name])
+      // Batch of 3 instead of firing all at once — a full plate of meals would hit the
+      // image edge fn in one burst and saturate FAL's rate limit (same fix as Saved tab).
+      const BATCH = 3
+      for (let b = 0; b < toFetch.length; b += BATCH) {
+        await Promise.all(toFetch.slice(b, b + BATCH).map(async (m) => {
+          try {
+            const { data: imgData } = await supabase.functions.invoke('generate-meal-image', {
+              body: { mealName: m.name, ingredients: [] },
+            })
+            if (imgData?.image) {
+              updatedCache[m.name] = imgData.image
+              // Only update React state if still mounted
+              if (!cancelled) setMealImages(prev => ({ ...prev, [m.name]: imgData.image }))
+              // Always persist — home screen reads this cache
+              AsyncStorage.setItem(IMAGE_URL_CACHE_KEY, JSON.stringify(updatedCache))
+            }
+          } catch {}
+        }))
+      }
     })()
     return () => { cancelled = true }
   }, [mealsForDisplay])
@@ -3673,19 +3678,23 @@ function SMealSwipe({ onNext, onBack }: { onNext: (liked: string[]) => void; onB
           if (cache[m.name]) alreadyCached[m.name] = cache[m.name]
         }
         if (Object.keys(alreadyCached).length > 0) setImages(alreadyCached)
-        // Fetch missing ones in parallel
-        await Promise.all(SWIPE_MEALS.map(async (m) => {
-          if (cache[m.name]) return
-          try {
-            const { data } = await supabase.functions.invoke('generate-meal-image', {
-              body: { mealName: m.name, ingredients: m.imageHints ?? [] },
-            })
-            if (data?.image) {
-              cache[m.name] = data.image
-              setImages(prev => ({ ...prev, [m.name]: data.image }))
-            }
-          } catch {}
-        }))
+        // Fetch missing ones in batches of 3 — firing all swipe-card images at once
+        // saturated FAL's rate limit (same fix as Saved tab / plan reveal).
+        const toFetch = SWIPE_MEALS.filter(m => !cache[m.name])
+        const BATCH = 3
+        for (let b = 0; b < toFetch.length; b += BATCH) {
+          await Promise.all(toFetch.slice(b, b + BATCH).map(async (m) => {
+            try {
+              const { data } = await supabase.functions.invoke('generate-meal-image', {
+                body: { mealName: m.name, ingredients: m.imageHints ?? [] },
+              })
+              if (data?.image) {
+                cache[m.name] = data.image
+                setImages(prev => ({ ...prev, [m.name]: data.image }))
+              }
+            } catch {}
+          }))
+        }
         await AsyncStorage.setItem('pantry_image_urls_v1', JSON.stringify(cache))
       } catch {}
     })()
