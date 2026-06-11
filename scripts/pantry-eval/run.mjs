@@ -138,7 +138,9 @@ async function callModel(m, base64, mime) {
   })
   const ms = Date.now() - t0
   const data = await res.json()
-  if (data.error) return { names: [], ms, error: data.error.message ?? JSON.stringify(data.error) }
+  // Google sometimes returns errors as an ARRAY ([{error:...}]) — check both shapes.
+  const errObj = Array.isArray(data) ? data[0]?.error : data.error
+  if (errObj) return { names: [], ms, error: errObj.message ?? JSON.stringify(errObj) }
   const choice = data.choices?.[0]
   const content = choice?.message?.content ?? ''
   // Diagnose empty output (the Pro problem): dump finish_reason, which fields the message
