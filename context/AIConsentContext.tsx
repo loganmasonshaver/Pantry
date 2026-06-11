@@ -33,7 +33,15 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
   const [saving, setSaving] = useState(false)
   // Holds the resolve callback of the Promise returned by requestConsent so the modal's
   // accept/cancel handlers can settle it asynchronously
-  const pendingResolve = useRef<((v: boolean) => void) | null>(null)
+  // A QUEUE, not a single slot: two screens can call requestConsent before the modal
+  // resolves. With one slot the second call overwrote the first's resolver, leaking the
+  // first promise (it never settled). Collect all waiters and resolve them together.
+  const pendingResolvers = useRef<Array<(v: boolean) => void>>([])
+  const settlePending = (v: boolean) => {
+    const waiters = pendingResolvers.current
+    pendingResolvers.current = []
+    waiters.forEach(r => r(v))
+  }
   // Ref mirror so requestConsent (captured in a closure) can read the latest value.
   const hasConsentRef = useRef(false)
   // Ref mirror so waitForLoad's polling closure can detect when the profile fetch settles
@@ -86,7 +94,7 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
     await waitForLoad()
     if (hasConsentRef.current) return true
     return new Promise<boolean>((resolve) => {
-      pendingResolve.current = resolve
+      pendingResolvers.current.push(resolve)
       setModalVisible(true)
     })
   }
@@ -105,14 +113,12 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
     setHasConsent(true)
     hasConsentRef.current = true
     setModalVisible(false)
-    pendingResolve.current?.(true)
-    pendingResolve.current = null
+    settlePending(true)
   }
 
   const handleCancel = () => {
     setModalVisible(false)
-    pendingResolve.current?.(false)
-    pendingResolve.current = null
+    settlePending(false)
   }
 
   const revokeConsent = async () => {

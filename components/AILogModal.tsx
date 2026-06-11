@@ -112,6 +112,22 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     setSelectedSlot(defaultSlot)
   }, [defaultSlot])
 
+  // Auto-sync calories to the macro math (Atwater 4/4/9) when the user edits a macro.
+  // Lives in an effect — not inline in render — because doing setState during render
+  // (even deferred via setTimeout(0)) re-ran on every render and could loop. Keyed on the
+  // macro inputs so it only recalculates when one actually changes; lastEditedMacro gates
+  // it so editing calories directly isn't clobbered. 10 kcal tolerance ignores rounding noise.
+  useEffect(() => {
+    if (!lastEditedMacro) return
+    const p = parseInt(protein) || 0
+    const c = parseInt(carbs) || 0
+    const f = parseInt(fat) || 0
+    const macroCals = p * 4 + c * 4 + f * 9
+    if (macroCals > 0 && Math.abs(macroCals - (parseInt(calories) || 0)) > 10) {
+      setCalories(String(macroCals))
+    }
+  }, [protein, carbs, fat, lastEditedMacro])
+
   useEffect(() => {
     if (step !== 'analyzing') return
     const loop = Animated.loop(
@@ -471,24 +487,8 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                   ))}
                 </View>
 
-                {/* Auto-sync: if user edits a macro, recalculate calories to match (Atwater 4/4/9).
-                    Only fires when the user touched a macro field (lastEditedMacro), so editing
-                    calories directly doesn't get clobbered by this loop. */}
-                {(() => {
-                  const p = parseInt(protein) || 0
-                  const c = parseInt(carbs) || 0
-                  const f = parseInt(fat) || 0
-                  const cal = parseInt(calories) || 0
-                  const macroCals = p * 4 + c * 4 + f * 9
-                  const diff = Math.abs(macroCals - cal)
-                  // 10 kcal tolerance to ignore rounding noise from individual macro inputs
-                  if (diff > 10 && macroCals > 0 && lastEditedMacro) {
-                    // setTimeout(0) defers setState out of the render phase — React forbids
-                    // setState during render and will warn/throw if called synchronously here.
-                    setTimeout(() => setCalories(String(macroCals)), 0)
-                  }
-                  return null
-                })()}
+                {/* Calorie auto-sync moved to a guarded useEffect (see above) — render
+                    must stay free of setState. */}
 
                 {/* Slot picker */}
                 <Text style={styles.slotLabel}>Add to meal</Text>
