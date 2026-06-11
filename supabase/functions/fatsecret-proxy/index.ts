@@ -6,6 +6,16 @@ const BASE_URL = "https://platform.fatsecret.com/rest/server.api"
 const CONSUMER_KEY = Deno.env.get("FATSECRET_KEY") ?? ""
 const CONSUMER_SECRET = Deno.env.get("FATSECRET_SECRET") ?? ""
 
+// Allowlist of FatSecret methods this proxy will sign, with the exact params each
+// accepts. The proxy holds the consumer secret, so without this a caller could pass
+// ANY method/params and have us sign arbitrary FatSecret API calls on our account.
+// Unknown methods are rejected; unexpected params are stripped before signing.
+const ALLOWED_METHODS: Record<string, Set<string>> = {
+  "foods.search": new Set(["search_expression", "page_number", "max_results"]),
+  "food.get": new Set(["food_id"]),
+  "foods.autocomplete": new Set(["expression", "max_results"]),
+}
+
 // OAuth 1.0a requires stricter percent-encoding than standard encodeURIComponent
 function percentEncode(str: string): string {
   return encodeURIComponent(str)
@@ -86,11 +96,19 @@ Deno.serve(async (req: Request) => {
       params: Record<string, string>
     }
 
-    if (!method) {
-      return new Response(JSON.stringify({ error: "Missing method" }), { status: 400 })
+    const allowedParams = method ? ALLOWED_METHODS[method] : undefined
+    if (!allowedParams) {
+      return new Response(JSON.stringify({ error: "Unsupported method" }), { status: 400 })
     }
 
-    const url = await buildSignedUrl({ method, ...params })
+    // Strip anything not on this method's param allowlist so a caller can't smuggle
+    // extra signed params (e.g. a different format/region) into our account's request.
+    const safeParams: Record<string, string> = {}
+    for (const [k, v] of Object.entries(params ?? {})) {
+      if (allowedParams.has(k)) safeParams[k] = String(v)
+    }
+
+    const url = await buildSignedUrl({ method, ...safeParams })
     const res = await fetch(url)
     const data = await res.json()
 
