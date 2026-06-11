@@ -27,6 +27,9 @@ const IMAGES_DIR = path.join(__dirname, 'images')
 
 // Models under test. Adjust ids here if Google/OpenAI rename them — these are the
 // current (June 2026) ids; verify against the provider docs if a call 404s.
+const GEMINI = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+const OPENROUTER = 'https://openrouter.ai/api/v1/chat/completions'
+
 const MODELS = [
   {
     label: 'GPT-4o (current)',
@@ -34,21 +37,10 @@ const MODELS = [
     model: 'gpt-4o',
     apiKey: process.env.OPENAI_API_KEY,
   },
-  {
-    // Mid-tier flash — newer/stronger than 3.1-flash-lite, far cheaper than Pro. The candidate
-    // sweet spot: hopefully fixes Lite's hallucinations/produce misses without Pro's cost.
-    label: 'Gemini 3.5 Flash',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-3.5-flash',
-    apiKey: process.env.GOOGLE_AI_KEY,
-    maxTokens: 16000,
-  },
-  // The real 3.1 Pro id is gemini-3.1-pro-preview (bare "gemini-3.1-pro" 404'd). Test the
-  // full thinking curve — does more reasoning catch more items on a perception task, or plateau?
-  // Each needs token headroom so thinking doesn't starve the answer.
+  // Gemini 3.1 Pro — needs a billing-enabled key (free tier = limit 0). Low + med thinking only.
   {
     label: 'Gemini 3.1 Pro (low think)',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    endpoint: GEMINI,
     model: 'gemini-3.1-pro-preview',
     apiKey: process.env.GOOGLE_AI_KEY,
     extra: { reasoning_effort: 'low' },
@@ -56,25 +48,32 @@ const MODELS = [
   },
   {
     label: 'Gemini 3.1 Pro (med think)',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    endpoint: GEMINI,
     model: 'gemini-3.1-pro-preview',
     apiKey: process.env.GOOGLE_AI_KEY,
     extra: { reasoning_effort: 'medium' },
     maxTokens: 24000,
   },
   {
-    label: 'Gemini 3.1 Pro (high think)',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-3.1-pro-preview',
-    apiKey: process.env.GOOGLE_AI_KEY,
-    extra: { reasoning_effort: 'high' },
-    maxTokens: 32000,
-  },
-  {
     label: 'Gemini 3.1 Flash-Lite',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    endpoint: GEMINI,
     model: 'gemini-3.1-flash-lite',
     apiKey: process.env.GOOGLE_AI_KEY,
+  },
+  // Via OpenRouter (one key, OpenAI-compatible) — auto-skipped if OPENROUTER_API_KEY is unset.
+  // Qwen3-VL tops open-weight vision/OCR benchmarks and is NOT a thinking model (so it should be
+  // fast). Pixtral = Mistral's small cheap VLM. Fix ids if they 404 (openrouter.ai/models).
+  {
+    label: 'Qwen3-VL (OpenRouter)',
+    endpoint: OPENROUTER,
+    model: 'qwen/qwen3-vl-72b-instruct',
+    apiKey: process.env.OPENROUTER_API_KEY,
+  },
+  {
+    label: 'Pixtral Large (OpenRouter)',
+    endpoint: OPENROUTER,
+    model: 'mistralai/pixtral-large-2411',
+    apiKey: process.env.OPENROUTER_API_KEY,
   },
 ]
 
@@ -129,17 +128,44 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
 // Normalize an item name for cross-model matching in the recall matrix.
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
 
+// ── Post-answer non-food filter ───────────────────────────────────────────
+// Deterministic safety net: strip obvious non-food the model hallucinated (nail polish,
+// dishes, cookware, pet food). Two matchers, both portable to production scan-pantry:
+//  • EXACT — bare ambiguous words (so we DON'T nuke "pudding cups", "ramen bowl", "pot pie")
+//  • CONTAINS — multiword terms that never appear inside a food name
+const NONFOOD_EXACT = new Set([
+  'plate', 'plates', 'dinner plate', 'dinner plates', 'bowl', 'bowls', 'cup', 'cups',
+  'mug', 'mugs', 'glass', 'glasses', 'pot', 'pots', 'pan', 'pans', 'skillet', 'kettle',
+  'tray', 'trays', 'utensil', 'utensils', 'fork', 'knife', 'spoon', 'spatula',
+  'container', 'containers', 'plastic container', 'plastic food container', 'food container',
+  'prepared food container', 'toaster', 'blender', 'coffee maker', 'appliance', 'sponge',
+  'sponges', 'napkin', 'napkins', 'foil', 'aluminum foil', 'battery', 'batteries',
+  'cookbook', 'cookbooks',
+])
+const NONFOOD_CONTAINS = [
+  'nail polish', 'dish soap', 'hand soap', 'paper towel', 'cutting board', 'trash bag',
+  'garbage bag', 'dog food', 'dog biscuit', 'dog treat', 'cat food', 'cat treat', 'kibble',
+  'toothpaste', 'shampoo', 'toiletr', 'dishware', 'cookware', 'kitchenware', 'plastic wrap',
+]
+function isNonFood(name) {
+  const n = norm(name)
+  if (NONFOOD_EXACT.has(n)) return true
+  return NONFOOD_CONTAINS.some((t) => n.includes(t))
+}
+
 function flattenItems(raw) {
   const clean = String(raw).replace(/```json|```/g, '').trim()
   let parsed
   try { parsed = JSON.parse(clean) } catch {
     // Show what actually came back so a non-JSON reply (prose, an error string) is debuggable.
-    return { names: [], error: `JSON parse failed — got: "${clean.slice(0, 120).replace(/\s+/g, ' ')}"` }
+    return { names: [], removed: [], error: `JSON parse failed — got: "${clean.slice(0, 120).replace(/\s+/g, ' ')}"` }
   }
   const zones = parsed.zones ?? []
-  const names = []
-  for (const z of zones) for (const it of (z.items ?? [])) if (it?.name) names.push(it.name)
-  return { names, error: null }
+  const all = []
+  for (const z of zones) for (const it of (z.items ?? [])) if (it?.name) all.push(it.name)
+  const removed = all.filter(isNonFood)          // what the filter caught (shown so we can verify)
+  const names = all.filter((n) => !isNonFood(n)) // food only
+  return { names, removed, error: null }
 }
 
 // Detect the REAL image type from magic bytes, not the extension — internet/phone
@@ -176,7 +202,7 @@ async function callModel(m, base64, mime) {
   const data = await res.json()
   // Google sometimes returns errors as an ARRAY ([{error:...}]) — check both shapes.
   const errObj = Array.isArray(data) ? data[0]?.error : data.error
-  if (errObj) return { names: [], ms, error: errObj.message ?? JSON.stringify(errObj) }
+  if (errObj) return { names: [], removed: [], ms, error: errObj.message ?? JSON.stringify(errObj) }
   const choice = data.choices?.[0]
   const content = choice?.message?.content ?? ''
   // Diagnose empty output (the Pro problem): dump finish_reason, which fields the message
@@ -185,10 +211,10 @@ async function callModel(m, base64, mime) {
     const fr = choice?.finish_reason ?? '(no choice)'
     const mkeys = choice?.message ? Object.keys(choice.message).join(',') : '(no message)'
     const rawPeek = JSON.stringify(data).slice(0, 240)
-    return { names: [], ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
+    return { names: [], removed: [], ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
   }
-  const { names, error } = flattenItems(content)
-  return { names, ms, error }
+  const { names, removed, error } = flattenItems(content)
+  return { names, removed, ms, error }
 }
 
 // ── LIST mode: print the Gemini models this key can actually call, then exit. ──
@@ -224,7 +250,7 @@ if (files.length === 0) { console.error(`No images in ${IMAGES_DIR}. Drop some p
 
 console.log(`\nTesting ${files.length} photo(s) across ${active.length} model(s): ${active.map((m) => m.label).join(', ')}\n`)
 
-const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0 }]))
+const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0, removed: 0 }]))
 
 for (const file of files) {
   const buf = fs.readFileSync(path.join(IMAGES_DIR, file))
@@ -236,12 +262,14 @@ for (const file of files) {
   // Run all models on this image concurrently.
   const results = await Promise.all(active.map(async (m) => ({ m, r: await callModel(m, base64, mime) })))
 
-  // Per-model summary line.
+  // Per-model summary line. Shows item count (after non-food filter), latency, and — when
+  // the filter caught hallucinated non-food — exactly what it stripped, so we can verify it.
   for (const { m, r } of results) {
     const t = totals[m.label]
-    if (r.error) { t.errors++; console.log(`  ${m.label.padEnd(22)} ERROR: ${r.error}`); continue }
-    t.items += r.names.length; t.ms += r.ms
-    console.log(`  ${m.label.padEnd(22)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)`)
+    if (r.error) { t.errors++; console.log(`  ${m.label.padEnd(26)} ERROR: ${r.error}`); continue }
+    t.items += r.names.length; t.ms += r.ms; t.removed += (r.removed?.length ?? 0)
+    const filtered = r.removed?.length ? `  🚫 filtered: ${r.removed.join(', ')}` : ''
+    console.log(`  ${m.label.padEnd(26)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${filtered}`)
   }
 
   // Recall matrix: union of every item any model found, with ✓/· per model.
@@ -264,7 +292,7 @@ for (const m of active) {
   const t = totals[m.label]
   const avgItems = (t.items / files.length).toFixed(1)
   const avgMs = (t.ms / Math.max(1, files.length - t.errors) / 1000).toFixed(1)
-  console.log(`  ${m.label.padEnd(22)} avg ${avgItems} items/photo   avg ${avgMs}s   errors: ${t.errors}`)
+  console.log(`  ${m.label.padEnd(26)} avg ${avgItems} items/photo   avg ${avgMs}s   errors: ${t.errors}   non-food filtered: ${t.removed}`)
 }
 console.log(`
 How to read this:
