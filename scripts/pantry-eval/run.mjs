@@ -50,13 +50,7 @@ const MODELS = [
     apiKey: process.env.OPENAI_API_KEY,
   },
   {
-    label: 'GPT-4.1-mini (~6x cheaper)',
-    endpoint: OPENAI,
-    model: 'gpt-4.1-mini',
-    apiKey: process.env.OPENAI_API_KEY,
-  },
-  {
-    label: 'Gemini 3.1 Flash-Lite',
+    label: 'Gemini 3.1 Flash-Lite (fallback)',
     endpoint: GEMINI,
     model: 'gemini-3.1-flash-lite',
     apiKey: process.env.GOOGLE_AI_KEY,
@@ -82,42 +76,68 @@ You are a kitchen inventory scanner. Be EXHAUSTIVE — your job is to spot every
 
 Use these 3 detection strategies on every item:
 1. VISUAL RECOGNITION — identify foods by their appearance, shape, color, container type
-2. BRAND/LOGO READING — if you can see a brand name, logo, or product label, use it to determine the exact product variant
-3. NUTRITION LABEL / INGREDIENT LIST — if a product is turned showing its back label, read any visible nutrition facts or ingredient lists to help identify the specific product
+2. BRAND/LOGO READING — if you can see a brand name, logo, or product label, use it to determine the exact product variant (e.g. "Non-Fat Greek Yogurt" instead of just "Greek Yogurt")
+3. NUTRITION LABEL / INGREDIENT LIST — if a product is turned showing its back label, read any visible nutrition facts or ingredient lists to help identify the specific product (e.g. seeing "Whole Wheat" in ingredients → "Whole Wheat Bread" not just "Bread")
 
-EXHAUSTIVENESS RULES:
+EXHAUSTIVENESS RULES (these matter more than naming precision):
 - Scan EVERY zone in the image — don't focus on the obvious centerpiece items and skip the rest
-- Common misses: spices in small jars, condiment bottles on fridge doors, sauces, oils, items in CLEAR or SEMI-TRANSPARENT containers, back-row items partially hidden behind front items, frozen drawer contents, top-shelf items, bottom items that look like packaging
-- For items in clear containers, identify the CONTENTS not the container
-- If you see something edible but can't ID it precisely, use a best-guess generic name — DO NOT skip it
-- Partial labels still count — include with your best inference
+- Common misses to actively look for: spices in small jars, condiment bottles on fridge doors, sauces, oils, items in CLEAR or SEMI-TRANSPARENT containers (you can see contents through the plastic), back-row items partially hidden behind front items, frozen drawer contents, items on the very top shelf, items on the bottom that may look like packaging trash
+- For items in clear containers (Tupperware, glass jars, ziplock bags), identify the CONTENTS not the container
+- If you see something edible but can't ID it precisely, use a best-guess generic name (e.g. "leafy greens" if you can't tell spinach from kale, "white sauce" if you can't ID it specifically) — DO NOT skip it
+- If a single product is duplicated (3 cans of beans), list it ONCE — but don't skip a real second item because it "looks similar" to another
+- Partial labels still count — if you can see part of a label that suggests a product, include it with your best inference
 
-FRESH FOOD COUNTS TOO (don't only scan labeled/packaged goods):
-- Actively sweep produce/crisper drawers, the main fridge compartment, and shelves for FRESH items: vegetables, fruit, eggs, herbs, cheese, leftovers, raw meat. In a fridge these hide behind door condiments and in dim drawers — look for them on purpose. Missing the carrots, eggs, lettuce, and lemons is a failure.
+SCAN METHOD — work systematically so cluttered/back areas don't get skimmed:
+- Go shelf by shelf. For EACH shelf sweep front→back AND left→right. The BACK ROW behind the front items is where most misses happen — actively look past the front items for caps, lids, and label edges poking out behind or between them. A jar behind a jar, a tub behind a carton — each is a separate item.
+- Scan the DOOR shelves and built-in trays separately: condiments, butter/cheese compartments, and EGG TRAYS. Loose eggs sit in molded trays or on door shelves and blend into the tray shape — look for the rounded egg shapes and count them ("eggs").
+- Scan each DRAWER (produce, deli) separately — items there are dim and easy to skip.
+- If you can see even a SLIVER of something — a corner, a cap, an edge of a label peeking out — it counts. Include it with a best-guess name.
+- Stacked or nested items each count separately, even if mostly hidden.
 
-ONE PHYSICAL ITEM = ONE ENTRY (do not over-split):
-- If you can see only ONE container, list it exactly ONCE with your single best name. NEVER output multiple near-synonyms or alternate guesses for the same object — e.g. do not list both "Protein Powder" and "Protein Supplement" for one tub, or "Chicken Soup" and "Chicken Broth" for one can. When unsure of the exact identity, commit to ONE best name, not several.
-- If a single product is duplicated (3 identical cans of beans), still list it ONCE.
+COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short for a full scene, you've skipped back-row and small items — go back to the back rows, door shelves, and shelf edges and look again before returning. (Only include items that are actually visible — never invent — but don't stop early.)
 
-COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short, go back to back rows, door shelves, drawers, and shelf edges. (Only include items that are actually visible — never invent.)
+ONE PHYSICAL ITEM = ONE ENTRY (do not over-split or pad the list):
+- If you can see only ONE container, list it exactly ONCE with your single best name. NEVER output multiple near-synonyms or alternate guesses for the same object (e.g. don't list both "Tomato Soup" and "Tomato Rice Soup" for one can, or "Protein Powder" + "Whey Protein Isolate" for one tub).
+- Name each item at the generic product-type level — do NOT invent finer sub-variants you're only guessing at. When unsure of the exact variant, use the single broader generic name.
 
-EXCLUDE — never list these (they are NOT food):
-- Pet food/treats, and non-edible household goods (cleaning supplies, paper towels, foil, dish soap, sponges, trash bags, batteries, toiletries)
+EXCLUDE — these are NOT food and must NEVER appear in the list:
+- Pet food and pet treats (cat food, dog food, kibble)
+- Non-edible household goods: cleaning supplies, paper towels, napkins, tissues, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries, nail polish
 - Dishware, cookware, and kitchen tools: plates, bowls, cups, mugs, glasses, utensils, cutting boards, pots, pans, kettles, trays
 - Small appliances (coffee makers, toasters, blenders), cookbooks, and any container that is clearly EMPTY
-Only actual food and drink items go in the list.
+Apart from these exclusions, EVERY actual human food or drink item still follows the exhaustiveness rules above — when unsure whether a FOOD item is X or Y, still include it with a best-guess name. Never drop a real food/drink just because you're unsure what it is.
 
-Return a JSON object:
+Return a JSON object with this structure:
 {
+  "layout": "shelves" | "horizontal",
   "zones": [
-    { "zone": "Top Shelf", "items": [ { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0 } ] }
+    {
+      "zone": "Top Shelf",
+      "items": [
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0 },
+        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1 }
+      ]
+    }
   ]
 }
 
+Zone detection rules:
+- First, look for VERTICAL layers (shelves, racks, rows stacked top to bottom). If you detect 2+ distinct horizontal layers, use layout "shelves" with zones like: "Top Shelf", "Upper Shelf", "Middle Shelf", "Lower Shelf", "Bottom Shelf", "Drawer", "Door"
+- If the image is a single flat surface (countertop, single shelf, table), use layout "horizontal" with zones like: "Left Side", "Center", "Right Side"
+- Only include zones that actually contain items
+- Order zones top-to-bottom for shelves, left-to-right for horizontal
+
 Item rules:
-- "name" must be a GENERIC ingredient name. NEVER include a brand name in it — even if the brand is clearly visible, write only the generic product type (e.g. "Rice" not "Uncle Ben's Rice", "Cream of Mushroom Soup" not "Campbell's Cream of Mushroom Soup"). Brand-in-name creates duplicate entries.
-- CONSISTENT GRANULARITY: name each item at the generic product-type level. Do NOT invent finer sub-variants you're only guessing at (e.g. don't list both "Tomato Soup" and "Tomato Rice Soup" for one can, or "Cake Mix" and "Cake/Cookie Mix" for one box). When unsure of the exact variant, use the single broader generic name.
-- Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
+- "name" must be a GENERIC ingredient name. NEVER put a brand name in it — even if the brand is clearly visible, write only the generic product type ("Cream of Mushroom Soup" not "Campbell's Cream of Mushroom Soup", "Rice" not "Uncle Ben's Rice"). Brand-in-name creates duplicate entries. Use the brand/label only as CONTEXT to make the generic name more specific (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani", and not just "Yogurt").
+- "photo" — 0-based index of which photo this item came from. Required for downstream density analysis. If you genuinely can't tell, use 0.
+- Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
+  - Protein: meat, fish, eggs, beans, tofu
+  - Carbs: bread, pasta, rice, cereals, flour
+  - Produce: fruits, vegetables, herbs
+  - Condiments: sauces, oils, spices, dressings
+  - Dairy: milk, cheese, yogurt, butter
+  - Pantry Staples: canned goods, broth, baking items
+  - Other: anything else
 
 Return ONLY the raw JSON object, no markdown, no explanation.`
 }
