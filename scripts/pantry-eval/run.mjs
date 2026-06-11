@@ -115,7 +115,8 @@ Return a JSON object:
 }
 
 Item rules:
-- "name" must be a GENERIC ingredient name — no brand names. Use the most specific generic name you can determine.
+- "name" must be a GENERIC ingredient name. NEVER include a brand name in it — even if the brand is clearly visible, write only the generic product type (e.g. "Rice" not "Uncle Ben's Rice", "Cream of Mushroom Soup" not "Campbell's Cream of Mushroom Soup"). Brand-in-name creates duplicate entries.
+- CONSISTENT GRANULARITY: name each item at the generic product-type level. Do NOT invent finer sub-variants you're only guessing at (e.g. don't list both "Tomato Soup" and "Tomato Rice Soup" for one can, or "Cake Mix" and "Cake/Cookie Mix" for one box). When unsure of the exact variant, use the single broader generic name.
 - Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
 
 Return ONLY the raw JSON object, no markdown, no explanation.`
