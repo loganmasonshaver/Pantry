@@ -53,9 +53,13 @@ export default function SignInScreen() {
     // Exponential-ish cooldown for failed sign-ins: 3s default, 15s after 3 fails,
     // 60s after 5. Slows brute-force credential stuffing without locking real users
     // out for too long. failCount resets to 0 on successful sign-in.
+    // Client cooldown is UX-only (resets on relaunch, bypassable via the Auth REST API) —
+    // Supabase Auth's server-side rate limiting is the real backstop. Show the ACTUAL time
+    // remaining, not the full threshold, so the message isn't misleading.
     const cooldown = failCount >= 5 ? 60000 : failCount >= 3 ? 15000 : 3000
-    if (now - lastAttempt < cooldown) {
-      Alert.alert('Too many attempts', `Please wait ${Math.ceil(cooldown / 1000)} seconds.`)
+    const remainingMs = cooldown - (now - lastAttempt)
+    if (remainingMs > 0) {
+      Alert.alert('Too many attempts', `Please wait ${Math.ceil(remainingMs / 1000)} seconds.`)
       return
     }
     setLastAttempt(now)
@@ -141,7 +145,12 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <TurnstileWebView key={turnstileKey} onToken={setCaptchaToken} />
+      <TurnstileWebView
+        key={turnstileKey}
+        onToken={setCaptchaToken}
+        // On a failed challenge, remount to retry instead of leaving sign-in unable to verify.
+        onError={() => { setCaptchaToken(null); setTurnstileKey(k => k + 1) }}
+      />
       <View style={s.topBarRow}>
         <TouchableOpacity style={s.backArrowBtn} onPress={() => router.back()} activeOpacity={0.7}>
           <ArrowLeft size={18} stroke="#FFFFFF" strokeWidth={2.5} />

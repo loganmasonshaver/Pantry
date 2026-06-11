@@ -63,9 +63,10 @@ export default function CreateAccountScreen() {
     const now = Date.now()
     // Cooldown between sign-up attempts — prevents Supabase rate-limit hits and
     // spam abuse if someone holds the button. Turnstile (above) is the real
-    // bot defense; this is just a client-side guard.
-    if (now - lastAttempt < 30000) { // 30s cooldown between submit attempts
-      Alert.alert('Please wait', 'You can try again in a few seconds.')
+    // bot defense; this is just a client-side guard. Show the actual remaining time.
+    const remainingMs = 30000 - (now - lastAttempt)
+    if (remainingMs > 0) {
+      Alert.alert('Please wait', `You can try again in ${Math.ceil(remainingMs / 1000)} seconds.`)
       return
     }
     setLastAttempt(now)
@@ -187,7 +188,12 @@ export default function CreateAccountScreen() {
 
   return (
     <SafeAreaView style={s.safe}>
-      <TurnstileWebView ref={turnstileRef} onToken={setCaptchaToken} />
+      <TurnstileWebView
+        ref={turnstileRef}
+        onToken={setCaptchaToken}
+        // On a failed challenge, reset to fetch a fresh token instead of stalling sign-up.
+        onError={() => { setCaptchaToken(null); turnstileRef.current?.reset() }}
+      />
       <View style={s.topBarRow}>
         <TouchableOpacity style={s.backArrowBtn} onPress={() => router.back()} activeOpacity={0.7}>
           <ArrowLeft size={18} stroke="#FFFFFF" strokeWidth={2.5} />
