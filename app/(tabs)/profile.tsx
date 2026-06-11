@@ -29,6 +29,25 @@ import { trackWeightLogged } from '@/lib/analytics'
 
 const { width } = Dimensions.get('window')
 
+// Single source of truth for the local keys that must be wiped on account delete AND
+// onboarding reset. They previously drifted (reset omitted plan_ready, staples_prompted,
+// recent-meal/food caches, macros_expanded), leaving a "reset" user with stale state.
+const RESET_CACHE_KEYS = [
+  'onboarding_complete',
+  'onboarding_step',
+  'onboarding_data',
+  'otp_verified',
+  'onboarding_swiped_meals',
+  'pantry_onboarding_plan_ready',
+  'pantry_daily_meals_cookNow',
+  'pantry_daily_meals_mealPlan',
+  'pantry_image_urls_v1',
+  'pantry_staples_prompted',
+  'pantry_recent_meal_names',
+  'pantry_recent_foods',
+  'pantry_macros_expanded',
+]
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 type PeriodKey = '7D' | '1M' | '3M' | '6M' | 'All'
@@ -612,6 +631,10 @@ export default function ProfileScreen() {
 
   // Calculator modal
   const [animatingGoals, setAnimatingGoals] = useState(false)
+  // Holds the count-up interval so unmount can clear it (otherwise it keeps ticking and
+  // calls setState on a dead component if the user leaves Profile mid-animation).
+  const calcTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => () => { if (calcTimerRef.current) clearInterval(calcTimerRef.current) }, [])
   const [displayCalories, setDisplayCalories] = useState<number | null>(null)
   const [displayProtein, setDisplayProtein] = useState<number | null>(null)
   const [showCalcModal, setShowCalcModal] = useState(false)
@@ -634,14 +657,17 @@ export default function ProfileScreen() {
 
   const fetchWeightLogs = useCallback(async () => {
     if (!user) return
+    // Fetch the most-recent 365 (descending + limit) so the query stays bounded as
+    // tenure grows, then reverse to ascending for the chart. latest = data[0].
     const { data } = await supabase
       .from('weight_logs')
       .select('weight_kg, logged_at')
       .eq('user_id', user.id)
-      .order('logged_at', { ascending: true })
+      .order('logged_at', { ascending: false })
+      .limit(365)
     if (data?.length) {
-      setWeightLogs(data)
-      const latest = data[data.length - 1]
+      const latest = data[0]
+      setWeightLogs([...data].reverse())
       setProfile(p => p ? { ...p, weight_kg: latest.weight_kg } : p)
       setDisplayWeight(Math.round(latest.weight_kg * 2.20462))
     }
@@ -672,16 +698,22 @@ export default function ProfileScreen() {
       .eq('user_id', user.id)
       .then(({ count }) => setSavedCount(count ?? 0))
 
-    // Meal logs — streak + count
+    // Meal logs — streak uses a 180-day window (plenty for any streak), bounded so the
+    // query doesn't grow all-time. Total count comes from a separate head count.
+    const streakWindow = new Date(Date.now() - 180 * 86400000).toISOString().split('T')[0]
     supabase
       .from('meal_logs')
       .select('logged_at')
       .eq('user_id', user.id)
+      .gte('logged_at', streakWindow)
       .then(({ data }) => {
-        const dates = data?.map(r => r.logged_at) ?? []
-        setMealLogDates(dates)
-        setMealLogCount(dates.length)
+        setMealLogDates(data?.map(r => r.logged_at) ?? [])
       })
+    supabase
+      .from('meal_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .then(({ count }) => setMealLogCount(count ?? 0))
 
     // Weekly nutrition summary
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
@@ -807,7 +839,8 @@ export default function ProfileScreen() {
     const steps = 30
     const interval = duration / steps
     let step = 0
-    const timer = setInterval(() => {
+    if (calcTimerRef.current) clearInterval(calcTimerRef.current) // cancel any prior run
+    calcTimerRef.current = setInterval(() => {
       step++
       const t = step / steps
       // Ease out cubic
@@ -815,7 +848,7 @@ export default function ProfileScreen() {
       setDisplayCalories(Math.round(startCal + (endCal - startCal) * ease))
       setDisplayProtein(Math.round(startPro + (endPro - startPro) * ease))
       if (step >= steps) {
-        clearInterval(timer)
+        if (calcTimerRef.current) clearInterval(calcTimerRef.current)
         setProfile(p => p ? {
           ...p, age, gender: calcGender, height_cm: heightCm, weight_kg: weightKg,
           activity_level: calcActivity, fitness_goal: calcGoal,
@@ -900,17 +933,7 @@ export default function ProfileScreen() {
                       // Must clear the SAME keys as Reset Onboarding, otherwise onboarding
                       // resumes mid-flow (at the last persisted onboarding_step) after the
                       // user re-signs in, which is jarring.
-                      await AsyncStorage.multiRemove([
-                        'onboarding_complete',
-                        'onboarding_step',
-                        'onboarding_data',
-                        'otp_verified',
-                        'onboarding_swiped_meals',
-                        'pantry_onboarding_plan_ready',
-                        'pantry_daily_meals_cookNow',
-                        'pantry_daily_meals_mealPlan',
-                        'pantry_image_urls_v1',
-                      ])
+                      await AsyncStorage.multiRemove(RESET_CACHE_KEYS)
                       await authSignOut()
                     } catch (e: any) {
                       setDeletingAccount(false)
@@ -927,6 +950,7 @@ export default function ProfileScreen() {
   }
 
   const resetOnboarding = () => {
+    if (!__DEV__) return // dev-only test tool — never run its irreversible wipes in production
     Alert.alert(
       'Reset to New User?',
       'WIPES your profile, pantry, saved meals, meal logs, ratings, grocery list, and creator recipes from the database. Auth account stays (Supabase blocks client-side user deletion) but on next sign-in your account will look brand new. Use to test the full new-user flow.',
@@ -961,16 +985,7 @@ export default function ProfileScreen() {
               await supabase.from('profiles').delete().eq('id', user.id).then(() => {}, () => {})
             }
 
-            await AsyncStorage.multiRemove([
-              'onboarding_complete',
-              'onboarding_step',
-              'onboarding_data',
-              'otp_verified',
-              'onboarding_swiped_meals',
-              'pantry_daily_meals_cookNow',
-              'pantry_daily_meals_mealPlan',
-              'pantry_image_urls_v1',
-            ])
+            await AsyncStorage.multiRemove(RESET_CACHE_KEYS)
             await authSignOut()
           },
         },
