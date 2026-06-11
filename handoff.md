@@ -1,143 +1,105 @@
-# Handoff — Onboarding intro video polish (captions + ripples + logged pop) & session recap
+# Handoff — Security/quality review continuation (Mediums M4–M6 + Lows)
 
-**Branch:** `main`. Everything below is committed & pushed. Metro is running from
-`/Users/loganshaver/pantry` (localhost:8081); the dev build is installed on Logan's
-physical iPhone ("Logan's iphone", UDID `00008150-0001691A3688401C`). To see JS
-changes: open the app → shake → Reload (phone must be on the same network / Personal
-Hotspot per the iOS USB setup note).
-
----
-
-## 🚧 THE BIG REMAINING TASK — onboarding intro video overlays
-
-Logan delivered a **new** preview video (already in place at
-`assets/onboarding-preview.mov`, **24.97s**, ~9MB). The intro screen plays it inside a
-phone mockup with two Ken-Burns zooms. Logan wants to layer on, **synced to the video**:
-
-1. **Captions** — short benefit lines that fade/slide in at each key moment, building
-   toward the paywall. Approved copy (finalize/tweak voice as you build):
-   - **~1–2s** (dashboard / Scan Now): **"Scan your pantry in 30 seconds"** ← 30s claim is approved
-   - **~5–7s** (live count / detection): "AI finds everything you have" (the in-app live
-     counter is now captured in the footage — see below)
-   - **~13s** (3 meal cards): "Instant meals from what's already there"
-   - **~15s** (recipe / YOU HAVE ingredients): "Built around your macros"
-   - **~19s** (logging): "Logged in one tap"
-   - **~23s** (Discover): **add a Discover caption** — draft: "Plus a feed of trending recipes"
-2. **Tap-ripple beats** — a finger-pulse/ripple over the mockup at:
-   - **~1s** on the **"Scan Now"** button (bottom-center of the dashboard frame)
-   - **~13s** on a **meal card** (the "Cook tonight" list)
-   - Goal: signal "this is effortless" + subconsciously teach the gesture.
-3. **"✓ Logged" success pop** at **~19s** — clean checkmark pop for completion dopamine.
-
-**After building, Logan explicitly asked: re-watch the WHOLE video again and verify every
-overlay lands on the right frame.** Don't trust the timestamps blindly — extract fresh
-frames and confirm (see method below).
-
-### Video flow → timestamp map (from frame extraction; near-identical to prior cut)
-| Video time | Screen |
-|---|---|
-| ~1s | Dashboard — calorie ring, "Unlock recipes built around what you already have", **Scan Now** |
-| ~3s | Camera — "Now photograph your fridge" |
-| ~5s | **Live count** — "3 items spotted / Uploading photos…" (the new in-app counter, captured) |
-| ~7s | "First pass complete — Spotted N items" / View Results |
-| ~9–11s | Detected Items list (by shelf) |
-| ~13s | Pantry "Cook tonight" — 3 meal cards |
-| ~15s | Meal detail — parfait, macros, "YOU HAVE" ingredients |
-| ~17s | Recipe instructions |
-| ~19s | "Logging…" |
-| ~21s | Back to pantry |
-| ~23s | Discover (featured + trending) |
-
-⚠️ These are from the **previous** 24.57s cut + the new frames at 1/3/5s (which matched +
-showed the live counter). The new video is 24.97s. **Re-extract frames to confirm exact
-times before finalizing** — `ffmpeg`/`ffprobe` are installed:
-```bash
-ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 assets/onboarding-preview.mov
-for t in $(seq 1 2 24); do ffmpeg -loglevel error -ss $t -i assets/onboarding-preview.mov -frames:v 1 -vf scale=230:-1 /tmp/vf/f_${t}s.jpg; done
-```
-(`montage`/imagemagick is NOT installed — read frames individually.)
-
-### Where & how to implement (the animation system)
-All of this lives in the **W1 intro component** in `app/onboarding/index.tsx`:
-- Video player: `useVideoPlayer(require('../../assets/onboarding-preview.mov'))` at **line ~235**,
-  `playbackRate = 0.9` (so 24.97s footage = ~27.7s of wall-clock playback).
-- The phone mockup + video render starts at **line ~341** (`w1.phoneWrap` / `w1.phone` / `w1.video`).
-- The timing engine is the `runCycle()` effect (**lines ~244–330**):
-  - `phoneAnim` drives enter(1s)/hold/exit(1s). Video `play()` is scheduled at
-    `1000 + START_HOLD_DELAY` (=1250ms) after cycle start.
-  - **Zooms** fire via `setTimeout(triggerZoom, 1000 + START_HOLD_DELAY + t)` where `t` is in
-    `ZOOM_AT` (currently `[15000, 18400]`). **triggerZoom PAUSES the video** for one
-    `ZOOM_CYCLE` (~1160ms) — so wall-clock ≠ video time. Conversion: `t = videoMs / 0.9`
-    (+ `ZOOM_CYCLE` for any beat after the first zoom, to compensate for the pause).
-  - `BASE_HOLD = 27800` controls when the loop exits; must cover the full video
-    (24.97s / 0.9 ≈ 27.7s + zoom pauses). **Bump if the loop still cuts off early on the new cut.**
-- **Captions/ripples/pop should be new `Animated.Value`s scheduled the SAME way** as the zooms
-  (setTimeout off cycle start, cleared in `runCycle`'s `pending` array and the cleanup), so they
-  reset cleanly every loop. Use the `t = videoMs / 0.9 (+ pauses)` conversion to align to video time.
-- The two zooms have **fixed focal points**: zoom1 pans up to bottom meal cards (deep 1.30×) →
-  3 meal cards ~13s; zoom2 centered 1.15× → recipe ~15s. Verify these still frame correctly on
-  the new cut; the timing was set for the prior 24.57s video and may need a small nudge.
-
-### Already done (do NOT re-do)
-- The **live item count-up is a real feature in the app** now (`components/PantryScanModal.tsx`),
-  NOT a video overlay — it ramps 0→N live during the scan and settles to the true total. It's
-  captured in the new recording, which is why the 5s frame shows "3 items spotted / Uploading photos".
-- The two **zooms** already exist and are roughly timed (just re-verify on the new cut).
+**For the next chat.** This session ran a full multi-agent code review (87 findings) and shipped
+**all Critical + all High + the first 3 Medium batches**. What's left: Medium batches **M4
+(scaling/cost), M5 (security), M6 (nits)** and the 27 Lows. Everything below is committed +
+pushed to `main`. Read `CODE_REVIEW.md` (repo root, committed) for the full finding list.
 
 ---
 
-## 📦 Everything else shipped this session (context for continuity)
+## ✅ What's already shipped this session (do NOT redo)
 
-**Scan pipeline**
-- Daily **scan cap 5/day** per user, server-side, both `scan-pantry` + `parse-receipt`
-  (`_shared/scan-cap.ts`, migration `20260530000000_scan_daily_cap.sql`, atomic RPC, refund on fail).
-- **Photo downscale to 2048px / q0.95** before upload (pantry + receipt) — fixed multi-minute
-  `req.json()` stalls (was uploading full-res multi-MB base64).
-- **Recall fixes**: scoped the pet-food exclusion (was over-skipping real food), lowered second-pass
-  gate 20→12 per photo, added systematic SCAN METHOD + egg-tray/back-row prompt guidance.
-- Pet-food / non-edible exclusion added to both pantry and receipt prompts.
+**Critical (3) — DB migrations + edge deploys, live & verified:**
+- `promo_active` made server-only (trigger `enforce_server_managed_premium` + `redeem_referral_code` RPC). Onboarding calls the RPC instead of writing the flag.
+- `generate-ingredient-images` gated behind `ADMIN_SECRET` (was open; anyone could wipe the shared image table).
+- `trending_meals` open UPDATE policy dropped → scoped to creator ownership (was IDOR).
 
-**Meals / cost control**
-- **Meal-gen daily cap 3/day** server-side (`generate-meals`, scan_type `meal_gen`, refund on fail) —
-  closes the regen cost leak (cache-invalidation + retries previously dodged the client `MAX_DAILY_REGENS=1`).
-- Food-dislike changes no longer wipe the meal cache (diet/allergen changes still do).
-- LLM made a **generous extractor** (15-20 candidates, no self-skip) — fixed thin trending counts.
+**High Group 1 — Server-side premium enforcement (THE big one), live & verified:**
+- New `superwall-webhook` edge function (Svix-signature verified) writes `profiles.is_premium`.
+  Events: initial_purchase/renewal/uncancellation/**non_renewing_purchase (lifetime)**/subscription_extended → true; expiration/subscription_paused/refund → false; cancellation/billing_issue/product_change → no change.
+- `is_premium` column (server-only, same trigger), backfilled for existing subscribers/trialers.
+- `_shared/premium.ts` `requirePremium()` wired into the 6 paid edge fns (generate-meals, scan-pantry, parse-receipt, estimate-meal-macros, generate-recipe, extract-recipe-from-url). Fails OPEN on read error.
+- **`PREMIUM_ENFORCEMENT=on`** (kill switch — set to anything else to disable instantly, no redeploy). Verified: non-premium → 403, premium → passes.
+- `_layout.tsx` sets `supabaseUserId` Superwall attribute for webhook mapping (identify already uses the Supabase id).
 
-**Trending / Discover (diet decouple)**
-- Fixed trending cron auth via a **`CRON_SECRET`** shared secret (value:
-  `4745ed4c77f8af82bd04058dfd2cbed0bed3861a150fc063`, set as function secret + must match vault
-  `cron_service_role_key`). The old service-role-key match kept 401'ing.
-- Trending now stores a **full ~18-meal tagged pool** (`compatible_diets[]`, `is_dairy_free/gluten_free/nut_free`),
-  generated by `generate-trending-meals` (eager image gen in **waves of 5** to avoid FAL rate-limit).
-- **Discover builds a per-user feed** by `diet_type` + allergen tags with variety + backfill
-  (`app/(tabs)/discover.tsx`). New `profiles.diet_type` column + editable **Diet** row in Settings.
-- Memory written: `project_trending_diet_pool.md`, `project_v2_meal_rotation.md`, `project_scan_cap.md`.
+**High Group 2 — abusable APIs, live & verified:**
+- `generate-meal-image`: cache-FIRST (free, no auth) → generation requires login + per-user daily cap (`image_gen`, 20/day, refunds on fail).
+- `seed-recipe-template` gated behind `ADMIN_SECRET`.
+- `loops-sync` delete now uses caller's verified email only (was deletable-any-contact).
+- `_shared/rate-limit.ts`: added `clientIp()` (prefers cf-connecting-ip, only first XFF hop) + eviction; 4 authed fns now key the limiter on `user.id` not the spoofable IP.
 
-**Auth / onboarding**
-- **`profiles.onboarding_completed`** flag (migrations `20260606000000` + `..0001`) — routing no longer
-  infers completion from `calorie_goal` (which is skippable). `finish()` sets the flag AND defaults goals
-  (2000 kcal / 150g) so the dashboard never breaks. signin.tsx + `_layout.tsx` route on the flag, with a
-  server-profile fallback when the local AsyncStorage flag is missing (reinstall-proof). Hardened the
-  profile check (`.maybeSingle()` + retry) so a transient query failure can't dump a real user into onboarding.
-- Sign-in shows a friendlier error for bad creds (Supabase returns generic "Invalid login credentials" for
-  both no-account and wrong-password — can't distinguish, so we nudge to "Create account").
+**High Group 3 — data-loss bugs (client):** wrong-day log delete, Saved-undo column drop, portion-edit carbs/fat drop, profile goal-save error swallowing.
 
-**UI**
-- Meal screen: removed strikethrough on HAVE ingredients (opacity 0.9), **tap an ingredient to move it to
-  YOU HAVE**, full-bleed hero image (height 500), hero pulled to top.
-- Home: hero card 360→300 (was cut off), carousel only cycles **image-ready** meals, **shimmer** skeleton
-  while images load, prefetch hero images, pantry refresh after scan (carousel replaces "unlock" card).
-- Discover rail cards 200→175 wide (2.5 peek) + tighter inset so pills don't wrap.
-- Scan modal: removed pre-scan tips screen (tips now rotate inline by the shutter), close collapses cleanly.
+**High Group 4 — scaling (client) + cost tuning:**
+- Saved-tab image backfill now persists to `saved_meals.image_url` (runs once, not every focus), batched ×3, ref-guarded.
+- FoodSearch: dropped per-result `getFoodById` N+1 → parses macros from description via local `quickMacros`; added search-sequence guard for stale results.
+- **Pantry scan cap: 5/day → 7 per rolling 7 days** (new `check_and_increment_scan_window` RPC + `checkScanCapWindow`), **max 8 photos/scan** (client + server). One scan = one whole-kitchen session = 1 cap unit.
+- `PaywallBrowser.tsx` **deleted** — it was dead code (never rendered). The live paywall is **Superwall-hosted** (dashboard), which is correct for fast iteration.
 
-**Spawned task chip (pending, may be unstarted):** "Downscale receipt photo before upload" — already done
-inline, the chip is redundant; dismiss it.
+**Medium M1 (silent error-swallowing):** food-preferences load-fail guard (prevents wiping dislikes), AIConsentContext.revokeConsent error check, FoodSearchModal recent-foods JSON.parse guard, CreatorRecipeModal AI-estimation try/catch (was freezing Save), PantryScanModal add-ingredients insert-error surfaced. (pantry.tsx loader already safe.)
+
+**Medium M2 (data integrity):** removeFromPantry LIKE-metachar escape, generate-meals empty-result refund, profile goal-change → meal-cache invalidation (saveGoal + recalc modal), grocery exact-dedup (was fuzzy substring hiding distinct items).
+
+**Medium M3 (auth/routing consistency):** verify-email + reset-password + createaccount(isReturningUser) all now use authoritative `onboarding_completed || calorie_goal` (maybeSingle) like signin's `routeByProfile`; `_layout` routing effect got a cancellation guard against the token-refresh race.
 
 ---
 
-## Current state / test checklist
-- Metro running; app on device. **Reload** to pull all the above JS.
-- Test: pantry scan → live count ramps then settles; meal screen tap-to-HAVE; Discover diet filtering
-  (flip the Settings → Diet between Classic/Vegetarian); sign-in with a completed vs incomplete account.
-- Trending: if Discover is empty, re-trigger generation (needs the vault `cron_service_role_key` = the
-  CRON_SECRET above); see `project_trending_diet_pool.md`.
+## ⚠️ State / environment notes (IMPORTANT for the next chat)
+
+- **Trial length is 7 days** (confirmed by Logan). PaywallBrowser copy was fixed to 7 before deletion; the live Superwall paywall must also say 7 days + **$7.99/mo, $30/yr** — **Logan to verify in the Superwall dashboard** (can't be done from code).
+- `DEV_FORCE_PAYWALL = false` in `context/SuperwallContext.tsx` — KEEP false for real builds (was flipped true to test, flipped back).
+- Secrets set: `PREMIUM_ENFORCEMENT=on`, `SUPERWALL_WEBHOOK_SECRET`, `ADMIN_SECRET`. Kill switch: `supabase secrets set PREMIUM_ENFORCEMENT=off` if real subscribers report being blocked.
+- **Migrations applied through `20260606040000_scan_window_cap.sql`.** All on remote.
+- **Metro is NOT running** (was killed). Restart from project root for device testing: `cd /Users/loganshaver/pantry && npx expo start`. Client changes this session need a **reload or rebuild** to reach the device.
+- **Deploy commands:** `supabase db push --yes` (migrations), `supabase functions deploy <name>`.
+- **Service-role key** (for DB verification curls): `supabase projects api-keys --project-ref fdafjnkqqtpsjtddbfdz`.
+- **Network quirk:** the project domain `fdafjnkqqtpsjtddbfdz.supabase.co` is intermittently unreachable from the sandbox shell (returns HTTP 000). The Supabase **CLI** works (different host). Retry curls with `dangerouslyDisableSandbox: true`, or test on device.
+- **Auth has CAPTCHA (Turnstile)** → password sign-in can't be scripted. To mint a test user session, use the admin **generate_link → /auth/v1/verify (magiclink, token_hash)** flow (this is how premium enforcement + the weekly cap were verified). Clean up test users after (delete profile row first — no FK cascade — then `auth/v1/admin/users/{id}`).
+- Per CLAUDE.md: inline `//` WHY-comments on non-obvious lines; commit+push to `main` after each meaningful change; end commits with the Co-Authored-By Claude trailer.
+
+---
+
+## 📋 REMAINING WORK
+
+### Medium M4 — Scaling / cost (HIGH value; mostly edge functions → need `supabase functions deploy`)
+1. **`parse-receipt` invalid Gemini model name → silently falls back to GPT-4o every scan.** `supabase/functions/parse-receipt/index.ts:44` (`parseWithGemini`). Verify the model string (cross-check the working one in generate-meals: `gemini-3.1-flash-lite` via the OpenAI-compat endpoint `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`). Receipt should use Gemini primary (cheap); right now it's paying GPT-4o on every receipt. **Real $ impact.**
+2. **`estimate-meal-macros` has no per-user daily cap + no timeout** on a GPT-4o (vision) call. `supabase/functions/estimate-meal-macros/index.ts:88-90,167-241`. Add `checkScanCap(req,'macro_est',N)` (reuse `_shared/scan-cap.ts`) + an AbortController timeout like scan-pantry has.
+3. **FatSecret N+1 in meal generation** — concurrent per-ingredient macro lookups. `generate-meals/index.ts:80,376-380` (also generate-trending-meals:73,632; estimate-meal-macros:195-206). Batch/limit concurrency (p-limit style) or cache.
+4. **Discover trending query: no row limit + stale diet filter, and triple/duplicate fetch.** `app/(tabs)/discover.tsx:192-217` (add `.limit()`), `250-264` (dedupe the effect triggers — performance finding too).
+5. **`extract-recipe-from-url` (YouTube HTML scrape): no timeout, no daily cap.** `extract-recipe-from-url/index.ts:29-58,160-226`. Add timeout + per-user cap; it's also ToS-fragile.
+6. **`generate-trending-meals` cron:** sequential YouTube calls, no timeout, no quota handling (`:285-322`); image fan-out (~54 FAL calls) in the cron critical path (`:757-787`). Add timeouts; move/queue image gen out of the critical path or wave-limit (it already waves by 5 — verify).
+7. **`loops-import-waitlist` loads the whole table + serial processing** → times out for large waitlists. `loops-import-waitlist/index.ts:31-34,76,79`. Paginate/batch.
+8. **Onboarding plan-reveal parallel image fetches unbounded.** `app/onboarding/index.tsx:2871-2885, 3677`. Batch like the Saved-tab fix (×3).
+
+### Medium M5 — Security hardening (mix of edge + DB migration)
+1. **`fatsecret-proxy` passes caller-supplied `method` + `params` unsanitized** into the signed request. `fatsecret-proxy/index.ts:84-93`. Add an allowlist of permitted methods (foods.search, food.get, foods.autocomplete) + strip unexpected params.
+2. **`trending_meals` INSERT policy lacks promo_active/creator enforcement + unvalidated social URLs.** (RLS migration + `discover.tsx:398-406,472-483`). Scope INSERT to real creators; validate/sanitize creator social URLs before render (Linking.openURL on attacker URLs).
+3. **CreatorRecipeModal photo → public bucket with guessable timestamp filename.** `CreatorRecipeModal.tsx:181`. Use a random UUID filename.
+4. **AILogModal sends raw base64 photo, no size validation.** `AILogModal.tsx:55-61`. Add a size cap before invoke (mirror the pantry downscale).
+5. **Creator profile INSERT has no server-side uniqueness on `user_id`.** `CreatorRecipeModal.tsx:205-221`. Add a UNIQUE constraint/index on `creators.user_id` (migration) so a user can't create duplicate creator rows.
+6. **(deferred from M2) `loops-sync` drops lifecycle events when the contact upsert fails** — `loops-sync/index.ts:186-216`. Retry/queue or at least surface so the Loops sequence isn't silently skipped.
+
+### Medium M6 — Correctness nits (LOWEST value — cherry-pick; skip pure cosmetics)
+Worth doing:
+- **Birthday age gate doesn't block continuation when birthday empty.** `app/(tabs)/index.tsx:1505-1516` (note: the review may have meant onboarding age step — verify location). Block Continue when no birthday.
+- **delivery-webview: no error handler (perpetual spinner) + no `originWhitelist`.** `app/delivery-webview.tsx:46-52`. Add onError + originWhitelist.
+- **Open Food Facts barcode fetch: no timeout.** `lib/fatsecret.ts:139-151`. AbortController.
+- **AILogModal setState-in-render via setTimeout(0) → possible render loop.** `AILogModal.tsx:457-471`. Move to a guarded useEffect.
+- **AIConsentContext concurrent requestConsent overwrites pendingResolve** (leaks promises). `AIConsentContext.tsx:84-91`.
+Likely skip (cosmetic): array-index React keys (RecipeFormModal/CreatorRecipeModal), staples prompt reappearing on swipe-dismiss.
+
+### Deferred earlier (decide whether to do):
+- **Blanket optimistic-update rollback** across grocery/pantry/meal/home — failures self-correct on refresh; high churn, low ROI. Left intentionally.
+- **G4 Saved-tab backfill captured-index** (`saved.tsx`) — the G4 rewrite still uses the positional index; it's correct because order matches fetch order, but worth a quick re-verify.
+
+### Lows (27) — all in `CODE_REVIEW.md`. Polish only; tackle after M4/M5 if desired.
+
+---
+
+## Suggested order for next chat
+1. **M4 #1 (parse-receipt model)** — quick, real $ savings. Then the rest of M4.
+2. **M5** — security hardening (one small migration for creators uniqueness).
+3. Cherry-pick **M6** (age gate, webview, OFF timeout). Skip cosmetics.
+4. Lows only if time.
+
+After each batch: typecheck (`npx tsc --noEmit` — note the codebase has many PRE-EXISTING tsc errors: VideoView props, profile setState, ref-callback returns, DetectedItem `zone` mock, `startsWith` on `never`, JSX namespace — filter those out), commit, push, and `supabase functions deploy` any changed edge fns.
