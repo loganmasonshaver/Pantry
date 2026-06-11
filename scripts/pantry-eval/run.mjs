@@ -125,6 +125,53 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
 // Normalize an item name for cross-model matching in the recall matrix.
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
 
+// ── Ground truth: hand-verified list of the REAL distinct items in a photo, so we can
+// score actual RECALL (% of true items caught) instead of eyeballing raw counts. Only for
+// photos whose contents are clearly enumerable (clear labeled goods). Each entry has match
+// keywords — a model "caught" the item if any of its names contains a keyword. Approximate
+// by nature (keyword overlap), but far more objective than counting.
+const GROUNDTRUTH = {
+  '18A13327-8F43-44F3-98A3-49E2B97B7B51.jpeg': [
+    { name: 'Baked Beans', keys: ['baked bean'] },
+    { name: 'Canned Chili', keys: ['chili'] },
+    { name: 'Tomato Sauce', keys: ['tomato sauce'] },
+    { name: 'Tomato Soup', keys: ['tomato soup'] },
+    { name: 'Tomato Rice Soup', keys: ['tomato rice', 'rice soup'] },
+    { name: 'Cream of Mushroom Soup', keys: ['mushroom soup', 'cream of mushroom'] },
+    { name: 'French Onion Soup', keys: ['french onion'] },
+    { name: 'Chicken Soup', keys: ['chicken soup', 'chicken noodle'] },
+    { name: 'Chicken Broth', keys: ['chicken broth'] },
+    { name: 'Beef Broth', keys: ['beef broth'] },
+    { name: 'Cashews', keys: ['cashew'] },
+    { name: 'Ketchup', keys: ['ketchup'] },
+    { name: 'Onion Soup Mix', keys: ['onion soup'] },
+    { name: 'Spiced Cider Mix', keys: ['cider'] },
+    { name: 'Crackers', keys: ['cracker'] },
+    { name: 'Stuffing', keys: ['stuffing'] },
+    { name: 'Pecans', keys: ['pecan'] },
+    { name: 'Rice', keys: ['rice'] },
+    { name: 'Pasta Sauce', keys: ['pasta sauce', 'spaghetti sauce'] },
+    { name: 'Olive/Cooking Oil', keys: ['oil'] },
+    { name: 'Potato Chips', keys: ['chip'] },
+  ],
+}
+
+// Score one model's items against a photo's ground truth → caught / missed / extra.
+function scoreAgainstTruth(truth, modelNames) {
+  const normed = modelNames.map(norm)
+  const caught = [], missed = []
+  const matchedKeys = new Set()
+  for (const t of truth) {
+    const hitName = normed.find((n) => t.keys.some((k) => n.includes(k)))
+    if (hitName) { caught.push(t.name); t.keys.forEach((k) => matchedKeys.add(k)) }
+    else missed.push(t.name)
+  }
+  // "extra" = model items that matched NO ground-truth keyword (candidate junk OR a real
+  // item not in our list — interpret with care, our truth isn't guaranteed exhaustive).
+  const extra = modelNames.filter((orig) => !truth.some((t) => t.keys.some((k) => norm(orig).includes(k))))
+  return { caught, missed, extra }
+}
+
 // ── Post-answer non-food filter ───────────────────────────────────────────
 // Deterministic safety net: strip obvious non-food the model hallucinated (nail polish,
 // dishes, cookware, pet food). Two matchers, both portable to production scan-pantry:
@@ -367,6 +414,19 @@ for (const file of files) {
     for (const [key, original] of [...display].sort((a, b) => a[1].localeCompare(b[1]))) {
       const marks = active.map((m) => (byModel[m.label]?.has(key) ? '   ✓  ' : '   ·  ').padStart(7)).join('')
       console.log(`  ${original.slice(0, 34).padEnd(34)}${marks}`)
+    }
+  }
+
+  // ── Ground-truth recall scoring (only for photos with a hand-verified list) ──
+  const truth = GROUNDTRUTH[file]
+  if (truth) {
+    console.log(`\n  📋 RECALL vs ground truth (${truth.length} known real items):`)
+    for (const { m, r } of results) {
+      if (r.error) continue
+      const { caught, missed, extra } = scoreAgainstTruth(truth, r.names)
+      const pct = Math.round((caught.length / truth.length) * 100)
+      console.log(`  ${m.label.padEnd(26)} recall ${caught.length}/${truth.length} (${pct}%)   missed: ${missed.join(', ') || 'none'}`)
+      console.log(`  ${' '.repeat(26)} extra/unverified (${extra.length}): ${extra.slice(0, 12).join(', ')}${extra.length > 12 ? ' …' : ''}`)
     }
   }
 }
