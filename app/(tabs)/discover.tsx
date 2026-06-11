@@ -214,6 +214,8 @@ export default function DiscoverScreen() {
       .gte('generated_at', thirtyDaysAgo)
       .order('generated_at', { ascending: false })
       .order('id')
+      .limit(300) // newest 300 within the 30d window — lifecycle filter + variety-fill trim
+                  // to a rail of ~6 anyway, so an unbounded fetch only wastes payload
 
     if (!data) { setLoading(false); return }
 
@@ -247,9 +249,10 @@ export default function DiscoverScreen() {
     setLoading(false)
   }, [])
 
-  useEffect(() => { fetchTrending() }, [fetchTrending])
-  // Re-sync when returning to the tab so creator-recipe edits and overnight cron runs
-  // are reflected without a manual reload.
+  // Initial mount + every tab return: useFocusEffect already fires on first focus
+  // (which for a tab screen IS mount), so a separate mount useEffect would just
+  // double-fetch on cold load. This single hook covers both — plus it re-syncs
+  // creator-recipe edits and overnight cron runs without a manual reload.
   useFocusEffect(useCallback(() => { fetchTrending() }, [fetchTrending]))
 
   // Foreground refetch: useFocusEffect doesn't re-fire when the app is backgrounded
