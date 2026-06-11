@@ -87,15 +87,24 @@ Read `CODE_REVIEW.md` (repo root, committed) for the full finding list.
 
 ---
 
-## 📋 REMAINING WORK — only Lows left
+## 📋 REMAINING WORK — NONE (review 100% complete)
 
-All Critical + High + Mediums (M1–M6) are shipped. The **27 Lows** in `CODE_REVIEW.md`
-are the only remaining items — polish/cosmetic, no security or cost impact. Tackle if
-desired; none are launch blockers.
+The full multi-agent code review is **done**: all Critical + High + Mediums (M1–M6)
++ **all 27 Lows (L1–L27)** are shipped, committed, and pushed. Edge-function changes
+are deployed; the two new migrations (`20260610000000`, `20260610010000`) are on remote.
 
-Intentionally left (decided, not forgotten):
+**Lows shipped this session (L1–L27), grouped:**
+- Correctness: L1 (promo premium flash), L3 (barcode name-overlap check), L4 (Turnstile onError + wired into signin/createaccount), L5 (Math.round macros), L8 (midnight isToday), L9 (SplashOverlay reduce-motion gate), L17 (MacroEditModal validation).
+- Data integrity: L11 (delete-account error surfacing + scan_usage), L12 (double-submit guards: grocery/pantry/meal-log/creator), L13 (real staple categories), L14 (cache user-scoping on sign-out + image-cache cap), L15 (unified RESET_CACHE_KEYS + __DEV__ guard on resetOnboarding), L16 (atomic trending swap), L18 (scan-insert savingRef guards), L19 (pantry drag order persisted), L23 (scan-cap fail-open backstop).
+- Performance/scaling: L2 (calc-timer cleanup), L20 (gauge/MacroBar/saved-undo animation cleanups), L21 (row limits on profile/home/grocery/meal-suggestion queries), L22 (in-process JWKS JWT verify + getUser fallback).
+- Security: L7 (fatsecret-proxy error-code mapping), L24 (admin-creator constant-time secret), L25 (delete-account CORS restricted), L26 (accurate cooldown messages), L27 (`_shared/sanitize.ts` prompt sanitization).
+- Discover: L6 (per-rail variety-fill), L10 (raised trending macro reject ceiling).
+
+Intentionally left (decided, NOT a Low):
 - **Blanket optimistic-update rollback** across grocery/pantry/meal/home — failures self-correct on refresh; high churn, low ROI.
 - **Cosmetic M6 items:** array-index React keys (RecipeFormModal/CreatorRecipeModal), staples prompt reappearing on swipe-dismiss.
+
+There is no outstanding review work. Next session can move to features/launch.
 
 ## Workflow reminders
 After each change: typecheck (`npx tsc --noEmit` — the codebase has many PRE-EXISTING tsc errors:
