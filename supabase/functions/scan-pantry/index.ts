@@ -216,7 +216,7 @@ Zone detection rules:
 - Order zones top-to-bottom for shelves, left-to-right for horizontal
 
 Item rules:
-- "name" must be a GENERIC ingredient name. NEVER put a brand name in it — even if the brand is clearly visible, write only the generic product type ("Cream of Mushroom Soup" not "Campbell's Cream of Mushroom Soup", "Rice" not "Uncle Ben's Rice"). Brand-in-name creates duplicate entries. Use the brand/label only as CONTEXT to make the generic name more specific (e.g. "Non-Fat Plain Greek Yogurt" not "Chobani", and not just "Yogurt").
+- "name" must be a GENERIC ingredient name — NEVER a brand or product name. Before writing each name, STRIP the brand to its generic type: "A1" → "Steak Sauce", "Quest Bars" → "Protein Bars", "Babybel" → "Cheese", "Hamburger Helper" → "Pasta Dinner Kit", "Campbell's Cream of Mushroom Soup" → "Cream of Mushroom Soup", "Uncle Ben's Rice" → "Rice", "Chobani" → "Greek Yogurt". A brand in the name creates duplicate entries. Use the brand/label only as CONTEXT to make the GENERIC name more specific (e.g. "Non-Fat Plain Greek Yogurt", not just "Yogurt").
 - "photo" — 0-based index of which photo this item came from. Required for downstream density analysis. If you genuinely can't tell, use 0.
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
