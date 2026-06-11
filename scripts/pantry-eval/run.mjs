@@ -39,6 +39,9 @@ const MODELS = [
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     model: 'gemini-3.1-pro',
     apiKey: process.env.GOOGLE_AI_KEY,
+    // Pro is a "thinking" model — on the first run its reasoning tokens consumed the whole
+    // output budget and content came back empty. Cap the thinking so it actually answers.
+    extra: { reasoning_effort: 'low' },
   },
   {
     label: 'Gemini 3.1 Flash-Lite',
@@ -121,7 +124,8 @@ async function callModel(m, base64, mime) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${m.apiKey}` },
     body: JSON.stringify({
       model: m.model,
-      max_tokens: 6000, // match production cap so dense scenes don't truncate
+      max_tokens: 12000, // headroom so a thinking model's reasoning doesn't starve the answer
+      ...(m.extra ?? {}), // per-model knobs (e.g. Pro's reasoning_effort)
       messages: [{
         role: 'user',
         content: [
