@@ -1,4 +1,21 @@
-# Handoff — Security/quality review continuation (Lows only remain)
+# Handoff — Pantry
+
+## ✅ Latest (2026-06-11) — Pantry-scan model upgrade + hardening
+**`scan-pantry` swapped off the 2024-era gpt-4o.** After a long head-to-head eval (GPT-4o vs
+Gemini Flash-Lite/3.5-Flash/Pro vs Qwen3-VL 235B/30B/8B via OpenRouter), with ground-truth
+recall scoring on a hand-verified photo:
+- **Primary = `gpt-4.1`** — best recall (76% vs gpt-4o's noisy 38–57%), first-party, ~same/lower cost. Both passes (first + catch-misses second) use it.
+- **Fallback = Gemini 3.1 Flash-Lite** (`scanVision` helper: try gpt-4.1, on failure fall back). Keeps the paid scan alive during an OpenAI outage/rate-spike; only fires on failure. Needs `GOOGLE_AI_KEY` secret (set).
+- **Hardened prompt**: shelf-by-shelf SCAN METHOD, ONE-ITEM-ONE-ENTRY (anti over-split), forceful no-brand (strip-the-brand with A1/Quest/Babybel examples), expanded non-food EXCLUDE (dishware/cookware/appliances/cookbooks/empty containers).
+- **Two post-gen filters** (`cleanupResult`): drop hallucinated non-food + strip parenthetical qualifiers + collapse dupes across the whole result before returning.
+- **Conclusions that shaped this:** thinking models (Gemini Pro, 3.5-Flash) too slow (10–30s) for a scan; Qwen-via-OpenRouter not scale-safe (malformed JSON, hallucinations, gateway routing); Flash-Lite fast+cheap but over-splits/misses produce (fine as fallback only).
+- **Eval harness** lives at `scripts/pantry-eval/` (zero-dep, gitignored photos). Its prompt is kept in sync with production; has ground-truth recall scoring, non-food + de-over-split filters, LIST/LISTOR modes, per-request timeout, live streaming output.
+- **STILL TODO:** Logan to **test the new scanner on-device** (scan a real fridge, eyeball the review screen + latency). If good, scanner work is done. Other AI features still on gpt-4o/Gemini as before — only `scan-pantry` changed.
+- ⚠️ During testing Logan pasted live API keys into chat once — keys were rotated. Reminder: keys go in the terminal, never pasted back.
+
+---
+
+# Handoff — Security/quality review (Lows only remain)
 
 **For the next chat.** The code review (87 findings) is now **done through all Mediums**:
 **all Critical + all High + M1–M3 (prior session)** and **M4 (scaling/cost), M5 (security),
