@@ -191,22 +191,36 @@ function sniffMime(buf) {
 
 async function callModel(m, base64, mime) {
   const t0 = Date.now()
-  const res = await fetch(m.endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${m.apiKey}` },
-    body: JSON.stringify({
-      model: m.model,
-      max_tokens: m.maxTokens ?? 12000, // headroom so a thinking model's reasoning doesn't starve the answer
-      ...(m.extra ?? {}), // per-model knobs (e.g. Pro's reasoning_effort)
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: 'high' } },
-          { type: 'text', text: buildPrompt(1) },
-        ],
-      }],
-    }),
-  })
+  // Per-request timeout — without it, one hung/queued model (e.g. a big model cold-starting
+  // on OpenRouter) blocks the whole run forever, since each photo awaits ALL models. 90s is
+  // generous; anything slower is disqualified for a scan anyway.
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 90000)
+  let res
+  try {
+    res = await fetch(m.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${m.apiKey}` },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model: m.model,
+        max_tokens: m.maxTokens ?? 12000, // headroom so a thinking model's reasoning doesn't starve the answer
+        ...(m.extra ?? {}), // per-model knobs (e.g. Pro's reasoning_effort)
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: 'high' } },
+            { type: 'text', text: buildPrompt(1) },
+          ],
+        }],
+      }),
+    })
+  } catch (e) {
+    return { names: [], removed: [], collapsed: 0, ms: Date.now() - t0,
+      error: e.name === 'AbortError' ? 'TIMED OUT (>90s) — too slow for a scan' : `request failed: ${e.message}` }
+  } finally {
+    clearTimeout(timer)
+  }
   const ms = Date.now() - t0
   const data = await res.json()
   // Google sometimes returns errors as an ARRAY ([{error:...}]) — check both shapes.
