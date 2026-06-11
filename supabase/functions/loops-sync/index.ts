@@ -183,12 +183,21 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: false, skipped: "no email" }), { headers: jsonCors })
     }
 
-    // Always upsert the contact first so event triggers find an existing record
+    // Upsert the contact first so event triggers see fresh properties. But DON'T let an
+    // upsert failure abort the request: the lifecycle event below (trial_started,
+    // subscribed, churned, …) is the part that actually drives Loops sequences, and
+    // events/send auto-creates/updates the contact anyway. Losing a property refresh is
+    // recoverable on the next sync; silently dropping a lifecycle event is not.
     const props = profileToLoopsProps({ ...profile, email })
-    await loopsUpsertContact(email, body.userId, props)
-
-    // Mark the contact as synced (for diagnostic / debugging)
-    await db.from("profiles").update({ loops_contact_synced_at: new Date().toISOString() }).eq("id", body.userId)
+    let upsertFailed: string | null = null
+    try {
+      await loopsUpsertContact(email, body.userId, props)
+      // Only stamp the sync marker on a real success.
+      await db.from("profiles").update({ loops_contact_synced_at: new Date().toISOString() }).eq("id", body.userId)
+    } catch (e) {
+      upsertFailed = (e as Error).message
+      console.log(`[loops-sync] contact upsert failed (continuing to event): ${upsertFailed}`)
+    }
 
     if (action === "event") {
       const eventName = body.eventName
@@ -218,7 +227,8 @@ Deno.serve(async (req: Request) => {
       await loopsFireEvent(email, body.userId, eventName, eventProperties)
     }
 
-    return new Response(JSON.stringify({ ok: true }), { headers: jsonCors })
+    // Surface a degraded upsert (event still fired) so it's visible rather than silent.
+    return new Response(JSON.stringify({ ok: true, ...(upsertFailed ? { upsertFailed } : {}) }), { headers: jsonCors })
   } catch (err) {
     console.log("[loops-sync] error:", err)
     return new Response(JSON.stringify({ error: (err as Error).message }), {
