@@ -14,6 +14,7 @@ const DELIVERY_URL = 'https://www.instacart.com'
 export default function DeliveryWebViewScreen() {
   const webViewRef = useRef(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -47,12 +48,23 @@ export default function DeliveryWebViewScreen() {
           ref={webViewRef}
           source={{ uri: DELIVERY_URL }}
           style={styles.webView}
+          // Restrict navigation to https — don't let the page redirect into custom schemes.
+          originWhitelist={['https://*']}
           onLoadStart={() => setLoading(true)}
           onLoadEnd={() => setLoading(false)}
+          // Without these the spinner spins forever on a failed/offline load. Clear it
+          // and surface the failure instead of leaving the user on a blank overlay.
+          onError={() => { setLoading(false); setLoadError(true) }}
+          onHttpError={() => setLoading(false)}
         />
-        {loading && (
+        {loading && !loadError && (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color="#00C9A7" />
+          </View>
+        )}
+        {loadError && (
+          <View style={styles.loadingOverlay}>
+            <Text style={styles.errorText}>Couldn't load delivery. Check your connection and try again.</Text>
           </View>
         )}
       </View>
@@ -115,5 +127,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  errorText: {
+    color: '#888888',
+    fontSize: 15,
+    textAlign: 'center',
+    paddingHorizontal: 40,
+    lineHeight: 22,
   },
 })

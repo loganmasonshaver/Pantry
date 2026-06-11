@@ -137,7 +137,12 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
 
 async function productNameFromBarcode(barcode: string): Promise<string | null> {
   try {
-    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`)
+    // Open Food Facts can be slow/unresponsive — without a ceiling a scan would hang
+    // the lookup indefinitely. 8s then bail to the normal "not found" path.
+    const ctrl = new AbortController()
+    const timeout = setTimeout(() => ctrl.abort(), 8000)
+    const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`, { signal: ctrl.signal })
+      .finally(() => clearTimeout(timeout))
     if (!res.ok) return null
     const json = await res.json()
     if (json.status !== 1) return null // OpenFoodFacts returns status:0 for unknown barcodes (not a 404)
