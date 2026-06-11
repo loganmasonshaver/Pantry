@@ -4,6 +4,7 @@ import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { sanitizeStr } from '../_shared/sanitize.ts'
+import { rejectOversizeImage } from '../_shared/image.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 
@@ -111,6 +112,9 @@ Deno.serve(async (req: Request) => {
     // Daily cap gate on the costly vision path — atomic check+increment before any AI call.
     // Outer catch refunds the slot on transient failure (mirrors scan-pantry / parse-receipt).
     if (photoMode) {
+      // Size backstop before the paid vision call — client downscales, a forged client can't.
+      const tooBig = rejectOversizeImage(base64, 'estimate-meal-macros')
+      if (tooBig) return tooBig
       const { allowed, used } = await checkScanCap(req, 'macro_est', MACRO_PHOTO_CAP_PER_DAY)
       if (!allowed) {
         console.log(`[estimate-meal-macros] daily photo cap hit: ${used}/${MACRO_PHOTO_CAP_PER_DAY}`)

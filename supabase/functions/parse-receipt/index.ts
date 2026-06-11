@@ -3,6 +3,7 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
+import { rejectOversizeImage } from '../_shared/image.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey  = Deno.env.get("GOOGLE_AI_KEY")
@@ -116,6 +117,9 @@ Deno.serve(async (req: Request) => {
     if (!base64) {
       return new Response(JSON.stringify({ error: "No image provided" }), { status: 400 })
     }
+    // Size backstop before the paid OCR call — client downscales, a forged client can't.
+    const tooBig = rejectOversizeImage(base64, 'parse-receipt')
+    if (tooBig) return tooBig
 
     // Daily cap gate — atomic check+increment before any AI call; outer catch refunds on fail.
     const { allowed, used } = await checkScanCap(req, 'receipt', RECEIPT_CAP_PER_DAY)

@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
+import { sanitizeStr, sanitizeList } from '../_shared/sanitize.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 
@@ -27,23 +28,29 @@ Deno.serve(async (req: Request) => {
   if (!allowed) return rateLimitResponse()
 
   try {
-    const { description, existingSteps } = await req.json()
-    if (!description?.trim()) {
+    const { description: rawDescription, existingSteps: rawSteps } = await req.json()
+    if (!rawDescription?.trim()) {
       return new Response(JSON.stringify({ error: 'Description is required' }), {
         status: 400, headers: { "Content-Type": "application/json" },
       })
     }
+    // Strip quotes/newlines + cap length before either field hits the prompt. This is the
+    // creator-import path — submitted text can be shown to other users — so unsanitized
+    // input here is a prompt-injection surface, not just a formatting nuisance. Generous
+    // caps: a recipe name/blurb fits in 1000 chars, an instruction step in 500.
+    const description = sanitizeStr(rawDescription, 1000)
+    const existingSteps = sanitizeList(rawSteps, 40, 500)
 
     // Two modes — full recipe gen vs annotate-existing.
     // Annotate mode handles the creator-import path: a creator submits a recipe with their
     // own instructions; we only need to add step titles + estimate prepTime, not rewrite the
     // recipe. Skipping full gen here preserves the creator's voice and avoids macro drift.
-    const annotateMode = Array.isArray(existingSteps) && existingSteps.length > 0
+    const annotateMode = existingSteps.length > 0
 
     const prompt = annotateMode ? `Recipe: "${description}"
 
 The recipe has these existing instruction steps written by the author:
-${existingSteps.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}
+${existingSteps.map((s, i) => `${i + 1}. ${s}`).join("\n")}
 
 Generate (a) a short 2-4 word title for each step that captures what the step does, and
 (b) an estimated total prep + cook time in minutes for the whole recipe.

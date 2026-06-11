@@ -3,6 +3,7 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCapWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
+import { rejectOversizeImage } from '../_shared/image.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
@@ -139,6 +140,12 @@ Deno.serve(async (req: Request) => {
     const images = rawImages.slice(0, MAX_PHOTOS_PER_SCAN)
     if (rawImages.length > MAX_PHOTOS_PER_SCAN) {
       console.log(`[scan-pantry] truncated ${rawImages.length} -> ${MAX_PHOTOS_PER_SCAN} photos`)
+    }
+    // Reject if any single image blew past the size backstop (client downscales; a forged
+    // client can't). One oversize photo fails the whole batch before the paid vision call.
+    for (const img of images) {
+      const tooBig = rejectOversizeImage(img, 'scan-pantry')
+      if (tooBig) return tooBig
     }
     // Log payload size — a multi-MB body means the client isn't downscaling and
     // req.json() above will have stalled for tens of seconds before this line.
