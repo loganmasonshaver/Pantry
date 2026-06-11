@@ -35,32 +35,13 @@ const MODELS = [
     apiKey: process.env.OPENAI_API_KEY,
   },
   {
-    label: 'Gemini 3.1 Pro (low think)',
+    // DEBUG: single Pro variant while we figure out the empty-output. Big budget, no thinking
+    // knob (it wasn't taking) — the diagnostic below dumps finish_reason + response shape so we
+    // can see WHY content is empty. Re-expand to the low/med/max curve once Pro returns items.
+    label: 'Gemini 3.1 Pro',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     model: 'gemini-3.1-pro',
     apiKey: process.env.GOOGLE_AI_KEY,
-    // Realistic production config — minimal thinking keeps cost/latency sane. Also fixes the
-    // empty-output we saw when reasoning ate the whole token budget.
-    extra: { reasoning_effort: 'low' },
-  },
-  {
-    label: 'Gemini 3.1 Pro (med think)',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-3.1-pro',
-    apiKey: process.env.GOOGLE_AI_KEY,
-    // Middle of the curve — shows whether recall plateaus before max thinking.
-    extra: { reasoning_effort: 'medium' },
-    maxTokens: 20000,
-  },
-  {
-    label: 'Gemini 3.1 Pro (max think)',
-    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    model: 'gemini-3.1-pro',
-    apiKey: process.env.GOOGLE_AI_KEY,
-    // The fairness control: full reasoning so we can SEE whether thinking actually buys more
-    // item recall on a perception task. Needs a big token budget so thinking doesn't starve
-    // the answer. (Costly + slow — this is a test config, not something you'd ship.)
-    extra: { reasoning_effort: 'high' },
     maxTokens: 32000,
   },
   {
@@ -158,7 +139,16 @@ async function callModel(m, base64, mime) {
   const ms = Date.now() - t0
   const data = await res.json()
   if (data.error) return { names: [], ms, error: data.error.message ?? JSON.stringify(data.error) }
-  const content = data.choices?.[0]?.message?.content ?? ''
+  const choice = data.choices?.[0]
+  const content = choice?.message?.content ?? ''
+  // Diagnose empty output (the Pro problem): dump finish_reason, which fields the message
+  // actually carries (output might be in a 'reasoning'/'reasoning_content' field), and a raw peek.
+  if (!content || !String(content).trim()) {
+    const fr = choice?.finish_reason ?? '(no choice)'
+    const mkeys = choice?.message ? Object.keys(choice.message).join(',') : '(no message)'
+    const rawPeek = JSON.stringify(data).slice(0, 240)
+    return { names: [], ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
+  }
   const { names, error } = flattenItems(content)
   return { names, ms, error }
 }
@@ -170,9 +160,10 @@ const active = MODELS.filter((m) => {
 })
 if (active.length === 0) { console.error('No API keys set. Provide OPENAI_API_KEY and/or GOOGLE_AI_KEY.'); process.exit(1) }
 
-const files = fs.existsSync(IMAGES_DIR)
+const files = (fs.existsSync(IMAGES_DIR)
   ? fs.readdirSync(IMAGES_DIR).filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
   : []
+).slice(0, Number(process.env.LIMIT) || Infinity) // LIMIT=1 → just the first photo, for fast debug runs
 if (files.length === 0) { console.error(`No images in ${IMAGES_DIR}. Drop some pantry photos there first.`); process.exit(1) }
 
 console.log(`\nTesting ${files.length} photo(s) across ${active.length} model(s): ${active.map((m) => m.label).join(', ')}\n`)
