@@ -44,6 +44,15 @@ const MODELS = [
     extra: { reasoning_effort: 'low' },
   },
   {
+    label: 'Gemini 3.1 Pro (med think)',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    model: 'gemini-3.1-pro',
+    apiKey: process.env.GOOGLE_AI_KEY,
+    // Middle of the curve — shows whether recall plateaus before max thinking.
+    extra: { reasoning_effort: 'medium' },
+    maxTokens: 20000,
+  },
+  {
     label: 'Gemini 3.1 Pro (max think)',
     endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     model: 'gemini-3.1-pro',
