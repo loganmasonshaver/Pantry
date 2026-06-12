@@ -119,7 +119,10 @@ Respond ONLY with valid JSON, no markdown, no explanation:
 
     const data = await response.json()
     if (data.error) {
-      return new Response(JSON.stringify({ error: data.error.message }), {
+      // Log the upstream detail server-side, return a generic message — OpenAI error bodies
+      // can leak model names, quota/billing text, and prompt-structure hints to the client.
+      console.error("[generate-recipe] OpenAI error:", data.error.message)
+      return new Response(JSON.stringify({ error: "Recipe generation failed" }), {
         status: 500, headers: { "Content-Type": "application/json" },
       })
     }
@@ -132,8 +135,9 @@ Respond ONLY with valid JSON, no markdown, no explanation:
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    console.error("[generate-recipe] error:", (error as Error).message) // detail stays server-side
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Recipe generation failed" }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

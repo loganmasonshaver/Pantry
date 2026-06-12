@@ -13,8 +13,10 @@ const ENFORCE = (Deno.env.get("PREMIUM_ENFORCEMENT") ?? "off").toLowerCase() ===
 
 /**
  * True if the user has an active subscription or promo grant.
- * FAILS OPEN on any read error / missing row — we never block a possible paying
- * customer over a transient DB issue; the per-user daily caps still bound abuse.
+ * Fails OPEN on genuine infra errors (transient DB hiccup) so we never block a paying
+ * customer — but a "no row found" result is treated as NOT premium, not a free pass.
+ * Otherwise any token whose id has no profile row (or a deleted profile) would be granted
+ * access; the per-user daily caps remain the backstop on the fail-open path.
  */
 export async function hasActiveSubscription(userId: string): Promise<boolean> {
   try {
@@ -22,11 +24,12 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
       .from("profiles")
       .select("is_premium, promo_active")
       .eq("id", userId)
-      .single()
-    if (error || !data) return true
+      .maybeSingle() // returns data=null (no error) when the row is absent → not premium
+    if (error) return true        // real read error → fail open
+    if (!data) return false       // no profile row → NOT premium (don't grant on a miss)
     return !!(data.is_premium || data.promo_active)
   } catch {
-    return true
+    return true                   // transient/network exception → fail open
   }
 }
 

@@ -14,12 +14,27 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const db = createClient(supabaseUrl, supabaseServiceKey)
 
+// Constant-time secret compare (same pattern as admin-creator). A plain !== leaks how many
+// leading chars matched via timing — on an endpoint that can export the whole waitlist table,
+// that's worth closing. Hashing to fixed-length digests makes the XOR loop length-independent.
+async function tokenMatches(provided: string | null): Promise<boolean> {
+  if (!adminToken || typeof provided !== "string") return false
+  const enc = new TextEncoder()
+  const [a, b] = await Promise.all([
+    crypto.subtle.digest("SHA-256", enc.encode(provided)),
+    crypto.subtle.digest("SHA-256", enc.encode(adminToken)),
+  ])
+  const x = new Uint8Array(a), y = new Uint8Array(b)
+  let diff = 0
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i]
+  return diff === 0
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: { "Access-Control-Allow-Origin": "*" } })
 
-  // Admin gate — header must match the secret
-  const providedToken = req.headers.get("x-admin-token")
-  if (!adminToken || providedToken !== adminToken) {
+  // Admin gate — header must match the secret (constant-time)
+  if (!(await tokenMatches(req.headers.get("x-admin-token")))) {
     return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 })
   }
 

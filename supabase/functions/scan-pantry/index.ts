@@ -124,8 +124,10 @@ Deno.serve(async (req: Request) => {
   if (denied) return denied
   console.log(`[scan-pantry] auth ok: ${Date.now() - tAuth}ms`)
 
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 10, 60000)
+  // Key on the verified user id, not x-forwarded-for — XFF is fully client-controlled,
+  // so an attacker could send a unique value per request and land each in a fresh bucket,
+  // defeating the limiter on this (GPT-4o vision, costliest) endpoint entirely.
+  const { allowed } = rateLimit(`u:${user.id}`, 10, 60000)
   if (!allowed) return rateLimitResponse()
 
   try {
