@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
+import { useSuperwallEvents } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackMealLogged } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
@@ -85,6 +86,12 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
   const { isPremium, registerPlacement } = usePremium()
+  // Tracks a subscription made DURING the in-flow paywall so a user who pays at the gate
+  // continues into the AI estimate they just unlocked instead of being dropped out.
+  const purchasedRef = useRef(false)
+  useSuperwallEvents({
+    onSubscriptionStatusChange: (status) => { if (status?.status === 'ACTIVE') purchasedRef.current = true },
+  })
   const [step, setStep] = useState<Step>('input')
   const [scanMode, setScanMode] = useState<ScanMode>('food')
   const [description, setDescription] = useState('')
@@ -224,8 +231,10 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
     if (!isPremium) {
       trackUpgradePromptShown('ai_log_limit')
       await registerPlacement('ai_log_limit') // Superwall placement — opens trial paywall, blocks until dismissed
-      onClose()
-      return
+      // If they subscribed at the gate, continue into the estimate they just paid for.
+      await new Promise(r => setTimeout(r, 400)) // let subscription-status event settle
+      if (!purchasedRef.current) { onClose(); return } // dismissed without subscribing → close
+      // subscribed → fall through to consent + analyze below
     }
 
     // Show first-run AI consent gate (legally required disclosure that photos/descriptions

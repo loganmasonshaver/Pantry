@@ -23,7 +23,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
-import { useSuperwall } from 'expo-superwall'
+import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
@@ -166,6 +166,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
   const insets = useSafeAreaInsets()
+  // Tracks a subscription that happens DURING the in-scan paywall, so a user who pays at the
+  // gate continues into the scan they just unlocked instead of being dropped back to pantry.
+  // isPremium in the scan closure is stale (captured false), so we read this ref instead.
+  const purchasedRef = useRef(false)
+  useSuperwallEvents({
+    onSubscriptionStatusChange: (status) => { if (status?.status === 'ACTIVE') purchasedRef.current = true },
+  })
   // Flow starts on the camera (step 1) — tips now live inline near the shutter
   // instead of a separate pre-scan screen.
   const [step, setStep] = useState(1)
@@ -231,8 +238,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       if (!isPremium) {
         trackUpgradePromptShown('scan_limit')
         await triggerUpgrade('pantry_scan_limit') // Superwall placement — blocks until paywall dismissed
-        handleClose()
-        return
+        // If they subscribed at the gate, fall through and run the scan they just paid for —
+        // don't dump them back to the pantry screen. Short settle delay lets the subscription-
+        // status event land so purchasedRef is accurate (mirrors the onboarding paywall pattern).
+        await new Promise(r => setTimeout(r, 400))
+        if (!purchasedRef.current) { handleClose(); return } // dismissed without subscribing → close
+        // subscribed → continue into the consent + scan + review flow below
       }
       // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
       const ok = await requestConsent()

@@ -26,7 +26,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackAIError } from '@/lib/analytics'
-import { useSuperwall } from 'expo-superwall'
+import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -142,6 +142,12 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
   const { requestConsent } = useAIConsent()
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
+  // Tracks a subscription made DURING the in-flow paywall so a user who pays at the gate
+  // continues into the receipt scan they just unlocked instead of being dropped out.
+  const purchasedRef = useRef(false)
+  useSuperwallEvents({
+    onSubscriptionStatusChange: (status) => { if (status?.status === 'ACTIVE') purchasedRef.current = true },
+  })
   const [step, setStep] = useState<'pick' | 'scanning' | 'visualReview' | 'saving'>('pick')
   const [imageUri, setImageUri] = useState<string | null>(null)
   const [items, setItems] = useState<ParsedItem[]>([])
@@ -229,8 +235,10 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     if (!isPremium) {
       trackUpgradePromptShown('scan_limit')
       await triggerUpgrade('receipt_scan_limit') // Superwall placement — opens paywall
-      onClose()
-      return
+      // If they subscribed at the gate, continue into the scan they just paid for.
+      await new Promise(r => setTimeout(r, 400)) // let subscription-status event settle
+      if (!purchasedRef.current) { onClose(); return } // dismissed without subscribing → close
+      // subscribed → fall through to consent + scan below
     }
     const ok = await requestConsent()
     if (!ok) return
