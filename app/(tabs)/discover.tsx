@@ -213,7 +213,7 @@ export default function DiscoverScreen() {
     // Lifecycle filtering below further trims YouTube to 7d and creators by engagement.
     // The !creator_id syntax is PostgREST's foreign-key embed — joins one creator per meal.
     const { data } = await supabase.from('trending_meals')
-      .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url, user_id)')
+      .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url)')
       .gte('generated_at', thirtyDaysAgo)
       .order('generated_at', { ascending: false })
       .order('id')
