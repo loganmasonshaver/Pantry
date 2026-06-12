@@ -720,7 +720,9 @@ export default function PantryScreen() {
       <PantryScanModal
         visible={showScanModal}
         onClose={() => setShowScanModal(false)}
-        onItemsAdded={fetchItems}
+        // After a pantry scan, refresh the item list AND launch the cook-reveal payoff screen
+        // (fresh meals from the just-scanned pantry). Receipt scans below intentionally don't.
+        onItemsAdded={() => { fetchItems(); router.push('/cook-reveal' as any) }}
       />
 
       {/* ── Receipt Scan Modal ── */}
