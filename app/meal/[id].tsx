@@ -31,7 +31,7 @@ import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
-import { useSuperwall } from 'expo-superwall'
+import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged, trackUpgradePromptShown } from '../../lib/analytics'
 
 const screenWidth = Dimensions.get('window').width
@@ -386,6 +386,12 @@ export default function MealDetailScreen() {
   const { user } = useAuth()
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
+  // Tracks a subscription made DURING a gate paywall so a user who pays continues the action
+  // (save / log) they just unlocked instead of having to tap again.
+  const purchasedRef = useRef(false)
+  useSuperwallEvents({
+    onSubscriptionStatusChange: (status) => { if (status?.status === 'ACTIVE') purchasedRef.current = true },
+  })
   const SLOT_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
   const ITEM_HEIGHT = 50
   // Time-of-day default for the meal slot picker so users tapping "Log Meal"
@@ -725,7 +731,9 @@ export default function MealDetailScreen() {
       trackUpgradePromptShown('meal_save_limit')
       trackMealSaveBlocked()
       await triggerUpgrade('meal_save_limit')
-      return
+      // If they subscribed at the gate, continue the save they just unlocked.
+      await new Promise(r => setTimeout(r, 400)) // let subscription-status event settle
+      if (!purchasedRef.current) return // dismissed without subscribing
     }
 
     setSaving(true)
@@ -803,15 +811,17 @@ export default function MealDetailScreen() {
     }
   }
 
-  const handleLog = () => {
+  const handleLog = async () => {
     if (!meal || logged) return
     // Premium-only model: non-subscribers can't log meals. Logging is a direct DB insert
     // (not an edge function), so this client gate is the only gate — open the paywall instead
     // of the slot picker. logToSlot is only reachable through this picker, so gating here covers it.
     if (!isPremium) {
       trackUpgradePromptShown('meal_log_limit')
-      triggerUpgrade('meal_log_limit')
-      return
+      await triggerUpgrade('meal_log_limit')
+      // If they subscribed at the gate, continue into the slot picker they just unlocked.
+      await new Promise(r => setTimeout(r, 400)) // let subscription-status event settle
+      if (!purchasedRef.current) return // dismissed without subscribing
     }
     const defaultIdx = getDefaultSlotIndex()
     setSelectedSlotIndex(defaultIdx)
