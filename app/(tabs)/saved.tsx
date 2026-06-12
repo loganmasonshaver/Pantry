@@ -16,6 +16,8 @@ import {
   Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router'
 import { Bookmark, Search, X, Utensils, Clock, Plus, Link } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
@@ -56,6 +58,24 @@ const FILTERS = ['All', 'High Protein', 'Quick', 'My Recipes']
 
 // ── Meal card ──────────────────────────────────────────────────────────
 
+// Per-user cache key so the Saved list paints instantly on tab focus (stale-while-revalidate)
+// and never shows one account's meals to another.
+const savedCacheKey = (uid: string) => `pantry_saved_meals_${uid}`
+
+// Tinted macro pill — matches the Discover rail cards so Saved visually rhymes with them.
+function Pill({ label, tint }: { label: string; tint: 'amber' | 'green' | 'white' }) {
+  const t = {
+    amber: { bg: 'rgba(245,158,11,0.18)', border: 'rgba(245,158,11,0.3)', color: '#F59E0B' },
+    green: { bg: 'rgba(74,222,128,0.18)', border: 'rgba(74,222,128,0.3)', color: '#4ADE80' },
+    white: { bg: 'rgba(255,255,255,0.12)', border: 'rgba(255,255,255,0.2)', color: COLORS.textWhite },
+  }[tint]
+  return (
+    <View style={[styles.pill, { backgroundColor: t.bg, borderColor: t.border }]}>
+      <Text style={[styles.pillText, { color: t.color }]}>{label}</Text>
+    </View>
+  )
+}
+
 function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () => void; onEdit?: () => void }) {
   const router = useRouter()
   const handlePress = () => {
@@ -78,36 +98,35 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData } })
   }
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.75} onPress={handlePress}>
+    <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={handlePress}>
+      {meal.image ? (
+        <Image source={{ uri: meal.image }} style={styles.cardImageReal} resizeMode="cover" />
+      ) : (
+        <View style={[styles.cardImageReal, styles.cardImagePlaceholder]}>
+          <Utensils size={28} stroke="#555555" strokeWidth={1.5} />
+        </View>
+      )}
+      {/* Gradient so the overlaid name + pills stay legible over any photo */}
+      <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} locations={[0.35, 1]} style={styles.cardGradient} />
       {meal.is_user_created && (
         <View style={styles.myRecipeBadge}>
           <Text style={styles.myRecipeBadgeText}>My Recipe</Text>
         </View>
       )}
-      {meal.image ? (
-        <Image source={{ uri: meal.image }} style={styles.cardImageReal} resizeMode="cover" />
-      ) : (
-        <View style={styles.cardImage}>
-          <Utensils size={24} stroke="#555555" strokeWidth={1.5} />
-        </View>
-      )}
-      <View style={styles.cardBody}>
+      <TouchableOpacity
+        style={styles.cardBookmark}
+        onPress={onUnsave}
+        activeOpacity={0.7}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Bookmark size={18} stroke="#4ADE80" fill="#4ADE80" strokeWidth={1.5} />
+      </TouchableOpacity>
+      <View style={styles.cardContent}>
         <Text style={styles.cardName} numberOfLines={2}>{meal.name}</Text>
-        {meal.prep_time != null && (
-          <View style={styles.cardMeta}>
-            <Clock size={11} stroke={COLORS.textMuted} strokeWidth={1.8} />
-            <Text style={styles.cardMetaText}>{meal.prep_time} min</Text>
-          </View>
-        )}
-        <View style={styles.cardFooter}>
-          <View style={styles.cardMacros}>
-            {meal.calories != null && <Text style={styles.cardMacroText}>{meal.calories} kcal</Text>}
-            {meal.calories != null && meal.protein != null && <Text style={styles.cardMacroDot}>·</Text>}
-            {meal.protein != null && <Text style={styles.cardMacroText}>{meal.protein}g pro</Text>}
-          </View>
-          <TouchableOpacity onPress={onUnsave} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Bookmark size={16} stroke="#4ADE80" fill="#4ADE80" strokeWidth={1.5} />
-          </TouchableOpacity>
+        <View style={styles.cardPillRow}>
+          {meal.prep_time != null && meal.prep_time > 0 && <Pill label={`${meal.prep_time}m`} tint="amber" />}
+          {meal.calories != null && <Pill label={`${meal.calories} CAL`} tint="white" />}
+          {meal.protein != null && meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" />}
         </View>
       </View>
     </TouchableOpacity>
@@ -193,10 +212,24 @@ export default function SavedScreen() {
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
   // Guards against overlapping image backfills when the tab is refocused rapidly.
   const backfillRef = useRef(false)
+  const hasContentRef = useRef(false) // once we've shown meals (from cache or a fetch), refocus refetches silently
+
+  // Instant paint: load the last-cached saved meals on mount so the tab never flashes a
+  // spinner; the fetch below then revalidates in the background and re-caches.
+  useEffect(() => {
+    if (!user) return
+    AsyncStorage.getItem(savedCacheKey(user.id)).then(raw => {
+      if (!raw) return
+      try {
+        const cached = JSON.parse(raw)
+        if (Array.isArray(cached) && cached.length) { setMeals(cached); hasContentRef.current = true; setLoading(false) }
+      } catch {}
+    })
+  }, [user])
 
   const fetchMeals = useCallback(async () => {
     if (!user) { setLoading(false); return }
-    setLoading(true)
+    if (!hasContentRef.current) setLoading(true) // spinner only when there's nothing to show yet
     const { data, error } = await supabase
       .from('saved_meals')
       .select('id, name, prep_time, calories, protein, carbs, fat, ingredients, steps, is_user_created, image_url')
@@ -212,6 +245,9 @@ export default function SavedScreen() {
         is_user_created: row.is_user_created ?? false,
       }))
       setMeals(mealsWithTags)
+      hasContentRef.current = true
+      // Cache for instant paint on the next focus / app launch (stale-while-revalidate).
+      AsyncStorage.setItem(savedCacheKey(user.id), JSON.stringify(mealsWithTags)).catch(() => {})
       // Lazy backfill for legacy saves with no stored image. Two key guards vs the old
       // version: (1) we PERSIST the generated image back to saved_meals.image_url, so it's
       // generated once ever — not re-fetched on every tab focus; (2) we process in small
@@ -543,9 +579,11 @@ const styles = StyleSheet.create({
 
   card: {
     width: CARD_WIDTH,
+    height: 210,
     backgroundColor: '#1A1A1A',
     borderRadius: 16,
     overflow: 'hidden',
+    position: 'relative',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -553,34 +591,66 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   cardImageReal: {
-    height: 110,
+    ...StyleSheet.absoluteFillObject,
     width: '100%',
+    height: '100%',
   },
-  cardImage: {
-    height: 110,
+  cardImagePlaceholder: {
     backgroundColor: '#2C2C2C',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cardBody: { padding: 12, gap: 5 },
+  cardGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: '70%',
+  },
+  cardBookmark: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+  },
   cardName: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.textWhite,
     letterSpacing: -0.2,
-    lineHeight: 19,
+    lineHeight: 18,
   },
-  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cardMetaText: { fontSize: 11, color: COLORS.textMuted },
-  cardFooter: {
+  cardPillRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 2,
+    gap: 4,
+    marginTop: 8,
+    flexWrap: 'wrap',
   },
-  cardMacros: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cardMacroText: { fontSize: 11, color: COLORS.textMuted, fontWeight: '500' },
-  cardMacroDot: { fontSize: 11, color: COLORS.textMuted },
+  pill: {
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  pillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
 
   emptyState: {
     flex: 1,
