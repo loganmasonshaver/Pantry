@@ -48,6 +48,31 @@ export function setupCrashReporting() {
   }
 }
 
+// ── AI / edge-function failures ───────────────────────────────────────────────
+// Server-side AI calls fail silently from our perspective — the user sees a generic
+// alert and we never learn it happened. This pipes every AI invoke failure to PostHog
+// so we can watch error rate per function and catch regressions/outages without a user
+// reporting them. Call from the catch/error branch of each functions.invoke('<ai-fn>').
+export function trackAIError(
+  fn: string,                       // edge function name, e.g. 'generate-meals'
+  error: unknown,                   // the invoke error or thrown exception
+  context?: Record<string, unknown> // optional extra fields (e.g. mode, status)
+) {
+  try {
+    const message =
+      (error as any)?.message ??     // Error / Supabase FunctionsError
+      (typeof error === 'string' ? error : 'Unknown error')
+    // status is exposed on Supabase's FunctionsHttpError; lets us split 429-cap from real 5xx.
+    const status = (error as any)?.context?.status ?? (error as any)?.status
+    posthog.capture('ai_error', {
+      fn,
+      message: String(message).slice(0, 300), // cap — some AI errors echo the whole prompt back
+      ...(status != null ? { status } : {}),
+      ...context,
+    })
+  } catch { /* telemetry must never break the calling flow */ }
+}
+
 // ── Identity ──────────────────────────────────────────────────────────────────
 
 export function identifyUser(userId: string, traits?: { email?: string }) {

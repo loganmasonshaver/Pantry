@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { trackAIError } from './analytics'
 
 export type GeneratedMeal = {
   id: string
@@ -94,6 +95,9 @@ export async function generateMeals({
     console.log('[generateMeals] retry result →', { hasData: !!data, retryError: (error as any)?.message, status: (error as any)?.context?.status })
   }
 
-  if (error) throw error
+  if (error) {
+    trackAIError('generate-meals', error, { mode })
+    throw error
+  }
   return data as GeneratedMeal[]
 }

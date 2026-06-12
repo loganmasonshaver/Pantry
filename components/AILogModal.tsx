@@ -27,6 +27,7 @@ import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackMealLogged } from '@/lib/analytics'
+import { trackAIError } from '@/lib/analytics'
 
 const { width: SCREEN_W } = Dimensions.get('window')
 // ── Types ────────────────────────────────────────────────────────────────
@@ -258,7 +259,8 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
         fat: estimate.fat,
       }
       setStep('review')
-    } catch {
+    } catch (e) {
+      trackAIError('estimate-meal-macros', e)
       Alert.alert('Analysis failed', 'Could not estimate macros. Try again with a clearer description.')
       setStep('input')
     }

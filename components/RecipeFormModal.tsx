@@ -19,6 +19,7 @@ import { X, Plus, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
+import { trackAIError } from '@/lib/analytics'
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -134,6 +135,7 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
         if (data.steps?.length) setSteps(data.steps)
       }
     } catch (e: any) {
+      trackAIError('generate-recipe', e)
       Alert.alert('Error', e.message ?? 'Failed to generate recipe')
     } finally {
       setAiLoading(false)

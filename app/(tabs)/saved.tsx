@@ -22,6 +22,7 @@ import { COLORS } from '@/constants/colors'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { useAIConsent } from '../../context/AIConsentContext'
+import { trackAIError } from '../../lib/analytics'
 import RecipeFormModal from '@/components/RecipeFormModal'
 
 const { width } = Dimensions.get('window')
@@ -178,6 +179,7 @@ export default function SavedScreen() {
       } as any)
       setShowRecipeForm(true)
     } catch (e: any) {
+      trackAIError('extract-recipe-from-url', e)
       Alert.alert('Import failed', e.message || 'Could not extract recipe from this link.')
     } finally {
       setImporting(false)

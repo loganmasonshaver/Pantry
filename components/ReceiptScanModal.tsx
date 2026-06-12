@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
+import { trackAIError } from '@/lib/analytics'
 import { useSuperwall } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 // ── Types ────────────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ async function parseReceiptImage(base64: string): Promise<ParsedItem[]> {
     if (ctx && typeof ctx.json === 'function') { try { body = await ctx.json() } catch { /* ignore */ } }
     const err = new Error(body.error || error.message) as Error & { code?: string }
     err.code = body.code
+    trackAIError('parse-receipt', err, { code: body.code }) // code distinguishes daily-cap gate from real OCR failure
     throw err
   }
   const parsed = data as { name: string; category: string }[]

@@ -3,8 +3,16 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { sanitizeStr, sanitizeList } from '../_shared/sanitize.ts'
+import { checkScanCap, scanCapResponse } from '../_shared/scan-cap.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
+
+// Durable per-user daily ceiling. The in-memory rate-limit below is only per-isolate burst
+// protection (resets on cold start), so on its own it's not a real abuse cap. Recipe gen is
+// a deliberate action (creating/importing a recipe) — 30/day never bothers a real user but
+// blocks someone scripting the cheap gpt-4o-mini call all day. Backed by the same DB RPC as
+// the vision scan caps; fails open on infra error.
+const RECIPE_GEN_CAP_PER_DAY = 30
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -26,6 +34,13 @@ Deno.serve(async (req: Request) => {
   // Rate-limit by the authenticated user id (un-spoofable) instead of a client-padded IP.
   const { allowed } = rateLimit(`u:${user.id}`, 10, 60000)
   if (!allowed) return rateLimitResponse()
+
+  // Durable daily cap (DB-backed) — the real abuse ceiling, atomic check+increment.
+  const { allowed: underCap, used } = await checkScanCap(req, 'recipe_gen', RECIPE_GEN_CAP_PER_DAY)
+  if (!underCap) {
+    console.log(`[generate-recipe] daily cap hit: ${used}/${RECIPE_GEN_CAP_PER_DAY}`)
+    return scanCapResponse(RECIPE_GEN_CAP_PER_DAY)
+  }
 
   try {
     const { description: rawDescription, existingSteps: rawSteps } = await req.json()

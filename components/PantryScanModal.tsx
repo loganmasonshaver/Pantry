@@ -25,6 +25,7 @@ import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
+import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 
 const { width: SCREEN_W } = Dimensions.get('window')
@@ -282,6 +283,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         if (e?.context && typeof e.context.json === 'function') {
           try { const body = await e.context.json(); if (body?.error) msg = body.error } catch { /* keep generic */ }
         }
+        trackAIError('scan-pantry', e, { shown: msg })
         setScanError(msg)
       }
     }
