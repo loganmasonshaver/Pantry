@@ -197,7 +197,7 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
       const filename = `creator-recipes/${Crypto.randomUUID()}.jpg`
       const { error } = await supabase.storage
         .from('meal-images')
-        .upload(filename, arrayBuffer, { contentType: 'image/jpeg', upsert: true })
+        .upload(filename, arrayBuffer, { contentType: 'image/jpeg', cacheControl: '31536000', upsert: true }) // random-UUID filename → immutable, cache 1yr
       if (error) {
         Alert.alert('Photo upload failed', error.message)
         return null

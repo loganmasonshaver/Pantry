@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   View,
   Text,
@@ -207,7 +207,15 @@ export default function DiscoverScreen() {
       })
   }, [user])
 
-  const fetchTrending = useCallback(async () => {
+  // Serve the in-state pool instead of re-hitting Postgres on every tab-return / foreground.
+  // The trending feed only changes once a day (cron) or on a creator edit, so a 300-row +
+  // creator-join round-trip per focus was pure waste. 5-min TTL still picks up the overnight
+  // batch and creator edits (any return after the window refetches); rapid tab-switching skips.
+  const lastFetchRef = useRef(0)
+  const TRENDING_TTL_MS = 5 * 60 * 1000
+
+  const fetchTrending = useCallback(async (force = false) => {
+    if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
     // 30-day window is the absolute upper bound (creator lifecycle ceiling).
     // Lifecycle filtering below further trims YouTube to 7d and creators by engagement.
@@ -249,6 +257,7 @@ export default function DiscoverScreen() {
     // filter (in `filtered` below) so a vegetarian's 6 are picked from the
     // diet-compatible pool with backfill — not capped to 6 before filtering.
     setTrending(mapped)
+    lastFetchRef.current = Date.now() // mark fresh only on success — a failed fetch retries next focus
     setLoading(false)
   }, [])
 

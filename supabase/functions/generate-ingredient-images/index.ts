@@ -212,6 +212,7 @@ async function uploadToStorage(ingredient: string, imageUrl: string): Promise<st
 
     const { error } = await db.storage.from('ingredient-images').upload(filename, blob, {
       contentType: 'image/webp',
+      cacheControl: '31536000', // 1yr — filename is content-addressed (ingredient name) + write-once
       upsert: true,
     })
     if (error) { console.error(`Upload failed for ${ingredient}:`, error); return null }
@@ -243,7 +244,7 @@ Deno.serve(async (req: Request) => {
       if (body.uploadUrl && body.filename) {
         const res = await fetch(body.uploadUrl)
         const blob = await res.blob()
-        await db.storage.from('ingredient-images').upload(body.filename, blob, { contentType: 'image/webp', upsert: true })
+        await db.storage.from('ingredient-images').upload(body.filename, blob, { contentType: 'image/webp', cacheControl: '31536000', upsert: true })
         const { data } = db.storage.from('ingredient-images').getPublicUrl(body.filename)
         return new Response(JSON.stringify({ url: data.publicUrl }), { headers: { 'Content-Type': 'application/json' } })
       }

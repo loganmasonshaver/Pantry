@@ -207,6 +207,7 @@ Deno.serve(async (req: Request) => {
 
         let { error: uploadErr } = await db.storage.from('meal-images').upload(filename, blob, {
           contentType: 'image/jpeg',
+          cacheControl: '31536000', // 1yr — filename is content-addressed (meal_key) + write-once, so let the CDN/client cache it instead of re-fetching at the 1hr default
           upsert: true,
         })
         if (uploadErr) {
@@ -214,6 +215,7 @@ Deno.serve(async (req: Request) => {
           await new Promise(r => setTimeout(r, 1500))
           const retry = await db.storage.from('meal-images').upload(filename, blob, {
             contentType: 'image/jpeg',
+            cacheControl: '31536000', // see note above — content-addressed, write-once
             upsert: true,
           })
           uploadErr = retry.error
