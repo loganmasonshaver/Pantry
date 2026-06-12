@@ -128,8 +128,9 @@ Deno.serve(async (req: Request) => {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
+    console.error('[fatsecret-proxy] error:', (error as Error).message) // detail server-side only
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Lookup failed" }), // generic — don't leak internals
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

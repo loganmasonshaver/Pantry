@@ -224,7 +224,8 @@ Rules:
     const data = await response.json()
     if (data.error) {
       if (photoMode) await refundScan(req, 'macro_est') // OpenAI rejected — refund the slot
-      return new Response(JSON.stringify({ error: data.error.message || JSON.stringify(data.error) }), {
+      console.error('[estimate-meal-macros] OpenAI error:', data.error.message || JSON.stringify(data.error))
+      return new Response(JSON.stringify({ error: "Could not estimate macros" }), { // generic
         status: 500, headers: { "Content-Type": "application/json" },
       })
     }
@@ -298,8 +299,9 @@ Calculate macros by adding up each ingredient at the listed gram weight. Be accu
     })
   } catch (error) {
     if (photoMode) await refundScan(req, 'macro_est') // parse/JSON error after increment — refund
+    console.error('[estimate-meal-macros] error:', (error as Error).message) // detail server-side only
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Could not estimate macros" }), // generic — don't leak internals
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

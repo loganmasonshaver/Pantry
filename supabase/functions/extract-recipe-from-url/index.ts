@@ -250,8 +250,9 @@ Deno.serve(async (req: Request) => {
     })
   } catch (error) {
     await refundScan(req, 'url_extract') // scrape/AI/parse failure after increment — refund
+    console.error('[extract-recipe-from-url] error:', (error as Error).message) // detail server-side only
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Could not extract recipe" }), // generic — don't leak internals
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

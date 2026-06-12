@@ -458,8 +458,9 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     })
   } catch (error) {
     await refundScan(req, 'meal_gen') // unexpected failure — refund the slot
+    console.error('[generate-meals] error:', (error as Error).message) // detail server-side only
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Meal generation failed" }), // generic — don't leak internals
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

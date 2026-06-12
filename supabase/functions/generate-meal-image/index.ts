@@ -248,7 +248,8 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
   } catch (error) {
     if (capConsumed) await refundScan(req, 'image_gen')
-    return new Response(JSON.stringify({ image: null, error: (error as Error).message }), {
+    console.error('[generate-meal-image] error:', (error as Error).message) // detail server-side only
+    return new Response(JSON.stringify({ image: null }), { // client only consumes `image`; no raw error
       status: 500, headers: jsonHeaders,
     })
   }

@@ -376,8 +376,9 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
     })
   } catch (error) {
     await refundScan(req, 'pantry') // first-pass parse / unexpected fail — refund the slot
+    console.error('[scan-pantry] error:', (error as Error).message) // detail server-side only
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Scan failed" }), // generic — don't leak internals to the client
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

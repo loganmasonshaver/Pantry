@@ -151,8 +151,9 @@ Deno.serve(async (req: Request) => {
     })
   } catch (error) {
     await refundScan(req, 'receipt') // both models failed / parse error — refund the slot
+    console.error('[parse-receipt] error:', (error as Error).message) // detail server-side only
     return new Response(
-      JSON.stringify({ error: (error as Error).message }),
+      JSON.stringify({ error: "Could not read receipt" }), // generic — don't leak internals
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }
