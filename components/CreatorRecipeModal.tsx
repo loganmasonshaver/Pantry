@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight, Camera, Plus, Pencil, Clock, Instagram, Youtube } from 'lucide-react-native'
 import * as ImagePicker from 'expo-image-picker'
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
 import * as Crypto from 'expo-crypto'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -179,9 +180,17 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
 
   const uploadPhoto = async (uri: string): Promise<string | null> => {
     try {
+      // Downscale before upload — the picker's `quality` only sets JPEG compression, not
+      // resolution, so a raw iPhone pick is a 2–5MB full-res image. These render in the
+      // home/Discover feed, so every viewer would re-download that. Cap to 2048px wide here
+      // (matches PantryScan/Receipt/AILog) → ~200–800KB. Centralized in upload so neither the
+      // camera nor library entry point can bypass it.
+      const scaled = await manipulateAsync(uri, [{ resize: { width: 2048 } }], {
+        compress: 0.8, format: SaveFormat.JPEG,
+      })
       // React Native's blob() implementation is unreliable for file:// URIs (returns 0-byte blobs
       // on some iOS versions). ArrayBuffer round-trip through fetch() works consistently.
-      const response = await fetch(uri)
+      const response = await fetch(scaled.uri)
       const arrayBuffer = await response.arrayBuffer()
       // Random UUID, not Date.now(): the bucket is public and we upsert, so a guessable/
       // colliding timestamp name let one creator's upload overwrite another's photo.
