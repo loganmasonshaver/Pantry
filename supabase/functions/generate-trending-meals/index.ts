@@ -802,7 +802,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           const ingredientNames = (meal.ingredients || []).map((i: any) => i.name)
           const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              // Authenticate as the trusted internal caller. generate-meal-image requires auth
+              // on a cache miss, and every freshly-generated trending meal IS a miss — without
+              // this header the call 401s and the meal stays on its YouTube thumbnail. Use the
+              // same CRON_SECRET-preferred token the cron itself authenticates with.
+              'Authorization': `Bearer ${CRON_SECRET || supabaseServiceKey}`,
+            },
             body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames }),
           })
           const imgData = await imgRes.json()

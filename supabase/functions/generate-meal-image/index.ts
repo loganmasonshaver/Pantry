@@ -114,8 +114,19 @@ Deno.serve(async (req: Request) => {
 
     // Cache MISS = we're about to spend FAL/LLM credits. Require a logged-in user so
     // anonymous callers can't drain image-generation credits by enumerating meal names.
-    const user = await verifyUser(req)
-    if (!user) return new Response(JSON.stringify({ image: null, error: 'auth required' }), { status: 401, headers: jsonHeaders })
+    // Exception: the trending-meals cron is a trusted server-side caller that authenticates
+    // with the service-role key (it has no user JWT). Its meal names are freshly generated =
+    // always a cache miss, so without this bypass every new trending meal 401s and is left on
+    // its YouTube-thumbnail fallback — the real cause of the all-YT Discover feed.
+    // Match the same internal-auth tokens generate-trending-meals accepts: CRON_SECRET (the
+    // dedicated, reliable shared secret) preferred, SUPABASE_SERVICE_ROLE_KEY as fallback.
+    const cronSecret = Deno.env.get("CRON_SECRET") ?? ""
+    const authToken = (req.headers.get('Authorization') ?? req.headers.get('authorization') ?? '')
+      .replace(/^Bearer\s+/i, '').trim()
+    const isInternal = (cronSecret !== '' && authToken === cronSecret) ||
+                       (supabaseServiceKey !== '' && authToken === supabaseServiceKey)
+    const user = isInternal ? null : await verifyUser(req)
+    if (!isInternal && !user) return new Response(JSON.stringify({ image: null, error: 'auth required' }), { status: 401, headers: jsonHeaders })
 
     if (!falApiKey) {
       console.log('FAL_API_KEY is missing or empty')
@@ -123,10 +134,14 @@ Deno.serve(async (req: Request) => {
     }
 
     // Per-user daily generation ceiling (atomic, server-side). Cache hits above are exempt;
-    // only real generations count. Refunded below if generation ultimately fails.
-    const { allowed } = await checkScanCap(req, 'image_gen', IMAGE_GEN_DAILY_CAP)
-    if (!allowed) return scanCapResponse(IMAGE_GEN_DAILY_CAP)
-    capConsumed = true
+    // only real generations count. Refunded below if generation ultimately fails. Skipped for
+    // the internal cron — there's no user to key the cap on, and its volume is already bounded
+    // by the daily trending batch size (~18), not user behavior.
+    if (!isInternal) {
+      const { allowed } = await checkScanCap(req, 'image_gen', IMAGE_GEN_DAILY_CAP)
+      if (!allowed) return scanCapResponse(IMAGE_GEN_DAILY_CAP)
+      capConsumed = true
+    }
 
     // STAGE 1: ask an LLM to visually describe the finished dish. If it succeeds we use
     // that as the basis for the Flux prompt; if it fails we fall back to a static template
