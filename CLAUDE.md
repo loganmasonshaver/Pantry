@@ -1,5 +1,10 @@
 # Pantry App — Claude Instructions
 
+## Plugins & Tooling Policy
+- **`security-guidance` plugin enabled** (official `@claude-plugins-official`) — real-time vuln review while coding. Install: `/plugin install security-guidance@claude-plugins-official`.
+- **Plugins: official marketplace only by default.** Community plugins require reviewing their source/components first (plugins run arbitrary code with your privileges — hooks, MCP servers, agents, no sandbox). Never install a plugin from an untrusted Git URL.
+- A **global git pre-push hook** AI-reviews risky diffs and blocks on CRITICAL findings (see memory `reference-prepush-ai-review`). Bypass: `git push --no-verify`.
+
 ## Git Workflow — IMPORTANT
 This repo uses a single main-branch workflow. No feature branches, no PRs for solo work. Every session:
 1. **At start:** `cd /Users/loganshaver/pantry && git pull origin main` — sync before any work. If the session was launched inside a `.claude/worktrees/*` path, still `cd` to `/Users/loganshaver/pantry` and do all work there. The worktree is dead weight; ignore it.
