@@ -302,22 +302,28 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         if (!purchasedRef.current) { handleClose(); return } // dismissed without subscribing → close
         // subscribed → continue into the consent + scan + review flow below
       }
-      // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
-      const ok = await requestConsent()
-      if (!ok) { onClose(); return }
       try {
-        // Race the invoke against a hard timeout. supabase-js doesn't honor an
-        // AbortSignal cleanly for functions.invoke, so we use Promise.race —
-        // the scan keeps running server-side but the client surfaces a recoverable
-        // error instead of leaving the user stuck on an infinite spinner.
-        const { data, error } = await Promise.race([
-          supabase.functions.invoke('scan-pantry', { body: { images: base64Images } }),
-          new Promise<{ data: null; error: Error }>((resolve) =>
-            setTimeout(() => resolve({ data: null, error: new Error('Scan is taking too long. Tap retry to try again.') }), SCAN_HARD_TIMEOUT_MS)
+        // Race the ENTIRE remaining flow (consent gate + invoke) against one hard
+        // timeout — not just the invoke. The consent prompt is a separate root-level
+        // modal that can't render over this scan modal; if it fails to resolve the user
+        // would hang forever, because the old timeout sat AFTER `await requestConsent()`
+        // and never even armed while consent was pending. Racing the whole flow
+        // guarantees a recoverable error+retry instead of an infinite spinner.
+        const scanResult = await Promise.race([
+          (async () => {
+            // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
+            const ok = await requestConsent()
+            if (!ok) return { declined: true as const }
+            const { data, error } = await supabase.functions.invoke('scan-pantry', { body: { images: base64Images } })
+            if (error) throw error
+            return { data }
+          })(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Scan is taking too long. Tap retry to try again.')), SCAN_HARD_TIMEOUT_MS)
           ),
         ])
-        if (error) throw error
-        const result = data as { layout: string; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
+        if ('declined' in scanResult) { onClose(); return }
+        const result = scanResult.data as { layout: string; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
         let itemIndex = 0
         const allItems: DetectedItem[] = []
         const zoneGroups: ZoneGroup[] = []

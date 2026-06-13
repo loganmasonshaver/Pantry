@@ -34,6 +34,7 @@ import { templates as recipeTemplates } from '../../lib/recipeTemplates'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
+import { useAIConsent } from '@/context/AIConsentContext'
 import { trackOnboardingStep, trackPaywallViewed, trackSubscriptionPurchased } from '../../lib/analytics'
 import { DISLIKE_CHIPS } from '../food-preferences'
 
@@ -3519,6 +3520,21 @@ function S7Paywall({ data, onNext, onBack }: { data: OnboardingData; onNext: () 
 }
 
 function S8Complete({ onFinish }: { onFinish: () => void }) {
+  const { requestConsent } = useAIConsent()
+  const [finishing, setFinishing] = useState(false)
+
+  // Surface the AI-data disclosure HERE — on a full-screen route with no feature modal
+  // open — so consent is recorded before the user ever opens a scan/receipt/log/recipe
+  // modal. Those modals render the consent prompt BEHIND themselves (iOS can't stack two
+  // modals), so a not-yet-consented user would hang on an invisible prompt. We proceed
+  // into the app regardless of their choice; declining just re-prompts on first AI use.
+  const handleGo = async () => {
+    if (finishing) return
+    setFinishing(true)
+    try { await requestConsent() } catch {}
+    onFinish()
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.centerFlex}>
@@ -3527,7 +3543,7 @@ function S8Complete({ onFinish }: { onFinish: () => void }) {
         <Text style={s.completeSub}>Your pantry is ready.{'\n'}Let us find your first meal.</Text>
       </View>
       <View style={s.bottomActions}>
-        <PillButton label="Lets Go" onPress={onFinish} />
+        <PillButton label="Lets Go" onPress={handleGo} />
       </View>
     </SafeAreaView>
   )
