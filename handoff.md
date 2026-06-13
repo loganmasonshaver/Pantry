@@ -19,16 +19,7 @@ current TestFlight build yet).
   index on every item. Also eyeball keyboard behavior on the "add missing" bar (sits low).
 
 ### ⏳ Pending / next
-1. **Run the trending-image cron trigger** (server-side, fixes the all-YouTube-thumbnail
-   Discover feed — the cron auth bug is fixed but today's batch is still stale). Paste into
-   the Supabase SQL editor:
-   ```sql
-   SELECT net.http_post(
-     url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true',
-     headers := jsonb_build_object('Content-Type','application/json',
-       'Authorization','Bearer ' || COALESCE((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='cron_service_role_key' LIMIT 1),'')),
-     body := '{}'::jsonb);
-   ```
+1. ~~Run the trending-image cron trigger~~ ✅ DONE (2026-06-12) — SQL fired, Discover feed repopulating off AI images.
 2. **Redo the onboarding preview video** — single asset `assets/onboarding-preview.mov`,
    `require`d in TWO spots: `S1Welcome` (very start, ~lines 270/499) and `STryFree` (trial-
    funnel screen near the paywall, ~lines 3090/3162). **Same file → just re-record and

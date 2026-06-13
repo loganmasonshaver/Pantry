@@ -136,15 +136,53 @@ function ProgressDots({ total, active }: { total: number; active: number }) {
   )
 }
 
-// One row of the prep / "how scanning works" screen.
-function PrepTip({ emoji, bold, rest }: { emoji: string; bold: string; rest: string }) {
+// Do/don't photo pair — the hero of the prep screen. A dense shelf with buried back rows
+// (✗) vs the same shelf front-faced and fully visible (✓). This is the only treatment that
+// SHOWS the feature's core failure mode (hidden items in a packed pantry) instead of
+// describing it, so it sets honest expectations before the user shoots.
+function PrepCompare() {
   return (
-    <View style={styles.prepTipRow}>
-      <Text style={styles.prepTipEmoji}>{emoji}</Text>
+    <View style={styles.prepCompareRow}>
+      <View style={styles.prepCompareCard}>
+        <Image source={require('../assets/scan-prep/dont.jpg')} style={[styles.prepCompareImg, styles.prepCompareImgBad]} resizeMode="cover" />
+        <View style={[styles.prepBadge, styles.prepBadgeBad]}><Text style={styles.prepBadgeText}>✕</Text></View>
+        <Text style={[styles.prepCompareTag, styles.prepCompareTagBad]}>Buried = missed</Text>
+      </View>
+      <View style={styles.prepCompareCard}>
+        <Image source={require('../assets/scan-prep/do.jpg')} style={[styles.prepCompareImg, styles.prepCompareImgGood]} resizeMode="cover" />
+        <View style={[styles.prepBadge, styles.prepBadgeGood]}><Text style={styles.prepBadgeText}>✓</Text></View>
+        <Text style={[styles.prepCompareTag, styles.prepCompareTagGood]}>Front-faced = found</Text>
+      </View>
+    </View>
+  )
+}
+
+// One row of the prep / "how scanning works" screen. Each row fades + rises in on a
+// staggered delay (driven by `index`) so the list animates to life instead of landing flat.
+function PrepTip({ emoji, bold, rest, index }: { emoji: string; bold: string; rest: string; index: number }) {
+  const anim = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 340,
+      delay: 140 + index * 90, // each row trails the one above it
+      useNativeDriver: true,
+    }).start()
+  }, [])
+  return (
+    <Animated.View
+      style={[
+        styles.prepTipRow,
+        { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
+      ]}
+    >
+      <View style={styles.prepTipChip}>
+        <Text style={styles.prepTipEmoji}>{emoji}</Text>
+      </View>
       <Text style={styles.prepTipText}>
         <Text style={styles.prepTipBold}>{bold}</Text>{rest}
       </Text>
-    </View>
+    </Animated.View>
   )
 }
 
@@ -590,17 +628,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         {showPrep && (
           <View style={[styles.prepOverlay, { paddingTop: insets.top + 16 }]}>
             <ScrollView contentContainerStyle={styles.prepScroll} showsVerticalScrollIndicator={false}>
-              <Text style={styles.prepTitle}>Help Pantry catch everything</Text>
-              <Text style={styles.prepIntro}>
-                Pantry reads what the camera sees — food fully hidden behind other items is its blind spot. A few seconds of prep fixes that.
-              </Text>
+              <Text style={styles.prepTitle}>A quick prep = a better scan</Text>
+              <Text style={styles.prepIntro}>Pantry reads what the camera can see. Items tucked behind others are its blind spot — pull them forward so nothing gets missed.</Text>
+              <PrepCompare />
               <View style={styles.prepTips}>
-                <PrepTip emoji="🫳" bold="Front-face your shelves" rest=" — pull items forward, one layer deep." />
-                <PrepTip emoji="🔍" bold="One shelf or section per photo" rest=" — get close so small jars and labels stay sharp. (Up to 8.)" />
-                <PrepTip emoji="🏷️" bold="Labels toward the camera" rest=" — so it can tell similar products apart." />
-                <PrepTip emoji="🍽️" bold="Packed or deep? Lay it on the counter" rest=" — spread flat in one layer." />
+                <PrepTip index={0} emoji="🔍" bold="One shelf per photo" rest=" — get up close" />
+                <PrepTip index={1} emoji="🏷️" bold="Labels facing out" rest=" — separates lookalikes" />
+                <PrepTip index={2} emoji="🍽️" bold="Packed? Lay it flat" rest=" — one layer on the counter" />
               </View>
-              <Text style={styles.prepFootnote}>You'll review every photo and fix misses in one tap.</Text>
+              <Text style={styles.prepFootnote}>You'll review every photo and fix misses after.</Text>
             </ScrollView>
             <View style={styles.prepActions}>
               <TouchableOpacity style={styles.primaryBtn} onPress={dismissPrep} activeOpacity={0.85}>
@@ -1084,15 +1120,28 @@ const styles = StyleSheet.create({
 
   // ── Prep / "how scanning works" overlay ──
   prepOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 50, paddingHorizontal: 24 },
-  prepScroll: { paddingBottom: 24, flexGrow: 1, justifyContent: 'center' },
-  prepTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 14, lineHeight: 31 },
-  prepIntro: { fontSize: 15, color: '#AAAAAA', lineHeight: 22, marginBottom: 26 },
-  prepTips: { gap: 18 },
-  prepTipRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  prepTipEmoji: { fontSize: 22, lineHeight: 26, width: 28 },
-  prepTipText: { flex: 1, fontSize: 15, color: '#CCCCCC', lineHeight: 21 },
+  prepScroll: { paddingBottom: 24, flexGrow: 1, justifyContent: 'center', paddingTop: 8 },
+  prepCompareRow: { flexDirection: 'row', gap: 12, marginTop: 18, marginBottom: 24 },
+  prepCompareCard: { flex: 1 },
+  prepCompareImg: { width: '100%', height: 184, borderRadius: 14, backgroundColor: '#1A1A1A' },
+  prepCompareImgBad: { borderWidth: 2, borderColor: 'rgba(239,68,68,0.6)' },
+  prepCompareImgGood: { borderWidth: 2, borderColor: 'rgba(74,222,128,0.6)' },
+  prepBadge: { position: 'absolute', top: 8, left: 8, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  prepBadgeBad: { backgroundColor: '#EF4444' },
+  prepBadgeGood: { backgroundColor: '#16A34A' },
+  prepBadgeText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', lineHeight: 18 },
+  prepCompareTag: { fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
+  prepCompareTagBad: { color: '#FF6B6B' },
+  prepCompareTagGood: { color: '#4ADE80' },
+  prepTitle: { fontSize: 28, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 10, lineHeight: 33, textAlign: 'center' },
+  prepIntro: { fontSize: 15, color: '#999999', lineHeight: 21, marginBottom: 30, textAlign: 'center' },
+  prepTips: { gap: 14 },
+  prepTipRow: { flexDirection: 'row', gap: 14, alignItems: 'center' },
+  prepTipChip: { width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center' },
+  prepTipEmoji: { fontSize: 20 },
+  prepTipText: { flex: 1, fontSize: 15, color: '#999999', lineHeight: 20 },
   prepTipBold: { color: '#FFFFFF', fontWeight: '700' },
-  prepFootnote: { fontSize: 13, color: '#888888', fontStyle: 'italic', marginTop: 26, lineHeight: 19 },
+  prepFootnote: { fontSize: 13, color: '#777777', textAlign: 'center', marginTop: 28, lineHeight: 19 },
   prepActions: { paddingBottom: 8, paddingTop: 8 },
 
   // ── Per-photo review carousel ──
