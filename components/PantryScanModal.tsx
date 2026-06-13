@@ -18,7 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -203,6 +203,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
   const [showPrep, setShowPrep] = useState(false) // first-run "how scanning works" overlay (sets expectations + coaches better photos)
+  // Per-photo review carousel state
+  const [currentPhoto, setCurrentPhoto] = useState(0)
+  const pagerRef = useRef<ScrollView>(null)
+  const nudgedRef = useRef(false) // one-time "it swipes" nudge guard
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
@@ -400,6 +404,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     AsyncStorage.setItem(SCAN_PREP_SEEN_KEY, '1').catch(() => {})
   }
 
+  // One-time "it swipes" nudge when the multi-photo review first opens — the pager twitches
+  // toward the next photo and springs back, the strongest reliable swipe-affordance signal.
+  useEffect(() => {
+    if (step !== 55 || nudgedRef.current || photos.length <= 1) return
+    nudgedRef.current = true
+    const t1 = setTimeout(() => pagerRef.current?.scrollTo({ x: 48, animated: true }), 550)
+    const t2 = setTimeout(() => pagerRef.current?.scrollTo({ x: 0, animated: true }), 1000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [step, photos.length])
+
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
     onClose()
@@ -417,6 +431,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       setFlashOn(false)
       setMissedInput('')
       setAddingMissed(false)
+      setCurrentPhoto(0)
+      nudgedRef.current = false
       setScanError(null)
       setRetryNonce(0)
     }, 350)
@@ -439,6 +455,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           category: await categorizeItem(name),
           checked: true,
           zone: 'Added manually',
+          // Tag manually-added items to the photo currently on screen so they appear on its page.
+          photo: photos.length > 0 ? Math.min(currentPhoto, photos.length - 1) : null,
         }))
       )
       setDetectedItems(prev => [...prev, ...newItems])
@@ -837,122 +855,151 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
         )}
 
         {/* ── Step 5.5: Zone-based visual review ── */}
-        {step === 55 && (
-          <View style={stepWithSafeTop}>
-            <View style={styles.topBar}>
-              {/* X always on the LEFT; title sits to its right. */}
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-              <Text style={[styles.topTitle, { marginLeft: 12 }]}>Detected Items</Text>
-            </View>
+        {step === 55 && (() => {
+          // One review page per captured photo — each shows that photo full + ONLY the items
+          // the AI attributed to it (item.photo), so the user compares photo-vs-list to catch
+          // misses. Items the model didn't attribute fall onto a trailing "More" page.
+          const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number | null }[] =
+            photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => d.photo === idx), photoIdx: idx }))
+          const orphans = detectedItems.filter(d => d.photo == null || d.photo < 0 || d.photo >= photos.length)
+          if (orphans.length > 0) pages.push({ uri: undefined, label: 'More', items: orphans, photoIdx: null })
+          const total = pages.length || 1
+          const cur = Math.min(currentPhoto, total - 1)
+          const goTo = (i: number) => {
+            const c = Math.max(0, Math.min(i, total - 1))
+            pagerRef.current?.scrollTo({ x: c * SCREEN_W, animated: true })
+            setCurrentPhoto(c)
+          }
+          return (
+            <View style={stepWithSafeTop}>
+              <View style={styles.topBar}>
+                <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+                  <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+                </TouchableOpacity>
+                <Text style={[styles.topTitle, { marginLeft: 12 }]}>Review your scan</Text>
+              </View>
 
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {/* Photo */}
-              {photos.length > 0 && photos[photos.length - 1]?.uri && (
-                <View style={styles.zoneImageWrap}>
-                  <Image
-                    source={{ uri: photos[photos.length - 1].uri }}
-                    style={styles.zoneImage}
-                    resizeMode="cover"
-                  />
-                </View>
-              )}
-
-              <Text style={[styles.subtitle, { marginTop: 12, marginBottom: 16 }]}>
-                {detectedItems.length} item{detectedItems.length !== 1 ? 's' : ''} spotted — tap X to remove, or add missed items below
-              </Text>
-
-              {/* Zone sections */}
-              {zones.map(zoneGroup => {
-                const liveItems = zoneGroup.items.filter(i => detectedItems.some(d => d.id === i.id))
-                if (liveItems.length === 0) return null
-                return (
-                  <View key={zoneGroup.zone} style={styles.zoneSection}>
-                    <Text style={styles.zoneLabel}>{zoneGroup.zone}</Text>
-                    <View style={styles.zoneChipWrap}>
-                      {liveItems.map(item => (
-                        <View key={item.id} style={styles.zoneChip}>
-                          <Text style={styles.zoneChipText}>{item.name}</Text>
-                          <TouchableOpacity
-                            onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          >
-                            <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
+              {/* Pager controls — chevrons + "Photo N of M" + dots make the swipe obvious */}
+              <View style={styles.pagerCtrl}>
+                <TouchableOpacity onPress={() => goTo(cur - 1)} disabled={cur === 0} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <ChevronLeft size={24} stroke={cur === 0 ? '#3A3A3A' : COLORS.textWhite} strokeWidth={2} />
+                </TouchableOpacity>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={styles.pagerLabel}>{pages[cur]?.label}{total > 1 ? `  ·  ${cur + 1} of ${total}` : ''}</Text>
+                  {total > 1 && (
+                    <View style={styles.dotsRow}>
+                      {pages.map((_, i) => <View key={i} style={[styles.pagerDot, i === cur && styles.pagerDotActive]} />)}
                     </View>
-                  </View>
-                )
-              })}
+                  )}
+                </View>
+                <TouchableOpacity onPress={() => goTo(cur + 1)} disabled={cur >= total - 1} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <ChevronRight size={24} stroke={cur >= total - 1 ? '#3A3A3A' : COLORS.textWhite} strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
 
-              {/* Missed-something input — type items we missed, comma-separated.
-                  Helper auto-categorizes each via the LLM-backed categorizer. */}
-              <View style={styles.missedSection}>
-                <Text style={styles.zoneLabel}>Missed something?</Text>
+              {/* Horizontal pager — one full page per photo */}
+              <ScrollView
+                ref={pagerRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
+                style={{ flex: 1 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                {pages.map((page, idx) => (
+                  <View key={idx} style={{ width: SCREEN_W }}>
+                    {page.uri ? (
+                      <Image source={{ uri: page.uri }} style={styles.reviewPhoto} resizeMode="contain" />
+                    ) : (
+                      <View style={[styles.reviewPhoto, styles.reviewPhotoPlaceholder]}>
+                        <ImageIcon size={28} stroke="#555" strokeWidth={1.4} />
+                        <Text style={styles.reviewPhotoPhText}>Items the AI couldn't place to a photo</Text>
+                      </View>
+                    )}
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                      <Text style={styles.reviewFoundLabel}>
+                        {page.items.length > 0
+                          ? `Found ${page.items.length} here — tap ✕ if it's wrong`
+                          : 'Nothing detected here — add anything you see below'}
+                      </Text>
+                      <View style={styles.zoneChipWrap}>
+                        {page.items.map(item => (
+                          <View key={item.id} style={styles.zoneChip}>
+                            <Text style={styles.zoneChipText}>{item.name}</Text>
+                            <TouchableOpacity
+                              onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
+                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            >
+                              <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                            </TouchableOpacity>
+                          </View>
+                        ))}
+                      </View>
+                    </ScrollView>
+                  </View>
+                ))}
+              </ScrollView>
+
+              {/* Add-missing — contextual to the photo currently on screen */}
+              <View style={styles.missedBar}>
                 <TextInput
-                  style={styles.missedInput}
-                  placeholder="e.g. salt, pepper, soy sauce"
+                  style={styles.missedBarInput}
+                  placeholder={total > 1 ? `Add what's missing in ${pages[cur]?.label}…` : 'Add what it missed — e.g. salt, soy sauce'}
                   placeholderTextColor={COLORS.textMuted}
                   value={missedInput}
                   onChangeText={setMissedInput}
-                  multiline
-                  blurOnSubmit
                   returnKeyType="done"
+                  onSubmitEditing={addMissedItems}
                 />
                 <TouchableOpacity
-                  style={[styles.missedAddBtn, (!missedInput.trim() || addingMissed) && { opacity: 0.5 }]}
+                  style={[styles.missedBarBtn, (!missedInput.trim() || addingMissed) && { opacity: 0.5 }]}
                   onPress={addMissedItems}
                   disabled={!missedInput.trim() || addingMissed}
                   activeOpacity={0.7}
                 >
-                  {addingMissed
-                    ? <ActivityIndicator color="#4ADE80" size="small" />
-                    : <Text style={styles.missedAddBtnText}>Add to list</Text>}
+                  {addingMissed ? <ActivityIndicator color="#000" size="small" /> : <Plus size={20} stroke="#000" strokeWidth={2.5} />}
                 </TouchableOpacity>
               </View>
 
-              <View style={{ height: 8 }} />
-            </ScrollView>
-
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
-                disabled={saving}
-                activeOpacity={0.85}
-                onPress={async () => {
-                  if (!user) return
-                  if (savingRef.current) return // synchronous guard — disabled prop updates async
-                  const selected = detectedItems.filter(i => i.checked)
-                  if (selected.length === 0) { handleClose(); return }
-                  savingRef.current = true
-                  setSaving(true)
-                  const rows = selected.map(item => ({
-                    user_id: user.id,
-                    name: item.name,
-                    category: item.category,
-                    in_stock: true,
-                  }))
-                  const { error } = await supabase.from('pantry_items').insert(rows)
-                  setSaving(false)
-                  savingRef.current = false
-                  if (error) {
-                    Alert.alert('Save failed', error.message)
-                    return
+              <View style={styles.actions}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
+                  disabled={saving}
+                  activeOpacity={0.85}
+                  onPress={async () => {
+                    if (!user) return
+                    if (savingRef.current) return // synchronous guard — disabled prop updates async
+                    const selected = detectedItems.filter(i => i.checked)
+                    if (selected.length === 0) { handleClose(); return }
+                    savingRef.current = true
+                    setSaving(true)
+                    const rows = selected.map(item => ({
+                      user_id: user.id,
+                      name: item.name,
+                      category: item.category,
+                      in_stock: true,
+                    }))
+                    const { error } = await supabase.from('pantry_items').insert(rows)
+                    setSaving(false)
+                    savingRef.current = false
+                    if (error) {
+                      Alert.alert('Save failed', error.message)
+                      return
+                    }
+                    onItemsAdded?.()
+                    handleClose()
+                  }}
+                >
+                  {saving
+                    ? <ActivityIndicator color="#000000" />
+                    : <Text style={styles.primaryBtnText}>Add {detectedItems.length} Item{detectedItems.length !== 1 ? 's' : ''} to Pantry</Text>
                   }
-                  onItemsAdded?.()
-                  handleClose()
-                }}
-              >
-                {saving
-                  ? <ActivityIndicator color="#000000" />
-                  : <Text style={styles.primaryBtnText}>Add {detectedItems.length} Item{detectedItems.length !== 1 ? 's' : ''} to Pantry</Text>
-                }
-              </TouchableOpacity>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
-        )}
+          )
+        })()}
 
         {/* ── Step 6: Results ── */}
         {step === 6 && (
@@ -1047,6 +1094,21 @@ const styles = StyleSheet.create({
   prepTipBold: { color: '#FFFFFF', fontWeight: '700' },
   prepFootnote: { fontSize: 13, color: '#888888', fontStyle: 'italic', marginTop: 26, lineHeight: 19 },
   prepActions: { paddingBottom: 8, paddingTop: 8 },
+
+  // ── Per-photo review carousel ──
+  pagerCtrl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 10 },
+  pagerLabel: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2 },
+  dotsRow: { flexDirection: 'row', gap: 6, marginTop: 7, alignItems: 'center' },
+  pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
+  pagerDotActive: { backgroundColor: '#4ADE80', width: 18 },
+  reviewPhoto: { width: '100%', height: 300, backgroundColor: '#0A0A0A' },
+  reviewPhotoPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 10 },
+  reviewPhotoPhText: { color: '#888888', fontSize: 13 },
+  reviewItemsScroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+  reviewFoundLabel: { fontSize: 13, color: '#888888', marginBottom: 12, fontWeight: '600' },
+  missedBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 10 },
+  missedBarInput: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#FFFFFF', fontSize: 14 },
+  missedBarBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
 
   step: {
     flex: 1,
