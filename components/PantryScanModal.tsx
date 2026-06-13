@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import {
   View,
   Text,
@@ -17,7 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -45,6 +46,7 @@ type DetectedItem = {
   category: string
   checked: boolean
   zone: string
+  photo?: number | null // which source photo the AI saw this in (for the per-photo review). null = unknown.
 }
 
 type ZoneGroup = {
@@ -134,6 +136,18 @@ function ProgressDots({ total, active }: { total: number; active: number }) {
   )
 }
 
+// One row of the prep / "how scanning works" screen.
+function PrepTip({ emoji, bold, rest }: { emoji: string; bold: string; rest: string }) {
+  return (
+    <View style={styles.prepTipRow}>
+      <Text style={styles.prepTipEmoji}>{emoji}</Text>
+      <Text style={styles.prepTipText}>
+        <Text style={styles.prepTipBold}>{bold}</Text>{rest}
+      </Text>
+    </View>
+  )
+}
+
 function PhotoThumbnail({ label, uri }: { label: string; uri?: string }) {
   return (
     <View style={styles.thumbnail}>
@@ -188,6 +202,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
+  const [showPrep, setShowPrep] = useState(false) // first-run "how scanning works" overlay (sets expectations + coaches better photos)
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
@@ -260,7 +275,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           ),
         ])
         if (error) throw error
-        const result = data as { layout: string; zones: { zone: string; items: { name: string; category: string }[] }[] }
+        const result = data as { layout: string; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
         let itemIndex = 0
         const allItems: DetectedItem[] = []
         const zoneGroups: ZoneGroup[] = []
@@ -273,6 +288,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
               category: RESULT_CATEGORIES.includes(item.category) ? item.category : 'Other',
               checked: true,
               zone: zoneData.zone,
+              // Which source photo the AI attributed this item to — kept for the per-photo
+              // review. Defaults to null when the model omits it (falls back to a "More" page).
+              photo: typeof item.photo === 'number' ? item.photo : null,
             }
             return detected
           })
@@ -368,6 +386,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       requestPermission()
     }
   }, [visible])
+
+  // Show the "how scanning works" prep screen on the user's FIRST scan only (re-openable via
+  // the ? on the camera). Sets the expectation that hidden items aren't seen + coaches the
+  // photo behaviors that actually move vision accuracy.
+  const SCAN_PREP_SEEN_KEY = 'scan_prep_seen_v1'
+  useEffect(() => {
+    if (!visible) return
+    AsyncStorage.getItem(SCAN_PREP_SEEN_KEY).then(v => { if (!v) setShowPrep(true) })
+  }, [visible])
+  const dismissPrep = () => {
+    setShowPrep(false)
+    AsyncStorage.setItem(SCAN_PREP_SEEN_KEY, '1').catch(() => {})
+  }
 
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
@@ -537,6 +568,30 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
 
+        {/* ── Prep / "how scanning works" overlay (first run + ? button) ── */}
+        {showPrep && (
+          <View style={[styles.prepOverlay, { paddingTop: insets.top + 16 }]}>
+            <ScrollView contentContainerStyle={styles.prepScroll} showsVerticalScrollIndicator={false}>
+              <Text style={styles.prepTitle}>Help Pantry catch everything</Text>
+              <Text style={styles.prepIntro}>
+                Pantry reads what the camera sees — food fully hidden behind other items is its blind spot. A few seconds of prep fixes that.
+              </Text>
+              <View style={styles.prepTips}>
+                <PrepTip emoji="🫳" bold="Front-face your shelves" rest=" — pull items forward, one layer deep." />
+                <PrepTip emoji="🔍" bold="One shelf or section per photo" rest=" — get close so small jars and labels stay sharp. (Up to 8.)" />
+                <PrepTip emoji="🏷️" bold="Labels toward the camera" rest=" — so it can tell similar products apart." />
+                <PrepTip emoji="🍽️" bold="Packed or deep? Lay it on the counter" rest=" — spread flat in one layer." />
+              </View>
+              <Text style={styles.prepFootnote}>You'll review every photo and fix misses in one tap.</Text>
+            </ScrollView>
+            <View style={styles.prepActions}>
+              <TouchableOpacity style={styles.primaryBtn} onPress={dismissPrep} activeOpacity={0.85}>
+                <Text style={styles.primaryBtnText}>Got it — start scanning</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
           const stepConfig = {
@@ -575,7 +630,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   <View style={styles.cameraTopCenter}>
                     <ProgressDots total={3} active={stepConfig.dotIndex} />
                   </View>
-                  <View style={{ width: 36 }} />
+                  <TouchableOpacity style={styles.cameraCloseBtn} onPress={() => setShowPrep(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <HelpCircle size={20} stroke="#FFFFFF" strokeWidth={2} />
+                  </TouchableOpacity>
                 </View>
 
                 {/* Photo thumbnails overlay */}
@@ -977,6 +1034,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#000000' },
+
+  // ── Prep / "how scanning works" overlay ──
+  prepOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 50, paddingHorizontal: 24 },
+  prepScroll: { paddingBottom: 24, flexGrow: 1, justifyContent: 'center' },
+  prepTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 14, lineHeight: 31 },
+  prepIntro: { fontSize: 15, color: '#AAAAAA', lineHeight: 22, marginBottom: 26 },
+  prepTips: { gap: 18 },
+  prepTipRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  prepTipEmoji: { fontSize: 22, lineHeight: 26, width: 28 },
+  prepTipText: { flex: 1, fontSize: 15, color: '#CCCCCC', lineHeight: 21 },
+  prepTipBold: { color: '#FFFFFF', fontWeight: '700' },
+  prepFootnote: { fontSize: 13, color: '#888888', fontStyle: 'italic', marginTop: 26, lineHeight: 19 },
+  prepActions: { paddingBottom: 8, paddingTop: 8 },
 
   step: {
     flex: 1,
