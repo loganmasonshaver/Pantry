@@ -29,8 +29,10 @@ current TestFlight build yet).
        'Authorization','Bearer ' || COALESCE((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='cron_service_role_key' LIMIT 1),'')),
      body := '{}'::jsonb);
    ```
-2. **Redo the onboarding preview video** — `assets/onboarding-preview.mov` (used at
-   `app/onboarding/index.tsx:270`). Logan wants to re-record it.
+2. **Redo the onboarding preview video** — single asset `assets/onboarding-preview.mov`,
+   `require`d in TWO spots: `S1Welcome` (very start, ~lines 270/499) and `STryFree` (trial-
+   funnel screen near the paywall, ~lines 3090/3162). **Same file → just re-record and
+   replace the one asset; both placements update automatically, no code change.**
 3. **Cut a TestFlight build** for final validation: bump **Build number** in Xcode (the #1
    gotcha — must increment every upload), archive, upload. Validate real IAP/paywall flow.
 4. **Pre-launch:** the Superwall `onboarding_paywall` is already non-dismissible (hard). Turn
