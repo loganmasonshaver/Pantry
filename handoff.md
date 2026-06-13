@@ -1,6 +1,90 @@
 # Handoff — Pantry
 
-## ✅ Latest (2026-06-11) — Pantry-scan model upgrade + hardening
+## ✅ Latest (2026-06-12) — Security pass, paywall fixes, scan-flow WOW upgrade
+
+Huge session. Everything below is **committed + pushed to `main`**. Edge functions were
+**deployed** this session; all the **client/UI changes need a fresh build** (not on the
+current TestFlight build yet).
+
+### ▶️ START HERE — testing the new build
+- **Test on the WIRED phone first** (`expo run:ios --device`), not TestFlight — the new UI
+  (scan carousel, prep screen, saved cards, cook-reveal) is pure RN and hot-reloads in
+  seconds vs ~25 min per TestFlight cycle. Use TestFlight only as the final pre-submit gate.
+- **Flip `DEV_FORCE_PAYWALL = true`** at `context/SuperwallContext.tsx:17` to do **sandbox
+  paywall testing**. In dev it defaults to always-premium, so the paywall-continuation fixes
+  below WON'T fire otherwise. (Set it back to `false` before committing.)
+- **🔬 Critical device check:** in the new per-photo carousel review, confirm the AI's
+  `photo` index actually populates per item. If most items land on the trailing **"More"**
+  page, the model is omitting `photo` → strengthen the `scan-pantry` prompt to force a photo
+  index on every item. Also eyeball keyboard behavior on the "add missing" bar (sits low).
+
+### ⏳ Pending / next
+1. **Run the trending-image cron trigger** (server-side, fixes the all-YouTube-thumbnail
+   Discover feed — the cron auth bug is fixed but today's batch is still stale). Paste into
+   the Supabase SQL editor:
+   ```sql
+   SELECT net.http_post(
+     url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true',
+     headers := jsonb_build_object('Content-Type','application/json',
+       'Authorization','Bearer ' || COALESCE((SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name='cron_service_role_key' LIMIT 1),'')),
+     body := '{}'::jsonb);
+   ```
+2. **Redo the onboarding preview video** — `assets/onboarding-preview.mov` (used at
+   `app/onboarding/index.tsx:270`). Logan wants to re-record it.
+3. **Cut a TestFlight build** for final validation: bump **Build number** in Xcode (the #1
+   gotcha — must increment every upload), archive, upload. Validate real IAP/paywall flow.
+4. **Pre-launch:** the Superwall `onboarding_paywall` is already non-dismissible (hard). Turn
+   on Apple **Phased Release** when submitting updates.
+
+### What shipped this session
+**Security (full pass — see CODE_REVIEW history):**
+- Red-team hardening: fixed **vote-stuffing** (per-user `meal_votes` ledger), open storage
+  upload policies, x-forwarded-for rate-limit spoof (→ keyed on user id), premium fail-open
+  on missing profile row.
+- Follow-up: `creators` column leak (revoked `affiliate_code`), bucket MIME/size limits,
+  `redeem_referral_code` single-use, dropped dead `email_otp` table.
+- Input sanitization on `generate-recipe`, server-side image size caps, generic client error
+  messages (8 funcs), durable per-user AI caps, `ai_error` PostHog telemetry.
+- **RLS audited — clean.** `PREMIUM_ENFORCEMENT` flipped **ON** (secret). Demo/your account
+  have `promo_active=true`.
+- A **global git pre-push hook** now AI-reviews risky diffs and blocks on CRITICAL (bypass:
+  `git push --no-verify`). Install the **`security-guidance`** plugin: `/plugin install
+  security-guidance@claude-plugins-official`.
+
+**Paywall continuation fixes:** subscribing AT a gate now CONTINUES the action you started
+(was dropping it). Applied to pantry scan, receipt scan, AI log, meal save, meal log.
+
+**Trending images:** cron couldn't auth to `generate-meal-image` (no Authorization header) →
+every new trending meal stuck on its YouTube thumbnail. Fixed (CRON_SECRET/service-role
+bypass). Needs the cron trigger above to repopulate.
+
+**Saved Meals:** instant load (AsyncStorage stale-while-revalidate, no more focus spinner) +
+Discover-style full-bleed cards with colored macro pills.
+
+**Cook-reveal WOW screen** (`app/cook-reveal.tsx`): after a pantry scan, a dedicated reveal
+generates fresh meals from the just-scanned pantry with a staggered animation + haptic.
+
+**Scan-flow upgrade** (`components/PantryScanModal.tsx`):
+- First-run **prep screen** ("how scanning works" — sets expectations, coaches photos;
+  re-open via the ? on the camera).
+- **Swipeable per-photo carousel review** (rebuilt step 55): one page per photo, AI-found
+  list filtered by `item.photo`, chevrons + dots + "Photo N of M" + a one-time swipe nudge,
+  per-photo "add missing." (Note: **step 6 is DEAD CODE** — nothing routes to it.)
+
+### Discussed but NOT built (backlog)
+- **Seasonings problem:** pre-seed pantry staples + a tappable seasonings *checklist* (not a
+  scan) + meal-gen *assumes* basic seasonings (don't flag salt/pepper/oil as "missing").
+- **Pack-opening tap-to-reveal** for the ONBOARDING plan reveal only (not cook-reveal — would
+  be friction on a repeated action).
+- Optional **app-entry gate** for returning non-premium users (post-launch).
+
+### Scan caps (corrected — memory was stale)
+Pantry scan = **7 per rolling 7-day window** (not 5/day). Photos per scan capped at **8**.
+Receipt = 5/day. These are well-calibrated; leave them.
+
+---
+
+## ✅ Prior (2026-06-11) — Pantry-scan model upgrade + hardening
 **`scan-pantry` swapped off the 2024-era gpt-4o.** After a long head-to-head eval (GPT-4o vs
 Gemini Flash-Lite/3.5-Flash/Pro vs Qwen3-VL 235B/30B/8B via OpenRouter), with ground-truth
 recall scoring on a hand-verified photo:
