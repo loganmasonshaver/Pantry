@@ -29,7 +29,7 @@ import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
+const { width: SCREEN_W } = Dimensions.get('window')
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -248,9 +248,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
-  // When set, shows the fullscreen pinch-to-zoom overlay for that photo uri. Rendered as an
-  // in-tree absolute overlay (not a nested <Modal>) to avoid the iOS modal-over-modal issue.
-  const [zoomUri, setZoomUri] = useState<string | null>(null)
   // Live-feel item counter: ramps up WHILE scanning (simulated — GPT returns all
   // items at once, so there's nothing real to stream), then settles to the true
   // total when results land. countRef mirrors it so the effects can read the latest
@@ -958,47 +955,77 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 style={{ flex: 1 }}
                 keyboardShouldPersistTaps="handled"
               >
-                {pages.map((page, idx) => (
+                {pages.map((page, idx) => {
+                  // Group this page's items by the zone/shelf the model assigned so the review
+                  // mirrors the physical layout (top shelf, door, drawer…). Headers only show
+                  // when there's >1 zone — a single zone reads cleaner as a flat list.
+                  const byZone = new Map<string, DetectedItem[]>()
+                  for (const it of page.items) {
+                    const z = (it.zone || '').trim() || 'Other'
+                    if (!byZone.has(z)) byZone.set(z, [])
+                    byZone.get(z)!.push(it)
+                  }
+                  const zoneEntries = Array.from(byZone.entries())
+                  const showZoneHeaders = zoneEntries.length > 1
+                  const renderChip = (item: DetectedItem) => (
+                    <View key={item.id} style={styles.zoneChip}>
+                      <Text style={styles.zoneChipText}>{item.name}</Text>
+                      <TouchableOpacity
+                        onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                      </TouchableOpacity>
+                    </View>
+                  )
+                  return (
                   <View key={idx} style={{ width: SCREEN_W }}>
                     {page.uri ? (
-                      <TouchableOpacity activeOpacity={0.9} onPress={() => setZoomUri(page.uri!)}>
-                        <Image source={{ uri: page.uri }} style={styles.reviewPhoto} resizeMode="contain" />
-                        <View style={styles.zoomHint}>
+                      // Pinch-to-zoom IN PLACE (maximumZoomScale) so the photo can be inspected
+                      // for misses while the item list stays visible below — no fullscreen
+                      // takeover. Pinch is two-finger so it doesn't fight the pager's swipe.
+                      <View style={styles.reviewPhoto}>
+                        <ScrollView
+                          style={StyleSheet.absoluteFill}
+                          contentContainerStyle={styles.reviewPhotoZoomContent}
+                          maximumZoomScale={3}
+                          minimumZoomScale={1}
+                          bouncesZoom
+                          centerContent
+                          showsVerticalScrollIndicator={false}
+                          showsHorizontalScrollIndicator={false}
+                        >
+                          <Image source={{ uri: page.uri }} style={styles.reviewPhotoImg} resizeMode="contain" />
+                        </ScrollView>
+                        <View style={styles.zoomHint} pointerEvents="none">
                           <Maximize2 size={13} stroke="#FFFFFF" strokeWidth={2} />
-                          <Text style={styles.zoomHintText}>Tap to zoom</Text>
+                          <Text style={styles.zoomHintText}>Pinch to zoom</Text>
                         </View>
-                      </TouchableOpacity>
+                      </View>
                     ) : (
                       <View style={[styles.reviewPhoto, styles.reviewPhotoPlaceholder]}>
                         <ImageIcon size={28} stroke="#555" strokeWidth={1.4} />
                         <Text style={styles.reviewPhotoPhText}>Items the AI couldn't place to a photo</Text>
                       </View>
                     )}
-                    {/* width pinned to SCREEN_W: nested in the horizontal pager, the vertical
-                        scroll would otherwise size wider than the screen and the chip flex-wrap
-                        would compute against that, drifting chips off the right edge. */}
                     <ScrollView style={{ flex: 1, width: SCREEN_W }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                       <Text style={styles.reviewFoundLabel}>
                         {page.items.length > 0
                           ? `Found ${page.items.length} here — tap ✕ if it's wrong`
                           : 'Nothing detected here — add anything you see below'}
                       </Text>
-                      <View style={styles.zoneChipWrap}>
-                        {page.items.map(item => (
-                          <View key={item.id} style={styles.zoneChip}>
-                            <Text style={styles.zoneChipText}>{item.name}</Text>
-                            <TouchableOpacity
-                              onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
-                              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            >
-                              <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
+                      {showZoneHeaders
+                        ? zoneEntries.map(([zone, items]) => (
+                            <View key={zone} style={styles.zoneGroup}>
+                              <Text style={styles.zoneHeader}>{zone}</Text>
+                              <View style={styles.zoneChipWrap}>{items.map(renderChip)}</View>
+                            </View>
+                          ))
+                        : <View style={styles.zoneChipWrap}>{page.items.map(renderChip)}</View>}
                     </ScrollView>
                   </View>
-                ))}
+                  )
+                })}
               </ScrollView>
 
               {/* Add-missing — contextual to the photo currently on screen */}
@@ -1134,31 +1161,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           </View>
         )}
 
-        {/* Fullscreen pinch-to-zoom for the review photo. In-tree absolute overlay (not a nested
-            <Modal>) so it layers over the scan modal on iOS. ScrollView maximumZoomScale gives
-            native pinch-zoom; tap X to dismiss. */}
-        {zoomUri && (
-          <View style={styles.zoomOverlay}>
-            <ScrollView
-              style={StyleSheet.absoluteFill}
-              contentContainerStyle={styles.zoomScrollContent}
-              maximumZoomScale={4}
-              minimumZoomScale={1}
-              centerContent
-              showsVerticalScrollIndicator={false}
-              showsHorizontalScrollIndicator={false}
-            >
-              <Image source={{ uri: zoomUri }} style={styles.zoomImage} resizeMode="contain" />
-            </ScrollView>
-            <TouchableOpacity
-              style={[styles.closeBtn, { position: 'absolute', top: insets.top + 8, left: 12, zIndex: 101 }]}
-              onPress={() => setZoomUri(null)}
-            >
-              <X size={20} stroke={COLORS.textWhite} strokeWidth={2} />
-            </TouchableOpacity>
-          </View>
-        )}
-
       </SafeAreaView>
     </Modal>
   )
@@ -1199,12 +1201,13 @@ const styles = StyleSheet.create({
   dotsRow: { flexDirection: 'row', gap: 6, marginTop: 7, alignItems: 'center' },
   pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
   pagerDotActive: { backgroundColor: '#4ADE80', width: 18 },
-  reviewPhoto: { width: '100%', height: 230, backgroundColor: '#0A0A0A' },
+  reviewPhoto: { width: '100%', height: 230, backgroundColor: '#0A0A0A', overflow: 'hidden' },
+  reviewPhotoImg: { width: SCREEN_W, height: 230 },
+  reviewPhotoZoomContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
   zoomHint: { position: 'absolute', bottom: 8, right: 12, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 14 },
   zoomHintText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
-  zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
-  zoomScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
-  zoomImage: { width: SCREEN_W, height: SCREEN_H },
+  zoneGroup: { marginBottom: 2 },
+  zoneHeader: { fontSize: 12, fontWeight: '700', color: '#4ADE80', marginTop: 14, marginBottom: 8, letterSpacing: 0.3 },
   reviewPhotoPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 10 },
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
   reviewItemsScroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
@@ -1607,6 +1610,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    // Pin to the content width (screen minus the list's 20px side padding). Inside the
+    // horizontal pager the wrap was computing against an unbounded width, so long chips
+    // ran off the right edge instead of wrapping. An explicit width forces clean wrapping.
+    width: SCREEN_W - 40,
   },
   zoneChip: {
     flexDirection: 'row',
