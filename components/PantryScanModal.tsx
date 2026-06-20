@@ -405,9 +405,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       const next = n + 1
       spottedCountRef.current = next
       setSpottedCount(next)
-      timer = setTimeout(tick, 350 + next * 110) // gap grows ~110ms per item
+      timer = setTimeout(tick, 280 + next * 80) // gap grows ~80ms per item (was 110 — felt too slow as the count climbed)
     }
-    timer = setTimeout(tick, 450)
+    timer = setTimeout(tick, 350)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [step, showDone, scanError])
 
