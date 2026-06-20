@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Flame, Compass, Utensils, Plus } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -177,12 +178,18 @@ function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
   return true
 }
 
+// Per-user cache so the rail paints instantly on tab focus / app launch (stale-while-revalidate),
+// the same pattern the Saved tab uses. Without it Discover fetched trending_meals cold on every
+// mount and showed a spinner each time. Capped to 60 to keep the stored payload light.
+const discoverCacheKey = (uid: string) => `pantry_discover_${uid}`
+
 export default function DiscoverScreen() {
   const router = useRouter()
   const { user } = useAuth()
   const { promoActive } = usePremium()
   const [trending, setTrending] = useState<DiscoverMeal[]>([])
   const [loading, setLoading] = useState(true)
+  const hasContentRef = useRef(false) // once meals are shown (cache or fetch), refocus refetches silently
   const [activeFilter, setActiveFilter] = useState<FilterKey>('All')
   const [showCreatorModal, setShowCreatorModal] = useState(false)
   const [foodDislikes, setFoodDislikes] = useState<string[]>([])
@@ -213,6 +220,19 @@ export default function DiscoverScreen() {
   // batch and creator edits (any return after the window refetches); rapid tab-switching skips.
   const lastFetchRef = useRef(0)
   const TRENDING_TTL_MS = 5 * 60 * 1000
+
+  // Instant paint: hydrate the last-cached rail on mount so the tab never flashes a spinner;
+  // fetchTrending below revalidates in the background and re-caches.
+  useEffect(() => {
+    if (!user) return
+    AsyncStorage.getItem(discoverCacheKey(user.id)).then(raw => {
+      if (!raw) return
+      try {
+        const cached = JSON.parse(raw)
+        if (Array.isArray(cached) && cached.length) { setTrending(cached); hasContentRef.current = true; setLoading(false) }
+      } catch {}
+    })
+  }, [user])
 
   const fetchTrending = useCallback(async (force = false) => {
     if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
@@ -257,9 +277,12 @@ export default function DiscoverScreen() {
     // filter (in `filtered` below) so a vegetarian's 6 are picked from the
     // diet-compatible pool with backfill — not capped to 6 before filtering.
     setTrending(mapped)
+    hasContentRef.current = true
     lastFetchRef.current = Date.now() // mark fresh only on success — a failed fetch retries next focus
     setLoading(false)
-  }, [])
+    // Cache a light slice for instant paint on the next focus / app launch (stale-while-revalidate).
+    if (user) AsyncStorage.setItem(discoverCacheKey(user.id), JSON.stringify(mapped.slice(0, 60))).catch(() => {})
+  }, [user])
 
   // Initial mount + every tab return: useFocusEffect already fires on first focus
   // (which for a tab screen IS mount), so a separate mount useEffect would just
