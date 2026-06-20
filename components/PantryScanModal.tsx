@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Animated,
+  Easing,
   TextInput,
   ActivityIndicator,
   Image,
@@ -372,6 +373,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           zoneGroups.push({ zone: zoneData.zone, items: zoneItems })
         }
 
+        // TEMP DIAGNOSTIC (remove after): logs exactly what the model returned for `photo` per
+        // item, so we can see WHY items orphan (omitted? string? 1-indexed/out of range?).
+        console.log('[scan-debug] photos=', photos.length, 'rawPhoto=', JSON.stringify((result.zones || []).flatMap((z: any) => (z.items || []).map((i: any) => i.photo))))
         setDetectedItems(allItems)
         setZones(zoneGroups)
         setShowDone(true)
@@ -415,33 +419,33 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     Animated.timing(msgAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
   }, [loadingMessageIdx, step, showDone])
 
-  // Phase 1 — live ramp WHILE scanning. Ticks up with a decelerating gap (fast at
-  // first, then crawling) toward a soft cap, so it feels like the AI is spotting
-  // items in real time during the 30s-2min scan. Resets when the scan (re)starts.
+  // Phase 1 — live "spotting" ramp WHILE scanning. The count animates to a soft cap over a FIXED
+  // ~4s ease-out, independent of the cap's size — so 9 (one photo) and 45 (five photos) both feel
+  // equally quick: a small cap ticks gently, a big cap leaps in larger jumps, both finish climbing
+  // in the same snappy window. This decouples "feels fast" from the unpredictable real scan time;
+  // the number then HOLDS at the cap (the rotating status copy carries the wait) until results land
+  // and the settle effect snaps it UP to the real total. Soft cap = ~9/photo so the reveal counts
+  // up, never down.
   useEffect(() => {
     if (step !== 5 || showDone || scanError) return
+    const softCap = 9 * Math.max(1, photos.length)
     setSpottedCount(0)
     spottedCountRef.current = 0
-    let cancelled = false
-    let timer: ReturnType<typeof setTimeout>
-    // Soft cap scales with photo count (~9/photo): more photos ⇒ more items, so a higher ceiling
-    // is safe and the reveal still counts UP to the real total rather than overshooting + settling
-    // DOWN (which felt like a let-down). Caps low for 1 photo, climbs further for big multi-scans.
-    const softCap = 9 * Math.max(1, photos.length)
-    const tick = () => {
-      if (cancelled) return
-      const n = spottedCountRef.current
-      if (n >= softCap) return
-      const next = n + 1
-      spottedCountRef.current = next
-      setSpottedCount(next)
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}) // a light tap per "spotted" item — makes the climb feel like real discovery
-      // Gentle deceleration but CAPPED at 650ms so it never crawls — matters now that the cap can
-      // reach ~45 on a multi-photo scan; the old 280+80·n hit ~1s/tick by 9 and would stall higher.
-      timer = setTimeout(tick, Math.min(650, 240 + next * 40))
-    }
-    timer = setTimeout(tick, 350)
-    return () => { cancelled = true; clearTimeout(timer) }
+    const anim = new Animated.Value(0)
+    let lastHaptic = 0
+    const id = anim.addListener(({ value }) => {
+      const v = Math.round(value)
+      if (v === spottedCountRef.current) return
+      spottedCountRef.current = v
+      setSpottedCount(v)
+      const now = Date.now()
+      if (now - lastHaptic > 90) { // throttle so a big-cap leap doesn't fire a haptic storm
+        lastHaptic = now
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+      }
+    })
+    Animated.timing(anim, { toValue: softCap, duration: 4000, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
+    return () => { anim.removeListener(id); anim.stopAnimation() }
   }, [step, showDone, scanError])
 
   // Phase 2 — settle from the live value to the true total when results land
