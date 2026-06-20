@@ -1033,7 +1033,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
-                style={{ flex: 1 }}
+                // Break out of the step's 24px horizontal padding so each SCREEN_W page is truly
+                // full-width — otherwise pages overflowed the padded box and clipped the right
+                // edge (zoom hint + last chip per row). Inner rows self-pad (items 20, etc.).
+                style={{ flex: 1, marginHorizontal: -24 }}
                 keyboardShouldPersistTaps="handled"
               >
                 {pages.map((page, idx) => {
