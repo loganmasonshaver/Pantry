@@ -721,7 +721,7 @@ export default function PantryScreen() {
           ListFooterComponent={
             totalItems > 0 ? (
               <View style={styles.footerWrap}>
-                <Text style={styles.timestamp}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''} total</Text>
+                <Text style={styles.footerCount}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''} total</Text>
                 <TouchableOpacity style={styles.clearBtn} onPress={clearPantry} activeOpacity={0.7}>
                   <Trash2 size={15} stroke="#EF4444" strokeWidth={2} />
                   <Text style={styles.clearBtnText}>Clear pantry</Text>
@@ -1132,8 +1132,9 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20, maxWidth: 280 },
 
   timestamp: { textAlign: 'center', fontSize: 13, color: COLORS.textMuted, fontWeight: '500', marginTop: 24, letterSpacing: 0.3 },
-  footerWrap: { alignItems: 'center', paddingBottom: 24 },
-  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
+  footerWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: 24, paddingBottom: 48 },
+  footerCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500', letterSpacing: 0.3 },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
   clearBtnText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
