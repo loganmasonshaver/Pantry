@@ -16,7 +16,8 @@ const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat
 // Pantry scan is the priciest call (vision, sometimes 2 passes). One scan =
 // one whole-kitchen session (all photos batched), so a few/week covers normal use.
 // Rolling 7-day window stops sustained abuse without a rigid daily wall.
-const SCAN_CAP_PER_WEEK = 7
+// ⚠️ TESTING ONLY — temporarily unlimited. REVERT TO 7 BEFORE LAUNCH (abuse/cost protection).
+const SCAN_CAP_PER_WEEK = 99999
 const SCAN_WINDOW_DAYS = 7
 // Hard backstop on payload size — a single scan can't exceed this many photos, which
 // bounds the per-call token cost the count cap can't (client enforces the same limit).

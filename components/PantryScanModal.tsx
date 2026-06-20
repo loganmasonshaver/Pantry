@@ -9,7 +9,6 @@ import {
   ScrollView,
   StyleSheet,
   Animated,
-  Easing,
   TextInput,
   ActivityIndicator,
   Image,
@@ -419,33 +418,36 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     Animated.timing(msgAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
   }, [loadingMessageIdx, step, showDone])
 
-  // Phase 1 — live "spotting" ramp WHILE scanning. The count animates to a soft cap over a FIXED
-  // ~4s ease-out, independent of the cap's size — so 9 (one photo) and 45 (five photos) both feel
-  // equally quick: a small cap ticks gently, a big cap leaps in larger jumps, both finish climbing
-  // in the same snappy window. This decouples "feels fast" from the unpredictable real scan time;
-  // the number then HOLDS at the cap (the rotating status copy carries the wait) until results land
-  // and the settle effect snaps it UP to the real total. Soft cap = ~9/photo so the reveal counts
-  // up, never down.
+  // Phase 1 — live "spotting" ramp WHILE scanning. Like a loading bar that rushes to ~80% then
+  // creeps: the count chases a target that starts at ~9/photo and DRIFTS up slowly over time.
+  // The exponential chase (16%/tick) gives big jumps early (feels fast whether it ends at 9 or 45),
+  // and the slow target drift means it NEVER sits frozen on a long scan — it keeps inching up until
+  // results land, then the settle effect below snaps it to the real total.
   useEffect(() => {
     if (step !== 5 || showDone || scanError) return
-    const softCap = 9 * Math.max(1, photos.length)
+    const base = 9 * Math.max(1, photos.length)
+    const startedAt = Date.now()
     setSpottedCount(0)
     spottedCountRef.current = 0
-    const anim = new Animated.Value(0)
+    let floatVal = 0
+    let lastShown = 0
     let lastHaptic = 0
-    const id = anim.addListener(({ value }) => {
-      const v = Math.round(value)
-      if (v === spottedCountRef.current) return
-      spottedCountRef.current = v
-      setSpottedCount(v)
+    const interval = setInterval(() => {
+      const elapsedS = (Date.now() - startedAt) / 1000
+      const target = base + elapsedS * 0.2 // slow upward drift so it never looks stuck
+      floatVal += (target - floatVal) * 0.16 // exponential chase — fast early, gentle near the top
+      const shown = Math.round(floatVal)
+      if (shown === lastShown) return
+      lastShown = shown
+      spottedCountRef.current = shown
+      setSpottedCount(shown)
       const now = Date.now()
-      if (now - lastHaptic > 90) { // throttle so a big-cap leap doesn't fire a haptic storm
+      if (now - lastHaptic > 90) { // throttle so big early jumps don't fire a haptic storm
         lastHaptic = now
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
       }
-    })
-    Animated.timing(anim, { toValue: softCap, duration: 4000, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
-    return () => { anim.removeListener(id); anim.stopAnimation() }
+    }, 180)
+    return () => clearInterval(interval)
   }, [step, showDone, scanError])
 
   // Phase 2 — settle from the live value to the true total when results land
