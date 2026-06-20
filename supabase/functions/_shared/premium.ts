@@ -20,12 +20,22 @@ const ENFORCE = (Deno.env.get("PREMIUM_ENFORCEMENT") ?? "off").toLowerCase() ===
  */
 export async function hasActiveSubscription(userId: string): Promise<boolean> {
   try {
-    const { data, error } = await db
+    // The profiles read has NO built-in timeout. A stalled DB connection would otherwise hang
+    // the whole edge function to Supabase's ~150s wall-clock kill (observed: 2+ min scans that
+    // never logged past auth). Cap it and fail OPEN on timeout — same as a real read error —
+    // so a slow DB never blocks a paying customer. Per-user weekly cap is the backstop.
+    const query = db
       .from("profiles")
       .select("is_premium, promo_active")
       .eq("id", userId)
       .maybeSingle() // returns data=null (no error) when the row is absent → not premium
-    if (error) return true        // real read error → fail open
+    const { data, error } = await Promise.race([
+      query,
+      new Promise<{ data: null; error: Error }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: new Error("premium check timed out") }), 6000)
+      ),
+    ])
+    if (error) return true        // real read error OR timeout → fail open
     if (!data) return false       // no profile row → NOT premium (don't grant on a miss)
     return !!(data.is_premium || data.promo_active)
   } catch {

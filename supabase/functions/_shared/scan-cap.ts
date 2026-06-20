@@ -67,8 +67,16 @@ export async function checkScanCapWindow(
   cap: number,
   days: number,
 ): Promise<{ allowed: boolean; used: number }> {
-  const { data, error } = await userClient(req)
-    .rpc("check_and_increment_scan_window", { p_scan_type: scanType, p_cap: cap, p_days: days })
+  // Cap the RPC — like the premium read, it has no built-in timeout, and a stalled DB call
+  // here would hang the function to the ~150s edge wall-clock kill. A timeout resolves into
+  // the error shape below, routing to the bounded fail-open path (allow, don't block a user).
+  const { data, error } = await Promise.race([
+    userClient(req)
+      .rpc("check_and_increment_scan_window", { p_scan_type: scanType, p_cap: cap, p_days: days }),
+    new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error("scan-cap rpc timed out") }), 6000)
+    ),
+  ])
   if (error || !data?.[0]) {
     const allowed = failOpenAllowed(req, scanType) // bounded fail-open, not unlimited
     console.log(`[scan-cap] window rpc error, fail-open ${allowed ? 'ALLOW' : 'DENY (backstop)'}: ${error?.message ?? "no row"}`)
