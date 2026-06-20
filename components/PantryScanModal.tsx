@@ -424,16 +424,21 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     spottedCountRef.current = 0
     let cancelled = false
     let timer: ReturnType<typeof setTimeout>
+    // Soft cap scales with photo count (~9/photo): more photos ⇒ more items, so a higher ceiling
+    // is safe and the reveal still counts UP to the real total rather than overshooting + settling
+    // DOWN (which felt like a let-down). Caps low for 1 photo, climbs further for big multi-scans.
+    const softCap = 9 * Math.max(1, photos.length)
     const tick = () => {
       if (cancelled) return
       const n = spottedCountRef.current
-      if (n >= 9) return // soft cap kept BELOW the typical real count so the reveal counts UP (a
-      // reward), never down — a ramp that overshot to 14 then settled to 12 felt like a let-down
+      if (n >= softCap) return
       const next = n + 1
       spottedCountRef.current = next
       setSpottedCount(next)
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}) // a light tap per "spotted" item — makes the climb feel like real discovery
-      timer = setTimeout(tick, 280 + next * 80) // gap grows ~80ms per item (was 110 — felt too slow as the count climbed)
+      // Gentle deceleration but CAPPED at 650ms so it never crawls — matters now that the cap can
+      // reach ~45 on a multi-photo scan; the old 280+80·n hit ~1s/tick by 9 and would stall higher.
+      timer = setTimeout(tick, Math.min(650, 240 + next * 40))
     }
     timer = setTimeout(tick, 350)
     return () => { cancelled = true; clearTimeout(timer) }
