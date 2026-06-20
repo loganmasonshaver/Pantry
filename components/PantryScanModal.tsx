@@ -103,9 +103,14 @@ const SCAN_STATUS_LINES = [
   'Scanning shelf by shelf 📲',
   'Checking the back rows 👀',
   'Catching the small stuff 🔦',
-  'Identifying every package 📦',
+  'Reading every label 📋',
   'Looking for anything hidden 🔎',
+  'Inspecting each container 🫙',
+  'Sorting by category 🗂️',
+  'Cross-checking each item ✔️',
   'Double-checking for misses ✅',
+  'Building your pantry list 🧺',
+  'Almost done ✨',
 ]
 
 // Hard ceiling. If the scan hasn't responded by this point something is wrong
@@ -375,16 +380,25 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     return () => { loop.stop() }
   }, [step, retryNonce])
 
-  // Cycle the status copy on a fixed cadence and loop — keeps the screen feeling active even
-  // on a fast scan. 1400ms is slow enough to read, fast enough that something always changes.
+  // Advance the status copy every 3s. 13 lines × 3s ≈ 39s of unique copy, so a typical scan
+  // finishes before it ever loops; the modulo is just a safety net for unusually long scans.
+  // The line itself animates in (see msgAnim effect) so each change reads as fresh, not stale.
   useEffect(() => {
     if (step !== 5 || showDone) return
     setLoadingMessageIdx(0)
     const interval = setInterval(() => {
       setLoadingMessageIdx(i => (i + 1) % SCAN_STATUS_LINES.length)
-    }, 1400)
+    }, 3000)
     return () => clearInterval(interval)
   }, [step, showDone])
+
+  // Fade + lift each new status line in so a 3s hold never feels static.
+  const msgAnim = useRef(new Animated.Value(1)).current
+  useEffect(() => {
+    if (step !== 5 || showDone) return
+    msgAnim.setValue(0)
+    Animated.timing(msgAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
+  }, [loadingMessageIdx, step, showDone])
 
   // Phase 1 — live ramp WHILE scanning. Ticks up with a decelerating gap (fast at
   // first, then crawling) toward a soft cap, so it feels like the AI is spotting
@@ -856,11 +870,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 2, fontWeight: '700', color: COLORS.textWhite }]}>
                     item{spottedCount === 1 ? '' : 's'} spotted
                   </Text>
-                  <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 10, paddingHorizontal: 12 }]}>
+                  <Animated.Text
+                    style={[
+                      styles.subtitle,
+                      { textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
+                      showDone ? null : { opacity: msgAnim, transform: [{ translateY: msgAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] },
+                    ]}
+                  >
                     {showDone
                       ? 'Tap below to review and add anything we missed'
                       : SCAN_STATUS_LINES[loadingMessageIdx]}
-                  </Text>
+                  </Animated.Text>
                 </>
               )}
             </View>
