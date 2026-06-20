@@ -420,30 +420,9 @@ export default function HomeScreen() {
     })
   }, [meals])
 
-  const ESSENTIAL_STAPLES = [
-    'salt', 'pepper', 'olive oil', 'garlic', 'butter', 'onion',
-    'soy sauce', 'eggs', 'rice', 'flour', 'sugar', 'milk',
-    'paprika', 'cumin', 'chili powder', 'oregano', 'lemon', 'vinegar',
-  ]
-  // Real category per staple — was hardcoded 'Spices & Seasonings', which mis-filed
-  // eggs/rice/milk/oil everywhere categories show. Names match pantry CATEGORY_CONFIG.
-  const STAPLE_CATEGORY: Record<string, string> = {
-    'salt': 'Spices & Seasonings', 'pepper': 'Spices & Seasonings', 'paprika': 'Spices & Seasonings',
-    'cumin': 'Spices & Seasonings', 'chili powder': 'Spices & Seasonings', 'oregano': 'Spices & Seasonings',
-    'olive oil': 'Oils & Vinegars', 'vinegar': 'Oils & Vinegars',
-    'garlic': 'Produce', 'onion': 'Produce', 'lemon': 'Produce',
-    'butter': 'Dairy & Eggs', 'eggs': 'Dairy & Eggs', 'milk': 'Dairy & Eggs',
-    'soy sauce': 'Sauces & Condiments', 'rice': 'Grains & Pasta',
-    'flour': 'Baking', 'sugar': 'Baking',
-  }
-  const stapleCategory = (name: string) => STAPLE_CATEGORY[name.toLowerCase()] ?? 'Spices & Seasonings'
-  const [missingStaples, setMissingStaples] = useState<string[]>([])
-  // Staples prompt now fires ONCE as a modal right after a pantry scan
-  // completes (instead of a persistent home card). Dismissal is stored in
-  // AsyncStorage so it sticks across app launches. Old session-only state
-  // (staplesDismissed) is gone.
-  const [showStaplesPrompt, setShowStaplesPrompt] = useState(false)
-  const STAPLES_PROMPTED_KEY = 'pantry_staples_prompted'
+  // Kitchen-staples ask moved INTO the scan review flow (a "Also have these?" chip row in
+  // PantryScanModal) — the old post-scan "Kitchen basics?" popup interrupted the moment right
+  // after a scan, so it was removed. Seasonings (salt/pepper/oil) are now assumed by meal-gen.
   // Macros card: compact (protein only) vs expanded (all 3). User's choice
   // persists across sessions. Default compact since Pantry's audience cares
   // most about protein; carbs/fat are one tap away if they want them.
@@ -463,7 +442,6 @@ export default function HomeScreen() {
     const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
     setPantryNames(names)
     setPantryFetched(true)
-    setMissingStaples(ESSENTIAL_STAPLES.filter(s => !names.has(s)))
   }, [user])
 
   useEffect(() => { loadPantryNames() }, [loadPantryNames])
@@ -485,24 +463,6 @@ export default function HomeScreen() {
     loop.start()
     return () => loop.stop()
   }, [pantryFetched, pantryNames])
-
-  const addStapleToPantry = async (name: string) => {
-    if (!user) return
-    setPantryNames(prev => { const n = new Set(prev); n.add(name); return n })
-    setMissingStaples(prev => prev.filter(s => s !== name))
-    const { data: existing } = await supabase.from('pantry_items').select('id').eq('user_id', user.id).ilike('name', name).limit(1)
-    if (existing && existing.length > 0) {
-      await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
-    } else {
-      await supabase.from('pantry_items').insert({ user_id: user.id, name, category: stapleCategory(name), in_stock: true })
-    }
-  }
-
-  const addStapleToGrocery = async (name: string) => {
-    if (!user) return
-    setMissingStaples(prev => prev.filter(s => s !== name))
-    await supabase.from('grocery_items').insert({ user_id: user.id, name, category: stapleCategory(name) })
-  }
 
   const [showPrefBanner, setShowPrefBanner] = useState(false)
   const [showPantryScanFromHome, setShowPantryScanFromHome] = useState(false)
@@ -1497,59 +1457,10 @@ export default function HomeScreen() {
           setShowPantryScanFromHome(false)
           // Refresh pantry so Home flips from the "Unlock recipes" card to the meal
           // carousel now that the scan added items — the initial fetch only runs on load.
+          // (The staples ask now lives inside the scan review flow, not a post-scan popup.)
           await loadPantryNames()
-          // Fire the kitchen-basics nudge ONCE per user (per device) right after
-          // a scan completes — natural moment to surface "you also have these
-          // common things?" without dragging it across the home screen forever.
-          const alreadyPrompted = await AsyncStorage.getItem(STAPLES_PROMPTED_KEY)
-          if (!alreadyPrompted && missingStaples.length >= 3) {
-            setShowStaplesPrompt(true)
-          }
         }}
       />
-
-      {/* ── Missing kitchen basics modal (one-shot after first scan) ── */}
-      <Modal
-        visible={showStaplesPrompt}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowStaplesPrompt(false)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }} edges={['top']}>
-          <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 17, fontWeight: '700', color: COLORS.textWhite }}>Kitchen basics?</Text>
-            <TouchableOpacity
-              onPress={async () => {
-                await AsyncStorage.setItem(STAPLES_PROMPTED_KEY, 'true')
-                setShowStaplesPrompt(false)
-              }}
-              activeOpacity={0.7}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Text style={{ color: COLORS.textMuted, fontSize: 15 }}>Done</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
-            <Text style={{ fontSize: 14, color: COLORS.textMuted, marginBottom: 20, lineHeight: 20 }}>
-              We didn't see these in your pantry — adding what you have unlocks more meal suggestions.
-            </Text>
-            {missingStaples.slice(0, 12).map(name => (
-              <View key={name} style={styles.stapleRow}>
-                <Text style={styles.stapleName}>{name}</Text>
-                <View style={styles.stapleActions}>
-                  <TouchableOpacity onPress={() => addStapleToPantry(name)} activeOpacity={0.7}>
-                    <Text style={styles.stapleHaveIt}>I have this</Text>
-                  </TouchableOpacity>
-                  <Text style={{ color: '#333', fontSize: 11 }}>|</Text>
-                  <TouchableOpacity onPress={() => addStapleToGrocery(name)} activeOpacity={0.7}>
-                    <Text style={styles.stapleGrocery}>+ Grocery</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
 
     </SafeAreaView>
   )

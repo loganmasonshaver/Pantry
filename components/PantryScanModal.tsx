@@ -82,6 +82,12 @@ const RESULT_CATEGORIES = [
   'Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantry Staples',
 ]
 
+// Real, meal-changing staples offered as one-tap chips on the review screen — NOT seasonings
+// (salt/pepper/oil are assumed by meal-gen, so asking about them would be redundant). These
+// genuinely vary kitchen to kitchen and unlock more cook-now meals, so we surface them in the
+// flow the user is already in (curating the scan) instead of a separate post-scan popup.
+const COMMON_STAPLES = ['Eggs', 'Milk', 'Butter', 'Cheese', 'Rice', 'Bread', 'Onion', 'Garlic', 'Lemon', 'Soy Sauce', 'Flour', 'Sugar']
+
 // Max photos per scan — bounds the per-call GPT-4o vision cost. Mirrored server-side in
 // scan-pantry/index.ts (which truncates) so a modified client can't exceed it. A full
 // fridge + pantry fits comfortably in this many.
@@ -506,6 +512,22 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
   // Parse comma- or newline-separated names, categorize each via the LLM-backed
   // helper, append to the detected list under a "Added manually" zone.
+  // One-tap add for a common staple chip — same path as a manually-typed missed item, so it
+  // saves with the scan and rides the cook-reveal. Dedupes against what's already detected.
+  const addStapleChip = async (name: string) => {
+    if (detectedItems.some(d => d.name.toLowerCase() === name.toLowerCase())) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    const item: DetectedItem = {
+      id: `staple-${Date.now()}-${name}`,
+      name,
+      category: await categorizeItem(name),
+      checked: true,
+      zone: 'Added manually',
+      photo: photos.length > 0 ? Math.min(currentPhoto, photos.length - 1) : null,
+    }
+    setDetectedItems(prev => [...prev, item])
+  }
+
   const addMissedItems = async () => {
     const names = missedInput
       .split(/[,\n]/)
@@ -1075,6 +1097,26 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 })}
               </ScrollView>
 
+              {/* Common staples you likely have but the camera can't see — one tap to add. Folds
+                  the old post-scan "kitchen basics?" popup into the flow the user is already in. */}
+              {(() => {
+                const available = COMMON_STAPLES.filter(s => !detectedItems.some(d => d.name.toLowerCase() === s.toLowerCase()))
+                if (available.length === 0) return null
+                return (
+                  <View style={styles.staplesBar}>
+                    <Text style={styles.staplesLabel}>Also have these? Tap to add</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.staplesChips} keyboardShouldPersistTaps="handled">
+                      {available.map(s => (
+                        <TouchableOpacity key={s} style={styles.stapleChip} onPress={() => addStapleChip(s)} activeOpacity={0.7}>
+                          <Plus size={13} stroke="#4ADE80" strokeWidth={2.6} />
+                          <Text style={styles.stapleChipText}>{s}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )
+              })()}
+
               {/* Add-missing — contextual to the photo currently on screen */}
               <View style={styles.missedBar}>
                 <TextInput
@@ -1280,6 +1322,11 @@ const styles = StyleSheet.create({
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
   reviewItemsScroll: { width: SCREEN_W, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
   reviewFoundLabel: { fontSize: 13, color: '#888888', marginBottom: 12, fontWeight: '600' },
+  staplesBar: { paddingTop: 6, paddingBottom: 2 },
+  staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },
+  staplesChips: { paddingHorizontal: 20, gap: 8 },
+  stapleChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,222,128,0.1)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)', borderRadius: 30, paddingVertical: 7, paddingLeft: 10, paddingRight: 13 },
+  stapleChipText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
   missedBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 10 },
   missedBarInput: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#FFFFFF', fontSize: 14 },
   missedBarBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },

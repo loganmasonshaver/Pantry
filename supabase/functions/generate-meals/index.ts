@@ -260,9 +260,10 @@ Deno.serve(async (req: Request) => {
 
     const ingredientRule = isCookNow
       ? `- HYBRID COOK NOW MODE — generate exactly ${genCount} meals split as follows:
-  • The first ${genCount - 1} meals (STRICT): use ONLY ingredients from the pantry list. NO ingredient outside the list — not even oil, salt, pepper, butter, or spices unless they're explicitly listed. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
-  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: salt, pepper, olive oil, garlic, butter, soy sauce, lemon, rice, pasta, eggs, common dried herbs). NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
-- Every ingredient in STRICT meals MUST appear in the pantry list (case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken").`
+  • UNIVERSAL BASICS: assume every kitchen already has salt, pepper, cooking oil, water, and common dried herbs/spices. You may ALWAYS use these even if they're not in the pantry list, and must NEVER put them in "missing_ingredients". Do NOT assume bigger staples like butter, eggs, rice, milk, or fresh produce — those must be in the pantry list.
+  • The first ${genCount - 1} meals (STRICT): besides the universal basics above, use ONLY ingredients from the pantry list. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
+  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: garlic, butter, soy sauce, lemon, rice, pasta, eggs). NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
+- Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the universal basics (salt, pepper, oil, water, dried herbs/spices). Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".`
       : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy.`
 
     const prompt = `You are a nutrition-focused meal planner. Generate exactly ${genCount} high-protein meal suggestions.
