@@ -9,6 +9,7 @@ import {
   ScrollView,
   StyleSheet,
   Animated,
+  Easing,
   TextInput,
   ActivityIndicator,
   Image,
@@ -287,8 +288,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [permission, requestPermission] = useCameraPermissions()
   const [flashOn, setFlashOn] = useState(false)
 
-  const pulseScale   = useRef(new Animated.Value(1)).current
-  const pulseOpacity = useRef(new Animated.Value(0.4)).current
+  // Drives the scanning beam that sweeps top→bottom over the viewfinder — same motif as the
+  // home "Scan your pantry" hero card, so the loading screen reads as the same scan action.
+  const beamAnim = useRef(new Animated.Value(0)).current
 
   // Loading animation + actual AI scan. retryNonce is in the dep list so the
   // user's "Retry" tap on the error screen re-fires this effect without
@@ -297,15 +299,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     if (step !== 5) return
     setScanError(null)
     const loop = Animated.loop(
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(pulseScale,   { toValue: 1.35, duration: 900, useNativeDriver: true }),
-          Animated.timing(pulseScale,   { toValue: 1,    duration: 900, useNativeDriver: true }),
-        ]),
-        Animated.sequence([
-          Animated.timing(pulseOpacity, { toValue: 1,   duration: 900, useNativeDriver: true }),
-          Animated.timing(pulseOpacity, { toValue: 0.3, duration: 900, useNativeDriver: true }),
-        ]),
+      Animated.sequence([
+        Animated.timing(beamAnim, { toValue: 1, duration: 1800, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(beamAnim, { toValue: 0, duration: 0, useNativeDriver: true }), // snap back to sweep again
       ])
     )
     loop.start()
@@ -913,13 +909,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
             {/* Centered loading indicator (fills available space) */}
             <View style={styles.loadingBody}>
-              <View style={styles.pulseWrap}>
-                <Animated.View
-                  style={[styles.pulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]}
-                />
-                <View style={styles.pulseCore}>
-                  <ScanLine size={32} stroke={scanError ? '#F87171' : '#4ADE80'} strokeWidth={1.6} />
-                </View>
+              <View style={styles.scanFrame}>
+                <View style={[styles.scanCorner, styles.scanCornerTL]} />
+                <View style={[styles.scanCorner, styles.scanCornerTR]} />
+                <View style={[styles.scanCorner, styles.scanCornerBL]} />
+                <View style={[styles.scanCorner, styles.scanCornerBR]} />
+                <ScanLine size={40} stroke={scanError ? '#F87171' : '#4ADE80'} strokeWidth={1.5} />
+                {!scanError && (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[styles.scanBeam, { transform: [{ translateY: beamAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 154] }) }] }]}
+                  />
+                )}
               </View>
               {scanError ? (
                 <>
@@ -1640,29 +1641,15 @@ const styles = StyleSheet.create({
   },
 
   // Loading pulse
-  pulseWrap: {
-    width: 110,
-    height: 110,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pulseRing: {
-    position: 'absolute',
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    backgroundColor: 'rgba(74,222,128,0.18)',
-  },
-  pulseCore: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: '#1A1A1A',
-    borderWidth: 1.5,
-    borderColor: 'rgba(74,222,128,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  // Scanning viewfinder — mirrors the home "Scan your pantry" hero: camera-corner brackets
+  // framing the icon, with a glowing green beam sweeping top→bottom (see beamAnim).
+  scanFrame: { width: 180, height: 160, position: 'relative', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  scanCorner: { position: 'absolute', width: 26, height: 26, borderColor: '#4ADE80' },
+  scanCornerTL: { top: 0, left: 0, borderTopWidth: 2.5, borderLeftWidth: 2.5, borderTopLeftRadius: 6 },
+  scanCornerTR: { top: 0, right: 0, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 6 },
+  scanCornerBL: { bottom: 0, left: 0, borderBottomWidth: 2.5, borderLeftWidth: 2.5, borderBottomLeftRadius: 6 },
+  scanCornerBR: { bottom: 0, right: 0, borderBottomWidth: 2.5, borderRightWidth: 2.5, borderBottomRightRadius: 6 },
+  scanBeam: { position: 'absolute', left: 6, right: 6, height: 2, backgroundColor: '#4ADE80', shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8 },
 
   // Results (step 6)
   resultGroup: { marginBottom: 20 },
