@@ -370,13 +370,9 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
     const afterCleanup = (result.zones || []).reduce((a: number, z: any) => a + (z.items?.length || 0), 0)
     if (beforeCleanup !== afterCleanup) console.log(`[scan-pantry] cleanup: ${beforeCleanup} -> ${afterCleanup} items`)
 
-    // Strip the photo index from the response — it's only used server-side for
-    // the density gate above; the client only consumes { name, category }.
-    for (const zone of (result.zones || [])) {
-      for (const item of (zone.items || [])) {
-        delete item.photo
-      }
-    }
+    // NOTE: previously we stripped item.photo here ("client only consumes name+category") — but
+    // the per-photo review now NEEDS photo, so the strip was silently breaking attribution (every
+    // item arrived photo-less → orphaned). Keep photo in the response.
     console.log(`[scan-pantry] total: ${Date.now() - t0}ms`)
 
     return new Response(JSON.stringify(result), {
