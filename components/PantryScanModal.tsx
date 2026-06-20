@@ -998,8 +998,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                           <Image source={{ uri: page.uri }} style={styles.reviewPhotoImg} resizeMode="contain" />
                         </ScrollView>
                         <View style={styles.zoomHint} pointerEvents="none">
-                          <Maximize2 size={13} stroke="#FFFFFF" strokeWidth={2} />
-                          <Text style={styles.zoomHintText}>Pinch to zoom</Text>
+                          <Maximize2 size={12} stroke="#FFFFFF" strokeWidth={2} />
+                          <Text style={styles.zoomHintText}>Zoom</Text>
                         </View>
                       </View>
                     ) : (
@@ -1196,21 +1196,21 @@ const styles = StyleSheet.create({
   prepActions: { paddingBottom: 8, paddingTop: 8 },
 
   // ── Per-photo review carousel ──
-  pagerCtrl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 10 },
+  pagerCtrl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 4 },
   pagerLabel: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2 },
   dotsRow: { flexDirection: 'row', gap: 6, marginTop: 7, alignItems: 'center' },
   pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
   pagerDotActive: { backgroundColor: '#4ADE80', width: 18 },
-  reviewPhoto: { width: '100%', height: 230, backgroundColor: '#0A0A0A', overflow: 'hidden' },
-  reviewPhotoImg: { width: SCREEN_W, height: 230 },
+  reviewPhoto: { width: '100%', height: 300, backgroundColor: '#0A0A0A', overflow: 'hidden' },
+  reviewPhotoImg: { width: SCREEN_W, height: 300 },
   reviewPhotoZoomContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
-  zoomHint: { position: 'absolute', bottom: 8, right: 12, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 14 },
+  zoomHint: { position: 'absolute', bottom: 8, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 5, paddingHorizontal: 9, borderRadius: 13 },
   zoomHintText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
   zoneGroup: { marginBottom: 2 },
   zoneHeader: { fontSize: 12, fontWeight: '700', color: '#4ADE80', marginTop: 14, marginBottom: 8, letterSpacing: 0.3 },
   reviewPhotoPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 10 },
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
-  reviewItemsScroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+  reviewItemsScroll: { width: SCREEN_W, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
   reviewFoundLabel: { fontSize: 13, color: '#888888', marginBottom: 12, fontWeight: '600' },
   missedBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 10 },
   missedBarInput: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#FFFFFF', fontSize: 14 },
@@ -1618,17 +1618,21 @@ const styles = StyleSheet.create({
   zoneChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     backgroundColor: '#1A1A1A',
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingLeft: 14,
-    paddingRight: 10,
+    borderRadius: 16,
+    paddingVertical: 6,
+    paddingLeft: 12,
+    paddingRight: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+    // flexShrink:0 so chips keep their natural width and WRAP to the next line instead of
+    // being squeezed/clipped — default flexShrink let Yoga overflow the last chip per row.
+    flexShrink: 0,
+    maxWidth: SCREEN_W - 40, // a single very long chip still can't exceed the row width
   },
   zoneChipText: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '500',
     color: COLORS.textWhite,
   },
