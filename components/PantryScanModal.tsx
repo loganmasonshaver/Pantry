@@ -31,7 +31,7 @@ import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 
-const { width: SCREEN_W } = Dimensions.get('window')
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -275,6 +275,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // Post-save success step (returning scanners only) — offers the cook-reveal vs "maybe later".
   const [showSaved, setShowSaved] = useState(false)
   const [savedCount, setSavedCount] = useState(0)
+  // Tapped review photo → fullscreen pinch-to-zoom overlay (in-tree, not a nested Modal).
+  const [zoomUri, setZoomUri] = useState<string | null>(null)
   // Live-feel item counter: ramps up WHILE scanning (simulated — GPT returns all
   // items at once, so there's nothing real to stream), then settles to the true
   // total when results land. countRef mirrors it so the effects can read the latest
@@ -508,6 +510,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setMissedInput('')
       setAddingMissed(false)
       setShowSaved(false)
+      setZoomUri(null)
       setCurrentPhoto(0)
       nudgedRef.current = false
       setScanError(null)
@@ -1001,101 +1004,75 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           }
           return (
             <View style={stepWithSafeTop}>
-              <View style={styles.topBar}>
-                <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                  <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-                </TouchableOpacity>
-                <Text style={[styles.topTitle, { marginLeft: 12 }]}>Review your scan</Text>
-              </View>
-
-              {/* Pager controls — chevrons + "Photo N of M" + dots make the swipe obvious */}
-              <View style={styles.pagerCtrl}>
-                <TouchableOpacity onPress={() => goTo(cur - 1)} disabled={cur === 0} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <ChevronLeft size={24} stroke={cur === 0 ? '#3A3A3A' : COLORS.textWhite} strokeWidth={2} />
-                </TouchableOpacity>
-                <View style={{ alignItems: 'center' }}>
-                  <Text style={styles.pagerLabel}>{pages[cur]?.label}{total > 1 ? `  ·  ${cur + 1} of ${total}` : ''}</Text>
-                  {total > 1 && (
-                    <View style={styles.dotsRow}>
-                      {pages.map((_, i) => <View key={i} style={[styles.pagerDot, i === cur && styles.pagerDotActive]} />)}
-                    </View>
-                  )}
-                </View>
-                <TouchableOpacity onPress={() => goTo(cur + 1)} disabled={cur >= total - 1} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <ChevronRight size={24} stroke={cur >= total - 1 ? '#3A3A3A' : COLORS.textWhite} strokeWidth={2} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Horizontal pager — one full page per photo */}
-              <ScrollView
-                ref={pagerRef}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
-                // Break out of the step's 24px horizontal padding so each SCREEN_W page is truly
-                // full-width — otherwise pages overflowed the padded box and clipped the right
-                // edge (zoom hint + last chip per row). Inner rows self-pad (items 20, etc.).
-                style={{ flex: 1, marginHorizontal: -24 }}
-                keyboardShouldPersistTaps="handled"
-              >
-                {pages.map((page, idx) => {
-                  // Group this page's items by the zone/shelf the model assigned so the review
-                  // mirrors the physical layout (top shelf, door, drawer…). Headers only show
-                  // when there's >1 zone — a single zone reads cleaner as a flat list.
-                  const byZone = new Map<string, DetectedItem[]>()
-                  for (const it of page.items) {
-                    const z = (it.zone || '').trim() || 'Other'
-                    if (!byZone.has(z)) byZone.set(z, [])
-                    byZone.get(z)!.push(it)
-                  }
-                  const zoneEntries = Array.from(byZone.entries())
-                  const showZoneHeaders = zoneEntries.length > 1
-                  const renderChip = (item: DetectedItem) => (
-                    <View key={item.id} style={styles.zoneChip}>
-                      <Text style={styles.zoneChipText}>{item.name}</Text>
-                      <TouchableOpacity
-                        onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              {(() => {
+                // Items below follow the CURRENT photo (cur). Computed here so the top strip stays
+                // just photos and the list re-renders on swipe — keeps photo + its items glanceable.
+                const curItems = pages[cur]?.items ?? []
+                const byZone = new Map<string, DetectedItem[]>()
+                for (const it of curItems) {
+                  const z = (it.zone || '').trim() || 'Other'
+                  if (!byZone.has(z)) byZone.set(z, [])
+                  byZone.get(z)!.push(it)
+                }
+                const zoneEntries = Array.from(byZone.entries())
+                const showZoneHeaders = zoneEntries.length > 1
+                const renderChip = (item: DetectedItem) => (
+                  <View key={item.id} style={styles.zoneChip}>
+                    <Text style={styles.zoneChipText}>{item.name}</Text>
+                    <TouchableOpacity
+                      onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                    </TouchableOpacity>
+                  </View>
+                )
+                return (
+                  <>
+                    {/* Photo strip pulled to the very top, full-bleed. Swipe switches photos; the
+                        item list below follows `cur`. X + Zoom overlaid; tap a photo to zoom. */}
+                    <View style={[styles.reviewPhotoTop, { marginTop: -(insets.top + 8) }]}>
+                      <ScrollView
+                        ref={pagerRef}
+                        horizontal
+                        pagingEnabled
+                        showsHorizontalScrollIndicator={false}
+                        onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
+                        keyboardShouldPersistTaps="handled"
                       >
-                        <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                        {pages.map((page, idx) => (
+                          <TouchableOpacity key={idx} activeOpacity={0.95} onPress={() => page.uri && setZoomUri(page.uri)} style={styles.reviewPhoto}>
+                            <Image source={{ uri: page.uri }} style={styles.reviewPhotoImg} resizeMode="cover" />
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <TouchableOpacity style={[styles.closeBtn, styles.reviewCloseOverlay, { top: insets.top + 8 }]} onPress={handleClose}>
+                        <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
+                      <View style={styles.zoomHint} pointerEvents="none">
+                        <Maximize2 size={12} stroke="#FFFFFF" strokeWidth={2} />
+                        <Text style={styles.zoomHintText}>Zoom</Text>
+                      </View>
                     </View>
-                  )
-                  return (
-                  <View key={idx} style={{ width: SCREEN_W }}>
-                    {page.uri ? (
-                      // Pinch-to-zoom IN PLACE (maximumZoomScale) so the photo can be inspected
-                      // for misses while the item list stays visible below — no fullscreen
-                      // takeover. Pinch is two-finger so it doesn't fight the pager's swipe.
-                      <View style={styles.reviewPhoto}>
-                        <ScrollView
-                          style={StyleSheet.absoluteFill}
-                          contentContainerStyle={styles.reviewPhotoZoomContent}
-                          maximumZoomScale={3}
-                          minimumZoomScale={1}
-                          bouncesZoom
-                          centerContent
-                          showsVerticalScrollIndicator={false}
-                          showsHorizontalScrollIndicator={false}
-                        >
-                          <Image source={{ uri: page.uri }} style={styles.reviewPhotoImg} resizeMode="cover" />
-                        </ScrollView>
-                        <View style={styles.zoomHint} pointerEvents="none">
-                          <Maximize2 size={12} stroke="#FFFFFF" strokeWidth={2} />
-                          <Text style={styles.zoomHintText}>Zoom</Text>
+
+                    {/* Title + which-photo, right below the photo */}
+                    <View style={styles.reviewHeader}>
+                      <Text style={styles.topTitle}>Review your scan</Text>
+                      {total > 1 && (
+                        <View style={styles.reviewHeaderRight}>
+                          <Text style={styles.pagerLabel}>{pages[cur]?.label}  ·  {cur + 1}/{total}</Text>
+                          <View style={styles.dotsRow}>
+                            {pages.map((_, i) => <View key={i} style={[styles.pagerDot, i === cur && styles.pagerDotActive]} />)}
+                          </View>
                         </View>
-                      </View>
-                    ) : (
-                      <View style={[styles.reviewPhoto, styles.reviewPhotoPlaceholder]}>
-                        <ImageIcon size={28} stroke="#555" strokeWidth={1.4} />
-                        <Text style={styles.reviewPhotoPhText}>Items the AI couldn't place to a photo</Text>
-                      </View>
-                    )}
-                    <ScrollView style={{ flex: 1, width: SCREEN_W }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                      )}
+                    </View>
+
+                    {/* Current photo's items, grouped by zone */}
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                       <Text style={styles.reviewFoundLabel}>
-                        {page.items.length > 0
-                          ? `Found ${page.items.length} here — tap ✕ if it's wrong`
+                        {curItems.length > 0
+                          ? `Found ${curItems.length} here — tap ✕ if it's wrong`
                           : 'Nothing detected here — add anything you see below'}
                       </Text>
                       {showZoneHeaders
@@ -1105,12 +1082,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                               <View style={styles.zoneChipWrap}>{items.map(renderChip)}</View>
                             </View>
                           ))
-                        : <View style={styles.zoneChipWrap}>{page.items.map(renderChip)}</View>}
+                        : <View style={styles.zoneChipWrap}>{curItems.map(renderChip)}</View>}
                     </ScrollView>
-                  </View>
-                  )
-                })}
-              </ScrollView>
+                  </>
+                )
+              })()}
 
               {/* Common staples you likely have but the camera can't see — one tap to add. Folds
                   the old post-scan "kitchen basics?" popup into the flow the user is already in. */}
@@ -1278,6 +1254,27 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           </View>
         )}
 
+        {/* Fullscreen pinch-to-zoom for a tapped review photo. In-tree absolute overlay (not a
+            nested Modal) so it layers over the scan modal on iOS. */}
+        {zoomUri && (
+          <View style={styles.zoomOverlay}>
+            <ScrollView
+              style={StyleSheet.absoluteFill}
+              contentContainerStyle={styles.zoomScrollContent}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              centerContent
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+            >
+              <Image source={{ uri: zoomUri }} style={styles.zoomImage} resizeMode="contain" />
+            </ScrollView>
+            <TouchableOpacity style={[styles.closeBtn, { position: 'absolute', top: insets.top + 8, left: 12, zIndex: 101 }]} onPress={() => setZoomUri(null)}>
+              <X size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
+        )}
+
       </SafeAreaView>
     </Modal>
   )
@@ -1326,9 +1323,18 @@ const styles = StyleSheet.create({
   dotsRow: { flexDirection: 'row', gap: 6, marginTop: 7, alignItems: 'center' },
   pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
   pagerDotActive: { backgroundColor: '#4ADE80', width: 18 },
-  reviewPhoto: { width: '100%', height: 250, backgroundColor: '#0A0A0A', overflow: 'hidden' },
-  reviewPhotoImg: { width: SCREEN_W, height: 250 },
-  reviewPhotoZoomContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  // Photo strip pinned to the very top, full-bleed (breaks out of the step's 24px side padding).
+  reviewPhotoTop: { marginHorizontal: -24, position: 'relative' },
+  reviewPhoto: { width: SCREEN_W, height: 264, backgroundColor: '#0A0A0A', overflow: 'hidden' },
+  reviewPhotoImg: { width: SCREEN_W, height: 264 },
+  reviewCloseOverlay: { position: 'absolute', left: 12, zIndex: 10 },
+  // Title row directly below the photo (within the step's normal 24px padding).
+  reviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, paddingBottom: 4 },
+  reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
+  // Fullscreen tap-to-zoom overlay.
+  zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
+  zoomScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  zoomImage: { width: SCREEN_W, height: SCREEN_H },
   zoomHint: { position: 'absolute', bottom: 8, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 5, paddingHorizontal: 9, borderRadius: 13 },
   zoomHintText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
   zoneGroup: { marginBottom: 2 },
