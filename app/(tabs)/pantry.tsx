@@ -720,11 +720,11 @@ export default function PantryScreen() {
       <PantryScanModal
         visible={showScanModal}
         onClose={() => setShowScanModal(false)}
-        // After a pantry scan, refresh the item list AND launch the cook-reveal payoff screen
-        // (fresh meals from the just-scanned pantry). Receipt scans below intentionally don't.
-        // Defer the push ~400ms: onItemsAdded fires while the scan <Modal> is still open, and a
-        // navigation under a presented native modal gets swallowed — let it slide away first.
-        onItemsAdded={() => { fetchItems(); setTimeout(() => router.push('/cook-reveal' as any), 400) }}
+        onItemsAdded={() => fetchItems()}
+        // The modal owns the post-save flow (first scan auto-reveals; later scans offer a
+        // choice). onSeeMeals is the cook-reveal payoff — deferred ~400ms so the scan <Modal>
+        // slides away first, otherwise the nav is swallowed under the presented native modal.
+        onSeeMeals={() => setTimeout(() => router.push('/cook-reveal' as any), 400)}
       />
 
       {/* ── Receipt Scan Modal ── */}

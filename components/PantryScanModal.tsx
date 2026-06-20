@@ -221,9 +221,15 @@ type Props = {
   visible: boolean
   onClose: () => void
   onItemsAdded?: () => void
+  // When provided, a saved scan offers the cook-reveal payoff. First scan auto-reveals
+  // (the magic moment); later scans get a "See meals / Maybe later" choice. Omit it (e.g.
+  // the Home entry) to keep the old close-immediately behavior and run a different flow.
+  onSeeMeals?: () => void
 }
 
-export default function PantryScanModal({ visible, onClose, onItemsAdded }: Props) {
+const COOK_REVEAL_SEEN_KEY = 'cook_reveal_seen_v1'
+
+export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeMeals }: Props) {
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
   const { isPremium, triggerUpgrade } = usePremium()
@@ -259,6 +265,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
+  // Post-save success step (returning scanners only) — offers the cook-reveal vs "maybe later".
+  const [showSaved, setShowSaved] = useState(false)
+  const [savedCount, setSavedCount] = useState(0)
   // Live-feel item counter: ramps up WHILE scanning (simulated — GPT returns all
   // items at once, so there's nothing real to stream), then settles to the true
   // total when results land. countRef mirrors it so the effects can read the latest
@@ -487,6 +496,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       setFlashOn(false)
       setMissedInput('')
       setAddingMissed(false)
+      setShowSaved(false)
       setCurrentPhoto(0)
       nudgedRef.current = false
       setScanError(null)
@@ -659,6 +669,25 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
             <View style={styles.prepActions}>
               <TouchableOpacity style={styles.primaryBtn} onPress={dismissPrep} activeOpacity={0.85}>
                 <Text style={styles.primaryBtnText}>Got it — start scanning</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
+        {/* ── Post-save success step — returning scanners choose the cook-reveal or skip ── */}
+        {showSaved && (
+          <View style={[styles.savedOverlay, { paddingTop: insets.top + 16 }]}>
+            <View style={styles.savedBody}>
+              <View style={styles.savedCheck}><Check size={40} stroke="#000000" strokeWidth={3} /></View>
+              <Text style={styles.savedTitle}>{savedCount} item{savedCount !== 1 ? 's' : ''} added</Text>
+              <Text style={styles.savedSub}>Your pantry's updated. Want to see what you can make right now?</Text>
+            </View>
+            <View style={styles.savedActions}>
+              <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.85} onPress={() => { handleClose(); onSeeMeals?.() }}>
+                <Text style={styles.primaryBtnText}>See what you can cook</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.savedLater} activeOpacity={0.7} onPress={() => handleClose()}>
+                <Text style={styles.savedLaterText}>Maybe later</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1093,7 +1122,20 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                       return
                     }
                     onItemsAdded?.()
-                    handleClose()
+                    // No cook-reveal flow wired (e.g. Home entry) → close as before.
+                    if (!onSeeMeals) { handleClose(); return }
+                    // First scan ever: auto-reveal the magic (no choice). After that, returning
+                    // scanners get the success step with a "Maybe later" off-ramp, so we don't
+                    // force a meal generation on every restock.
+                    const seen = await AsyncStorage.getItem(COOK_REVEAL_SEEN_KEY)
+                    if (!seen) {
+                      await AsyncStorage.setItem(COOK_REVEAL_SEEN_KEY, '1')
+                      handleClose()
+                      onSeeMeals()
+                      return
+                    }
+                    setSavedCount(rows.length)
+                    setShowSaved(true)
                   }}
                 >
                   {saving
@@ -1212,6 +1254,14 @@ const styles = StyleSheet.create({
   prepTipBold: { color: '#FFFFFF', fontWeight: '700' },
   prepFootnote: { fontSize: 13, color: '#777777', textAlign: 'center', marginTop: 28, lineHeight: 19 },
   prepActions: { paddingBottom: 8, paddingTop: 8 },
+  savedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 60, paddingHorizontal: 24 },
+  savedBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
+  savedCheck: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  savedTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4 },
+  savedSub: { fontSize: 15, color: '#999999', textAlign: 'center', lineHeight: 21, paddingHorizontal: 12 },
+  savedActions: { paddingBottom: 8, paddingTop: 8 },
+  savedLater: { paddingVertical: 14, alignItems: 'center' },
+  savedLaterText: { fontSize: 15, color: '#888888', fontWeight: '600' },
 
   // ── Per-photo review carousel ──
   pagerCtrl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 4 },
