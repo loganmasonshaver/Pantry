@@ -427,7 +427,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     const tick = () => {
       if (cancelled) return
       const n = spottedCountRef.current
-      if (n >= 24) return // soft cap — real total replaces this on completion
+      if (n >= 9) return // soft cap kept BELOW the typical real count so the reveal counts UP (a
+      // reward), never down — a ramp that overshot to 14 then settled to 12 felt like a let-down
       const next = n + 1
       spottedCountRef.current = next
       setSpottedCount(next)
@@ -972,14 +973,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           // misses. Items the model didn't attribute fall onto a trailing "More" page.
           // Single photo: every item belongs to it — skip the per-photo split entirely so the
           // model omitting a `photo` index can't dump everything onto a phantom "More" page.
-          const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number | null }[] =
+          // Map every item to a REAL photo. The model often omits/garbles the per-item `photo`
+          // index, so anything unattributed falls back to photo 0 — never a separate photo-less
+          // "More" page (that was the bug: 2 photos rendered a phantom 3rd page holding everything).
+          // Pages always == photo count.
+          const photoOf = (d: DetectedItem) =>
+            (typeof d.photo === 'number' && d.photo >= 0 && d.photo < photos.length) ? d.photo : 0
+          const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number }[] =
             photos.length <= 1
               ? [{ uri: photos[0]?.uri, label: 'Photo 1', items: detectedItems, photoIdx: 0 }]
-              : photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => d.photo === idx), photoIdx: idx }))
-          if (photos.length > 1) {
-            const orphans = detectedItems.filter(d => d.photo == null || d.photo < 0 || d.photo >= photos.length)
-            if (orphans.length > 0) pages.push({ uri: undefined, label: 'More', items: orphans, photoIdx: null })
-          }
+              : photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => photoOf(d) === idx), photoIdx: idx }))
           const total = pages.length || 1
           const cur = Math.min(currentPhoto, total - 1)
           const goTo = (i: number) => {
