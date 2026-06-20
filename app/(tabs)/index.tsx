@@ -27,6 +27,7 @@ import { Swipeable } from 'react-native-gesture-handler'
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
+import { MealImage } from '@/components/MealImage'
 import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
 import { useSuperwall } from 'expo-superwall'
@@ -209,7 +210,7 @@ function MealCard({
       onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
     >
       {meal.image && meal.image.startsWith('http') ? (
-        <Image source={{ uri: meal.image }} style={styles.mealImageReal} resizeMode="cover" />
+        <MealImage uri={meal.image} style={styles.mealImageReal} recyclingKey={String(meal.id)} />
       ) : (
         <ShimmerBox style={styles.mealImagePlaceholder} />
       )}
@@ -868,7 +869,7 @@ export default function HomeScreen() {
                   onPress={() => router.push({ pathname: '/meal/[id]', params: { id: m.id } })}
                 >
                   {m.image_url ? (
-                    <Image source={{ uri: m.image_url }} style={styles.planReadyImage} resizeMode="cover" />
+                    <MealImage uri={m.image_url} style={styles.planReadyImage} />
                   ) : (
                     <View style={[styles.planReadyImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
                       <Utensils size={20} stroke="#555" strokeWidth={1.5} />
@@ -1175,7 +1176,7 @@ export default function HomeScreen() {
                         so the gradient + text stay anchored while only the image scales. */}
                     <RNAnimated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: heroScale }] }]}>
                       {heroMeal.image && heroMeal.image.startsWith('http') ? (
-                        <Image source={{ uri: heroMeal.image }} style={styles.heroMealImage} resizeMode="cover" />
+                        <MealImage uri={heroMeal.image} style={styles.heroMealImage} priority="high" />
                       ) : (
                         // Shimmer skeleton while the AI image is still rendering — reads as
                         // "loading" instead of a static icon. Title/pills stay overlaid on top.

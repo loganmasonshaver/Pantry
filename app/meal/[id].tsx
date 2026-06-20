@@ -22,6 +22,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, ChevronRight } from 'lucide-react-native'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
+import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { categorizeItem } from '@/lib/categories'
@@ -883,7 +884,7 @@ export default function MealDetailScreen() {
           </View>
         ) : (meal.image || generatedImage) ? (
           <View style={styles.heroContainer}>
-            <Image source={{ uri: meal.image || generatedImage! }} style={styles.heroImage} resizeMode="cover" />
+            <MealImage uri={(meal.image || generatedImage) as string} style={styles.heroImage} priority="high" />
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
               locations={[0.3, 0.7, 1]}

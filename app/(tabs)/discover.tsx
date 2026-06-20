@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
+import { MealImage, prefetchMealImages } from '@/components/MealImage'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
@@ -229,7 +230,10 @@ export default function DiscoverScreen() {
       if (!raw) return
       try {
         const cached = JSON.parse(raw)
-        if (Array.isArray(cached) && cached.length) { setTrending(cached); hasContentRef.current = true; setLoading(false) }
+        if (Array.isArray(cached) && cached.length) {
+          setTrending(cached); hasContentRef.current = true; setLoading(false)
+          prefetchMealImages(cached.slice(0, 8).map((m: DiscoverMeal) => m.image)) // warm the rail before scroll
+        }
       } catch {}
     })
   }, [user])
@@ -282,6 +286,7 @@ export default function DiscoverScreen() {
     setLoading(false)
     // Cache a light slice for instant paint on the next focus / app launch (stale-while-revalidate).
     if (user) AsyncStorage.setItem(discoverCacheKey(user.id), JSON.stringify(mapped.slice(0, 60))).catch(() => {})
+    prefetchMealImages(mapped.slice(0, 8).map(m => m.image)) // warm the visible rail's photos
   }, [user])
 
   // Initial mount + every tab return: useFocusEffect already fires on first focus
@@ -390,7 +395,7 @@ export default function DiscoverScreen() {
             onPress={() => openMeal(featured)}
           >
             {featured.image && featured.image.startsWith('http') ? (
-              <Image source={{ uri: featured.image }} style={styles.featuredImage} resizeMode="cover" />
+              <MealImage uri={featured.image} style={styles.featuredImage} recyclingKey={String(featured.id)} priority="high" />
             ) : (
               <View style={[styles.featuredImage, styles.featuredImagePlaceholder]}>
                 <Utensils size={36} stroke="#444" strokeWidth={1.4} />
@@ -508,7 +513,7 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
   return (
     <TouchableOpacity style={styles.railCard} activeOpacity={0.85} onPress={onPress}>
       {meal.image && meal.image.startsWith('http') ? (
-        <Image source={{ uri: meal.image }} style={styles.railImage} resizeMode="cover" />
+        <MealImage uri={meal.image} style={styles.railImage} recyclingKey={String(meal.id)} />
       ) : (
         <View style={[styles.railImage, styles.featuredImagePlaceholder]}>
           <Utensils size={28} stroke="#444" strokeWidth={1.4} />

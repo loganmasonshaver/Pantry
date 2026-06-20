@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { View, Text, Image, TouchableOpacity, StyleSheet, Animated, ScrollView, Easing, Dimensions, AccessibilityInfo } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, Animated, ScrollView, Easing, Dimensions, AccessibilityInfo } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import * as Haptics from 'expo-haptics'
@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import { Shimmer } from '@/components/Shimmer'
+import { MealImage } from '@/components/MealImage'
 
 // Deck geometry — each card is ~78% of the screen so the neighbours peek in at the edges,
 // which is what sells the "there's more in the deck" feel as you advance.
@@ -180,7 +181,7 @@ export default function CookReveal() {
                 <Animated.View key={meal.id ?? i} style={[styles.cardWrap, { transform: [{ scale }], opacity }]}>
                   <TouchableOpacity activeOpacity={0.92} onPress={() => openMeal(meal)} style={styles.card}>
                     {meal.image ? (
-                      <Image source={{ uri: meal.image }} style={styles.cardImage} resizeMode="cover" />
+                      <MealImage uri={meal.image} style={styles.cardImage} recyclingKey={String(meal.id ?? i)} priority="high" />
                     ) : (
                       <Shimmer style={styles.cardImage} />
                     )}

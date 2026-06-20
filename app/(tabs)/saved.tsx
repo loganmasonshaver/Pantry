@@ -8,15 +8,14 @@ import {
   StyleSheet,
   Dimensions,
   Animated,
-  ActivityIndicator,
-  Image,
-  Alert,
+  ActivityIndicator,  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { MealImage, prefetchMealImages } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router'
 import { Bookmark, Search, X, Utensils, Clock, Plus, Link } from 'lucide-react-native'
@@ -100,7 +99,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={handlePress}>
       {meal.image ? (
-        <Image source={{ uri: meal.image }} style={styles.cardImageReal} resizeMode="cover" />
+        <MealImage uri={meal.image} style={styles.cardImageReal} recyclingKey={String(meal.id)} />
       ) : (
         <View style={[styles.cardImageReal, styles.cardImagePlaceholder]}>
           <Utensils size={28} stroke="#555555" strokeWidth={1.5} />
@@ -222,7 +221,10 @@ export default function SavedScreen() {
       if (!raw) return
       try {
         const cached = JSON.parse(raw)
-        if (Array.isArray(cached) && cached.length) { setMeals(cached); hasContentRef.current = true; setLoading(false) }
+        if (Array.isArray(cached) && cached.length) {
+          setMeals(cached); hasContentRef.current = true; setLoading(false)
+          prefetchMealImages(cached.slice(0, 8).map((m: SavedMeal) => m.image)) // warm visible cards before scroll
+        }
       } catch {}
     })
   }, [user])
@@ -248,6 +250,7 @@ export default function SavedScreen() {
       hasContentRef.current = true
       // Cache for instant paint on the next focus / app launch (stale-while-revalidate).
       AsyncStorage.setItem(savedCacheKey(user.id), JSON.stringify(mealsWithTags)).catch(() => {})
+      prefetchMealImages(mealsWithTags.slice(0, 8).map(m => m.image)) // warm the visible cards' photos
       // Lazy backfill for legacy saves with no stored image. Two key guards vs the old
       // version: (1) we PERSIST the generated image back to saved_meals.image_url, so it's
       // generated once ever — not re-fetched on every tab focus; (2) we process in small
