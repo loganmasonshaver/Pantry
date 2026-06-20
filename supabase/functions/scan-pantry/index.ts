@@ -23,7 +23,10 @@ const SCAN_WINDOW_DAYS = 7
 const MAX_PHOTOS_PER_SCAN = 8
 
 // One vision call with a hard timeout. Throws on error/timeout/empty so the caller can fall back.
-async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, timeoutMs = 90000): Promise<string> {
+// 30s: the model returns in ~10s; 30s leaves headroom for a slow response while keeping the
+// whole flow (up to 2 passes × primary+fallback) safely under Supabase's ~150s edge wall-clock
+// limit, and surfaces a real failure fast instead of making the user wait 90s.
+async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, timeoutMs = 30000): Promise<string> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {

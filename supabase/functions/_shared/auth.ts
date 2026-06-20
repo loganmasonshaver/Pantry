@@ -15,11 +15,23 @@ const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
 // back to the network getUser path below, so this can never lock out a valid user.
 const JWKS = createRemoteJWKSet(new URL(`${supabaseUrl}/auth/v1/.well-known/jwks.json`))
 
+// Network fallback hit only when local JWKS verification misses (stale/invalid token — exactly
+// the corrupted-session case). getUser() has no built-in timeout, so a slow/unreachable Auth
+// API would hang here with no ceiling and the worker would run until Supabase's ~150s edge
+// wall-clock kill — surfacing to the client as a "failed to send" / non-2xx with no useful
+// reason. Race it against a 30s cap so a bad token returns a clean 401 fast instead.
+const AUTH_NETWORK_TIMEOUT_MS = 30000
 async function networkVerify(token: string): Promise<{ id: string; email: string | null } | null> {
   const client = createClient(supabaseUrl, supabaseAnonKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
   })
-  const { data, error } = await client.auth.getUser(token)
+  const result = await Promise.race([
+    client.auth.getUser(token),
+    new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error('auth network verify timed out') }), AUTH_NETWORK_TIMEOUT_MS)
+    ),
+  ])
+  const { data, error } = result
   if (error || !data?.user) return null
   return { id: data.user.id, email: data.user.email ?? null }
 }
