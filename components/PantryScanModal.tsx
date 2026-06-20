@@ -368,9 +368,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           zoneGroups.push({ zone: zoneData.zone, items: zoneItems })
         }
 
-        // TEMP DIAGNOSTIC (remove after): logs exactly what the model returned for `photo` per
-        // item, so we can see WHY items orphan (omitted? string? 1-indexed/out of range?).
-        console.log('[scan-debug] photos=', photos.length, 'rawPhoto=', JSON.stringify((result.zones || []).flatMap((z: any) => (z.items || []).map((i: any) => i.photo))))
         setDetectedItems(allItems)
         setZones(zoneGroups)
         setShowDone(true)
