@@ -14,11 +14,12 @@ import {
   ActivityIndicator,
   Animated as RNAnimated,
   Easing,
+  Alert,
 } from 'react-native'
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw } from 'lucide-react-native'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Trash2 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -363,6 +364,26 @@ export default function PantryScreen() {
     await supabase.from('pantry_items').delete().eq('id', ingredientId)
   }
 
+  // Wipe the whole pantry. Confirmed because it's bulk + irreversible (the usual no-confirm
+  // rule is for routine actions; this isn't). Optimistic clear, refetch to restore on error.
+  const clearPantry = () => {
+    if (!user || totalItems === 0) return
+    Alert.alert(
+      'Clear pantry?',
+      `This removes all ${totalItems} ingredient${totalItems !== 1 ? 's' : ''}. This can't be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear', style: 'destructive', onPress: async () => {
+            setCategories([])
+            const { error } = await supabase.from('pantry_items').delete().eq('user_id', user.id)
+            if (error) { Alert.alert("Couldn't clear pantry", error.message); fetchItems() }
+          },
+        },
+      ],
+    )
+  }
+
   const addIngredient = async (overrideCategory?: string) => {
     const name = newIngredientName.trim()
     if (!name || !user) return
@@ -699,7 +720,13 @@ export default function PantryScreen() {
           }
           ListFooterComponent={
             totalItems > 0 ? (
-              <Text style={styles.timestamp}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''} total</Text>
+              <View style={styles.footerWrap}>
+                <Text style={styles.timestamp}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''} total</Text>
+                <TouchableOpacity style={styles.clearBtn} onPress={clearPantry} activeOpacity={0.7}>
+                  <Trash2 size={15} stroke="#EF4444" strokeWidth={2} />
+                  <Text style={styles.clearBtnText}>Clear pantry</Text>
+                </TouchableOpacity>
+              </View>
             ) : null
           }
           renderItem={({ item: cat, drag, isActive }: RenderItemParams<Category>) => (
@@ -1105,6 +1132,9 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20, maxWidth: 280 },
 
   timestamp: { textAlign: 'center', fontSize: 13, color: COLORS.textMuted, fontWeight: '500', marginTop: 24, letterSpacing: 0.3 },
+  footerWrap: { alignItems: 'center', paddingBottom: 24 },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14, paddingVertical: 10, paddingHorizontal: 18, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
+  clearBtnText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalSheet: {
