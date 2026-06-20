@@ -18,7 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -29,7 +29,7 @@ import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 
-const { width: SCREEN_W } = Dimensions.get('window')
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -248,6 +248,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
   const [addingMissed, setAddingMissed] = useState(false)
+  // When set, shows the fullscreen pinch-to-zoom overlay for that photo uri. Rendered as an
+  // in-tree absolute overlay (not a nested <Modal>) to avoid the iOS modal-over-modal issue.
+  const [zoomUri, setZoomUri] = useState<string | null>(null)
   // Live-feel item counter: ramps up WHILE scanning (simulated — GPT returns all
   // items at once, so there's nothing real to stream), then settles to the true
   // total when results land. countRef mirrors it so the effects can read the latest
@@ -901,10 +904,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           // One review page per captured photo — each shows that photo full + ONLY the items
           // the AI attributed to it (item.photo), so the user compares photo-vs-list to catch
           // misses. Items the model didn't attribute fall onto a trailing "More" page.
+          // Single photo: every item belongs to it — skip the per-photo split entirely so the
+          // model omitting a `photo` index can't dump everything onto a phantom "More" page.
           const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number | null }[] =
-            photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => d.photo === idx), photoIdx: idx }))
-          const orphans = detectedItems.filter(d => d.photo == null || d.photo < 0 || d.photo >= photos.length)
-          if (orphans.length > 0) pages.push({ uri: undefined, label: 'More', items: orphans, photoIdx: null })
+            photos.length <= 1
+              ? [{ uri: photos[0]?.uri, label: 'Photo 1', items: detectedItems, photoIdx: 0 }]
+              : photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => d.photo === idx), photoIdx: idx }))
+          if (photos.length > 1) {
+            const orphans = detectedItems.filter(d => d.photo == null || d.photo < 0 || d.photo >= photos.length)
+            if (orphans.length > 0) pages.push({ uri: undefined, label: 'More', items: orphans, photoIdx: null })
+          }
           const total = pages.length || 1
           const cur = Math.min(currentPhoto, total - 1)
           const goTo = (i: number) => {
@@ -952,14 +961,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                 {pages.map((page, idx) => (
                   <View key={idx} style={{ width: SCREEN_W }}>
                     {page.uri ? (
-                      <Image source={{ uri: page.uri }} style={styles.reviewPhoto} resizeMode="contain" />
+                      <TouchableOpacity activeOpacity={0.9} onPress={() => setZoomUri(page.uri!)}>
+                        <Image source={{ uri: page.uri }} style={styles.reviewPhoto} resizeMode="contain" />
+                        <View style={styles.zoomHint}>
+                          <Maximize2 size={13} stroke="#FFFFFF" strokeWidth={2} />
+                          <Text style={styles.zoomHintText}>Tap to zoom</Text>
+                        </View>
+                      </TouchableOpacity>
                     ) : (
                       <View style={[styles.reviewPhoto, styles.reviewPhotoPlaceholder]}>
                         <ImageIcon size={28} stroke="#555" strokeWidth={1.4} />
                         <Text style={styles.reviewPhotoPhText}>Items the AI couldn't place to a photo</Text>
                       </View>
                     )}
-                    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                    {/* width pinned to SCREEN_W: nested in the horizontal pager, the vertical
+                        scroll would otherwise size wider than the screen and the chip flex-wrap
+                        would compute against that, drifting chips off the right edge. */}
+                    <ScrollView style={{ flex: 1, width: SCREEN_W }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                       <Text style={styles.reviewFoundLabel}>
                         {page.items.length > 0
                           ? `Found ${page.items.length} here — tap ✕ if it's wrong`
@@ -1116,6 +1134,31 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
           </View>
         )}
 
+        {/* Fullscreen pinch-to-zoom for the review photo. In-tree absolute overlay (not a nested
+            <Modal>) so it layers over the scan modal on iOS. ScrollView maximumZoomScale gives
+            native pinch-zoom; tap X to dismiss. */}
+        {zoomUri && (
+          <View style={styles.zoomOverlay}>
+            <ScrollView
+              style={StyleSheet.absoluteFill}
+              contentContainerStyle={styles.zoomScrollContent}
+              maximumZoomScale={4}
+              minimumZoomScale={1}
+              centerContent
+              showsVerticalScrollIndicator={false}
+              showsHorizontalScrollIndicator={false}
+            >
+              <Image source={{ uri: zoomUri }} style={styles.zoomImage} resizeMode="contain" />
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.closeBtn, { position: 'absolute', top: insets.top + 8, left: 12, zIndex: 101 }]}
+              onPress={() => setZoomUri(null)}
+            >
+              <X size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+            </TouchableOpacity>
+          </View>
+        )}
+
       </SafeAreaView>
     </Modal>
   )
@@ -1156,7 +1199,12 @@ const styles = StyleSheet.create({
   dotsRow: { flexDirection: 'row', gap: 6, marginTop: 7, alignItems: 'center' },
   pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
   pagerDotActive: { backgroundColor: '#4ADE80', width: 18 },
-  reviewPhoto: { width: '100%', height: 300, backgroundColor: '#0A0A0A' },
+  reviewPhoto: { width: '100%', height: 230, backgroundColor: '#0A0A0A' },
+  zoomHint: { position: 'absolute', bottom: 8, right: 12, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 14 },
+  zoomHintText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },
+  zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
+  zoomScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  zoomImage: { width: SCREEN_W, height: SCREEN_H },
   reviewPhotoPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 10 },
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
   reviewItemsScroll: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
