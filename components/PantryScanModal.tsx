@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import * as Haptics from 'expo-haptics'
 import {
   View,
   Text,
@@ -91,15 +92,20 @@ const MAX_PHOTOS_PER_SCAN = 8
 // the user sees roughly matches what the AI is actually doing right now,
 // instead of random rotation that repeats mid-scan and shows misleading copy
 // (e.g. "second pass" before the first pass even returns).
-const LOADING_STAGES = [
-  { atMs: 0,      title: 'Uploading photos...',         sub: 'Sending your shelves to our AI vision model' },
-  { atMs: 4000,   title: 'Reading the shelves...',      sub: 'First pass — identifying every item we can see' },
-  { atMs: 20000,  title: 'Decoding labels & packaging', sub: 'Brand names, product types, sizes' },
-  { atMs: 40000,  title: 'Catching what we missed',     sub: 'Second pass — small items, back rows, door shelves' },
-  { atMs: 65000,  title: 'Looking up barcodes',         sub: 'Cross-referencing the Open Food Facts database' },
-  { atMs: 85000,  title: 'Categorizing everything',     sub: 'Sorting by produce, protein, condiments, dairy' },
-  { atMs: 110000, title: 'Almost there...',             sub: 'Big kitchens take a little longer to process' },
-  { atMs: 140000, title: 'Still working...',            sub: "Hang tight — we'll let you add anything we missed at the end" },
+// Status lines shown while scanning. PROCESS-based on purpose — they describe what the AI is
+// doing, never what it's finding, so they're true whether the user scanned a fridge, a pantry,
+// or a single cabinet (no false "behind the milk" / "checking the door" claims). They CYCLE on
+// a fixed interval and loop, so even a fast ~10s scan still feels alive instead of stalling on
+// one line.
+const SCAN_STATUS_LINES = [
+  'Reading your shelves 🔍',
+  'Decoding labels & packaging 🏷️',
+  'Scanning shelf by shelf 📲',
+  'Checking the back rows 👀',
+  'Catching the small stuff 🔦',
+  'Identifying every package 📦',
+  'Looking for anything hidden 🔎',
+  'Double-checking for misses ✅',
 ]
 
 // Hard ceiling. If the scan hasn't responded by this point something is wrong
@@ -369,23 +375,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
     return () => { loop.stop() }
   }, [step, retryNonce])
 
-  // Pick the message stage based on actual elapsed scan time. Re-evaluates
-  // every second so the visible copy advances in lockstep with what the server
-  // is most likely doing — never repeats, never overshoots reality.
+  // Cycle the status copy on a fixed cadence and loop — keeps the screen feeling active even
+  // on a fast scan. 1400ms is slow enough to read, fast enough that something always changes.
   useEffect(() => {
     if (step !== 5 || showDone) return
-    const startedAt = Date.now()
     setLoadingMessageIdx(0)
     const interval = setInterval(() => {
-      const elapsed = Date.now() - startedAt
-      // Pick the latest stage whose atMs ≤ elapsed. Stages are ordered ascending.
-      let idx = 0
-      for (let i = 0; i < LOADING_STAGES.length; i++) {
-        if (LOADING_STAGES[i].atMs <= elapsed) idx = i
-        else break
-      }
-      setLoadingMessageIdx(idx)
-    }, 1000)
+      setLoadingMessageIdx(i => (i + 1) % SCAN_STATUS_LINES.length)
+    }, 1400)
     return () => clearInterval(interval)
   }, [step, showDone])
 
@@ -405,6 +402,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
       const next = n + 1
       spottedCountRef.current = next
       setSpottedCount(next)
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}) // a light tap per "spotted" item — makes the climb feel like real discovery
       timer = setTimeout(tick, 280 + next * 80) // gap grows ~80ms per item (was 110 — felt too slow as the count climbed)
     }
     timer = setTimeout(tick, 350)
@@ -861,7 +859,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded }: Prop
                   <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 10, paddingHorizontal: 12 }]}>
                     {showDone
                       ? 'Tap below to review and add anything we missed'
-                      : LOADING_STAGES[loadingMessageIdx].title}
+                      : SCAN_STATUS_LINES[loadingMessageIdx]}
                   </Text>
                 </>
               )}
