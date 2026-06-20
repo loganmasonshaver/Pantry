@@ -226,10 +226,11 @@ Zone detection rules:
 - If the image is a single flat surface (countertop, single shelf, table), use layout "horizontal" with zones like: "Left Side", "Center", "Right Side"
 - Only include zones that actually contain items
 - Order zones top-to-bottom for shelves, left-to-right for horizontal
+- Distribute items into the SPECIFIC zone where each physically sits — do NOT dump everything into one generic zone. A full fridge usually spans 3-6 zones (several shelves + the door + drawers); put each item in the zone matching its real location so the user can scan shelf-by-shelf.
 
 Item rules:
 - "name" must be a GENERIC ingredient name — NEVER a brand or product name. Before writing each name, STRIP the brand to its generic type: "A1" → "Steak Sauce", "Quest Bars" → "Protein Bars", "Babybel" → "Cheese", "Hamburger Helper" → "Pasta Dinner Kit", "Campbell's Cream of Mushroom Soup" → "Cream of Mushroom Soup", "Uncle Ben's Rice" → "Rice", "Chobani" → "Greek Yogurt". A brand in the name creates duplicate entries. Use the brand/label only as CONTEXT to make the GENERIC name more specific (e.g. "Non-Fat Plain Greek Yogurt", not just "Yogurt").
-- "photo" — 0-based index of which photo this item came from. Required for downstream density analysis. If you genuinely can't tell, use 0.
+- "photo" — REQUIRED on EVERY item object, never omit it. The 0-based index (0 to ${images.length - 1}) of the photo this item is visible in. ${images.length === 1 ? 'There is only ONE photo, so "photo" is ALWAYS 0 on every item.' : `Assign each item to the specific photo it actually appears in — an item seen in the 3rd photo must be "photo": 2, NOT 0. Do not default everything to 0.`}
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
   - Carbs: bread, pasta, rice, cereals, flour
@@ -323,8 +324,9 @@ EXCLUDE pet food/treats and non-edible household goods (cleaning supplies, paper
 
 Use SAME zone names from first pass where possible: ${knownZones.join(', ') || '(none — invent zones based on layout)'}.
 Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
+"photo" is REQUIRED on every item — the 0-based index (0 to ${images.length - 1}) of the photo it appears in${images.length === 1 ? ' (always 0 here)' : ', so it groups under the right photo'}.
 
-Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "..." }] }
+Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "...", "photo": 0 }] }
 
 Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] }.`
 
@@ -349,7 +351,9 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
             zone = { zone: zoneName, items: [] }
             result.zones.push(zone)
           }
-          zone.items.push({ name: item.name, category: item.category || 'Other' })
+          // Carry the photo index (default 0) so second-pass finds don't orphan to the
+          // client's "More" page in multi-photo scans the way first-pass items wouldn't.
+          zone.items.push({ name: item.name, category: item.category || 'Other', photo: typeof item.photo === 'number' ? item.photo : 0 })
         }
         console.log(`[scan-pantry] second pass: ${Date.now() - secondPassStart}ms, added ${missed.length} items`)
       }
