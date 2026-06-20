@@ -175,6 +175,9 @@ function RootLayoutNav() {
         <Stack.Screen name="meal/[id]" />
         <Stack.Screen name="delivery-webview" />
         <Stack.Screen name="food-preferences" />
+        {/* Post-scan payoff screen. Registered explicitly + fade so the push from the pantry
+            scan reliably lands instead of being dropped under the closing scan modal. */}
+        <Stack.Screen name="cook-reveal" options={{ animation: 'fade' }} />
       </Stack>
       {/* Branded splash overlay — covers any partial Stack render during cold start.
           Positioned AFTER the Stack so it floats above. */}
