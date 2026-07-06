@@ -185,18 +185,108 @@ const GROUNDTRUTH = {
     { name: 'Olive/Cooking Oil', keys: ['oil'] },
     { name: 'Potato Chips', keys: ['chip'] },
   ],
-  // Logan's real counter-spread test shot. Conservative — only clearly-readable packaged goods,
-  // so recall measures "does raising the floor start killing REAL food" (the ceiling we care
-  // about). Many more items are in the photo; they'll show as "unverified" and that's expected.
+  // ── Below: hand-verified by reading each photo at full resolution (rotated upright + region
+  // crops for the dense ones). Conservative on purpose — only items whose label/shape I could
+  // actually READ. Recall then measures the thing that matters: "does raising the floor start
+  // killing REAL food." Dense photos have many more items than listed; those show as
+  // "unverified" and that's expected, not a truth error.
+
+  // Logan's counter-spread (IMG_3577). NOTE: what looked like "chocolate syrup" in a shrunk
+  // thumbnail is actually the Premier Protein tub — corrected after reading the upright crop.
   'IMG_3577.jpg': [
-    { name: 'Quest Protein Bars', keys: ['quest', 'protein bar'] },
-    { name: 'Swiss Miss Hot Cocoa', keys: ['swiss miss', 'cocoa', 'hot chocolate'] },
-    { name: 'Protein Powder', keys: ['protein powder', 'dymatize', 'iso100', 'whey'] },
+    { name: 'Protein Powder', keys: ['protein powder', 'whey', 'protein isolate', 'protein shake'] }, // Premier + Dymatize ISO100
+    { name: 'Hot Cocoa Mix', keys: ['cocoa', 'hot chocolate'] }, // Swiss Miss
+    { name: 'Cereal', keys: ['cereal'] }, // "CHOCOLATE" bfast box
+    { name: 'Granola', keys: ['granola'] }, // glass jar
+    { name: 'Flour', keys: ['flour'] }, // Trader Joe's all-purpose
+    { name: 'Onions', keys: ['onion'] }, // yellow, mesh bag
+    { name: 'Potatoes', keys: ['potato'] }, // red mesh bag w/ "BOIL" tag
+    { name: 'Protein Bars', keys: ['protein bar', 'quest'] },
+    { name: 'Eggs', keys: ['eggs'] }, // brown eggs in the clear bin
+    { name: 'Garlic', keys: ['garlic'] }, // McCormick jar
+    { name: 'Italian Seasoning', keys: ['italian seasoning', 'seasoning'] },
     { name: 'Pecans', keys: ['pecan'] },
-    { name: 'Garlic', keys: ['garlic'] },
-    { name: 'Onions', keys: ['onion'] },
-    { name: 'Chocolate Syrup', keys: ['chocolate syrup', 'syrup'] },
-    { name: 'Flour', keys: ['flour'] },
+    { name: 'Tortilla Chips', keys: ['tortilla chip', 'chips'] }, // green gluten-free "baked never fried" bag
+  ],
+
+  // Logan's french-door fridge (IMG_3579). Doors + interior only — the frosted crisper drawers
+  // and foil-covered leftovers are genuinely unidentifiable, so they're (correctly) omitted.
+  'IMG_3579.jpg': [
+    { name: 'Mustard', keys: ['mustard', 'dijon'] },
+    { name: 'Asian Sauce', keys: ['oyster sauce', 'soy sauce'] }, // Lee Kum Kee panda
+    { name: 'BBQ Sauce', keys: ['bbq', 'barbecue', 'baby ray'] }, // Sweet Baby Ray's
+    { name: 'Ranch Dressing', keys: ['ranch', 'dressing'] },
+    { name: 'Cranberry Juice', keys: ['cranberry'] }, // H-E-B
+    { name: 'Whipping Cream', keys: ['whipping cream', 'heavy cream'] }, // Great Value
+    { name: 'Milk', keys: ['milk', 'fairlife'] },
+    { name: 'Yogurt', keys: ['yogurt'] }, // :ratio protein
+    { name: 'Cottage Cheese', keys: ['cottage cheese'] },
+    { name: 'Energy Drink', keys: ['energy drink', 'alani'] },
+  ],
+
+  // Second, well-organized fridge (IMG_5144) — highly legible, so a strong recall test.
+  'IMG_5144.jpeg': [
+    { name: 'Almond Milk', keys: ['almond milk'] }, // Almond Breeze
+    { name: 'Oat Milk', keys: ['oat milk', 'oatmilk'] }, // Planet Oat
+    { name: 'Milk', keys: ['whole milk', '2% milk', 'dairy milk'] }, // gallon
+    { name: 'Yogurt', keys: ['yogurt'] }, // Kalona plain, Stonyfield Greek, White Mountain
+    { name: 'Egg Whites', keys: ['egg white'] }, // Kirkland
+    { name: 'Maple Syrup', keys: ['maple syrup'] }, // Kirkland
+    { name: 'Salsa', keys: ['salsa'] }, // Kirkland
+    { name: 'Peanut Butter', keys: ['peanut butter'] }, // Smucker's
+    { name: 'Pickles', keys: ['pickle'] }, // Grillo's
+    { name: 'Relish', keys: ['relish'] }, // Vlasic
+    { name: 'Cottage Cheese', keys: ['cottage cheese'] }, // Daisy
+    { name: 'Eggs', keys: ['eggs'] }, // brown eggs in door tray
+    { name: 'Orange Juice', keys: ['orange juice'] },
+    { name: 'Ground Beef', keys: ['ground beef', 'ground meat'] }, // raw on tray
+    { name: 'Cinnamon Rolls', keys: ['cinnamon roll'] }, // Annie's
+  ],
+
+  // Food-bank pantry (stock photo) — shelf-labeled and label-rich, a dense category recall test.
+  '1_c_ii-Food-Bank-1024x768.jpg': [
+    { name: 'Hamburger Helper', keys: ['hamburger helper'] },
+    { name: 'Macaroni & Cheese', keys: ['macaroni and cheese', 'mac and cheese', 'mac & cheese', 'macaroni cheese'] },
+    { name: 'Chicken Noodle Soup', keys: ['chicken noodle'] },
+    { name: 'Tomato Soup', keys: ['tomato soup'] },
+    { name: 'Pancake Mix', keys: ['pancake'] },
+    { name: 'Syrup', keys: ['syrup'] },
+    { name: 'Applesauce', keys: ['applesauce', 'apple sauce'] },
+    { name: 'Green Beans', keys: ['green bean'] },
+    { name: 'Corn', keys: ['corn'] },
+    { name: 'Mixed Vegetables', keys: ['mixed vegetable'] },
+    { name: 'Grape Jelly', keys: ['jelly', 'jam'] },
+    { name: 'Peanut Butter', keys: ['peanut butter'] }, // Skippy
+    { name: 'Pudding', keys: ['pudding'] },
+    { name: 'Instant Potatoes', keys: ['instant potato', 'mashed potato'] },
+    { name: 'Canned Pears', keys: ['pear'] },
+    { name: 'Fruit Cocktail', keys: ['fruit cocktail'] },
+    { name: 'Canned Peaches', keys: ['peach'] },
+    { name: 'Pineapple', keys: ['pineapple'] },
+    { name: 'Spam', keys: ['spam'] },
+    { name: 'Canned Chicken', keys: ['canned chicken', 'chicken breast', 'chunk chicken'] },
+    { name: 'Dry Pasta', keys: ['penne', 'spaghetti', 'rigatoni', 'dry pasta', 'pasta shells'] },
+    { name: 'Pasta Sauce', keys: ['pasta sauce', 'marinara', 'spaghetti sauce'] },
+  ],
+
+  // VECELO cabinet (product photo) — densely styled, mixed Western + Asian packaged goods.
+  'VECELO-35.4"-Kitchen-Pantry-Storage-Cabinet-Freestanding-Bathroom-Storage-Cabinets-Small-Food-Pantry-Cabinet-for-Dining-Room.jpg.webp': [
+    { name: 'Ketchup', keys: ['ketchup'] }, // Heinz
+    { name: 'Steak Sauce', keys: ['steak sauce'] }, // A1 + Kühne
+    { name: 'Olive Oil', keys: ['olive oil'] },
+    { name: 'Orange Juice', keys: ['orange juice'] },
+    { name: 'Pepsi', keys: ['pepsi'] },
+    { name: 'Fanta', keys: ['fanta'] },
+    { name: 'Peanut Butter', keys: ['peanut butter'] },
+    { name: 'Cookies', keys: ['cookie'] },
+    { name: 'Cup Noodles', keys: ['cup noodle', 'instant noodle', 'ramen'] },
+    { name: 'Rice Crackers', keys: ['rice cracker'] },
+    { name: 'Pink Salt', keys: ['pink salt', 'himalayan salt', 'sea salt'] },
+    { name: 'Mung Beans', keys: ['mung bean'] },
+    { name: 'Red Beans', keys: ['red bean', 'adzuki'] },
+    { name: 'Lemon Tea', keys: ['lemon tea'] },
+    { name: 'Hot Sauce', keys: ['hot sauce', 'peri peri'] }, // Nando's
+    { name: 'Gummy Candy', keys: ['gummy'] },
   ],
 }
 
