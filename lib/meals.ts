@@ -29,6 +29,7 @@ export async function generateMeals({
   cuisinePreferences = [],
   recentMealNames = [],
   mode = 'cookNow',
+  staplesExcluded = [],
 }: {
   ingredients: string[]
   calorieGoal: number
@@ -43,6 +44,7 @@ export async function generateMeals({
   cuisinePreferences?: string[]
   recentMealNames?: string[]
   mode?: 'cookNow' | 'mealPlan'
+  staplesExcluded?: string[]
 }): Promise<GeneratedMeal[]> {
   // Edge functions verify the JWT — a stale or missing token returns 401 from
   // the gateway before our function even runs. Validating up front gives a
@@ -75,6 +77,7 @@ export async function generateMeals({
       cuisinePreferences,
       recentMealNames,
       mode,
+      staplesExcluded,
     },
   })
 

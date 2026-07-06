@@ -163,6 +163,7 @@ Deno.serve(async (req: Request) => {
       cuisinePreferences: rawCuisines = [],
       recentMealNames: rawRecent = [],
       mode = "cookNow",
+      staplesExcluded: rawStaplesExcluded = [], // basics the user tapped "I don't keep this" on
     } = await req.json()
 
     // Sanitize every user-controlled list before it hits the prompt — strips injection
@@ -258,15 +259,29 @@ Deno.serve(async (req: Request) => {
       ? `\n- PROTEIN VARIETY (blocking): pantry has ${detectedProteins.length} distinct primary protein sources — ${detectedProteins.join(', ')}. Each of the ${displayCount} displayed meals MUST use a DIFFERENT primary protein. Do not repeat a protein across meals. This prevents redundancy when the user clearly has variety on hand.`
       : ''
 
+    // Assumed staples the user has NOT opted out of. Conservative cooking ENABLERS only (fats,
+    // seasonings, baking basics) — never meal-defining items (eggs/rice/produce/proteins), which
+    // must come from the scanned pantry. KEEP IN SYNC with constants/staples.ts (client copy).
+    const excludedStaples: string[] = (Array.isArray(rawStaplesExcluded) ? rawStaplesExcluded : [])
+      .map((s: any) => String(s).toLowerCase().trim()).filter(Boolean)
+    const ASSUMED = ['salt', 'black pepper', 'cooking oil', 'olive oil', 'butter', 'all-purpose flour', 'sugar',
+      'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili powder', 'oregano', 'basil', 'Italian seasoning', 'cinnamon', 'red pepper flakes']
+      .filter(s => !excludedStaples.includes(s.toLowerCase()))
+    const excludedClause = excludedStaples.length
+      ? ` EXCEPTION — the user has told us they do NOT keep: ${excludedStaples.join(', ')}; treat those as missing if a recipe needs them.`
+      : ''
+
     const ingredientRule = isCookNow
       ? `- HYBRID COOK NOW MODE — generate exactly ${genCount} meals split as follows:
-  • UNIVERSAL BASICS: assume every kitchen already has salt, pepper, cooking oil, water, and common dried herbs/spices. You may ALWAYS use these even if they're not in the pantry list, and must NEVER put them in "missing_ingredients". Do NOT assume bigger staples like butter, eggs, rice, milk, or fresh produce — those must be in the pantry list.
-  • The first ${genCount - 1} meals (STRICT): besides the universal basics above, use ONLY ingredients from the pantry list. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
-  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: garlic, butter, soy sauce, lemon, rice, pasta, eggs). NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
-- Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the universal basics (salt, pepper, oil, water, dried herbs/spices). Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".`
+  • ASSUMED BASICS: assume the kitchen always stocks these — you may ALWAYS use them and must NEVER put them in "missing_ingredients": ${ASSUMED.join(', ')}, and water.${excludedClause} Do NOT assume anything a meal is BUILT from — eggs, milk, cheese, yogurt, rice, pasta, bread, fresh produce (onion, garlic, lemon, tomato), or any protein — those must be in the pantry list to be used.
+  • The first ${genCount - 1} meals (STRICT): besides the assumed basics above, use ONLY ingredients from the pantry list. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
+  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: fresh garlic, soy sauce, lemon, rice, pasta, eggs). NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
+- Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the assumed basics above. Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".`
       : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy.`
 
     const prompt = `You are a nutrition-focused meal planner. Generate exactly ${genCount} high-protein meal suggestions.
+
+Above all: every meal must be genuinely DELICIOUS and cohesive — a real dish a person would actually crave and choose to eat, not a random assembly of whatever is on hand. Never force unrelated pantry items together just to use them up; a simpler, tasty meal always beats a cluttered one. Quality of the meal comes before quantity of pantry items used.
 
 User profile:
 - Daily calorie goal: ${calorieGoal} kcal
