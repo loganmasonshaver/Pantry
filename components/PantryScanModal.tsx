@@ -879,8 +879,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={{ flex: 1 }} />
             </View>
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
-              <Text style={styles.hubTitle}>Add another area?</Text>
-              <Text style={styles.hubSubtitle}>One photo's enough — capture more storage areas for a fuller pantry.</Text>
+              <Text style={styles.hubTitle}>More areas, <Text style={styles.hubTitleAccent}>better meals</Text></Text>
+              <Text style={styles.hubSubtitle}>One photo's plenty — scan now, or add more below.</Text>
 
               {/* Captured so far — tangible progress, so the screen reads as a collection you're building. */}
               {photos.length > 0 && (
@@ -970,7 +970,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 })}
               </View>
             </ScrollView>
-            <View style={[styles.actions, { paddingBottom: insets.bottom || 8 }]}>
+            <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
               <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8 }]} onPress={() => setStep(5)} activeOpacity={0.85}>
                 <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />
                 <Text style={styles.primaryBtnText}>Scan {photos.length} Photo{photos.length !== 1 ? 's' : ''}</Text>
@@ -1286,7 +1286,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 </TouchableOpacity>
               </View>
 
-              <View style={[styles.actions, { paddingBottom: insets.bottom || 8 }]}>
+              <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
                 <TouchableOpacity
                   style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
                   disabled={saving}
@@ -1373,7 +1373,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               ))}
               <View style={{ height: 8 }} />
             </ScrollView>
-            <View style={[styles.actions, { paddingBottom: insets.bottom || 8 }]}>
+            <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
               <TouchableOpacity
                 style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
                 disabled={saving}
@@ -1538,6 +1538,7 @@ const styles = StyleSheet.create({
 
   // ── Step-4 "add more" hub (redesigned) ──
   hubTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 6 },
+  hubTitleAccent: { color: '#4ADE80' },
   hubSubtitle: { fontSize: 14, color: '#888888', lineHeight: 20, marginBottom: 24 },
   sectionEyebrow: { fontSize: 11, fontWeight: '700', color: '#666666', letterSpacing: 1.2, marginBottom: 12 },
   capturedSection: { marginBottom: 4 },
