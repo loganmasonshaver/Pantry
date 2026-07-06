@@ -662,10 +662,13 @@ export default function PantryScreen() {
                   ) : meals.length > 0 ? (
                     <View style={{ gap: 10 }}>
                       {meals.slice(0, 3).map((meal, idx) => {
-                        // Prefer server-supplied missing_ingredients (set by the hybrid
-                        // 2-strict + 1-stretch prompt). Fall back to client-side substring
-                        // detection during the deploy window when the edge function is older.
-                        const missing = meal.missing_ingredients ?? missingFor(meal.ingredients)
+                        // Compute against the LIVE pantry (the same check the meal-detail screen uses)
+                        // so the card and the detail always agree. The old code trusted the server's
+                        // self-reported missing_ingredients, but GPT returns [] even when the pantry is
+                        // near-empty → a false "Got everything" on the card while the detail correctly
+                        // showed every ingredient missing. `missingFor` skips staples + does two-way
+                        // substring, so a genuinely stocked pantry still reads "Got everything".
+                        const missing = missingFor(meal.ingredients)
                         return (
                           <TouchableOpacity
                             key={`${meal.id}-${idx}`}
