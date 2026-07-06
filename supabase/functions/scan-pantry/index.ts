@@ -52,7 +52,10 @@ function confScore(c: unknown): number {
 // non-default temperature, so we don't send one (its reads are stable enough at the ingredient
 // level per the eval); the Gemini fallback still pins temperature 0.
 async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, opts: { tokenParam?: string; temperature?: number | null; timeoutMs?: number } = {}): Promise<string> {
-  const { tokenParam = "max_tokens", temperature = 0, timeoutMs = 30000 } = opts
+  // 60s (was 30s): gpt-5.4 at 'original' detail is slower per call, and a real scan batches
+  // several photos into ONE call — a 6-8 photo scan can take 30-45s. Single-pass now, so even
+  // primary(60s)+fallback(60s) stays under Supabase's ~150s edge wall-clock limit.
+  const { tokenParam = "max_tokens", temperature = 0, timeoutMs = 60000 } = opts
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
