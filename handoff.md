@@ -1,207 +1,114 @@
-# Handoff — Pantry
+# Handoff — Pantry — 2026-07-06 session
 
-## ✅ Latest (2026-06-12) — Security pass, paywall fixes, scan-flow WOW upgrade
-
-Huge session. Everything below is **committed + pushed to `main`**. Edge functions were
-**deployed** this session; all the **client/UI changes need a fresh build** (not on the
-current TestFlight build yet).
-
-### ▶️ START HERE — testing the new build
-- **Test on the WIRED phone first** (`expo run:ios --device`), not TestFlight — the new UI
-  (scan carousel, prep screen, saved cards, cook-reveal) is pure RN and hot-reloads in
-  seconds vs ~25 min per TestFlight cycle. Use TestFlight only as the final pre-submit gate.
-- **Flip `DEV_FORCE_PAYWALL = true`** at `context/SuperwallContext.tsx:17` to do **sandbox
-  paywall testing**. In dev it defaults to always-premium, so the paywall-continuation fixes
-  below WON'T fire otherwise. (Set it back to `false` before committing.)
-- **🔬 Critical device check:** in the new per-photo carousel review, confirm the AI's
-  `photo` index actually populates per item. If most items land on the trailing **"More"**
-  page, the model is omitting `photo` → strengthen the `scan-pantry` prompt to force a photo
-  index on every item. Also eyeball keyboard behavior on the "add missing" bar (sits low).
-
-### ⏳ Pending / next
-1. ~~Run the trending-image cron trigger~~ ✅ DONE (2026-06-12) — SQL fired, Discover feed repopulating off AI images.
-2. **Redo the onboarding preview video** — single asset `assets/onboarding-preview.mov`,
-   `require`d in TWO spots: `S1Welcome` (very start, ~lines 270/499) and `STryFree` (trial-
-   funnel screen near the paywall, ~lines 3090/3162). **Same file → just re-record and
-   replace the one asset; both placements update automatically, no code change.**
-3. **Cut a TestFlight build** for final validation: bump **Build number** in Xcode (the #1
-   gotcha — must increment every upload), archive, upload. Validate real IAP/paywall flow.
-4. **Pre-launch:** the Superwall `onboarding_paywall` is already non-dismissible (hard). Turn
-   on Apple **Phased Release** when submitting updates.
-
-### What shipped this session
-**Security (full pass — see CODE_REVIEW history):**
-- Red-team hardening: fixed **vote-stuffing** (per-user `meal_votes` ledger), open storage
-  upload policies, x-forwarded-for rate-limit spoof (→ keyed on user id), premium fail-open
-  on missing profile row.
-- Follow-up: `creators` column leak (revoked `affiliate_code`), bucket MIME/size limits,
-  `redeem_referral_code` single-use, dropped dead `email_otp` table.
-- Input sanitization on `generate-recipe`, server-side image size caps, generic client error
-  messages (8 funcs), durable per-user AI caps, `ai_error` PostHog telemetry.
-- **RLS audited — clean.** `PREMIUM_ENFORCEMENT` flipped **ON** (secret). Demo/your account
-  have `promo_active=true`.
-- A **global git pre-push hook** now AI-reviews risky diffs and blocks on CRITICAL (bypass:
-  `git push --no-verify`). Install the **`security-guidance`** plugin: `/plugin install
-  security-guidance@claude-plugins-official`.
-
-**Paywall continuation fixes:** subscribing AT a gate now CONTINUES the action you started
-(was dropping it). Applied to pantry scan, receipt scan, AI log, meal save, meal log.
-
-**Trending images:** cron couldn't auth to `generate-meal-image` (no Authorization header) →
-every new trending meal stuck on its YouTube thumbnail. Fixed (CRON_SECRET/service-role
-bypass). Needs the cron trigger above to repopulate.
-
-**Saved Meals:** instant load (AsyncStorage stale-while-revalidate, no more focus spinner) +
-Discover-style full-bleed cards with colored macro pills.
-
-**Cook-reveal WOW screen** (`app/cook-reveal.tsx`): after a pantry scan, a dedicated reveal
-generates fresh meals from the just-scanned pantry with a staggered animation + haptic.
-
-**Scan-flow upgrade** (`components/PantryScanModal.tsx`):
-- First-run **prep screen** ("how scanning works" — sets expectations, coaches photos;
-  re-open via the ? on the camera).
-- **Swipeable per-photo carousel review** (rebuilt step 55): one page per photo, AI-found
-  list filtered by `item.photo`, chevrons + dots + "Photo N of M" + a one-time swipe nudge,
-  per-photo "add missing." (Note: **step 6 is DEAD CODE** — nothing routes to it.)
-
-### Discussed but NOT built (backlog)
-- **Seasonings problem:** pre-seed pantry staples + a tappable seasonings *checklist* (not a
-  scan) + meal-gen *assumes* basic seasonings (don't flag salt/pepper/oil as "missing").
-- **Pack-opening tap-to-reveal** for the ONBOARDING plan reveal only (not cook-reveal — would
-  be friction on a repeated action).
-- Optional **app-entry gate** for returning non-premium users (post-launch).
-
-### Scan caps (corrected — memory was stale)
-Pantry scan = **7 per rolling 7-day window** (not 5/day). Photos per scan capped at **8**.
-Receipt = 5/day. These are well-calibrated; leave them.
+## TL;DR
+A very long session, ~95% focused on the **scan flow** (`components/PantryScanModal.tsx`): capture →
+hub → review were reworked end-to-end for UX + polish. Also: a Fable-skills/CLAUDE.md handover and
+a full security sweep. **Everything is committed + pushed to `main`** (session range `4046ed1..HEAD`).
+`scan-pantry` edge function was deployed several times. App was rebuilt on the physical iPhone
+(`expo run:ios --device`). ~1 week to launch. Premium-only hard paywall (trial = access).
 
 ---
 
-## ✅ Prior (2026-06-11) — Pantry-scan model upgrade + hardening
-**`scan-pantry` swapped off the 2024-era gpt-4o.** After a long head-to-head eval (GPT-4o vs
-Gemini Flash-Lite/3.5-Flash/Pro vs Qwen3-VL 235B/30B/8B via OpenRouter), with ground-truth
-recall scoring on a hand-verified photo:
-- **Primary = `gpt-4.1`** — best recall (76% vs gpt-4o's noisy 38–57%), first-party, ~same/lower cost. Both passes (first + catch-misses second) use it.
-- **Fallback = Gemini 3.1 Flash-Lite** (`scanVision` helper: try gpt-4.1, on failure fall back). Keeps the paid scan alive during an OpenAI outage/rate-spike; only fires on failure. Needs `GOOGLE_AI_KEY` secret (set).
-- **Hardened prompt**: shelf-by-shelf SCAN METHOD, ONE-ITEM-ONE-ENTRY (anti over-split), forceful no-brand (strip-the-brand with A1/Quest/Babybel examples), expanded non-food EXCLUDE (dishware/cookware/appliances/cookbooks/empty containers).
-- **Two post-gen filters** (`cleanupResult`): drop hallucinated non-food + strip parenthetical qualifiers + collapse dupes across the whole result before returning.
-- **Conclusions that shaped this:** thinking models (Gemini Pro, 3.5-Flash) too slow (10–30s) for a scan; Qwen-via-OpenRouter not scale-safe (malformed JSON, hallucinations, gateway routing); Flash-Lite fast+cheap but over-splits/misses produce (fine as fallback only).
-- **Eval harness** lives at `scripts/pantry-eval/` (zero-dep, gitignored photos). Its prompt is kept in sync with production; has ground-truth recall scoring, non-food + de-over-split filters, LIST/LISTOR modes, per-request timeout, live streaming output.
-- **STILL TODO:** Logan to **test the new scanner on-device** (scan a real fridge, eyeball the review screen + latency). If good, scanner work is done. Other AI features still on gpt-4o/Gemini as before — only `scan-pantry` changed.
-- ⚠️ During testing Logan pasted live API keys into chat once — keys were rotated. Reminder: keys go in the terminal, never pasted back.
+## ⚠️ MUST DO BEFORE LAUNCH
+1. **Revert `SCAN_CAP_WEEK`.** For testing I ran `supabase secrets set SCAN_CAP_WEEK=99999` to lift
+   the weekly scan cap. `scan-pantry` reads `Number(Deno.env.get('SCAN_CAP_WEEK') ?? 7)`. Before
+   launch: `supabase secrets unset SCAN_CAP_WEEK` (reverts to safe default **7**) or set it to 7.
+   Leaving it high = the OpenAI cost cap is wide open in prod. (Tracked as a spawned task.)
+2. Re-verify edge deploy: `supabase functions deploy scan-pantry` (deployed this session; confirm).
+
+## Open spawned tasks (chips) — carryover work
+- **Revert SCAN_CAP_WEEK before launch** (see above).
+- **Lock subscription-lifecycle columns server-side** — `trial_started_at / subscribed_at /
+  churned_at` are client-writable (analytics poisoning, NOT an access bypass — real entitlement is
+  Superwall + is_premium/promo_active, already trigger-locked). Move writes to the Superwall webhook,
+  then extend `enforce_server_managed_premium` to cover them. Low priority, post-launch.
+- **Inline AI-consent in URL-import + recipe AI-generate** — `saved.tsx handleImportFromUrl` and
+  `RecipeFormModal handleGenerate` call `requestConsent()` from INSIDE a native `<Modal>` (two iOS
+  modals can't stack → hangs for a never-consented user). Needs an inline consent step, not the
+  root modal. Low priority: the primary AI paths (scan/receipt/AI-log/meal-gen/onboarding) already
+  gate consent correctly.
 
 ---
 
-# Handoff — Security/quality review (Lows only remain)
+## Current scan flow architecture (`components/PantryScanModal.tsx`)
+Step machine: **1** (camera) → **4** (hub) → **5** (loading/scan) → **55** (review) → saved.
+(Steps 2/3 = dead code, unreachable; step 6 = dead code. Left in place, low priority to remove.)
 
-**For the next chat.** The code review (87 findings) is now **done through all Mediums**:
-**all Critical + all High + M1–M3 (prior session)** and **M4 (scaling/cost), M5 (security),
-M6 (worth-doing nits) — shipped this session.** The ONLY thing left is the **27 Lows**
-(polish, listed in `CODE_REVIEW.md`). Everything is committed + pushed to `main`.
+- **Capture (step 1)** — *single-photo-first*. Full-bleed camera ("Scan your kitchen"), gradient
+  scrims for legible copy, corner brackets. Shutter → `capturePhoto(label, 4)` → lands on the hub.
+  `pendingLabel` carries the area name when the user adds a specific area from the hub.
+- **Hub (step 4)** — header **"More areas, better meals"**. `CAPTURED · N` showcase: photo cards
+  with a green "captured" check (top-right) + a **✕ remove** (top-left; removing the last photo
+  bounces to the camera). `ADD AN AREA` 2-col grid (Fridge/Freezer/Pantry/Counter/Second Fridge/
+  Custom, Lucide icons, green tiles). White **"Scan N Photos"** CTA (safe-area padded, centered).
+  Tapping an area → `setPendingLabel` + `setStep(1)` (uses the in-app camera).
+- **Review (step 55)** — **list-primary**. Compact pannable photo (**0.32** of screen — a spot-check
+  reference, tap to fullscreen-zoom), labeled by the area the scan classified (`photoContainers`,
+  e.g. "Fridge · 1/2"). Items grouped by shelf zone. **Tap an item's name → inline rename**
+  (`editingId`/`editingText`/`commitRename`); **✕** removes. "Also have these?" staples are
+  **collapsed behind a one-line toggle** (`staplesOpen`). "Add missing" input + **"Add N to Pantry"**
+  CTA (safe-area padded).
 
-## ✅ Shipped THIS session (2026-06-10) — M4 + M5 + M6
-**M4 (scaling/cost):**
-1. parse-receipt was silently paying GPT-4o every scan (native Gemini endpoint 4xx'd) → switched to the OpenAI-compat endpoint like generate-meals. Real $ fix.
-2. estimate-meal-macros: added daily cap (25/day, 'macro_est', photo path only) + 90s timeout.
-3. FatSecret N+1: new `_shared/concurrency.ts` `mapLimit()`; capped meal-gen + trending fan-out to ≤15 concurrent.
-4. Discover: `.limit(300)` on trending query + removed duplicate mount fetch (useFocusEffect already covers mount).
-5. extract-recipe-from-url: `fetchWithTimeout` on all hops (10s scrape / 30s AI) + daily cap (15/day, 'url_extract').
-6. generate-trending-meals cron: 15s timeouts on YouTube calls + try/catch so one bad combo isn't fatal. (Image fan-out already waved by 5.)
-7. loops-import-waitlist: now resumable via offset pagination (batch 500, returns nextOffset) instead of whole-table load.
-8. onboarding image preloads (plan reveal + swipe): batched ×3 instead of unbounded parallel.
-
-**M5 (security):**
-1. fatsecret-proxy: method + per-method param allowlist (was signing arbitrary calls on our account).
-2. trending_meals INSERT policy: requires trend_source='creator' + owned creator_id + promo_active (migration `20260610010000`); client `safeOpenSocialUrl` only follows http(s) creator links.
-3. CreatorRecipeModal: random-UUID photo filenames (was guessable Date.now() in a public upsert bucket).
-4. AILogModal: downscale photos to 2048px + 12M-char ceiling before upload.
-5. `creators.user_id` partial unique index (migration `20260610000000`, dedupe+repoint first).
-6. loops-sync: contact-upsert failure no longer drops the lifecycle event (upsert made non-fatal, surfaces `upsertFailed`).
-
-**M6 (worth-doing nits):** OFF barcode 8s timeout; delivery-webview onError/onHttpError + originWhitelist; AILogModal calorie-sync moved out of render into a useEffect; AIConsentContext resolver queue (was leaking concurrent promises); onboarding birthday gate commits the visible default so age is never null.
-
-**Migrations applied this session (on remote):** `20260610000000_creators_user_id_unique.sql`, `20260610010000_trending_insert_hardening.sql`.
+### Confirm → meals flow
+Hitting "Add N to Pantry" saves, then on the **first scan ever** auto-launches `/cook-reveal`
+(meals generated from what was just added). Later scans get a success step. This is the intended
+"scan → meals" payoff. (Backing out of review = nothing saved → stale meals, a past confusion.)
 
 ---
 
-**(Prior session — already shipped, do NOT redo: all Critical + all High + M1–M3.)**
-Read `CODE_REVIEW.md` (repo root, committed) for the full finding list.
+## Key decisions this session (and REJECTED alternatives — important context)
+- **Detection boxes (tap chip → box drawn on photo): REJECTED.** GPT-4.1's bounding-box coords are
+  too imprecise for per-item pins (verified on real scans). The on-photo box overlay code is now
+  **dormant** (nothing sets `activeBoxId` since the chip tap was repurposed to rename). Safe to delete.
+- **Confidence triage ("double-check these" amber section): BUILT then REMOVED.** Went **trust-first**
+  — don't make the AI's uncertainty the user's homework over low-stakes data (a wrong pantry item is
+  a 1-tap delete). Confidence is still returned by the scan (potential backend quality telemetry),
+  just not shown in the UI.
+- **Per-photo pre-classify (`classifyOnly` mode on scan-pantry): BUILT then REVERTED.** Felt
+  bolted-on (extra vision call + ~1–2s relabel flicker on the hub). Chose **Option B**: the single
+  scan already returns `photoContainers` (location) alongside the food, so the review labels each
+  page by area with **no extra call**. The hub stays fast/generic; intelligence lives in the one scan.
+- **Single-photo-first capture: chosen** over the old forced pantry→fridge→counter guided march (friction).
+- **Camera unify:** "add another area" from the hub now uses the in-app camera (was the iOS system camera).
+- **Photo demoted to a 32% reference in review:** the screen's real job is *correcting an imperfect
+  list*, not admiring a photo. (0.32 is a starting guess — may need tuning.)
+
+## Backend — `scan-pantry` current output
+Returns `{ layout, photoContainers[], zones[].items[] }` where each item is
+`{ name, category, photo, box, confidence }`. **`box` and `confidence` are returned but NOT used in
+the UI** (dormant — box overlay rejected, confidence went backend-only). `photoContainers[i]` =
+`fridge|freezer|pantry|counter|other` per photo, drives review page labels + context-aware staples.
+Two-pass gpt-4.1 (Gemini 3.1 Flash-Lite fallback). `classifyOnly` mode was added then reverted (gone).
 
 ---
 
-## ✅ What's already shipped this session (do NOT redo)
+## Fable-skills handover (early in the session — durable artifacts)
+- `FABLE_POSTMORTEM.md` (repo root) — recurring failure patterns mined from ~851k tokens of past sessions.
+- **5 project skills** in `.claude/skills/`: `bug-hunter`, `security-sweep`, `build-planner`,
+  `honest-advisor`, `metadata-audit` (all seeded from real Pantry bugs; trigger on plain sentences).
+- **Global** `~/.claude/CLAUDE.md` + `~/.claude/skills/new-app-playbook` (+ build-planner/honest-advisor
+  copied global). Backed up in `~/my-briefing/claude-config/`.
+- `CLAUDE.md` (project) gained a **Gotchas/Landmines** + **Known baselines** section.
 
-**Critical (3) — DB migrations + edge deploys, live & verified:**
-- `promo_active` made server-only (trigger `enforce_server_managed_premium` + `redeem_referral_code` RPC). Onboarding calls the RPC instead of writing the flag.
-- `generate-ingredient-images` gated behind `ADMIN_SECRET` (was open; anyone could wipe the shared image table).
-- `trending_meals` open UPDATE policy dropped → scoped to creator ownership (was IDOR).
-
-**High Group 1 — Server-side premium enforcement (THE big one), live & verified:**
-- New `superwall-webhook` edge function (Svix-signature verified) writes `profiles.is_premium`.
-  Events: initial_purchase/renewal/uncancellation/**non_renewing_purchase (lifetime)**/subscription_extended → true; expiration/subscription_paused/refund → false; cancellation/billing_issue/product_change → no change.
-- `is_premium` column (server-only, same trigger), backfilled for existing subscribers/trialers.
-- `_shared/premium.ts` `requirePremium()` wired into the 6 paid edge fns (generate-meals, scan-pantry, parse-receipt, estimate-meal-macros, generate-recipe, extract-recipe-from-url). Fails OPEN on read error.
-- **`PREMIUM_ENFORCEMENT=on`** (kill switch — set to anything else to disable instantly, no redeploy). Verified: non-premium → 403, premium → passes.
-- `_layout.tsx` sets `supabaseUserId` Superwall attribute for webhook mapping (identify already uses the Supabase id).
-
-**High Group 2 — abusable APIs, live & verified:**
-- `generate-meal-image`: cache-FIRST (free, no auth) → generation requires login + per-user daily cap (`image_gen`, 20/day, refunds on fail).
-- `seed-recipe-template` gated behind `ADMIN_SECRET`.
-- `loops-sync` delete now uses caller's verified email only (was deletable-any-contact).
-- `_shared/rate-limit.ts`: added `clientIp()` (prefers cf-connecting-ip, only first XFF hop) + eviction; 4 authed fns now key the limiter on `user.id` not the spoofable IP.
-
-**High Group 3 — data-loss bugs (client):** wrong-day log delete, Saved-undo column drop, portion-edit carbs/fat drop, profile goal-save error swallowing.
-
-**High Group 4 — scaling (client) + cost tuning:**
-- Saved-tab image backfill now persists to `saved_meals.image_url` (runs once, not every focus), batched ×3, ref-guarded.
-- FoodSearch: dropped per-result `getFoodById` N+1 → parses macros from description via local `quickMacros`; added search-sequence guard for stale results.
-- **Pantry scan cap: 5/day → 7 per rolling 7 days** (new `check_and_increment_scan_window` RPC + `checkScanCapWindow`), **max 8 photos/scan** (client + server). One scan = one whole-kitchen session = 1 cap unit.
-- `PaywallBrowser.tsx` **deleted** — it was dead code (never rendered). The live paywall is **Superwall-hosted** (dashboard), which is correct for fast iteration.
-
-**Medium M1 (silent error-swallowing):** food-preferences load-fail guard (prevents wiping dislikes), AIConsentContext.revokeConsent error check, FoodSearchModal recent-foods JSON.parse guard, CreatorRecipeModal AI-estimation try/catch (was freezing Save), PantryScanModal add-ingredients insert-error surfaced. (pantry.tsx loader already safe.)
-
-**Medium M2 (data integrity):** removeFromPantry LIKE-metachar escape, generate-meals empty-result refund, profile goal-change → meal-cache invalidation (saveGoal + recalc modal), grocery exact-dedup (was fuzzy substring hiding distinct items).
-
-**Medium M3 (auth/routing consistency):** verify-email + reset-password + createaccount(isReturningUser) all now use authoritative `onboarding_completed || calorie_goal` (maybeSingle) like signin's `routeByProfile`; `_layout` routing effect got a cancellation guard against the token-refresh race.
+## Security sweep (all findings fixed this session)
+- `scan-pantry` weekly cap was hardcoded **99999** ("TESTING ONLY") → now env-var, safe default 7.
+- `generate-meal-image`: removed client-controlled `bypassCache` (self-quota-drain vector).
+- `categorize-item`: rate limit keyed on `user.id` (was spoofable IP).
+- Cleared: entitlements trigger-locked, scan caps atomic (`FOR UPDATE`), referral single-use, all
+  secrets server-side, JWT verified everywhere. Strong posture overall.
 
 ---
 
-## ⚠️ State / environment notes (IMPORTANT for the next chat)
+## Testing / environment notes
+- Test on the wired iPhone (`expo run:ios --device`; UDID `00008150-0001691A3688401C`). Enable
+  **Personal Hotspot** first (device-build reachability). Prefix pod/build with
+  `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` (CocoaPods ASCII-8BIT fix).
+- `SCAN_CAP_WEEK=99999` currently lets you scan freely while testing (REVERT before launch).
+- Metro runs from `/Users/loganshaver/pantry` (main), not a worktree.
+- `insets.bottom` reports **0 inside the RN `<Modal>`** — that's why CTAs use `Math.max(insets.bottom, 24)`.
 
-- **Trial length is 7 days** (confirmed by Logan). PaywallBrowser copy was fixed to 7 before deletion; the live Superwall paywall must also say 7 days + **$7.99/mo, $30/yr** — **Logan to verify in the Superwall dashboard** (can't be done from code).
-- `DEV_FORCE_PAYWALL = false` in `context/SuperwallContext.tsx` — KEEP false for real builds (was flipped true to test, flipped back).
-- Secrets set: `PREMIUM_ENFORCEMENT=on`, `SUPERWALL_WEBHOOK_SECRET`, `ADMIN_SECRET`. Kill switch: `supabase secrets set PREMIUM_ENFORCEMENT=off` if real subscribers report being blocked.
-- **Migrations applied through `20260610010000_trending_insert_hardening.sql`.** All on remote (latest two added this session).
-- **Metro is NOT running** (was killed). Restart from project root for device testing: `cd /Users/loganshaver/pantry && npx expo start`. Client changes this session need a **reload or rebuild** to reach the device.
-- **Deploy commands:** `supabase db push --yes` (migrations), `supabase functions deploy <name>`.
-- **Service-role key** (for DB verification curls): `supabase projects api-keys --project-ref fdafjnkqqtpsjtddbfdz`.
-- **Network quirk:** the project domain `fdafjnkqqtpsjtddbfdz.supabase.co` is intermittently unreachable from the sandbox shell (returns HTTP 000). The Supabase **CLI** works (different host). Retry curls with `dangerouslyDisableSandbox: true`, or test on device.
-- **Auth has CAPTCHA (Turnstile)** → password sign-in can't be scripted. To mint a test user session, use the admin **generate_link → /auth/v1/verify (magiclink, token_hash)** flow (this is how premium enforcement + the weekly cap were verified). Clean up test users after (delete profile row first — no FK cascade — then `auth/v1/admin/users/{id}`).
-- Per CLAUDE.md: inline `//` WHY-comments on non-obvious lines; commit+push to `main` after each meaningful change; end commits with the Co-Authored-By Claude trailer.
-
----
-
-## 📋 REMAINING WORK — NONE (review 100% complete)
-
-The full multi-agent code review is **done**: all Critical + High + Mediums (M1–M6)
-+ **all 27 Lows (L1–L27)** are shipped, committed, and pushed. Edge-function changes
-are deployed; the two new migrations (`20260610000000`, `20260610010000`) are on remote.
-
-**Lows shipped this session (L1–L27), grouped:**
-- Correctness: L1 (promo premium flash), L3 (barcode name-overlap check), L4 (Turnstile onError + wired into signin/createaccount), L5 (Math.round macros), L8 (midnight isToday), L9 (SplashOverlay reduce-motion gate), L17 (MacroEditModal validation).
-- Data integrity: L11 (delete-account error surfacing + scan_usage), L12 (double-submit guards: grocery/pantry/meal-log/creator), L13 (real staple categories), L14 (cache user-scoping on sign-out + image-cache cap), L15 (unified RESET_CACHE_KEYS + __DEV__ guard on resetOnboarding), L16 (atomic trending swap), L18 (scan-insert savingRef guards), L19 (pantry drag order persisted), L23 (scan-cap fail-open backstop).
-- Performance/scaling: L2 (calc-timer cleanup), L20 (gauge/MacroBar/saved-undo animation cleanups), L21 (row limits on profile/home/grocery/meal-suggestion queries), L22 (in-process JWKS JWT verify + getUser fallback).
-- Security: L7 (fatsecret-proxy error-code mapping), L24 (admin-creator constant-time secret), L25 (delete-account CORS restricted), L26 (accurate cooldown messages), L27 (`_shared/sanitize.ts` prompt sanitization).
-- Discover: L6 (per-rail variety-fill), L10 (raised trending macro reject ceiling).
-
-Intentionally left (decided, NOT a Low):
-- **Blanket optimistic-update rollback** across grocery/pantry/meal/home — failures self-correct on refresh; high churn, low ROI.
-- **Cosmetic M6 items:** array-index React keys (RecipeFormModal/CreatorRecipeModal), staples prompt reappearing on swipe-dismiss.
-
-There is no outstanding review work. Next session can move to features/launch.
-
-## Workflow reminders
-After each change: typecheck (`npx tsc --noEmit` — the codebase has many PRE-EXISTING tsc errors:
-VideoView props, profile setState (`onboarding/index.tsx` ~504/3167 "No overload"), ref-callback
-returns, DetectedItem `zone` mock, `startsWith` on `never`, JSX namespace — filter those out),
-commit, push, and `supabase functions deploy <name>` any changed edge fns.
+## Likely next-session starting points
+1. Eyeball the review redesign on device: rename feel, photo at 0.32 (tune?), staples toggle.
+2. Any remaining scan-flow polish, then move off the scan flow toward launch (paywall/metadata — see
+   `~/my-briefing/todos/active.md`).
+3. Knock out the 3 spawned tasks when convenient (SCAN_CAP_WEEK revert is the only launch-blocker).
