@@ -1258,7 +1258,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       <Text style={styles.reviewFoundLabel}>
                         {curItems.length === 0
                           ? 'Nothing detected here — add anything you see below'
-                          : `Found ${curItems.length} — tap a name to fix it, ✕ to remove`}
+                          : `${curItems.length} in this photo — tap a name to fix, ✕ to remove`}
                       </Text>
                       {showZoneHeaders
                         ? zoneEntries.map(([zone, items]) => (
@@ -1370,7 +1370,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 >
                   {saving
                     ? <ActivityIndicator color="#000000" />
-                    : <Text style={styles.primaryBtnText}>Add {detectedItems.length} Item{detectedItems.length !== 1 ? 's' : ''} to Pantry</Text>
+                    : <Text style={styles.primaryBtnText}>Add all {detectedItems.length} to Pantry</Text>
                   }
                 </TouchableOpacity>
               </View>
