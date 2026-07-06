@@ -93,6 +93,9 @@ const COMMON_STAPLES = ['Eggs', 'Milk', 'Butter', 'Cheese', 'Rice', 'Bread', 'On
 
 // Context-aware quick-add suggestions, keyed by the container type the scan classifies each photo as.
 // A fridge photo suggests fridge basics, a pantry photo suggests dry goods, etc. Unknown → COMMON_STAPLES.
+// Maps a scan-classified container type → the display label shown for that photo's review page.
+const CONTAINER_LABEL: Record<string, string> = { fridge: 'Fridge', freezer: 'Freezer', pantry: 'Pantry', counter: 'Counter' }
+
 const STAPLES_BY_CONTAINER: Record<string, string[]> = {
   fridge: ['Eggs', 'Milk', 'Butter', 'Cheese', 'Yogurt', 'Mayonnaise', 'Ketchup', 'Mustard', 'Orange Juice', 'Sour Cream'],
   freezer: ['Frozen Vegetables', 'Frozen Berries', 'Ice Cream', 'Frozen Chicken', 'Frozen Fish', 'Frozen Peas', 'Frozen Fruit', 'Frozen Pizza'],
@@ -1062,10 +1065,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           // Pages always == photo count.
           const photoOf = (d: DetectedItem) =>
             (typeof d.photo === 'number' && d.photo >= 0 && d.photo < photos.length) ? d.photo : 0
+          // Label each photo page by the area the SCAN classified it as (fridge/pantry/…), falling
+          // back to "Photo N" when unknown. This is the "one smart scan, location→food" behavior:
+          // no separate pre-scan classify call — the scan already returns photoContainers.
+          const areaLabel = (idx: number) => CONTAINER_LABEL[(photoContainers[idx] || '').toLowerCase()] ?? `Photo ${idx + 1}`
           const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number }[] =
             photos.length <= 1
-              ? [{ uri: photos[0]?.uri, label: 'Photo 1', items: detectedItems, photoIdx: 0 }]
-              : photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => photoOf(d) === idx), photoIdx: idx }))
+              ? [{ uri: photos[0]?.uri, label: areaLabel(0), items: detectedItems, photoIdx: 0 }]
+              : photos.map((p, idx) => ({ uri: p.uri, label: areaLabel(idx), items: detectedItems.filter(d => photoOf(d) === idx), photoIdx: idx }))
           const total = pages.length || 1
           const cur = Math.min(currentPhoto, total - 1)
           // Render the photo at its TRUE aspect (full width) inside a frame capped at ~48% of the
