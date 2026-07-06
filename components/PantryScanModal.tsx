@@ -1105,21 +1105,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                                     }
                                   }}
                                 />
-                                {/* Detection boxes over the photo: all faint, the tapped item's highlighted.
-                                    AI's normalized [x,y,w,h] mapped onto the full-width image. */}
-                                {page.items.map(it => it.box ? (
+                                {/* Only the TAPPED item's box shows — drawing all of them at once turned the
+                                    photo into an unreadable wireframe. One box at a time = one confirmation. */}
+                                {page.items.map(it => (it.box && activeBoxId === it.id) ? (
                                   <View
                                     key={it.id}
                                     pointerEvents="none"
                                     style={[
                                       styles.detBox,
+                                      styles.detBoxActive,
                                       { left: it.box[0] * SCREEN_W, top: it.box[1] * imgH, width: it.box[2] * SCREEN_W, height: it.box[3] * imgH },
-                                      activeBoxId === it.id && styles.detBoxActive,
                                     ]}
                                   >
-                                    {activeBoxId === it.id && (
-                                      <View style={styles.detBoxLabel}><Text style={styles.detBoxLabelText} numberOfLines={1}>{it.name}</Text></View>
-                                    )}
+                                    <View style={styles.detBoxLabel}><Text style={styles.detBoxLabelText} numberOfLines={1}>{it.name}</Text></View>
                                   </View>
                                 ) : null)}
                               </TouchableOpacity>
