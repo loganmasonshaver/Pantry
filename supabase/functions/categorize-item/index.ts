@@ -19,8 +19,9 @@ Deno.serve(async (req: Request) => {
   const user = await verifyUser(req)
   if (!user) return unauthorizedResponse()
 
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 60, 60000)
+  // Key the limit on the authenticated user, not IP — ties cost to identity and stops
+  // users behind a shared NAT from starving each other's bucket.
+  const { allowed } = rateLimit(user.id, 60, 60000)
   if (!allowed) return rateLimitResponse()
 
   try {

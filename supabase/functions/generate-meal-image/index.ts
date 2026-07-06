@@ -93,7 +93,7 @@ Deno.serve(async (req: Request) => {
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
-    const { mealName, ingredients = [], steps = [], bypassCache = false } = await req.json()
+    const { mealName, ingredients = [], steps = [] } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
 
     // Normalize steps to a string array — accepts either ["raw text"] or [{title, detail}]
@@ -105,11 +105,10 @@ Deno.serve(async (req: Request) => {
 
     // Check DB cache FIRST (free, no auth) — globally-cached images are shared across all
     // users, so serving a hit costs nothing and preserves pre-auth use (e.g. onboarding).
-    if (!bypassCache) {
-      const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
-      if (cached?.image_url) {
-        return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
-      }
+    // Always cache-first: no client bypass, so a user can't force credit spend to drain quota.
+    const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
+    if (cached?.image_url) {
+      return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
     }
 
     // Cache MISS = we're about to spend FAL/LLM credits. Require a logged-in user so
