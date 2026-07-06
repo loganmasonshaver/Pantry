@@ -20,7 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, UtensilsCrossed, Container } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -150,7 +150,7 @@ const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
   { id: 'fridge',  label: 'Fridge',        icon: Refrigerator },
   { id: 'freezer', label: 'Freezer',       icon: Snowflake },
   { id: 'pantry',  label: 'Pantry',        icon: Package },
-  { id: 'counter', label: 'Counter',       icon: UtensilsCrossed },
+  { id: 'counter', label: 'Counter',       icon: Utensils },
   { id: 'fridge2', label: 'Second Fridge', icon: Container },
   { id: 'custom',  label: 'Custom',        icon: Plus },
 ]
@@ -901,7 +901,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <Text style={[styles.sectionEyebrow, { marginTop: 26 }]}>ADD AN AREA</Text>
               <View style={styles.areaGrid}>
                 {EXTRA_OPTIONS.map(opt => {
-                  const taken = photos.some(p => p.label === opt.label)
                   const Icon = opt.icon
                   if (opt.id === 'custom') {
                     return (
@@ -942,15 +941,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   return (
                     <View key={opt.id} style={styles.areaCardWrap}>
                       <TouchableOpacity
-                        style={[styles.areaCard, taken && styles.areaCardTaken]}
-                        onPress={() => { if (!taken) { setPendingLabel(opt.label); setStep(1) } }}
+                        style={styles.areaCard}
+                        onPress={() => { setPendingLabel(opt.label); setStep(1) }}
                         activeOpacity={0.85}
                       >
-                        {taken && <View style={styles.areaCheck}><Check size={10} stroke="#000" strokeWidth={3} /></View>}
-                        <View style={[styles.areaIconWrap, taken && styles.areaIconWrapTaken]}>
-                          <Icon size={22} stroke={taken ? '#4ADE80' : '#FFFFFF'} strokeWidth={1.8} />
+                        <View style={styles.areaIconWrap}>
+                          <Icon size={22} stroke="#4ADE80" strokeWidth={1.8} />
                         </View>
-                        <Text style={[styles.areaCardText, taken && { color: '#4ADE80' }]}>{opt.label}</Text>
+                        <Text style={styles.areaCardText}>{opt.label}</Text>
                       </TouchableOpacity>
                     </View>
                   )
@@ -1533,9 +1531,9 @@ const styles = StyleSheet.create({
   capturedLabel: { fontSize: 11, fontWeight: '600', color: '#FFFFFF', textAlign: 'center' },
   areaGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
   areaCardWrap: { width: '48%' },
-  areaCard: { backgroundColor: '#141414', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 14, alignItems: 'flex-start', gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  areaCard: { backgroundColor: '#141414', borderRadius: 16, paddingVertical: 16, paddingHorizontal: 14, alignItems: 'flex-start', gap: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   areaCardTaken: { borderColor: 'rgba(74,222,128,0.4)', backgroundColor: 'rgba(74,222,128,0.06)' },
-  areaIconWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' },
+  areaIconWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.10)', alignItems: 'center', justifyContent: 'center' },
   areaIconWrapTaken: { backgroundColor: 'rgba(74,222,128,0.14)' },
   areaCardText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
   areaCheck: { position: 'absolute', top: 12, right: 12, width: 20, height: 20, borderRadius: 10, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
