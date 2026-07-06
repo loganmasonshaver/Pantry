@@ -520,6 +520,31 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     photoScrollRef.current?.scrollTo({ y: targetY, animated: true })
   }, [activeBoxId])
 
+  // Auto-pan each review photo to WHERE THE FOOD IS on open/swipe. Portrait shots (phone held
+  // vertical) are taller than the frame, and the inner scroll defaults to the TOP — which is the
+  // ceiling / cabinet tops / empty shelf ABOVE the food. That reads as "it photographed the wrong
+  // thing." We scroll to the median vertical position of THIS photo's detected boxes so the actual
+  // items are centered in frame the moment the page opens. Falls back to photo-center when a photo
+  // has no boxes. Re-runs when photoDims load (dims arrive async after the image renders).
+  useEffect(() => {
+    if (step !== 55) return
+    const uri = photos[currentPhoto]?.uri
+    const d = uri ? photoDims[uri] : undefined
+    if (!d) return
+    const imgH = SCREEN_W * (d.h / d.w)
+    const frameH = Math.min(imgH, Math.round(SCREEN_H * 0.32))
+    if (imgH <= frameH + 1) return // whole photo already fits the frame — nothing to pan
+    const centers = detectedItems
+      .filter(it => (it.photo ?? 0) === currentPhoto && it.box)
+      .map(it => it.box![1] + it.box![3] / 2)
+      .sort((a, b) => a - b)
+    const centerFrac = centers.length ? centers[Math.floor(centers.length / 2)] : 0.5 // median, else center
+    const targetY = Math.max(0, Math.min(centerFrac * imgH - frameH / 2, imgH - frameH))
+    // Small delay so the pager settles on the new page and its inner ScrollView re-attaches the ref.
+    const t = setTimeout(() => photoScrollRef.current?.scrollTo({ y: targetY, animated: true }), 120)
+    return () => clearTimeout(t)
+  }, [step, currentPhoto, photoDims, detectedItems])
+
   // Request camera permission when modal opens
   useEffect(() => {
     if (visible && !permission?.granted) {
