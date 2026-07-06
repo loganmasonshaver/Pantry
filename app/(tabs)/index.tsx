@@ -361,6 +361,7 @@ export default function HomeScreen() {
   // Gate AI consent BEFORE opening the scan modal — two native iOS modals can't stack, so a
   // consent prompt fired from inside the scan modal queues behind it and the scan hangs.
   const openScanWithConsent = async () => { if (await requestConsent()) setShowPantryScanFromHome(true) }
+  const openAILogWithConsent = async () => { if (await requestConsent()) setShowAILogModal(true) }
   const { registerPlacement } = useSuperwall()
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [pantryFetched, setPantryFetched] = useState(false)
@@ -994,7 +995,7 @@ export default function HomeScreen() {
             shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 14,
           }}
           activeOpacity={0.85}
-          onPress={() => setShowAILogModal(true)}
+          onPress={openAILogWithConsent}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={{

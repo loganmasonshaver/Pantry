@@ -215,6 +215,7 @@ export default function PantryScreen() {
   // so a consent prompt fired from inside the open scan modal gets queued behind it and only
   // surfaces after the user exits (and the scan hangs waiting on it). Gate it at the tap.
   const openScanWithConsent = async () => { if (await requestConsent()) setShowScanModal(true) }
+  const openReceiptWithConsent = async () => { if (await requestConsent()) setShowReceiptModal(true) }
 
   // Sweeping scan-beam animation reused by both scan cards. Single shared Animated
   // value so both beams stay perfectly in sync — visually reads as one continuous
@@ -579,7 +580,7 @@ export default function PantryScreen() {
                     />
                   </View>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={() => setShowReceiptModal(true)} activeOpacity={0.85}>
+                <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={openReceiptWithConsent} activeOpacity={0.85}>
                   <View style={styles.scanCardBadgeAbs}><Text style={styles.scanCardBadgeText}>AI</Text></View>
                   <View><Text style={styles.scanCardTitle}>Scan Receipt</Text><Text style={styles.scanCardSub}>Import purchases</Text></View>
                   {/* Compact receipt visual: paper with item lines + price column, beam sweeps */}
