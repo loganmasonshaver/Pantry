@@ -40,6 +40,7 @@ type PhotoEntry = {
   label: string
   uri?: string
   base64?: string
+  container?: string // AI-classified area (fridge/freezer/pantry/counter) — drives auto-label + hub check-off
 }
 
 type DetectedItem = {
@@ -146,11 +147,14 @@ const CAMERA_TIPS = [
   'One photo per zone — pantry, fridge, and freezer separately',
 ]
 
-const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
-  { id: 'fridge',  label: 'Fridge',        icon: Refrigerator },
-  { id: 'freezer', label: 'Freezer',       icon: Snowflake },
-  { id: 'pantry',  label: 'Pantry',        icon: Package },
-  { id: 'counter', label: 'Counter',       icon: Utensils },
+// Maps a classified container type → the display label the capture hub relabels a photo to.
+const CONTAINER_LABEL: Record<string, string> = { fridge: 'Fridge', freezer: 'Freezer', pantry: 'Pantry', counter: 'Counter' }
+
+const EXTRA_OPTIONS: { id: string; label: string; icon: any; container?: string }[] = [
+  { id: 'fridge',  label: 'Fridge',        icon: Refrigerator, container: 'fridge' },
+  { id: 'freezer', label: 'Freezer',       icon: Snowflake, container: 'freezer' },
+  { id: 'pantry',  label: 'Pantry',        icon: Package, container: 'pantry' },
+  { id: 'counter', label: 'Counter',       icon: Utensils, container: 'counter' },
   { id: 'fridge2', label: 'Second Fridge', icon: Container },
   { id: 'custom',  label: 'Custom',        icon: Plus },
 ]
@@ -633,6 +637,21 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     return out.base64 ?? undefined
   }
 
+  // Fire-and-forget: classify the just-captured photo's container so the hub can auto-label it
+  // (fridge/freezer/…) and check off that area. Runs in the background; the UI never waits on it.
+  const classifyPhoto = async (photoId: string, base64: string, explicit: boolean) => {
+    try {
+      const { data } = await supabase.functions.invoke('scan-pantry', { body: { classifyOnly: true, images: [base64] } })
+      const container = typeof data?.container === 'string' ? data.container : null
+      if (!container || container === 'other') return
+      setPhotos(prev => prev.map(p =>
+        p.id === photoId
+          ? { ...p, container, label: explicit ? p.label : (CONTAINER_LABEL[container] ?? p.label) }
+          : p
+      ))
+    } catch { /* non-fatal — the hub just stays generic */ }
+  }
+
   const capturePhoto = async (label: string, next: number) => {
     if (!cameraRef.current) return
     if (photos.length >= MAX_PHOTOS_PER_SCAN) {
@@ -646,12 +665,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       const photo = await cameraRef.current.takePictureAsync({ quality: 1 })
       if (photo) {
         const base64 = await downscaleToBase64(photo.uri)
-        setPhotos(prev => [...prev, {
-          id: String(Date.now()),
-          label,
-          uri: photo.uri,
-          base64,
-        }])
+        const id = String(Date.now())
+        const explicit = pendingLabel != null // user picked a specific area → don't override its label
+        setPhotos(prev => [...prev, { id, label, uri: photo.uri, base64 }])
+        if (base64) classifyPhoto(id, base64, explicit)
       }
     } catch (e) {
       Alert.alert('Capture failed', 'Could not take photo.')
@@ -676,12 +693,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     })
     if (!result.canceled && result.assets[0]) {
       const base64 = await downscaleToBase64(result.assets[0].uri)
-      setPhotos(prev => [...prev, {
-        id: String(Date.now()),
-        label,
-        uri: result.assets[0].uri,
-        base64,
-      }])
+      const id = String(Date.now())
+      const explicit = pendingLabel != null // user picked a specific area → don't override its label
+      setPhotos(prev => [...prev, { id, label, uri: result.assets[0].uri, base64 }])
+      if (base64) classifyPhoto(id, base64, explicit)
       setPendingLabel(null) // consumed the queued "add this area" label (if any)
       setStep(next)
     }
@@ -902,6 +917,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={styles.areaGrid}>
                 {EXTRA_OPTIONS.map(opt => {
                   const Icon = opt.icon
+                  // Checked off when a captured photo was AI-classified as this area (coherent now,
+                  // unlike the old label-match which never matched the generic first "Kitchen" photo).
+                  const taken = opt.container ? photos.some(p => p.container === opt.container) : false
                   if (opt.id === 'custom') {
                     return (
                       <View key={opt.id} style={styles.areaCardWrap}>
@@ -941,14 +959,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   return (
                     <View key={opt.id} style={styles.areaCardWrap}>
                       <TouchableOpacity
-                        style={styles.areaCard}
-                        onPress={() => { setPendingLabel(opt.label); setStep(1) }}
+                        style={[styles.areaCard, taken && styles.areaCardTaken]}
+                        onPress={() => { if (!taken) { setPendingLabel(opt.label); setStep(1) } }}
                         activeOpacity={0.85}
                       >
-                        <View style={styles.areaIconWrap}>
+                        {taken && <View style={styles.areaCheck}><Check size={10} stroke="#000" strokeWidth={3} /></View>}
+                        <View style={[styles.areaIconWrap, taken && styles.areaIconWrapTaken]}>
                           <Icon size={22} stroke="#4ADE80" strokeWidth={1.8} />
                         </View>
-                        <Text style={styles.areaCardText}>{opt.label}</Text>
+                        <Text style={[styles.areaCardText, taken && { color: '#4ADE80' }]}>{opt.label}</Text>
                       </TouchableOpacity>
                     </View>
                   )
