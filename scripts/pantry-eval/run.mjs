@@ -59,11 +59,7 @@ const MODELS = [
     endpoint: OPENAI, model: 'gpt-5.4', apiKey: process.env.OPENAI_API_KEY,
     detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 2.50, priceOut: 15.00,
   },
-  {
-    label: 'GPT-5.5 (original detail)',
-    endpoint: OPENAI, model: 'gpt-5.5', apiKey: process.env.OPENAI_API_KEY,
-    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 5.00, priceOut: 30.00,
-  },
+  // gpt-5.5 dropped from the A/B — 5× the cost for a label-OCR task; revisit only if 5.4 can't read the fine print.
   {
     label: 'Gemini 3.1 Flash-Lite (fallback)',
     endpoint: GEMINI, model: 'gemini-3.1-flash-lite', apiKey: process.env.GOOGLE_AI_KEY,
