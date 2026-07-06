@@ -25,6 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
+import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
@@ -209,6 +210,11 @@ export default function PantryScreen() {
   const [searchQuery, setSearchQuery] = useState('')
   const [showScanModal, setShowScanModal] = useState(false)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
+  const { requestConsent } = useAIConsent()
+  // Consent must be gathered BEFORE the scan modal opens: two native iOS modals can't stack,
+  // so a consent prompt fired from inside the open scan modal gets queued behind it and only
+  // surfaces after the user exits (and the scan hangs waiting on it). Gate it at the tap.
+  const openScanWithConsent = async () => { if (await requestConsent()) setShowScanModal(true) }
 
   // Sweeping scan-beam animation reused by both scan cards. Single shared Animated
   // value so both beams stay perfectly in sync — visually reads as one continuous
@@ -511,7 +517,7 @@ export default function PantryScreen() {
                   the lower half so the cards aren't visually empty. Both share the
                   same scanCardBeam loop so the sweeping beams stay in sync. */}
               <View style={[styles.scanRow, { marginHorizontal: 0 }]}>
-                <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={() => setShowScanModal(true)} activeOpacity={0.85}>
+                <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={openScanWithConsent} activeOpacity={0.85}>
                   <View style={styles.scanCardBadgeAbs}><Text style={styles.scanCardBadgeText}>AI</Text></View>
                   <View><Text style={styles.scanCardTitle}>Scan Pantry</Text><Text style={styles.scanCardSub}>Auto-detect items</Text></View>
                   {/* Compact pantry visual: 2 shelves × 3 items, beam sweeps top→bottom */}

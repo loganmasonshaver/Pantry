@@ -413,14 +413,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     Animated.timing(msgAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
   }, [loadingMessageIdx, step, showDone])
 
-  // Phase 1 — live "spotting" ramp WHILE scanning. Like a loading bar that rushes to ~80% then
-  // creeps: the count chases a target that starts at ~9/photo and DRIFTS up slowly over time.
-  // The exponential chase (16%/tick) gives big jumps early (feels fast whether it ends at 9 or 45),
-  // and the slow target drift means it NEVER sits frozen on a long scan — it keeps inching up until
-  // results land, then the settle effect below snaps it to the real total.
+  // Phase 1 — live "spotting" ramp WHILE scanning. STEADY climb, not a rush-then-crawl: the old
+  // exponential chase leapt to ~80% in 2s then added a fraction per tick (read as a slow +1 every
+  // few seconds = "product feels stuck/slow"). Now the target rises near-linearly with elapsed time,
+  // so the number climbs at a constant, believable pace the whole scan until results land.
   useEffect(() => {
     if (step !== 5 || showDone || scanError) return
     const base = 9 * Math.max(1, photos.length)
+    const cap = Math.round(base * 1.6) // believable ceiling so a long scan never inflates to an absurd count
+    const rate = Math.max(1.2, base / 14) // items/sec — reaches ~base in ~14s; floor so a 1-photo scan still moves visibly
     const startedAt = Date.now()
     setSpottedCount(0)
     spottedCountRef.current = 0
@@ -429,15 +430,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     let lastHaptic = 0
     const interval = setInterval(() => {
       const elapsedS = (Date.now() - startedAt) / 1000
-      const target = base + elapsedS * 0.2 // slow upward drift so it never looks stuck
-      floatVal += (target - floatVal) * 0.16 // exponential chase — fast early, gentle near the top
+      const target = Math.min(cap, elapsedS * rate) // near-linear: no early rush, no late crawl
+      floatVal += (target - floatVal) * 0.3 // light smoothing so ticks aren't robotic, but pace stays ≈ rate
       const shown = Math.round(floatVal)
       if (shown === lastShown) return
       lastShown = shown
       spottedCountRef.current = shown
       setSpottedCount(shown)
       const now = Date.now()
-      if (now - lastHaptic > 90) { // throttle so big early jumps don't fire a haptic storm
+      if (now - lastHaptic > 90) { // throttle so early ticks don't fire a haptic storm
         lastHaptic = now
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
       }

@@ -30,6 +30,7 @@ import { COLORS } from '@/constants/colors'
 import { MealImage } from '@/components/MealImage'
 import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
+import { useAIConsent } from '../../context/AIConsentContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated } from '../../lib/analytics'
 import AILogModal from '../../components/AILogModal'
@@ -356,6 +357,10 @@ export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
   const { isPremium, promoActive } = usePremium()
+  const { requestConsent } = useAIConsent()
+  // Gate AI consent BEFORE opening the scan modal — two native iOS modals can't stack, so a
+  // consent prompt fired from inside the scan modal queues behind it and the scan hangs.
+  const openScanWithConsent = async () => { if (await requestConsent()) setShowPantryScanFromHome(true) }
   const { registerPlacement } = useSuperwall()
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [pantryFetched, setPantryFetched] = useState(false)
@@ -1017,7 +1022,7 @@ export default function HomeScreen() {
           <TouchableOpacity
             style={styles.scanHero}
             activeOpacity={0.9}
-            onPress={() => setShowPantryScanFromHome(true)}
+            onPress={openScanWithConsent}
           >
             {/* Pantry-cabinet illustration in SVG: 3 shelves with visible depth,
                 9 varied items (jar / can / cereal box / oil bottle / tuna tin /
