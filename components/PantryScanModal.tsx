@@ -268,6 +268,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [retryNonce, setRetryNonce] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
+  const [pendingLabel, setPendingLabel] = useState<string | null>(null) // area label queued when "add area" is tapped from the hub
   const [showDone, setShowDone] = useState(false)
   const [customLabel, setCustomLabel] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
@@ -545,6 +546,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     setTimeout(() => {
       setStep(1)
       setPhotos([])
+      setPendingLabel(null)
       setShowDone(false)
       setCustomLabel('')
       setShowCustomInput(false)
@@ -652,6 +654,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     } catch (e) {
       Alert.alert('Capture failed', 'Could not take photo.')
     }
+    setPendingLabel(null) // consumed the queued "add this area" label (if any)
     setStep(next)
   }
 
@@ -677,6 +680,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         uri: result.assets[0].uri,
         base64,
       }])
+      setPendingLabel(null) // consumed the queued "add this area" label (if any)
       setStep(next)
     }
   }
@@ -776,6 +780,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 4 },
             3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
           }[step]!
+          // Adding a specific area from the hub captures it with the SAME in-app camera as the first
+          // photo — pendingLabel carries the chosen area's name so the photo is labeled correctly.
+          const captureLabel = pendingLabel ?? stepConfig.label
+          const captureTitle = pendingLabel ? `Photograph your ${pendingLabel.toLowerCase()}` : stepConfig.title
           return (
             <View style={styles.step}>
               {/* Camera viewfinder */}
@@ -824,7 +832,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               {/* Bottom controls */}
               <View style={styles.cameraBottom}>
                 <View style={styles.stepTextCompact}>
-                  <Text style={styles.title}>{stepConfig.title}</Text>
+                  <Text style={styles.title}>{captureTitle}</Text>
                   <Text style={styles.subtitle}>{stepConfig.subtitle}</Text>
                   <Text style={styles.cameraTip}>
                     💡 {CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}
@@ -835,10 +843,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <TouchableOpacity style={styles.flashBtn} onPress={() => setFlashOn(f => !f)} activeOpacity={0.7}>
                     <Zap size={20} stroke={flashOn ? '#FFD700' : COLORS.textMuted} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(stepConfig.label, stepConfig.next)} activeOpacity={0.85}>
+                  <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(captureLabel, 4)} activeOpacity={0.85}>
                     <View style={styles.shutterInner} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(stepConfig.label, stepConfig.next)} activeOpacity={0.7}>
+                  <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(captureLabel, 4)} activeOpacity={0.7}>
                     <ImageIcon size={20} stroke={COLORS.textMuted} strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
@@ -894,9 +902,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                               style={[styles.customAddBtn, !customLabel.trim() && { opacity: 0.4 }]}
                               onPress={() => {
                                 if (!customLabel.trim()) return
-                                addExtraPhoto(customLabel.trim())
+                                setPendingLabel(customLabel.trim())
                                 setCustomLabel('')
                                 setShowCustomInput(false)
+                                setStep(1)
                               }}
                               disabled={!customLabel.trim()}
                             >
@@ -916,7 +925,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     <TouchableOpacity
                       key={opt.id}
                       style={[styles.extraCard, styles.extraCardWrap, taken && styles.extraCardTaken]}
-                      onPress={() => !taken && addExtraPhoto(opt.label)}
+                      onPress={() => { if (!taken) { setPendingLabel(opt.label); setStep(1) } }}
                       activeOpacity={0.7}
                     >
                       {taken && (
