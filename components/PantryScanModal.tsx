@@ -50,6 +50,7 @@ type DetectedItem = {
   zone: string
   photo?: number | null // which source photo the AI saw this in (for the per-photo review). null = unknown.
   box?: [number, number, number, number] | null // [x,y,w,h] normalized 0-1 in that photo (top-left origin). Drives the tap-to-locate overlay.
+  confidence?: 'high' | 'low' // AI's self-reported certainty. 'low' → surfaced in the "double-check" triage section.
 }
 
 type ZoneGroup = {
@@ -374,6 +375,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               // origin). Null when the model omits/malforms it — chip just isn't tap-to-locate then.
               box: Array.isArray(item.box) && item.box.length === 4 && item.box.every((n: any) => typeof n === 'number')
                 ? item.box as [number, number, number, number] : null,
+              // Default to 'high' when absent (old scans / model omission) so only items the AI
+              // EXPLICITLY flags as uncertain land in the double-check section.
+              confidence: item.confidence === 'low' ? 'low' : 'high',
             }
             return detected
           })
@@ -1041,8 +1045,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 // Items below follow the CURRENT photo (cur). Computed here so the top strip stays
                 // just photos and the list re-renders on swipe — keeps photo + its items glanceable.
                 const curItems = pages[cur]?.items ?? []
+                // Trust-first triage: the AI's uncertain items surface in a "double-check" section;
+                // everything it's sure of is grouped by zone as normal. ALL are included by default —
+                // the user removes wrong ones, they don't have to confirm right ones.
+                const lowConf = curItems.filter(it => it.confidence === 'low')
+                const confident = curItems.filter(it => it.confidence !== 'low')
                 const byZone = new Map<string, DetectedItem[]>()
-                for (const it of curItems) {
+                for (const it of confident) {
                   const z = (it.zone || '').trim() || 'Other'
                   if (!byZone.has(z)) byZone.set(z, [])
                   byZone.get(z)!.push(it)
@@ -1050,7 +1059,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 const zoneEntries = Array.from(byZone.entries())
                 const showZoneHeaders = zoneEntries.length > 1
                 const renderChip = (item: DetectedItem) => (
-                  <View key={item.id} style={[styles.zoneChip, activeBoxId === item.id && styles.zoneChipActive]}>
+                  <View key={item.id} style={[styles.zoneChip, item.confidence === 'low' && styles.zoneChipLow, activeBoxId === item.id && styles.zoneChipActive]}>
                     <TouchableOpacity
                       disabled={!item.box}
                       onPress={() => setActiveBoxId(id => id === item.id ? null : item.id)}
@@ -1154,10 +1163,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     {/* Current photo's items, grouped by zone */}
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                       <Text style={styles.reviewFoundLabel}>
-                        {curItems.length > 0
-                          ? `Found ${curItems.length} here — tap ✕ if it's wrong`
-                          : 'Nothing detected here — add anything you see below'}
+                        {curItems.length === 0
+                          ? 'Nothing detected here — add anything you see below'
+                          : lowConf.length > 0
+                            ? `Found ${curItems.length} — ${confident.length} we're sure of, ${lowConf.length} to double-check`
+                            : `Found ${curItems.length} — tap ✕ if any are wrong`}
                       </Text>
+                      {/* Uncertain items first, flagged amber — the only ones that really need a look. */}
+                      {lowConf.length > 0 && (
+                        <View style={styles.doubleCheckGroup}>
+                          <Text style={styles.doubleCheckHeader}>Double-check these — we weren't sure</Text>
+                          <View style={styles.zoneChipWrap}>{lowConf.map(renderChip)}</View>
+                        </View>
+                      )}
                       {showZoneHeaders
                         ? zoneEntries.map(([zone, items]) => (
                             <View key={zone} style={styles.zoneGroup}>
@@ -1165,7 +1183,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                               <View style={styles.zoneChipWrap}>{items.map(renderChip)}</View>
                             </View>
                           ))
-                        : <View style={styles.zoneChipWrap}>{curItems.map(renderChip)}</View>}
+                        : <View style={styles.zoneChipWrap}>{confident.map(renderChip)}</View>}
                     </ScrollView>
                   </>
                 )
@@ -1418,6 +1436,10 @@ const styles = StyleSheet.create({
   detBoxLabel: { position: 'absolute', top: -21, left: -1.5, backgroundColor: '#4ADE80', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, maxWidth: SCREEN_W * 0.5 },
   detBoxLabelText: { color: '#000000', fontSize: 11, fontWeight: '700' },
   zoneChipActive: { borderColor: '#4ADE80', borderWidth: 1 },
+  // Confidence-triage "double-check" section — amber so the eye goes there, not to the sure items.
+  doubleCheckGroup: { marginBottom: 12, backgroundColor: 'rgba(245,158,11,0.06)', borderRadius: 12, padding: 10, borderWidth: 1, borderColor: 'rgba(245,158,11,0.25)' },
+  doubleCheckHeader: { fontSize: 12, fontWeight: '700', color: '#F59E0B', marginBottom: 8, letterSpacing: 0.2 },
+  zoneChipLow: { borderColor: 'rgba(245,158,11,0.55)', backgroundColor: 'rgba(245,158,11,0.08)' },
   reviewCloseOverlay: { position: 'absolute', left: 12, zIndex: 10 },
   // Title row directly below the photo (within the step's normal 24px padding).
   reviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, paddingBottom: 4 },

@@ -216,8 +216,8 @@ Return a JSON object with this structure:
     {
       "zone": "Top Shelf",
       "items": [
-        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0, "box": [0.41, 0.12, 0.10, 0.18] },
-        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1, "box": [0.22, 0.55, 0.14, 0.20] }
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0, "box": [0.41, 0.12, 0.10, 0.18], "confidence": "high" },
+        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1, "box": [0.22, 0.55, 0.14, 0.20], "confidence": "low" }
       ]
     }
   ]
@@ -234,6 +234,7 @@ Item rules:
 - "name" must be a GENERIC ingredient name — NEVER a brand or product name. Before writing each name, STRIP the brand to its generic type: "A1" → "Steak Sauce", "Quest Bars" → "Protein Bars", "Babybel" → "Cheese", "Hamburger Helper" → "Pasta Dinner Kit", "Campbell's Cream of Mushroom Soup" → "Cream of Mushroom Soup", "Uncle Ben's Rice" → "Rice", "Chobani" → "Greek Yogurt". A brand in the name creates duplicate entries. Use the brand/label only as CONTEXT to make the GENERIC name more specific (e.g. "Non-Fat Plain Greek Yogurt", not just "Yogurt").
 - "photo" — REQUIRED on EVERY item object, never omit it. The 0-based index (0 to ${images.length - 1}) of the photo this item is visible in. ${images.length === 1 ? 'There is only ONE photo, so "photo" is ALWAYS 0 on every item.' : `Assign each item to the specific photo it actually appears in — an item seen in the 3rd photo must be "photo": 2, NOT 0. Do not default everything to 0.`}
 - "box" — REQUIRED on every item: the item's location in ITS photo as [x, y, w, h], all normalized 0-1 with the ORIGIN at the TOP-LEFT of that photo. x,y = the top-left corner of a tight box around the visible item (include its cap/lid); w,h = the box's width/height as fractions of the photo. Examples: an item in the upper-left quarter ≈ [0.05, 0.08, 0.15, 0.22]; one centered near the bottom ≈ [0.45, 0.70, 0.12, 0.20]. Estimate as accurately as you can — this box is drawn over the photo so the user can see exactly which item you mean. If an item is partially hidden, box only its VISIBLE part. Coordinates are for the same photo given in "photo".
+- "confidence" — REQUIRED, either "high" or "low". Use "high" ONLY when you can clearly see and identify the item (readable label/brand, or an unmistakable shape). Use "low" whenever you're guessing: the item is partially hidden, blurry, in an opaque/unmarked container, an ambiguous shape, or you gave a best-guess generic name. Be honest — "low" items get surfaced to the user to double-check, so calling a guess "high" is worse than admitting the guess. Most clearly-visible front-row items are "high"; most back-row/small/ambiguous ones are "low".
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
   - Carbs: bread, pasta, rice, cereals, flour
@@ -329,8 +330,9 @@ Use SAME zone names from first pass where possible: ${knownZones.join(', ') || '
 Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
 "photo" is REQUIRED on every item — the 0-based index (0 to ${images.length - 1}) of the photo it appears in${images.length === 1 ? ' (always 0 here)' : ', so it groups under the right photo'}.
 "box" is REQUIRED on every item — [x, y, w, h] normalized 0-1 from the photo's TOP-LEFT corner, a tight box around the visible item (its width/height as fractions of the photo).
+"confidence" is REQUIRED — "high" or "low". These are items you MISSED the first time (small/hidden/ambiguous), so most will be "low"; only use "high" for one you can now clearly read/identify.
 
-Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "...", "photo": 0, "box": [0.1, 0.2, 0.1, 0.15] }] }
+Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "...", "photo": 0, "box": [0.1, 0.2, 0.1, 0.15], "confidence": "low" }] }
 
 Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] }.`
 
@@ -357,7 +359,9 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
           }
           // Carry the photo index (default 0) so second-pass finds don't orphan to the
           // client's "More" page in multi-photo scans the way first-pass items wouldn't.
-          zone.items.push({ name: item.name, category: item.category || 'Other', photo: typeof item.photo === 'number' ? item.photo : 0, box: Array.isArray(item.box) && item.box.length === 4 ? item.box : null })
+          // Second-pass finds are the small/hidden/ambiguous items — default to low confidence
+          // unless the model explicitly says high, so they surface for a double-check.
+          zone.items.push({ name: item.name, category: item.category || 'Other', photo: typeof item.photo === 'number' ? item.photo : 0, box: Array.isArray(item.box) && item.box.length === 4 ? item.box : null, confidence: item.confidence === 'high' ? 'high' : 'low' })
         }
         console.log(`[scan-pantry] second pass: ${Date.now() - secondPassStart}ms, added ${missed.length} items`)
       }
