@@ -28,9 +28,11 @@ const MAX_PHOTOS_PER_SCAN = 8
 // Kills genuine-guess noise ("unidentifiable blob", opaque unmarked container) that varies
 // run-to-run — the stuff that made the review a wall of junk chips. Numeric (not binary
 // high/low) so the cutoff is tunable: a binary "drop low" nuked >half the real finds because
-// "low" swallowed every confident-but-not-certain item. 0 = keep everything (default until the
-// pantry-eval sweep picks the sweet spot); set SCAN_CONFIDENCE_FLOOR in the Supabase dashboard.
-const SCAN_CONFIDENCE_FLOOR = Number(Deno.env.get('SCAN_CONFIDENCE_FLOOR') ?? 0)
+// "low" swallowed every confident-but-not-certain item. Default 30 was picked by the pantry-eval
+// sweep on gpt-5.4 across 6 real photos: everything scoring <30 was vague blob-junk ("glass jar
+// with dark contents", "round tub of food"), and NO real ingredient drops until floor 40 — so 30
+// strips noise with a 10-pt safety buffer. Override per-env in the Supabase dashboard if needed.
+const SCAN_CONFIDENCE_FLOOR = Number(Deno.env.get('SCAN_CONFIDENCE_FLOOR') ?? 30)
 
 // Normalize whatever the model put in `confidence` to a 0-100 number. Tolerates the old
 // string form ('high'/'low') and omission so a mixed/older response never crashes the floor.
@@ -45,18 +47,21 @@ function confScore(c: unknown): number {
 // 30s: the model returns in ~10s; 30s leaves headroom for a slow response while keeping the
 // whole flow (up to 2 passes × primary+fallback) safely under Supabase's ~150s edge wall-clock
 // limit, and surfaces a real failure fast instead of making the user wait 90s.
-async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, timeoutMs = 30000): Promise<string> {
+// opts.tokenParam: gpt-5.x take `max_completion_tokens`; gpt-4-era / Gemini take `max_tokens`.
+// opts.temperature: null omits it entirely — gpt-5.4 is a newer-gen model that rejects a forced
+// non-default temperature, so we don't send one (its reads are stable enough at the ingredient
+// level per the eval); the Gemini fallback still pins temperature 0.
+async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, opts: { tokenParam?: string; temperature?: number | null; timeoutMs?: number } = {}): Promise<string> {
+  const { tokenParam = "max_tokens", temperature = 0, timeoutMs = 30000 } = opts
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
+    const body: Record<string, unknown> = { model, messages, [tokenParam]: maxTokens }
+    if (temperature !== null) body.temperature = temperature
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      // temperature: 0 — vision scans must be repeatable. Unset defaults to 1 (full sampling),
-      // which is why the SAME fridge photo returned different item sets/counts run-to-run. At 0 the
-      // model takes its top pick every time; near-identical output for identical input. (Image
-      // tokenization still adds tiny non-determinism, so it's "stable," not bit-identical.)
-      body: JSON.stringify({ model, max_tokens: maxTokens, messages, temperature: 0 }),
+      body: JSON.stringify(body),
       signal: ctrl.signal,
     })
     const data = await res.json()
@@ -69,15 +74,17 @@ async function visionCall(endpoint: string, apiKey: string, model: string, messa
   }
 }
 
-// Primary GPT-4.1 (best recall in our eval), fallback Gemini 3.1 Flash-Lite. The fallback
-// keeps the paid scan alive during an OpenAI outage / rate-limit spike — only fires on failure,
-// so ~all scans run on the primary. Same messages work on both (OpenAI-compatible endpoints).
+// Primary GPT-5.4 at 'original' image detail — in the pantry-eval on Logan's real photos it hit
+// 82% recall vs gpt-4.1's 63%, because gpt-4.1's tile tokenizer downscales the shortest side to
+// 768px and shreds small labels; gpt-5.4's full-res patches actually read them. Its SINGLE pass
+// already out-recalls gpt-4.1's old two-pass, so the second pass is off (halves scan cost).
+// Fallback: Gemini 3.1 Flash-Lite keeps the paid scan alive during an OpenAI outage.
 async function scanVision(messages: any[], maxTokens: number): Promise<string> {
   try {
-    return await visionCall(OPENAI_URL, openaiApiKey!, "gpt-4.1", messages, maxTokens)
+    return await visionCall(OPENAI_URL, openaiApiKey!, "gpt-5.4", messages, maxTokens, { tokenParam: "max_completion_tokens", temperature: null })
   } catch (e) {
     if (!googleAiKey) throw e
-    console.log(`[scan-pantry] gpt-4.1 failed (${(e as Error).message}); falling back to Gemini Flash-Lite`)
+    console.log(`[scan-pantry] gpt-5.4 failed (${(e as Error).message}); falling back to Gemini Flash-Lite`)
     return await visionCall(GEMINI_URL, googleAiKey, "gemini-3.1-flash-lite", messages, maxTokens)
   }
 }
@@ -191,7 +198,9 @@ Deno.serve(async (req: Request) => {
 
     const imageContent = images.map((base64: string) => ({
       type: "image_url" as const,
-      image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "high" as const },
+      // 'original' = full-resolution patches on gpt-5.4 (up to 6000px), the whole reason for the
+      // upgrade — it lets the model read small jar/spice/condiment labels 'high' (768px) blurs out.
+      image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "original" as const },
     }))
 
     const firstPassPrompt = `These are ${images.length} photo(s) of a kitchen (fridge, pantry shelves, counter), numbered 0 to ${images.length - 1} in the order shown. Identify every visible food ingredient or grocery item.
@@ -286,7 +295,7 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     // ceiling (vision can hang past the edge runtime's ~150s limit and force-kill the function).
     let text: string
     try {
-      text = await scanVision(firstPassMessages, 6000) // 6000: dense scans truncate at lower caps
+      text = await scanVision(firstPassMessages, 10000) // 10k: gpt-5.4 max_completion_tokens covers reasoning + a dense multi-photo JSON without truncating (you only pay for tokens actually generated)
     } catch (e) {
       const msg = (e as Error).name === 'AbortError'
         ? 'Scan timed out. Try again with fewer or smaller photos.'
@@ -324,7 +333,11 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     // (a 13-detected fridge actually had ~21), so a high threshold meant the
     // densest, most-missed scans never got the catch-misses pass. 12 errs toward
     // recall — the ~30s second-pass cost is worth not dropping milk/eggs/PB.
-    const shouldRunSecondPass = maxPerPhoto >= 12
+    // Second pass DISABLED for gpt-5.4: its single full-res pass already out-recalls gpt-4.1's
+    // old two-pass (82% vs 63% in the eval), so the catch-misses pass is redundant and would
+    // just double the scan cost. Density calc kept for the log. Re-enable if we ever fall back
+    // to a weaker primary model. (maxPerPhoto still referenced below in the log line.)
+    const shouldRunSecondPass = false
     console.log(`[scan-pantry] per-photo density: max=${maxPerPhoto} across ${photoCounts.size} photo(s), secondPass=${shouldRunSecondPass}`)
 
     // ── SECOND PASS: catch what the first pass missed ───────────────────
