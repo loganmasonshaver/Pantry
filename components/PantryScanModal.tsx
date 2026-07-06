@@ -299,7 +299,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [missedInput, setMissedInput] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null) // which detected chip is being renamed inline
   const [editingText, setEditingText] = useState('')
-  const [staplesOpen, setStaplesOpen] = useState(false) // "Also have these" collapsed by default to give the list room
   const [addingMissed, setAddingMissed] = useState(false)
   // Post-save success step (returning scanners only) — offers the cook-reveal vs "maybe later".
   const [showSaved, setShowSaved] = useState(false)
@@ -1251,9 +1250,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       </View>
                     </View>
 
-                    {/* Title + which-photo, right below the photo */}
+                    {/* Header — the COUNT is the hero (it continues the count-up reveal and is what
+                        people actually read), with the action instruction right under it. The generic
+                        "Review your scan" is gone; eyes glossed over it. Photo/area context sits right. */}
                     <View style={styles.reviewHeader}>
-                      <Text style={styles.topTitle}>Review your scan</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.reviewCountHero}>
+                          {curItems.length === 0 ? 'Nothing found here' : `${curItems.length} item${curItems.length === 1 ? '' : 's'} found`}
+                        </Text>
+                        <Text style={styles.reviewInstruction}>Tap a name to fix it  ·  ✕ to remove</Text>
+                      </View>
                       {total > 1 && (
                         <View style={styles.reviewHeaderRight}>
                           <Text style={styles.pagerLabel}>{pages[cur]?.label}  ·  {cur + 1}/{total}</Text>
@@ -1266,11 +1272,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
                     {/* Current photo's items, grouped by zone */}
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                      <Text style={styles.reviewFoundLabel}>
-                        {curItems.length === 0
-                          ? 'Nothing detected here — add anything you see below'
-                          : `${curItems.length} in this photo — tap a name to fix, ✕ to remove`}
-                      </Text>
                       {showZoneHeaders
                         ? zoneEntries.map(([zone, items]) => (
                             <View key={zone} style={styles.zoneGroup}>
@@ -1284,43 +1285,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 )
               })()}
 
-              {/* Common staples you likely have but the camera can't see — one tap to add. Folds
-                  the old post-scan "kitchen basics?" popup into the flow the user is already in. */}
-              {(() => {
-                // Context-aware: suggest staples matching THIS photo's container type; fall back to
-                // the generic list when the scan didn't classify it (or classified "other").
-                const container = (photoContainers[cur] || '').toLowerCase()
-                const stapleList = STAPLES_BY_CONTAINER[container] ?? COMMON_STAPLES
-                const available = stapleList.filter(s => !detectedItems.some(d => d.name.toLowerCase() === s.toLowerCase()))
-                if (available.length === 0) return null
-                return (
-                  <View style={styles.staplesBar}>
-                    {/* Collapsed by default — a one-line toggle so it doesn't permanently eat list room. */}
-                    <TouchableOpacity style={styles.staplesToggle} onPress={() => setStaplesOpen(o => !o)} activeOpacity={0.7}>
-                      <Text style={[styles.staplesLabel, { paddingHorizontal: 0, marginBottom: 0 }]}>Also have these? Tap to add ({available.length})</Text>
-                      {staplesOpen
-                        ? <ChevronUp size={16} stroke="#888888" strokeWidth={2} />
-                        : <ChevronDown size={16} stroke="#888888" strokeWidth={2} />}
-                    </TouchableOpacity>
-                    {staplesOpen && (
-                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.staplesChips} keyboardShouldPersistTaps="handled">
-                        {available.map(s => (
-                          <TouchableOpacity key={s} style={styles.stapleChip} onPress={() => addStapleChip(s)} activeOpacity={0.7}>
-                            <Plus size={13} stroke="#4ADE80" strokeWidth={2.6} />
-                            <Text style={styles.stapleChipText}>{s}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
-                    )}
-                  </View>
-                )
-              })()}
+              {/* The old "Also have these? Tap to add" staples dropdown was removed — it was the
+                  legacy way of nagging users to add basics, now superseded by assuming staples for
+                  meal generation and surfacing them in the recipe's "we assumed" tier. */}
 
               {/* Add-missing — contextual to the photo currently on screen */}
               <View style={styles.missedBar}>
                 <TextInput
                   style={styles.missedBarInput}
-                  placeholder={total > 1 ? `Add what's missing in ${pages[cur]?.label}…` : 'Add what it missed — e.g. salt, soy sauce'}
+                  placeholder={total > 1 ? `Add what's missing in ${pages[cur]?.label}…` : 'Add anything we missed — e.g. chicken, spinach'}
                   placeholderTextColor={COLORS.textMuted}
                   value={missedInput}
                   onChangeText={setMissedInput}
@@ -1547,7 +1520,7 @@ const styles = StyleSheet.create({
   zoneChipLow: { borderColor: 'rgba(245,158,11,0.55)', backgroundColor: 'rgba(245,158,11,0.08)' },
   reviewCloseOverlay: { position: 'absolute', left: 12, zIndex: 10 },
   // Title row directly below the photo (within the step's normal 24px padding).
-  reviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, paddingBottom: 4 },
+  reviewHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingTop: 12, paddingBottom: 4 },
   reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
   // Fullscreen tap-to-zoom overlay.
   zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
@@ -1562,7 +1535,8 @@ const styles = StyleSheet.create({
   // No fixed width: the list lives inside the step's 24px horizontal padding, so forcing width
   // SCREEN_W made the content 48px wider than its viewport → sideways scroll + left-clipped chips.
   reviewItemsScroll: { paddingTop: 16, paddingBottom: 20 },
-  reviewFoundLabel: { fontSize: 13, color: '#888888', marginBottom: 12, fontWeight: '600' },
+  reviewCountHero: { fontSize: 27, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4 },
+  reviewInstruction: { fontSize: 13, color: '#888888', marginTop: 3, fontWeight: '600' },
   staplesBar: { paddingTop: 6, paddingBottom: 2 },
   staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },
   staplesToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 6 },
