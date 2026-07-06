@@ -454,17 +454,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   }, [loadingMessageIdx, step, showDone])
 
   // Phase 1 — live "spotting" ramp WHILE scanning. The true count is unknown mid-scan (the AI
-  // returns everything at once at the end), so this is a guess. Two rules keep the guess from
-  // looking broken: (1) NEVER plateau — a frozen number reads as "stuck"; (2) don't cap far below
-  // reality — a single full-fridge photo can hold 30+ items, so the old `base*1.6` ceiling (=14 for
-  // one photo) stalled at 14 then leapt to 30 when results landed. Now: a fast decelerating curve
-  // toward `base` PLUS a constant +1/sec floor so it ALWAYS keeps ticking, bounded by a generous
-  // cap so a slow scan can't inflate to an absurd number. The settle effect below snaps to the true
-  // total when results land — because the number was still moving, that reads as "finalizing," not a jump.
+  // returns everything at once at the end), so this is a guess. THE GUESS MUST UNDERSHOOT: it
+  // asymptotes to `base` and can never exceed it, so the settle below almost always ticks UP to the
+  // true total. An upward finish reads as "finalizing"; a DOWNWARD one reads as broken. The old
+  // formula added `+ elapsedS` with a base*2 cap, so a slow gpt-5.4 scan (~40s at 'original' detail)
+  // inflated the number to ~90 before the real 52 landed — then it counted DOWN. Fix: bound the
+  // count by the PHOTO COUNT, not the clock, so scan duration can't inflate it.
   useEffect(() => {
     if (step !== 5 || showDone || scanError) return
-    const base = 14 * Math.max(1, photos.length) // central expectation; a dense photo runs higher, handled by the floor
-    const cap = base * 2 + 10                      // generous upper bound so a slow/hung scan can't inflate absurdly
+    // ~14/photo is deliberately below what a full fridge/pantry actually holds (~17-23), so real
+    // scans overshoot this and the settle ticks up. No separate cap — the exponential can't reach base.
+    const base = 14 * Math.max(1, photos.length)
     const startedAt = Date.now()
     setSpottedCount(0)
     spottedCountRef.current = 0
@@ -472,8 +472,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     let lastHaptic = 0
     const interval = setInterval(() => {
       const elapsedS = (Date.now() - startedAt) / 1000
-      // decel curve (fast early, easing near `base`) + constant floor velocity so it never flat-stalls
-      const shown = Math.round(Math.min(cap, base * (1 - Math.exp(-elapsedS / 6)) + elapsedS))
+      // Pure decelerating approach to `base` (tau 12s ≈ one full gpt-5.4 scan) — no elapsed-time
+      // term, so a slow scan can NOT inflate the count past the estimate. Asymptotic → never plateaus
+      // hard (keeps ticking by fractions), never overshoots.
+      const shown = Math.round(base * (1 - Math.exp(-elapsedS / 12)))
       if (shown === lastShown) return
       lastShown = shown
       spottedCountRef.current = shown
