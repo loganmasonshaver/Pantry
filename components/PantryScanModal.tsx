@@ -971,7 +971,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               </View>
             </ScrollView>
             <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8 }]} onPress={() => setStep(5)} activeOpacity={0.85}>
+              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8, justifyContent: 'center' }]} onPress={() => setStep(5)} activeOpacity={0.85}>
                 <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />
                 <Text style={styles.primaryBtnText}>Scan {photos.length} Photo{photos.length !== 1 ? 's' : ''}</Text>
               </TouchableOpacity>
