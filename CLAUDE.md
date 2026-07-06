@@ -74,3 +74,38 @@ Do this after each task — not just at session end — so progress is saved if 
 npm start          # start Expo dev server
 npx expo run:ios   # build and run on iOS simulator
 ```
+
+## Gotchas / Landmines — DO NOT relearn these
+
+### Onboarding → profiles is the #1 bug source
+- Onboarding writes to `profiles` via upsert from one giant step file. Any edit there
+  can silently drop fields (goals, carbs/fat, dietary_restrictions, food_dislikes).
+- After ANY onboarding change: write a test profile through the full flow, read the
+  row back, and assert every field survived — including ones you didn't touch.
+- Never assume upsert preserves untouched columns. Check the payload you're sending.
+
+### Duplicates/double-fires: rule out environment before code
+- "Double notification" and "duplicate meal" bugs have twice been environmental:
+  multiple app installs on the test iPhone, iOS persisting stale notifications,
+  or hot-reload ghosts. Check for these BEFORE editing code.
+
+### Cache
+- Meal cache is keyed by date + timezone; image-loading writes have corrupted it once.
+  Any cache change needs verification at a day boundary, not just same-day.
+
+### Don't touch
+- **Image generation** — globally cached across users; per-user "optimizations" break the cost model.
+- **Yearly IAP ($29.99)** — works. When debugging Monthly, leave Yearly alone.
+- **Stripe** — web checkout only. Never import or reference Stripe in app code (App Review rejection).
+- **Discover expiry filter** — aggressive by design; it (not the diet bands) is why meals disappear.
+
+### Security invariant
+- Anything granting premium/access (`promo_active`, referral redemption) is written
+  server-side via SECURITY DEFINER RPC only. Never trust a client write for entitlements.
+
+## Known baselines
+- Pre-existing TypeScript errors exist in the onboarding flow and several modal files.
+  Before editing those areas, run `npx tsc --noEmit` to capture the baseline — don't
+  claim to have introduced or fixed errors that were already there.
+- Risky native/auth changes (sign-in methods, IAP) get a device test before touching
+  main — the native Google Sign-In revert cost two sessions.
