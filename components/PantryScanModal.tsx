@@ -1454,7 +1454,9 @@ const styles = StyleSheet.create({
   zoneHeader: { fontSize: 12, fontWeight: '700', color: '#4ADE80', marginTop: 14, marginBottom: 8, letterSpacing: 0.3 },
   reviewPhotoPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 10 },
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
-  reviewItemsScroll: { width: SCREEN_W, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+  // No fixed width: the list lives inside the step's 24px horizontal padding, so forcing width
+  // SCREEN_W made the content 48px wider than its viewport → sideways scroll + left-clipped chips.
+  reviewItemsScroll: { paddingTop: 16, paddingBottom: 20 },
   reviewFoundLabel: { fontSize: 13, color: '#888888', marginBottom: 12, fontWeight: '600' },
   staplesBar: { paddingTop: 6, paddingBottom: 2 },
   staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },
@@ -1846,10 +1848,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    // Pin to the content width (screen minus the list's 20px side padding). Inside the
-    // horizontal pager the wrap was computing against an unbounded width, so long chips
-    // ran off the right edge instead of wrapping. An explicit width forces clean wrapping.
-    width: SCREEN_W - 40,
+    // Fill the (already width-constrained) list column so chips wrap cleanly. Was hardcoded to
+    // SCREEN_W-40 from when this lived in the full-bleed photo pager; that overflowed the padded step.
+    width: '100%',
   },
   zoneChip: {
     flexDirection: 'row',
