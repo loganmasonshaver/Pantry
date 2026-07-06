@@ -770,8 +770,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
           const stepConfig = {
-            1: { dotIndex: 0, label: 'Pantry', title: 'Photograph your pantry', subtitle: 'Open your cabinets and capture the full shelves', next: 2 },
-            2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 3 },
+            // Single-photo-first: the first capture lands straight on the review/scan hub (step 4) —
+            // no forced pantry→fridge→counter march. Extra areas are added optionally from the hub.
+            1: { dotIndex: 0, label: 'Kitchen', title: 'Scan your kitchen', subtitle: 'Snap your fridge, pantry, or freezer — one photo is enough to start', next: 4 },
+            2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 4 },
             3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
           }[step]!
           return (
@@ -803,7 +805,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     <X size={20} stroke="#FFFFFF" strokeWidth={2} />
                   </TouchableOpacity>
                   <View style={styles.cameraTopCenter}>
-                    <ProgressDots total={3} active={stepConfig.dotIndex} />
+                    {/* No fixed 3-step progress anymore — just show how many photos are in this scan. */}
+                    {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
                   </View>
                   <TouchableOpacity style={styles.cameraCloseBtn} onPress={() => setShowPrep(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                     <HelpCircle size={20} stroke="#FFFFFF" strokeWidth={2} />
@@ -840,9 +843,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity onPress={() => setStep(stepConfig.next)} activeOpacity={0.7}>
-                  <Text style={styles.skipText}>Skip</Text>
-                </TouchableOpacity>
+                {/* Only offer "done" once there's a photo — the first capture is required, but after
+                    that one photo is enough to scan (no forced walk through every area). */}
+                {photos.length > 0 && (
+                  <TouchableOpacity onPress={() => setStep(4)} activeOpacity={0.7}>
+                    <Text style={styles.skipText}>Done — review {photos.length} photo{photos.length !== 1 ? 's' : ''} →</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           )
@@ -860,8 +867,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={{ flex: 1 }} />
             </View>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
-              <Text style={styles.title}>Want to add more?</Text>
-              <Text style={[styles.subtitle, { marginBottom: 20 }]}>Add any other storage areas in your kitchen</Text>
+              <Text style={styles.title}>Scan now, or add more</Text>
+              <Text style={[styles.subtitle, { marginBottom: 20 }]}>One photo is enough — add other storage areas only if you want a fuller pantry</Text>
               {photos.length > 0 && (
                 <View style={[styles.photoRow, { marginBottom: 20 }]}>
                   {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
@@ -930,8 +937,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   Scan {photos.length} Photo{photos.length !== 1 ? 's' : ''}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep(3)} activeOpacity={0.7}>
-                <Text style={styles.skipText}>Back</Text>
+              <TouchableOpacity onPress={() => setStep(1)} activeOpacity={0.7}>
+                <Text style={styles.skipText}>Take another with the camera</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1560,6 +1567,17 @@ const styles = StyleSheet.create({
   cameraTopCenter: {
     flex: 1,
     paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  cameraCountText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    overflow: 'hidden',
   },
   cameraCloseBtn: {
     width: 36,
