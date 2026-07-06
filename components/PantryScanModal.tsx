@@ -453,56 +453,34 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     Animated.timing(msgAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
   }, [loadingMessageIdx, step, showDone])
 
-  // Phase 1 — live "spotting" ramp WHILE scanning. The true count is unknown mid-scan (the AI
-  // returns everything at once at the end), so this is a guess. THE GUESS MUST UNDERSHOOT: it
-  // asymptotes to `base` and can never exceed it, so the settle below almost always ticks UP to the
-  // true total. An upward finish reads as "finalizing"; a DOWNWARD one reads as broken. The old
-  // formula added `+ elapsedS` with a base*2 cap, so a slow gpt-5.4 scan (~40s at 'original' detail)
-  // inflated the number to ~90 before the real 52 landed — then it counted DOWN. Fix: bound the
-  // count by the PHOTO COUNT, not the clock, so scan duration can't inflate it.
+  // NO fake live count while scanning. A fabricated ramp can only feel wrong — it overshot on long
+  // scans (counted to 90, dropped to 52) and crawled on short ones (ticked to 8 once every couple
+  // seconds, then jumped to 27). Both read as broken. Instead: keep it at 0 during the wait — the
+  // sweeping beam + rotating status lines carry "it's working" — and reveal the REAL total with a
+  // fast count-up the instant results land (Phase 2). Reset to 0 whenever a scan (re)starts.
   useEffect(() => {
-    if (step !== 5 || showDone || scanError) return
-    // ~14/photo is deliberately below what a full fridge/pantry actually holds (~17-23), so real
-    // scans overshoot this and the settle ticks up. No separate cap — the exponential can't reach base.
-    const base = 14 * Math.max(1, photos.length)
-    const startedAt = Date.now()
-    setSpottedCount(0)
-    spottedCountRef.current = 0
-    let lastShown = 0
-    let lastHaptic = 0
-    const interval = setInterval(() => {
-      const elapsedS = (Date.now() - startedAt) / 1000
-      // Pure decelerating approach to `base` (tau 12s ≈ one full gpt-5.4 scan) — no elapsed-time
-      // term, so a slow scan can NOT inflate the count past the estimate. Asymptotic → never plateaus
-      // hard (keeps ticking by fractions), never overshoots.
-      const shown = Math.round(base * (1 - Math.exp(-elapsedS / 12)))
-      if (shown === lastShown) return
-      lastShown = shown
-      spottedCountRef.current = shown
-      setSpottedCount(shown)
-      const now = Date.now()
-      if (now - lastHaptic > 90) { // throttle so early ticks don't fire a haptic storm
-        lastHaptic = now
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
-      }
-    }, 140)
-    return () => clearInterval(interval)
-  }, [step, showDone, scanError])
+    if (step === 5 && !showDone) { setSpottedCount(0); spottedCountRef.current = 0 }
+  }, [step, showDone, retryNonce])
 
-  // Phase 2 — settle from the live value to the true total when results land
-  // (counts up or down a few from wherever the ramp was, so there's no jarring jump).
+  // Phase 2 — the reveal. Count 0 → real total with a FAST, fixed-duration ramp (~0.6s no matter
+  // the item count) the moment results land, so it's always snappy AND accurate — never a slow tick,
+  // never a mismatch. Light haptics tick along for a satisfying "brrrt".
   useEffect(() => {
     const target = detectedItems.length
     if (!showDone || target === 0) return
-    let current = spottedCountRef.current
-    if (current === target) return
-    const dir = target > current ? 1 : -1
+    const inc = Math.max(1, Math.ceil(target / 16)) // ~16 frames to the total, whatever it is
+    let current = 0
+    setSpottedCount(0)
+    spottedCountRef.current = 0
+    let lastHaptic = 0
     const id = setInterval(() => {
-      current += dir
+      current = Math.min(target, current + inc)
       spottedCountRef.current = current
       setSpottedCount(current)
-      if (current === target) clearInterval(id)
-    }, 45)
+      const now = Date.now()
+      if (now - lastHaptic > 50) { lastHaptic = now; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}) }
+      if (current >= target) clearInterval(id)
+    }, 36)
     return () => clearInterval(id)
   }, [showDone, detectedItems.length])
 
@@ -532,7 +510,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     const d = uri ? photoDims[uri] : undefined
     if (!d) return
     const imgH = SCREEN_W * (d.h / d.w)
-    const frameH = Math.min(imgH, Math.round(SCREEN_H * 0.32))
+    const frameH = Math.min(imgH, Math.round(SCREEN_H * 0.15)) // keep in sync with the render frame
     if (imgH <= frameH + 1) return // whole photo already fits the frame — nothing to pan
     const centers = detectedItems
       .filter(it => (it.photo ?? 0) === currentPhoto && it.box)
@@ -1055,11 +1033,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 </>
               ) : (
                 <>
-                  {/* Hero count — ramps live while scanning, settles to the real total. */}
-                  <Text style={styles.scanCount}>{spottedCount}</Text>
-                  <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 2, fontWeight: '700', color: COLORS.textWhite }]}>
-                    item{spottedCount === 1 ? '' : 's'} spotted
-                  </Text>
+                  {/* Hero count — hidden while scanning (the beam + status carry "it's working"),
+                      then a fast count-up reveal of the real total the moment results land. */}
+                  {showDone && (
+                    <>
+                      <Text style={styles.scanCount}>{spottedCount}</Text>
+                      <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 2, fontWeight: '700', color: COLORS.textWhite }]}>
+                        item{spottedCount === 1 ? '' : 's'} spotted
+                      </Text>
+                    </>
+                  )}
                   <Animated.Text
                     style={[
                       styles.subtitle,
@@ -1132,9 +1115,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           const curUri = pages[cur]?.uri
           const curDims = curUri ? photoDims[curUri] : undefined
           const curImgH = SCREEN_W * (curDims ? curDims.h / curDims.w : 4 / 3)
-          // Compact reference height (was 0.48): the LIST is the workspace for correcting the AI, the
-          // photo is a spot-check you tap to zoom. Smaller frame → the item list gets the room.
-          const frameH = Math.min(curImgH, Math.round(SCREEN_H * 0.32))
+          // Compact PREVIEW banner (was 0.32, 0.48 before). A portrait fridge shot can't be shown big
+          // AND whole in a review that also lists chips — a large frame just crops it and reads as
+          // "glitched, only part of my photo shows." So the photo is now a small food-centred preview
+          // (auto-panned to the items); the WHOLE photo is one tap away via the Zoom pill. The chips —
+          // grouped by shelf — are the real content and get the screen.
+          const frameH = Math.min(curImgH, Math.round(SCREEN_H * 0.15))
           const goTo = (i: number) => {
             const c = Math.max(0, Math.min(i, total - 1))
             pagerRef.current?.scrollTo({ x: c * SCREEN_W, animated: true })
