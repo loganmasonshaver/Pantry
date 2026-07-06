@@ -33,3 +33,15 @@ export function isAssumedStaple(name: string, excluded: Set<string> = new Set())
   if (excluded.has(n)) return false
   return STAPLE_ALIASES.has(n)
 }
+
+// Staples to auto-exclude based on a user's dietary_restrictions — so we NEVER assume butter for a
+// vegan or flour for someone gluten-free, without asking them to opt out by hand. Values match the
+// onboarding options (DIET_STYLES + ALLERGY_OPTIONS). Returns normalized alias forms so they match
+// isAssumedStaple's exclusion check. KEEP IN SYNC with the mapping in generate-meals.
+export function dietExcludedStaples(restrictions: string[] = []): string[] {
+  const r = restrictions.map(x => String(x).toLowerCase().trim())
+  const out: string[] = []
+  if (r.includes('vegan') || r.includes('dairy-free')) out.push('butter', 'unsalted butter', 'salted butter')
+  if (r.includes('gluten-free')) out.push('flour', 'all purpose flour', 'all-purpose flour', 'plain flour')
+  return out
+}

@@ -25,7 +25,7 @@ import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { isAssumedStaple } from '@/constants/staples'
+import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
 import { categorizeItem } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
@@ -424,6 +424,9 @@ export default function MealDetailScreen() {
   // Basics the user has opted out of assuming (normalized names). Drives the "we assumed" tier —
   // an excluded staple stops being shown as assumed and moves to "you'll need".
   const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
+  // Only the user's MANUAL opt-outs persist back to the profile — diet-derived exclusions are
+  // recomputed from dietary_restrictions each load, never written into staples_excluded.
+  const manualExcludedRef = useRef<string[]>([])
   const [generatedImage, setGeneratedImage] = useState<string | null>(null)
   // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
   // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
@@ -435,8 +438,14 @@ export default function MealDetailScreen() {
       .then(({ data }) => setPantryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
     supabase.from('grocery_items').select('name').eq('user_id', user.id)
       .then(({ data }) => setGroceryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
-    supabase.from('profiles').select('staples_excluded').eq('id', user.id).single()
-      .then(({ data }) => setExcludedStaples(new Set((data?.staples_excluded ?? []).map((s: string) => s.toLowerCase()))))
+    // Excluded set = the user's manual opt-outs PLUS diet-conflicting basics (butter for vegan,
+    // flour for gluten-free), so the "we assumed" tier never shows a basic their diet rules out.
+    supabase.from('profiles').select('staples_excluded, dietary_restrictions').eq('id', user.id).single()
+      .then(({ data }) => {
+        const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
+        manualExcludedRef.current = manual
+        setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
+      })
   }, [user])
 
   // Tap an assumed-basic row → "I don't keep this". Persist to profile so meal generation stops
@@ -446,9 +455,10 @@ export default function MealDetailScreen() {
     const norm = name.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, ' ').trim()
     if (excludedStaples.has(norm)) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
-    const next = new Set(excludedStaples).add(norm)
-    setExcludedStaples(next)
-    await supabase.from('profiles').update({ staples_excluded: Array.from(next) }).eq('id', user.id)
+    setExcludedStaples(prev => new Set(prev).add(norm))
+    const nextManual = Array.from(new Set([...manualExcludedRef.current, norm])) // persist only manual opt-outs
+    manualExcludedRef.current = nextManual
+    await supabase.from('profiles').update({ staples_excluded: nextManual }).eq('id', user.id)
   }
 
   // Fetch this meal's existing rating so the UI reflects current state

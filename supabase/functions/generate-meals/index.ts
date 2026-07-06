@@ -264,6 +264,12 @@ Deno.serve(async (req: Request) => {
     // must come from the scanned pantry. KEEP IN SYNC with constants/staples.ts (client copy).
     const excludedStaples: string[] = (Array.isArray(rawStaplesExcluded) ? rawStaplesExcluded : [])
       .map((s: any) => String(s).toLowerCase().trim()).filter(Boolean)
+    // Diet-aware auto-exclusion: never assume butter for a vegan/dairy-free user, or flour for a
+    // gluten-free one — using restrictions we already have, no opt-out needed. KEEP IN SYNC with
+    // dietExcludedStaples() in constants/staples.ts.
+    const dietLower = (dietaryRestrictions as string[]).map((x: string) => x.toLowerCase())
+    if (dietLower.includes('vegan') || dietLower.includes('dairy-free')) excludedStaples.push('butter')
+    if (dietLower.includes('gluten-free')) excludedStaples.push('all-purpose flour')
     const ASSUMED = ['salt', 'black pepper', 'cooking oil', 'olive oil', 'butter', 'all-purpose flour', 'sugar',
       'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili powder', 'oregano', 'basil', 'Italian seasoning', 'cinnamon', 'red pepper flakes']
       .filter(s => !excludedStaples.includes(s.toLowerCase()))
