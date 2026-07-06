@@ -424,26 +424,27 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     Animated.timing(msgAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start()
   }, [loadingMessageIdx, step, showDone])
 
-  // Phase 1 — live "spotting" ramp WHILE scanning. STEADY climb, not a rush-then-crawl: the old
-  // exponential chase leapt to ~80% in 2s then added a fraction per tick (read as a slow +1 every
-  // few seconds = "product feels stuck/slow"). Now the target rises near-linearly with elapsed time,
-  // so the number climbs at a constant, believable pace the whole scan until results land.
+  // Phase 1 — live "spotting" ramp WHILE scanning. The true count is unknown mid-scan (the AI
+  // returns everything at once at the end), so this is a guess. Two rules keep the guess from
+  // looking broken: (1) NEVER plateau — a frozen number reads as "stuck"; (2) don't cap far below
+  // reality — a single full-fridge photo can hold 30+ items, so the old `base*1.6` ceiling (=14 for
+  // one photo) stalled at 14 then leapt to 30 when results landed. Now: a fast decelerating curve
+  // toward `base` PLUS a constant +1/sec floor so it ALWAYS keeps ticking, bounded by a generous
+  // cap so a slow scan can't inflate to an absurd number. The settle effect below snaps to the true
+  // total when results land — because the number was still moving, that reads as "finalizing," not a jump.
   useEffect(() => {
     if (step !== 5 || showDone || scanError) return
-    const base = 9 * Math.max(1, photos.length)
-    const cap = Math.round(base * 1.6) // believable ceiling so a long scan never inflates to an absurd count
-    const rate = Math.max(1.2, base / 14) // items/sec — reaches ~base in ~14s; floor so a 1-photo scan still moves visibly
+    const base = 14 * Math.max(1, photos.length) // central expectation; a dense photo runs higher, handled by the floor
+    const cap = base * 2 + 10                      // generous upper bound so a slow/hung scan can't inflate absurdly
     const startedAt = Date.now()
     setSpottedCount(0)
     spottedCountRef.current = 0
-    let floatVal = 0
     let lastShown = 0
     let lastHaptic = 0
     const interval = setInterval(() => {
       const elapsedS = (Date.now() - startedAt) / 1000
-      const target = Math.min(cap, elapsedS * rate) // near-linear: no early rush, no late crawl
-      floatVal += (target - floatVal) * 0.3 // light smoothing so ticks aren't robotic, but pace stays ≈ rate
-      const shown = Math.round(floatVal)
+      // decel curve (fast early, easing near `base`) + constant floor velocity so it never flat-stalls
+      const shown = Math.round(Math.min(cap, base * (1 - Math.exp(-elapsedS / 6)) + elapsedS))
       if (shown === lastShown) return
       lastShown = shown
       spottedCountRef.current = shown
@@ -453,7 +454,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         lastHaptic = now
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
       }
-    }, 180)
+    }, 140)
     return () => clearInterval(interval)
   }, [step, showDone, scanError])
 
