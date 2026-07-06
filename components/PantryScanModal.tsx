@@ -893,6 +893,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                           ? <Image source={{ uri: p.uri }} style={styles.capturedImg} resizeMode="cover" />
                           : <View style={[styles.capturedImg, styles.capturedImgEmpty]}><ScanLine size={18} stroke="#4ADE80" strokeWidth={1.5} /></View>}
                         <View style={styles.capturedCheck}><Check size={11} stroke="#000" strokeWidth={3} /></View>
+                        {/* Tap ✕ to drop this photo; removing the last one bounces back to the camera
+                            (can't scan zero). Silent, no confirm — matches the app's UX convention. */}
+                        <TouchableOpacity
+                          style={styles.capturedRemove}
+                          onPress={() => {
+                            const next = photos.filter(x => x.id !== p.id)
+                            setPhotos(next)
+                            if (next.length === 0) setStep(1)
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <X size={12} stroke="#FFFFFF" strokeWidth={2.5} />
+                        </TouchableOpacity>
                         <View style={styles.capturedLabelWrap}><Text style={styles.capturedLabel} numberOfLines={1}>{p.label}</Text></View>
                       </View>
                     ))}
@@ -1533,6 +1546,7 @@ const styles = StyleSheet.create({
   capturedImg: { width: '100%', height: '100%' },
   capturedImgEmpty: { alignItems: 'center', justifyContent: 'center' },
   capturedCheck: { position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
+  capturedRemove: { position: 'absolute', top: 6, left: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
   capturedLabelWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 4, paddingHorizontal: 6 },
   capturedLabel: { fontSize: 10, fontWeight: '600', color: '#FFFFFF', textAlign: 'center' },
   areaGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 14 },
