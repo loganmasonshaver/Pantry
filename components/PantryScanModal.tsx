@@ -1075,6 +1075,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         ref={pagerRef}
                         horizontal
                         pagingEnabled
+                        // Single photo has nothing to page to — disable scroll+bounce so the strip can't
+                        // rubber-band left/right (read as "the area wobbles"). Multi-photo keeps swiping.
+                        scrollEnabled={total > 1}
+                        bounces={total > 1}
                         showsHorizontalScrollIndicator={false}
                         onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
                         keyboardShouldPersistTaps="handled"
@@ -1175,16 +1179,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 return (
                   <View style={styles.staplesBar}>
                     <Text style={styles.staplesLabel}>Also have these? Tap to add</Text>
-                    {/* Wrap onto the page instead of a horizontal slide — every suggestion is visible
-                        without the user having to discover they can scroll sideways. */}
-                    <View style={styles.staplesChipsWrap}>
+                    {/* Horizontal slider by design — a compact rail of quick-add suggestions that
+                        doesn't push the primary CTA down. (Context-aware per container type below.) */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.staplesChips} keyboardShouldPersistTaps="handled">
                       {available.map(s => (
                         <TouchableOpacity key={s} style={styles.stapleChip} onPress={() => addStapleChip(s)} activeOpacity={0.7}>
                           <Plus size={13} stroke="#4ADE80" strokeWidth={2.6} />
                           <Text style={styles.stapleChipText}>{s}</Text>
                         </TouchableOpacity>
                       ))}
-                    </View>
+                    </ScrollView>
                   </View>
                 )
               })()}
