@@ -23,6 +23,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
 import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import { ScanTheater } from './ScanTheater'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
@@ -281,6 +282,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
   // Per-photo container type from the scan (fridge/freezer/pantry/counter) → context-aware quick-adds.
   const [photoContainers, setPhotoContainers] = useState<string[]>([])
+  // Friendly area name per photo from its classified container ("Fridge"/"Freezer"/…). Lifted to
+  // component scope so both the loading theatre and the review carousel use the same labels.
+  const areaLabel = (idx: number) => CONTAINER_LABEL[(photoContainers[idx] || '').toLowerCase()] ?? `Photo ${idx + 1}`
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
@@ -1010,52 +1014,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
 
-            {/* Centered loading indicator (fills available space) */}
-            <View style={styles.loadingBody}>
-              <View style={styles.scanFrame}>
-                <View style={[styles.scanCorner, styles.scanCornerTL]} />
-                <View style={[styles.scanCorner, styles.scanCornerTR]} />
-                <View style={[styles.scanCorner, styles.scanCornerBL]} />
-                <View style={[styles.scanCorner, styles.scanCornerBR]} />
-                <ScanLine size={40} stroke={scanError ? '#F87171' : '#4ADE80'} strokeWidth={1.5} />
-                {!scanError && (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[styles.scanBeam, { transform: [{ translateY: beamAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 154] }) }] }]}
-                  />
-                )}
+            {/* Loading body — LIVE DETECTION THEATRE while scanning (the user's own photos scanned
+                section-by-section, boxes popping as the sweep passes), or an error card on failure. */}
+            {scanError ? (
+              <View style={styles.loadingBody}>
+                <View style={styles.scanFrame}>
+                  <View style={[styles.scanCorner, styles.scanCornerTL]} />
+                  <View style={[styles.scanCorner, styles.scanCornerTR]} />
+                  <View style={[styles.scanCorner, styles.scanCornerBL]} />
+                  <View style={[styles.scanCorner, styles.scanCornerBR]} />
+                  <ScanLine size={40} stroke="#F87171" strokeWidth={1.5} />
+                </View>
+                <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>Scan failed</Text>
+                <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>{scanError}</Text>
               </View>
-              {scanError ? (
-                <>
-                  <Text style={[styles.title, { textAlign: 'center', marginTop: 36 }]}>Scan failed</Text>
-                  <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>{scanError}</Text>
-                </>
-              ) : (
-                <>
-                  {/* Hero count — hidden while scanning (the beam + status carry "it's working"),
-                      then a fast count-up reveal of the real total the moment results land. */}
-                  {showDone && (
-                    <>
-                      <Text style={styles.scanCount}>{spottedCount}</Text>
-                      <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 2, fontWeight: '700', color: COLORS.textWhite }]}>
-                        item{spottedCount === 1 ? '' : 's'} spotted
-                      </Text>
-                    </>
-                  )}
-                  <Animated.Text
-                    style={[
-                      styles.subtitle,
-                      { textAlign: 'center', marginTop: 10, paddingHorizontal: 12 },
-                      showDone ? null : { opacity: msgAnim, transform: [{ translateY: msgAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }] },
-                    ]}
-                  >
-                    {showDone
-                      ? 'Tap below to review and add anything we missed'
-                      : SCAN_STATUS_LINES[loadingMessageIdx]}
-                  </Animated.Text>
-                </>
-              )}
-            </View>
+            ) : (
+              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} areaLabel={areaLabel} />
+            )}
 
             {/* Footer button — state-aware: View Results / Retry / nothing (still scanning) */}
             {showDone && !scanError && (
@@ -1102,7 +1077,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           // Label each photo page by the area the SCAN classified it as (fridge/pantry/…), falling
           // back to "Photo N" when unknown. This is the "one smart scan, location→food" behavior:
           // no separate pre-scan classify call — the scan already returns photoContainers.
-          const areaLabel = (idx: number) => CONTAINER_LABEL[(photoContainers[idx] || '').toLowerCase()] ?? `Photo ${idx + 1}`
           const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number }[] =
             photos.length <= 1
               ? [{ uri: photos[0]?.uri, label: areaLabel(0), items: detectedItems, photoIdx: 0 }]
