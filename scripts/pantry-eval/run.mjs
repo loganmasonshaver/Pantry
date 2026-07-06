@@ -114,8 +114,8 @@ Return a JSON object with this structure:
     {
       "zone": "Top Shelf",
       "items": [
-        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0 },
-        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1 }
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0, "confidence": 95 },
+        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1, "confidence": 45 }
       ]
     }
   ]
@@ -130,6 +130,7 @@ Zone detection rules:
 Item rules:
 - "name" must be a GENERIC ingredient name — NEVER a brand or product name. Before writing each name, STRIP the brand to its generic type: "A1" → "Steak Sauce", "Quest Bars" → "Protein Bars", "Babybel" → "Cheese", "Hamburger Helper" → "Pasta Dinner Kit", "Campbell's Cream of Mushroom Soup" → "Cream of Mushroom Soup", "Uncle Ben's Rice" → "Rice", "Chobani" → "Greek Yogurt". A brand in the name creates duplicate entries. Use the brand/label only as CONTEXT to make the GENERIC name more specific (e.g. "Non-Fat Plain Greek Yogurt", not just "Yogurt").
 - "photo" — 0-based index of which photo this item came from. Required for downstream density analysis. If you genuinely can't tell, use 0.
+- "confidence" — REQUIRED integer 0-100: how sure you are this exact item is really present and correctly named. 90-100 = clearly readable label or unmistakable shape; 60-85 = confident on the type but guessing the variant; 35-55 = partly hidden/blurry/ambiguous; 0-30 = a genuine guess at a blob or opaque/unmarked container. Don't inflate — low scores get filtered out as noise.
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
   - Carbs: bread, pasta, rice, cereals, flour
@@ -144,6 +145,16 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
 
 // Normalize an item name for cross-model matching in the recall matrix.
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
+
+// Normalize `confidence` to a 0-100 number — mirrors confScore() in the production scan-pantry
+// function so the sweep tests the exact cutoff logic prod will apply. Tolerates the old
+// string form and omission (absent → 100, i.e. never floor-dropped).
+function confScore(c) {
+  if (typeof c === 'number' && isFinite(c)) return c
+  if (c === 'low') return 30
+  if (c === 'high') return 90
+  return 100
+}
 
 // ── Ground truth: hand-verified list of the REAL distinct items in a photo, so we can
 // score actual RECALL (% of true items caught) instead of eyeballing raw counts. Only for
@@ -253,27 +264,29 @@ function flattenItems(raw) {
     }
   }
   const zones = parsed.zones ?? []
+  // Carry {name, confidence} through — the sweep needs the score, the matrix needs the name.
   const all = []
-  for (const z of zones) for (const it of (z.items ?? [])) if (it?.name) all.push(it.name)
-  const removed = all.filter(isNonFood)            // non-food hallucinations the filter caught
-  const food = all.filter((n) => !isNonFood(n))
+  for (const z of zones) for (const it of (z.items ?? [])) if (it?.name) all.push({ name: it.name, confidence: confScore(it.confidence) })
+  const removed = all.filter((it) => isNonFood(it.name)).map((it) => it.name) // non-food hallucinations the filter caught
+  const food = all.filter((it) => !isNonFood(it.name))
 
   // De-over-split: strip parenthetical qualifiers ("Hot Sauce (Red Cap)" → "Hot Sauce")
   // then collapse exact duplicates. Fixes the cap-color/can-color over-splitting. Does NOT
   // touch semantic dupes ("Protein Powder" vs "Whey Protein Isolate") — that needs fuzzy
   // matching which risks merging genuinely distinct items.
   const seen = new Set()
-  const names = []
+  const items = []
   let collapsed = 0
-  for (const orig of food) {
-    const canon = orig.replace(/\s*\([^)]*\)/g, '').trim()
+  for (const it of food) {
+    const canon = it.name.replace(/\s*\([^)]*\)/g, '').trim()
     const key = norm(canon)
     if (!key) continue
     if (seen.has(key)) { collapsed++; continue }
     seen.add(key)
-    names.push(canon)
+    items.push({ name: canon, confidence: it.confidence })
   }
-  return { names, removed, collapsed, error: null }
+  const names = items.map((i) => i.name)
+  return { names, items, removed, collapsed, error: null }
 }
 
 // Detect the REAL image type from magic bytes, not the extension — internet/phone
@@ -304,6 +317,7 @@ async function callModel(m, base64, mime) {
       body: JSON.stringify({
         model: m.model,
         max_tokens: m.maxTokens ?? 12000, // headroom so a thinking model's reasoning doesn't starve the answer
+        temperature: 0, // match production — deterministic reads so the sweep measures signal, not sampling noise
         ...(m.extra ?? {}), // per-model knobs (e.g. Pro's reasoning_effort)
         messages: [{
           role: 'user',
@@ -335,13 +349,13 @@ async function callModel(m, base64, mime) {
     const rawPeek = JSON.stringify(data).slice(0, 240)
     return { names: [], removed: [], collapsed: 0, ms, error: `EMPTY content — finish_reason=${fr}, message fields=[${mkeys}]\n      raw: ${rawPeek}` }
   }
-  const { names, removed, collapsed, error } = flattenItems(content)
+  const { names, items, removed, collapsed, error } = flattenItems(content)
   // If parsing failed, append finish_reason + output token count — finish=length means the
   // provider truncated (token cap); finish=stop means the model itself ended early/malformed.
   const augErr = error
     ? `${error}  [finish=${choice?.finish_reason ?? '?'}, out_tokens=${data.usage?.completion_tokens ?? '?'}]`
     : error
-  return { names, removed, collapsed, ms, error: augErr }
+  return { names, items: items ?? [], removed, collapsed, ms, error: augErr }
 }
 
 // ── LIST mode: print the Gemini models this key can actually call, then exit. ──
@@ -376,6 +390,151 @@ if (process.env.LISTOR) {
   console.log('\nOpenRouter vision models (image input) worth testing:\n')
   for (const m of models) console.log('  ' + m)
   console.log(`\n${models.length} shown. Grab the qwen/pixtral ids and paste them to me.\n`)
+  process.exit(0)
+}
+
+// ── SWEEP mode: confidence-floor tuning + temp-0 consistency ────────────────
+// Runs the PRODUCTION model (gpt-4.1) REPEAT times per photo at temperature 0, then reports:
+//  1. CONSISTENCY — how stable the item set is run-to-run (proves temp 0 fixed the "same photo,
+//     different results" problem; flags which items still flicker).
+//  2. THRESHOLD SWEEP — for each candidate floor, how many items survive and EXACTLY which get
+//     dropped, so you can see where junk dies and (if ever) real food starts dying.
+//  3. GROUND-TRUTH precision/recall — on labeled photos, real-item recall vs. unverified items
+//     dropped at each floor, and a recommended SCAN_CONFIDENCE_FLOOR value.
+// Run:  SWEEP=1 OPENAI_API_KEY=sk-... node scripts/pantry-eval/run.mjs
+//       REPEAT=5 → 5 runs/photo (default 3);  SWEEP_MODEL=gpt-4o → sweep a different model;
+//       LIMIT=1 → first photo only (cheap smoke test).
+if (process.env.SWEEP) {
+  const REPEAT = Math.max(1, Number(process.env.REPEAT) || 3)
+  const THRESHOLDS = [0, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80]
+  const wantModel = process.env.SWEEP_MODEL || 'gpt-4.1'
+  const model = MODELS.find((m) => m.model === wantModel)
+  if (!model) { console.error(`SWEEP_MODEL "${wantModel}" is not in the MODELS list.`); process.exit(1) }
+  if (!model.apiKey) { console.error(`No API key in env for ${model.label}.`); process.exit(1) }
+
+  const sweepFiles = (fs.existsSync(IMAGES_DIR)
+    ? fs.readdirSync(IMAGES_DIR).filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+    : []
+  ).slice(0, Number(process.env.LIMIT) || Infinity)
+  if (sweepFiles.length === 0) { console.error(`No images in ${IMAGES_DIR}. Drop pantry photos there first.`); process.exit(1) }
+
+  console.log(`\nSWEEP: ${model.label} · ${REPEAT}× per photo · temp 0 · ${sweepFiles.length} photo(s)\n`)
+
+  // Aggregated across photos → drives the final recommendation.
+  const aggByT = new Map(THRESHOLDS.map((t) => [t, { caught: 0, truthTotal: 0, unverifiedKept: 0 }]))
+  let anyTruth = false
+
+  for (const file of sweepFiles) {
+    const buf = fs.readFileSync(path.join(IMAGES_DIR, file))
+    const mime = sniffMime(buf)
+    if (!mime) { console.log(`\n⚠️  skipping ${file} — unsupported format`); continue }
+    const base64 = buf.toString('base64')
+    console.log(`\n${'='.repeat(72)}\n📷 ${file}  [${mime}]\n${'='.repeat(72)}`)
+
+    // Sequential (not parallel) — REPEAT calls on ONE key; bursting invites 429s and would
+    // itself add variance we're trying to measure out.
+    const runs = []
+    for (let r = 0; r < REPEAT; r++) {
+      const res = await callModel(model, base64, mime)
+      if (res.error) { console.log(`  ✗ run ${r + 1}: ERROR ${res.error}`); continue }
+      runs.push(res)
+      console.log(`  ✓ run ${r + 1}: ${res.items.length} items (${(res.ms / 1000).toFixed(1)}s)`)
+    }
+    if (runs.length === 0) { console.log('  (all runs errored — skipping analysis)'); continue }
+
+    // ── Consistency across runs ──
+    const setPerRun = runs.map((r) => new Set(r.items.map((i) => norm(i.name))))
+    const union = new Set()
+    for (const s of setPerRun) for (const k of s) union.add(k)
+    const inAll = [...union].filter((k) => setPerRun.every((s) => s.has(k)))
+    const flaky = [...union].filter((k) => !setPerRun.every((s) => s.has(k)))
+    const counts = runs.map((r) => r.items.length)
+    if (REPEAT > 1) {
+      // Mean pairwise Jaccard = the headline stability number (100% = identical set every run).
+      let jSum = 0, jN = 0
+      for (let a = 0; a < setPerRun.length; a++) for (let b = a + 1; b < setPerRun.length; b++) {
+        const A = setPerRun[a], B = setPerRun[b]
+        const inter = [...A].filter((k) => B.has(k)).length
+        const uni = new Set([...A, ...B]).size
+        jSum += uni ? inter / uni : 1; jN++
+      }
+      const jac = jN ? jSum / jN : 1
+      console.log(`\n  CONSISTENCY: counts ${counts.join('/')} · stable ${inAll.length}/${union.size} items · mean Jaccard ${(jac * 100).toFixed(0)}%`)
+      if (flaky.length) {
+        // Show flicker items WITH mean confidence — the argument is that a floor should kill
+        // exactly these low-confidence stragglers, tightening consistency for free.
+        const disp = flaky.map((k) => {
+          let name = k, confs = []
+          for (const r of runs) { const it = r.items.find((i) => norm(i.name) === k); if (it) { name = it.name; confs.push(it.confidence) } }
+          const avg = confs.length ? Math.round(confs.reduce((a, b) => a + b, 0) / confs.length) : '?'
+          return `${name}(conf ${avg}, ${confs.length}/${REPEAT}×)`
+        })
+        console.log(`  flicker (present in some runs, not all): ${disp.join(', ')}`)
+      }
+    }
+
+    // ── Pool distinct items across runs → mean confidence per item ──
+    const pool = new Map()
+    for (const r of runs) for (const it of r.items) {
+      const k = norm(it.name)
+      if (!pool.has(k)) pool.set(k, { name: it.name, confs: [] })
+      pool.get(k).confs.push(it.confidence)
+    }
+    const distinct = [...pool.entries()].map(([k, v]) => ({
+      name: v.name,
+      conf: Math.round(v.confs.reduce((a, b) => a + b, 0) / v.confs.length),
+      seen: setPerRun.filter((s) => s.has(k)).length,
+    })).sort((a, b) => a.conf - b.conf) // lowest first — the drop candidates are at the top
+
+    console.log(`\n  ITEMS by mean confidence (low→high, appeared x/${REPEAT}):`)
+    for (const d of distinct) console.log(`    ${String(d.conf).padStart(3)}  ${d.name}${d.seen < REPEAT ? `  (${d.seen}/${REPEAT}×)` : ''}`)
+
+    // ── Threshold sweep ──
+    console.log(`\n  THRESHOLD SWEEP (distinct items surviving each floor):`)
+    for (const T of THRESHOLDS) {
+      const kept = distinct.filter((d) => d.conf >= T)
+      const dropped = distinct.filter((d) => d.conf < T)
+      console.log(`    floor ${String(T).padStart(2)} → keep ${String(kept.length).padStart(2)}/${distinct.length}${dropped.length ? `   drops: ${dropped.map((d) => `${d.name}(${d.conf})`).join(', ')}` : ''}`)
+    }
+
+    // ── Ground-truth precision/recall per threshold (labeled photos only) ──
+    const truth = GROUNDTRUTH[file]
+    if (truth) {
+      anyTruth = true
+      console.log(`\n  📋 vs ground truth (${truth.length} known real items):`)
+      for (const T of THRESHOLDS) {
+        const keptNames = distinct.filter((d) => d.conf >= T).map((d) => d.name)
+        const { caught, missed } = scoreAgainstTruth(truth, keptNames)
+        // "unverified kept" = surviving items matching no truth keyword (junk OR real-but-unlabeled).
+        const unverified = keptNames.filter((n) => !truth.some((t) => t.keys.some((k) => norm(n).includes(k)))).length
+        const pct = Math.round((caught.length / truth.length) * 100)
+        const agg = aggByT.get(T)
+        agg.caught += caught.length; agg.truthTotal += truth.length; agg.unverifiedKept += unverified
+        console.log(`    floor ${String(T).padStart(2)} → recall ${caught.length}/${truth.length} (${String(pct).padStart(3)}%) · unverified kept ${unverified}${pct < 100 && missed.length ? `  lost: ${missed.join(', ')}` : ''}${pct < 90 ? '  ⚠️ real items dying' : ''}`)
+      }
+    }
+  }
+
+  // ── Recommendation ──
+  console.log(`\n${'='.repeat(72)}\n📊 RECOMMENDATION\n${'='.repeat(72)}`)
+  if (anyTruth) {
+    // Sweet spot = highest floor that keeps aggregate real-item recall ≥ 95%.
+    let best = 0
+    for (const T of THRESHOLDS) {
+      const a = aggByT.get(T)
+      if (a.truthTotal && a.caught / a.truthTotal >= 0.95) best = T
+    }
+    const a0 = aggByT.get(0), aB = aggByT.get(best)
+    const junkCut = a0.unverifiedKept - aB.unverifiedKept
+    console.log(`  Suggested SCAN_CONFIDENCE_FLOOR = ${best}`)
+    console.log(`  At floor ${best}: real-item recall ${Math.round((aB.caught / aB.truthTotal) * 100)}% · unverified items cut ${junkCut} vs floor 0.`)
+    console.log(`  (Based on ${Object.keys(GROUNDTRUTH).length} labeled photo(s) — add more GROUNDTRUTH entries for a firmer number.)`)
+  } else {
+    console.log(`  No ground-truth photos labeled. Read the per-photo THRESHOLD SWEEP above and pick the`)
+    console.log(`  highest floor whose "drops" are still all junk (blobs, mystery containers) and no real`)
+    console.log(`  food. Add a GROUNDTRUTH entry (see the example near the top of this file) to auto-recommend.`)
+  }
+  console.log(`  Then set it in Supabase: SCAN_CONFIDENCE_FLOOR=<value>, and redeploy scan-pantry.\n`)
   process.exit(0)
 }
 

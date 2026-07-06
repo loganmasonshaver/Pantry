@@ -16,6 +16,30 @@ with the exact production scan prompt and prints a side-by-side recall matrix.
 
    Missing a key → that model is skipped. No new dependencies; needs Node 18+.
 
+## Confidence-floor sweep (find the `SCAN_CONFIDENCE_FLOOR` sweet spot)
+
+The production scanner now scores every item `confidence` 0–100 and can drop anything below
+`SCAN_CONFIDENCE_FLOOR` (env, default 0 = drop nothing). To find the right cutoff on YOUR
+photos instead of guessing:
+
+```bash
+SWEEP=1 OPENAI_API_KEY=sk-... node scripts/pantry-eval/run.mjs
+```
+
+Runs the production model (`gpt-4.1`) **3× per photo at temperature 0** and prints:
+
+- **CONSISTENCY** — item-count spread + mean Jaccard across the 3 runs (proves temp 0 fixed the
+  "same photo, different results" problem) and the exact items that still *flicker* run-to-run.
+- **ITEMS by confidence** — every distinct item, lowest score first (the drop candidates).
+- **THRESHOLD SWEEP** — for each candidate floor, how many items survive and **exactly which get
+  dropped**, so you can see where junk dies and (if ever) real food starts dying.
+- **Ground-truth recall** — on labeled photos, real-item recall vs. unverified items cut at each
+  floor, and a **suggested `SCAN_CONFIDENCE_FLOOR`** (highest floor keeping ≥95% real recall).
+
+Knobs: `REPEAT=5` (runs/photo), `SWEEP_MODEL=gpt-4o`, `LIMIT=1` (first photo only, cheap).
+Add more `GROUNDTRUTH` entries in `run.mjs` (hand-list a photo's real items) to firm up the
+recommendation — right now only one photo is labeled.
+
 ## Reading the output
 
 - Per photo: each model's item count + latency, then a matrix of every detected item

@@ -51,7 +51,7 @@ type DetectedItem = {
   zone: string
   photo?: number | null // which source photo the AI saw this in (for the per-photo review). null = unknown.
   box?: [number, number, number, number] | null // [x,y,w,h] normalized 0-1 in that photo (top-left origin). Drives the tap-to-locate overlay.
-  confidence?: 'high' | 'low' // AI's self-reported certainty. 'low' → surfaced in the "double-check" triage section.
+  confidence?: number // AI's self-reported certainty 0-100. Server applies the floor; kept here as telemetry, not shown in the review UI.
 }
 
 type ZoneGroup = {
@@ -396,9 +396,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               // origin). Null when the model omits/malforms it — chip just isn't tap-to-locate then.
               box: Array.isArray(item.box) && item.box.length === 4 && item.box.every((n: any) => typeof n === 'number')
                 ? item.box as [number, number, number, number] : null,
-              // Default to 'high' when absent (old scans / model omission) so only items the AI
-              // EXPLICITLY flags as uncertain land in the double-check section.
-              confidence: item.confidence === 'low' ? 'low' : 'high',
+              // Numeric 0-100 now (was 'high'/'low'). Server already floor-drops the noise; this
+              // is passthrough telemetry. Tolerate the old string form so an in-flight/older
+              // response never lands NaN in state.
+              confidence: typeof item.confidence === 'number' ? item.confidence
+                : item.confidence === 'low' ? 30 : 90,
             }
             return detected
           })

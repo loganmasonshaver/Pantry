@@ -24,6 +24,23 @@ const SCAN_WINDOW_DAYS = 7
 // bounds the per-call token cost the count cap can't (client enforces the same limit).
 const MAX_PHOTOS_PER_SCAN = 8
 
+// Confidence floor: drop items the model scored below this (0-100) before they reach the user.
+// Kills genuine-guess noise ("unidentifiable blob", opaque unmarked container) that varies
+// run-to-run — the stuff that made the review a wall of junk chips. Numeric (not binary
+// high/low) so the cutoff is tunable: a binary "drop low" nuked >half the real finds because
+// "low" swallowed every confident-but-not-certain item. 0 = keep everything (default until the
+// pantry-eval sweep picks the sweet spot); set SCAN_CONFIDENCE_FLOOR in the Supabase dashboard.
+const SCAN_CONFIDENCE_FLOOR = Number(Deno.env.get('SCAN_CONFIDENCE_FLOOR') ?? 0)
+
+// Normalize whatever the model put in `confidence` to a 0-100 number. Tolerates the old
+// string form ('high'/'low') and omission so a mixed/older response never crashes the floor.
+function confScore(c: unknown): number {
+  if (typeof c === 'number' && isFinite(c)) return c
+  if (c === 'low') return 30
+  if (c === 'high') return 90
+  return 100 // absent → treat as fully confident (never floor-drop an unscored item)
+}
+
 // One vision call with a hard timeout. Throws on error/timeout/empty so the caller can fall back.
 // 30s: the model returns in ~10s; 30s leaves headroom for a slow response while keeping the
 // whole flow (up to 2 passes × primary+fallback) safely under Supabase's ~150s edge wall-clock
@@ -35,7 +52,11 @@ async function visionCall(endpoint: string, apiKey: string, model: string, messa
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, max_tokens: maxTokens, messages }),
+      // temperature: 0 — vision scans must be repeatable. Unset defaults to 1 (full sampling),
+      // which is why the SAME fridge photo returned different item sets/counts run-to-run. At 0 the
+      // model takes its top pick every time; near-identical output for identical input. (Image
+      // tokenization still adds tiny non-determinism, so it's "stable," not bit-identical.)
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages, temperature: 0 }),
       signal: ctrl.signal,
     })
     const data = await res.json()
@@ -91,6 +112,7 @@ function cleanupResult(result: any): void {
     for (const item of (zone.items || [])) {
       if (!item?.name || typeof item.name !== 'string') continue
       if (isNonFood(item.name)) continue
+      if (confScore(item.confidence) < SCAN_CONFIDENCE_FLOOR) continue // below the tunable quality floor
       const canon = item.name.replace(/\s*\([^)]*\)/g, '').trim()
       const key = normName(canon)
       if (!key || seen.has(key)) continue
@@ -217,8 +239,8 @@ Return a JSON object with this structure:
     {
       "zone": "Top Shelf",
       "items": [
-        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0, "box": [0.41, 0.12, 0.10, 0.18], "confidence": "high" },
-        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1, "box": [0.22, 0.55, 0.14, 0.20], "confidence": "low" }
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0, "box": [0.41, 0.12, 0.10, 0.18], "confidence": 95 },
+        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1, "box": [0.22, 0.55, 0.14, 0.20], "confidence": 45 }
       ]
     }
   ]
@@ -238,7 +260,12 @@ Item rules:
 - "name" must be a GENERIC ingredient name — NEVER a brand or product name. Before writing each name, STRIP the brand to its generic type: "A1" → "Steak Sauce", "Quest Bars" → "Protein Bars", "Babybel" → "Cheese", "Hamburger Helper" → "Pasta Dinner Kit", "Campbell's Cream of Mushroom Soup" → "Cream of Mushroom Soup", "Uncle Ben's Rice" → "Rice", "Chobani" → "Greek Yogurt". A brand in the name creates duplicate entries. Use the brand/label only as CONTEXT to make the GENERIC name more specific (e.g. "Non-Fat Plain Greek Yogurt", not just "Yogurt").
 - "photo" — REQUIRED on EVERY item object, never omit it. The 0-based index (0 to ${images.length - 1}) of the photo this item is visible in. ${images.length === 1 ? 'There is only ONE photo, so "photo" is ALWAYS 0 on every item.' : `Assign each item to the specific photo it actually appears in — an item seen in the 3rd photo must be "photo": 2, NOT 0. Do not default everything to 0.`}
 - "box" — REQUIRED on every item: the item's location in ITS photo as [x, y, w, h], all normalized 0-1 with the ORIGIN at the TOP-LEFT of that photo. x,y = the top-left corner of a tight box around the visible item (include its cap/lid); w,h = the box's width/height as fractions of the photo. Examples: an item in the upper-left quarter ≈ [0.05, 0.08, 0.15, 0.22]; one centered near the bottom ≈ [0.45, 0.70, 0.12, 0.20]. Estimate as accurately as you can — this box is drawn over the photo so the user can see exactly which item you mean. If an item is partially hidden, box only its VISIBLE part. Coordinates are for the same photo given in "photo".
-- "confidence" — REQUIRED, either "high" or "low". Use "high" ONLY when you can clearly see and identify the item (readable label/brand, or an unmistakable shape). Use "low" whenever you're guessing: the item is partially hidden, blurry, in an opaque/unmarked container, an ambiguous shape, or you gave a best-guess generic name. Be honest — "low" items get surfaced to the user to double-check, so calling a guess "high" is worse than admitting the guess. Most clearly-visible front-row items are "high"; most back-row/small/ambiguous ones are "low".
+- "confidence" — REQUIRED integer 0-100: how sure you are this exact item is really present and correctly named. Calibrate honestly, using the full range:
+  - 90-100: you can clearly READ the label/brand, or the shape is unmistakable (a carton of milk, a visible egg tray)
+  - 60-85: confident on the food TYPE but guessing the exact variant (clearly yogurt, unsure if Greek/regular)
+  - 35-55: plausible but partially hidden, blurry, dim, or an ambiguous shape you're inferring
+  - 0-30: a genuine guess at a barely-visible blob, an opaque/unmarked container, or contents you mostly can't see
+  Scores below a cutoff get filtered out as noise, so DO NOT inflate — an honest 25 on a mystery blob is far better than a dishonest 80. Most clear front-row items land 85+; most back-row/small/ambiguous ones land under 50.
 - Categories must be one of: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other
   - Protein: meat, fish, eggs, beans, tofu
   - Carbs: bread, pasta, rice, cereals, flour
@@ -334,9 +361,9 @@ Use SAME zone names from first pass where possible: ${knownZones.join(', ') || '
 Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
 "photo" is REQUIRED on every item — the 0-based index (0 to ${images.length - 1}) of the photo it appears in${images.length === 1 ? ' (always 0 here)' : ', so it groups under the right photo'}.
 "box" is REQUIRED on every item — [x, y, w, h] normalized 0-1 from the photo's TOP-LEFT corner, a tight box around the visible item (its width/height as fractions of the photo).
-"confidence" is REQUIRED — "high" or "low". These are items you MISSED the first time (small/hidden/ambiguous), so most will be "low"; only use "high" for one you can now clearly read/identify.
+"confidence" is REQUIRED — integer 0-100 for how sure you are the item is really there and correctly named (90-100 clearly readable; 60-85 confident type, unsure variant; 35-55 partly hidden/ambiguous; 0-30 a genuine guess at a blob/opaque container). These are items you MISSED the first time, so most will score lower; only give 85+ to one you can now clearly read/identify. Don't inflate — low scores get filtered as noise.
 
-Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "...", "photo": 0, "box": [0.1, 0.2, 0.1, 0.15], "confidence": "low" }] }
+Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "...", "photo": 0, "box": [0.1, 0.2, 0.1, 0.15], "confidence": 40 }] }
 
 Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] }.`
 
@@ -363,9 +390,10 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
           }
           // Carry the photo index (default 0) so second-pass finds don't orphan to the
           // client's "More" page in multi-photo scans the way first-pass items wouldn't.
-          // Second-pass finds are the small/hidden/ambiguous items — default to low confidence
-          // unless the model explicitly says high, so they surface for a double-check.
-          zone.items.push({ name: item.name, category: item.category || 'Other', photo: typeof item.photo === 'number' ? item.photo : 0, box: Array.isArray(item.box) && item.box.length === 4 ? item.box : null, confidence: item.confidence === 'high' ? 'high' : 'low' })
+          // Second-pass finds are the small/hidden/ambiguous items — default to a middling-low
+          // score (40) when the model omits one, so a genuinely-uncertain find can still be
+          // floor-dropped rather than waved through as fully confident.
+          zone.items.push({ name: item.name, category: item.category || 'Other', photo: typeof item.photo === 'number' ? item.photo : 0, box: Array.isArray(item.box) && item.box.length === 4 ? item.box : null, confidence: confScore(item.confidence) === 100 ? 40 : confScore(item.confidence) })
         }
         console.log(`[scan-pantry] second pass: ${Date.now() - secondPassStart}ms, added ${missed.length} items`)
       }
