@@ -219,7 +219,7 @@ EXHAUSTIVENESS RULES (these matter more than naming precision):
 - Scan EVERY zone in the image — don't focus on the obvious centerpiece items and skip the rest
 - Common misses to actively look for: spices in small jars, condiment bottles on fridge doors, sauces, oils, items in CLEAR or SEMI-TRANSPARENT containers (you can see contents through the plastic), back-row items partially hidden behind front items, frozen drawer contents, items on the very top shelf, items on the bottom that may look like packaging trash
 - For items in clear containers (Tupperware, glass jars, ziplock bags), identify the CONTENTS not the container
-- If you see something edible but can't ID it precisely, use a best-guess generic name (e.g. "leafy greens" if you can't tell spinach from kale, "white sauce" if you can't ID it specifically) — DO NOT skip it
+- If you can tell WHAT the food is but not the exact variant, use a best-guess generic name (e.g. "leafy greens" if you can't tell spinach from kale). BUT if you cannot identify the actual food at all — a foil-covered pan, an opaque tub, an unlabeled container of "something" — SKIP it. NEVER invent placeholder entries like "leftovers", "covered pot of leftovers", "food in container", "deli container", "sauce jar", "drink bottle", or "condiment cup". Those name a container, not a food — nobody can cook from them.
 - If a single product is duplicated (3 cans of beans), list it ONCE — but don't skip a real second item because it "looks similar" to another
 - Partial labels still count — if you can see part of a label that suggests a product, include it with your best inference
 
@@ -227,7 +227,7 @@ SCAN METHOD — work systematically so cluttered/back areas don't get skimmed:
 - Go shelf by shelf. For EACH shelf sweep front→back AND left→right. The BACK ROW behind the front items is where most misses happen — actively look past the front items for caps, lids, and label edges poking out behind or between them. A jar behind a jar, a tub behind a carton — each is a separate item.
 - Scan the DOOR shelves and built-in trays separately: condiments, butter/cheese compartments, and EGG TRAYS. Loose eggs sit in molded trays or on door shelves and blend into the tray shape — look for the rounded egg shapes and count them ("eggs").
 - Scan each DRAWER (produce, deli) separately — items there are dim and easy to skip.
-- If you can see even a SLIVER of something — a corner, a cap, an edge of a label peeking out — it counts. Include it with a best-guess name.
+- A sliver of a KNOWN item (a readable cap, a recognizable package) counts — include it. But a sliver you genuinely can't identify is not worth a placeholder; skip it rather than inventing "unknown jar".
 - Stacked or nested items each count separately, even if mostly hidden.
 
 COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distinct items. If your list looks short for a full scene, you've skipped back-row and small items — go back to the back rows, door shelves, and shelf edges and look again before returning. (Only include items that are actually visible — never invent — but don't stop early.)
@@ -235,13 +235,15 @@ COUNT CHECK before you finish: a full fridge/pantry typically holds 20-40 distin
 ONE PHYSICAL ITEM = ONE ENTRY (do not over-split or pad the list):
 - If you can see only ONE container, list it exactly ONCE with your single best name. NEVER output multiple near-synonyms or alternate guesses for the same object (e.g. don't list both "Tomato Soup" and "Tomato Rice Soup" for one can, or "Protein Powder" + "Whey Protein Isolate" for one tub).
 - Name each item at the generic product-type level — do NOT invent finer sub-variants you're only guessing at. When unsure of the exact variant, use the single broader generic name.
+- NEVER hedge with an "A or B" name (no "Lemon or orange", "Mayonnaise or aioli", "Mustard or hot sauce bottle", "Chocolate protein bar or candy"). Commit to your single most-likely guess, or step up to the broader category ("Citrus", "Condiment") — exactly ONE clean name per item.
 
 EXCLUDE — these are NOT food and must NEVER appear in the list:
 - Pet food and pet treats (cat food, dog food, kibble)
 - Non-edible household goods: cleaning supplies, paper towels, napkins, tissues, foil/wrap, dish soap, sponges, trash bags, batteries, toiletries, nail polish
 - Dishware, cookware, and kitchen tools: plates, bowls, cups, mugs, glasses, utensils, cutting boards, pots, pans, kettles, trays
 - Small appliances (coffee makers, toasters, blenders), cookbooks, and any container that is clearly EMPTY
-Apart from these exclusions, EVERY actual human food or drink item still follows the exhaustiveness rules above — when unsure whether a FOOD item is X or Y, still include it with a best-guess name. Never drop a real food/drink just because you're unsure what it is.
+- Unidentifiable leftovers and generic containers: "leftovers", "covered pot", "food in foil pan", "food in a clear/plastic/deli container", or a plain "sauce jar"/"drink bottle"/"condiment cup" whose actual contents you can't name. If you can't say what the FOOD is, it is NOT a pantry item — leave it out.
+Apart from these exclusions, include every actual food/drink you can NAME. When unsure of the exact variant, use ONE broader generic name — never an "X or Y" hedge, and never a container-description in place of a food. Never drop a real, identifiable food just because you're unsure of its brand or variant.
 
 Return a JSON object with this structure:
 {
