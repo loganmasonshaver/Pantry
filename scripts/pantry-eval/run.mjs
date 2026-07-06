@@ -34,26 +34,40 @@ const OPENROUTER = 'https://openrouter.ai/api/v1/chat/completions'
 
 const OPENAI = 'https://api.openai.com/v1/chat/completions'
 
+// Model lineup for the recall+cost A/B. gpt-4o REMOVED — deprecated, API 404s since 2026-02-16.
+// priceIn/priceOut = USD per 1M tokens, verified on the OpenAI pricing page (July 2026); the run
+// multiplies REAL measured usage tokens by these so the cost column is actual, not estimated.
+//   detail — tile models (gpt-4.1) support only 'high'; patch models (gpt-5.x) accept 'original'
+//     for full-resolution reads (the whole point for small-label OCR). gpt-4.1 downscales the
+//     shortest side to 768px, which is why it can't read the fine print your labels need.
+//   tokenParam/noTemp — gpt-5.x are newer-gen; they take max_completion_tokens and some variants
+//     reject non-default temperature, so we omit it for them (A/B ranks recall+cost, not
+//     determinism; the floor SWEEP handles temp on whichever model you pick).
 const MODELS = [
-  // First-party only — these all scale safely (no OpenRouter gateway). Goal: a model cheaper
-  // than the 2024-era gpt-4o with equal/better accuracy. The gpt-4.1 family is newer + cheaper.
   {
-    label: 'GPT-4o (current)',
-    endpoint: OPENAI,
-    model: 'gpt-4o',
-    apiKey: process.env.OPENAI_API_KEY,
+    label: 'GPT-4.1 (incumbent)',
+    endpoint: OPENAI, model: 'gpt-4.1', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'high', priceIn: 2.00, priceOut: 8.00,
   },
   {
-    label: 'GPT-4.1',
-    endpoint: OPENAI,
-    model: 'gpt-4.1',
-    apiKey: process.env.OPENAI_API_KEY,
+    label: 'GPT-5.4-mini',
+    endpoint: OPENAI, model: 'gpt-5.4-mini', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'high', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.75, priceOut: 4.50,
+  },
+  {
+    label: 'GPT-5.4 (original detail)',
+    endpoint: OPENAI, model: 'gpt-5.4', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 2.50, priceOut: 15.00,
+  },
+  {
+    label: 'GPT-5.5 (original detail)',
+    endpoint: OPENAI, model: 'gpt-5.5', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 5.00, priceOut: 30.00,
   },
   {
     label: 'Gemini 3.1 Flash-Lite (fallback)',
-    endpoint: GEMINI,
-    model: 'gemini-3.1-flash-lite',
-    apiKey: process.env.GOOGLE_AI_KEY,
+    endpoint: GEMINI, model: 'gemini-3.1-flash-lite', apiKey: process.env.GOOGLE_AI_KEY,
+    detail: 'high',
   },
   // Qwen dropped: malformed JSON + hallucinations + OpenRouter gateway = not scale-safe.
   // Kept as an OPTIONAL reference row — only appears if OPENROUTER_API_KEY is set.
@@ -419,13 +433,14 @@ async function callModel(m, base64, mime) {
       signal: ctrl.signal,
       body: JSON.stringify({
         model: m.model,
-        max_tokens: m.maxTokens ?? 12000, // headroom so a thinking model's reasoning doesn't starve the answer
-        temperature: 0, // match production — deterministic reads so the sweep measures signal, not sampling noise
+        // Computed key: gpt-5.x take max_completion_tokens; older/gemini take max_tokens.
+        [m.tokenParam ?? 'max_tokens']: m.maxTokens ?? 12000, // headroom so a model's reasoning doesn't starve the answer
+        ...(m.noTemp ? {} : { temperature: 0 }), // omit for gpt-5.x (some reject non-default temp)
         ...(m.extra ?? {}), // per-model knobs (e.g. Pro's reasoning_effort)
         messages: [{
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: 'high' } },
+            { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: m.detail ?? 'high' } },
             { type: 'text', text: buildPrompt(1) },
           ],
         }],
@@ -458,7 +473,13 @@ async function callModel(m, base64, mime) {
   const augErr = error
     ? `${error}  [finish=${choice?.finish_reason ?? '?'}, out_tokens=${data.usage?.completion_tokens ?? '?'}]`
     : error
-  return { names, items: items ?? [], removed, collapsed, ms, error: augErr }
+  // Real measured cost from the provider's usage report × this model's per-1M prices. For gpt-5.x
+  // reasoning models, completion_tokens INCLUDES reasoning tokens, so this captures true spend.
+  const usage = data.usage ?? {}
+  const inTok = usage.prompt_tokens ?? usage.input_tokens ?? 0
+  const outTok = usage.completion_tokens ?? usage.output_tokens ?? 0
+  const cost = (m.priceIn != null && m.priceOut != null) ? (inTok * m.priceIn + outTok * m.priceOut) / 1e6 : null
+  return { names, items: items ?? [], removed, collapsed, ms, inTok, outTok, cost, error: augErr }
 }
 
 // ── LIST mode: print the Gemini models this key can actually call, then exit. ──
@@ -656,7 +677,7 @@ if (files.length === 0) { console.error(`No images in ${IMAGES_DIR}. Drop some p
 
 console.log(`\nTesting ${files.length} photo(s) across ${active.length} model(s): ${active.map((m) => m.label).join(', ')}\n`)
 
-const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0, removed: 0, collapsed: 0 }]))
+const totals = Object.fromEntries(active.map((m) => [m.label, { items: 0, ms: 0, errors: 0, removed: 0, collapsed: 0, cost: 0, inTok: 0, outTok: 0, caught: 0, truthTotal: 0 }]))
 
 for (const file of files) {
   const buf = fs.readFileSync(path.join(IMAGES_DIR, file))
@@ -679,9 +700,11 @@ for (const file of files) {
       console.log(`  ✗ ${m.label.padEnd(24)} ERROR: ${r.error}`)
     } else {
       t.items += r.names.length; t.ms += r.ms; t.removed += (r.removed?.length ?? 0); t.collapsed += (r.collapsed ?? 0)
+      t.cost += r.cost || 0; t.inTok += r.inTok || 0; t.outTok += r.outTok || 0
       const filtered = r.removed?.length ? `  🚫 ${r.removed.join(', ')}` : ''
       const merged = r.collapsed ? `  🔁 ${r.collapsed} over-splits merged` : ''
-      console.log(`  ✓ ${m.label.padEnd(24)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${merged}${filtered}`)
+      const costStr = r.cost != null ? `  $${r.cost.toFixed(4)} (${r.inTok}+${r.outTok}tok)` : ''
+      console.log(`  ✓ ${m.label.padEnd(26)} ${String(r.names.length).padStart(2)} items  (${(r.ms / 1000).toFixed(1)}s)${costStr}${merged}${filtered}`)
     }
     return { m, r }
   }))
@@ -706,6 +729,7 @@ for (const file of files) {
     for (const { m, r } of results) {
       if (r.error) continue
       const { caught, missed, extra } = scoreAgainstTruth(truth, r.names)
+      totals[m.label].caught += caught.length; totals[m.label].truthTotal += truth.length // aggregate recall
       const pct = Math.round((caught.length / truth.length) * 100)
       console.log(`  ${m.label.padEnd(26)} recall ${caught.length}/${truth.length} (${pct}%)   missed: ${missed.join(', ') || 'none'}`)
       console.log(`  ${' '.repeat(26)} extra/unverified (${extra.length}): ${extra.slice(0, 12).join(', ')}${extra.length > 12 ? ' …' : ''}`)
@@ -714,19 +738,29 @@ for (const file of files) {
 }
 
 // ── Totals ───────────────────────────────────────────────────────────────
-console.log(`\n${'='.repeat(70)}\n📊 TOTALS across ${files.length} photo(s)\n${'='.repeat(70)}`)
+console.log(`\n${'='.repeat(70)}\n📊 TOTALS across ${files.length} photo(s) — recall vs $ is the decision\n${'='.repeat(70)}`)
+console.log(`  ${'model'.padEnd(28)} ${'recall'.padStart(6)} ${'items'.padStart(6)} ${'$/photo'.padStart(9)} ${'~$/scan'.padStart(8)} ${'avg s'.padStart(6)} err`)
 for (const m of active) {
   const t = totals[m.label]
+  const n = Math.max(1, files.length - t.errors)
   const avgItems = (t.items / files.length).toFixed(1)
-  const avgMs = (t.ms / Math.max(1, files.length - t.errors) / 1000).toFixed(1)
-  console.log(`  ${m.label.padEnd(26)} avg ${avgItems} items/photo   avg ${avgMs}s   errors: ${t.errors}   non-food filtered: ${t.removed}   over-splits merged: ${t.collapsed}`)
+  const avgMs = (t.ms / n / 1000).toFixed(1)
+  const recall = t.truthTotal ? `${Math.round((t.caught / t.truthTotal) * 100)}%` : '—'
+  const perPhoto = t.cost ? `$${(t.cost / n).toFixed(4)}` : '—'
+  // A real scan ≈ 3 photos × up to 2 passes ≈ 6 image-reads' worth. Rough projection so the
+  // $ number is felt at scan scale, not per-image.
+  const perScan = t.cost ? `$${((t.cost / n) * 6).toFixed(3)}` : '—'
+  console.log(`  ${m.label.padEnd(28)} ${recall.padStart(6)} ${avgItems.padStart(6)} ${perPhoto.padStart(9)} ${perScan.padStart(8)} ${avgMs.padStart(6)} ${t.errors}`)
 }
 console.log(`
 How to read this:
-  • More items isn't automatically better — eyeball the matrix for items a model
-    INVENTED (present for one model, implausible for the photo) vs. items it MISSED
-    (·  where the others have ✓ on something you can actually see in the photo).
-  • Pick the cheapest model whose ✓ column matches GPT-4o on REAL items.
-  • Gemini is ~4–5× cheaper per image; if Pro matches GPT-4o recall here, switch the
-    pantry-scan primary to it (GPT stays as fallback) for the same quality at lower cost.
+  • recall = % of hand-verified real items the model caught (higher = fewer misses). This is
+    the quality axis — pick the CHEAPEST model whose recall matches or beats gpt-4.1.
+  • $/photo is REAL measured cost (usage tokens × current price), $/scan projects it to a
+    ~3-photo two-pass scan. With a 5/day cap, even the priciest model is pennies — so let
+    recall decide, not cost, unless two models tie on recall.
+  • gpt-4.1 downscales to 768px shortest-side; the gpt-5.x rows use 'original' detail (full
+    res). If a 5.x model reads small labels your incumbent misses, that's the resolution win.
+  • Watch the err column: gpt-5.x may need param tweaks (temp/max_tokens) — an error row prints
+    the reason (finish_reason / message fields) so we can fix it fast.
 `)

@@ -1,8 +1,17 @@
-# Pantry-scan model A/B harness
+# Pantry-scan model A/B + confidence-floor harness
 
-Decide whether to move the pantry scan off GPT-4o onto Gemini **based on YOUR photos**,
-not benchmarks. Runs each image through GPT-4o, Gemini 3.1 Pro, and Gemini 3.1 Flash-Lite
-with the exact production scan prompt and prints a side-by-side recall matrix.
+Two questions, one harness, answered on **YOUR photos** not benchmarks:
+
+1. **Which model?** (`node run.mjs`) — runs each image through the current lineup (gpt-4.1
+   incumbent, gpt-5.4-mini, gpt-5.4, gpt-5.5; Gemini Flash-Lite fallback) with the exact
+   production prompt, and prints per-model **recall vs. ground truth + REAL measured $/photo**
+   (usage tokens × current price). Pick the cheapest model whose recall matches/beats gpt-4.1.
+   Note: gpt-4.1 uses tile tokenization (downscales to 768px shortest side); the gpt-5.x rows
+   use `detail: 'original'` (full-res patches) — the resolution edge for small-label reading.
+2. **What confidence floor?** (`SWEEP=1 node run.mjs`) — see the section below.
+
+gpt-4o was removed (API 404s since 2026-02-16). gpt-5.x may need param tweaks (temp /
+max_completion_tokens) — an error row prints the reason so it's quick to fix.
 
 ## Use
 
