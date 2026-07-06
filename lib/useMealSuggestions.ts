@@ -103,7 +103,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences')
+        .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences, staples_excluded')
         .eq('id', userId)
         .single()
 
@@ -155,6 +155,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         cuisinePreferences: profile?.cuisine_preferences || [],
         recentMealNames,
         mode,
+        staplesExcluded: profile?.staples_excluded || [], // basics the user opted out of assuming
       })
 
       // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes,

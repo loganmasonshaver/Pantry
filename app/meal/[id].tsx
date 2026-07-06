@@ -25,6 +25,7 @@ import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
+import { isAssumedStaple } from '@/constants/staples'
 import { categorizeItem } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
@@ -44,8 +45,6 @@ const screenWidth = Dimensions.get('window').width
 //              on the fly based on ingredient name.
 type PortionMode = 'Eyeball' | 'Measured'
 
-// Common cooking basics that everyone has — don't count as "missing"
-const COOKING_BASICS = new Set(['salt', 'pepper', 'black pepper', 'water', 'cooking spray'])
 
 // Modifier words that should follow the food noun, not precede it. AI
 // occasionally inverts the phrase ("juice lemon" instead of "lemon juice")
@@ -422,6 +421,9 @@ export default function MealDetailScreen() {
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
+  // Basics the user has opted out of assuming (normalized names). Drives the "we assumed" tier —
+  // an excluded staple stops being shown as assumed and moves to "you'll need".
+  const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
   const [generatedImage, setGeneratedImage] = useState<string | null>(null)
   // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
   // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
@@ -433,7 +435,21 @@ export default function MealDetailScreen() {
       .then(({ data }) => setPantryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
     supabase.from('grocery_items').select('name').eq('user_id', user.id)
       .then(({ data }) => setGroceryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
+    supabase.from('profiles').select('staples_excluded').eq('id', user.id).single()
+      .then(({ data }) => setExcludedStaples(new Set((data?.staples_excluded ?? []).map((s: string) => s.toLowerCase()))))
   }, [user])
+
+  // Tap an assumed-basic row → "I don't keep this". Persist to profile so meal generation stops
+  // assuming it too, and move the row to "you'll need". Optimistic: update state before the write.
+  const excludeStaple = async (name: string) => {
+    if (!user) return
+    const norm = name.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, ' ').trim()
+    if (excludedStaples.has(norm)) return
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    const next = new Set(excludedStaples).add(norm)
+    setExcludedStaples(next)
+    await supabase.from('profiles').update({ staples_excluded: Array.from(next) }).eq('id', user.id)
+  }
 
   // Fetch this meal's existing rating so the UI reflects current state
   useEffect(() => {
@@ -653,7 +669,7 @@ export default function MealDetailScreen() {
   const canEditMeal = isUserCreated || isCreatorOwner
 
   const missingIngredients = meal?.ingredients.filter(
-    i => !isAlreadyInList(i.name, pantryNames) && !COOKING_BASICS.has(i.name.toLowerCase())
+    i => !isAlreadyInList(i.name, pantryNames) && !isAssumedStaple(i.name, excludedStaples)
   ) ?? []
   const missingNotInGrocery = missingIngredients.filter(
     i => !isAlreadyInList(i.name, new Set([...groceryNames, ...[...addedToGrocery].map(n => n.toLowerCase())]))
@@ -1051,15 +1067,16 @@ export default function MealDetailScreen() {
               needs to act on. "Have" = explicitly in pantry OR a cooking basic (salt, oil, etc.)
               that everyone is assumed to have. */}
           {(() => {
-            const isHave = (ing: any) =>
-              isAlreadyInList(ing.name, pantryNames) || COOKING_BASICS.has(ing.name.toLowerCase())
-            const needRows = meal.ingredients.filter(i => !isHave(i))
-            const haveRows = meal.ingredients.filter(isHave)
+            const inPantry = (ing: any) => isAlreadyInList(ing.name, pantryNames)
+            const isBasic = (ing: any) => !inPantry(ing) && isAssumedStaple(ing.name, excludedStaples)
+            const haveRows = meal.ingredients.filter(inPantry)
+            const basicRows = meal.ingredients.filter(isBasic)
+            const needRows = meal.ingredients.filter(i => !inPantry(i) && !isBasic(i))
 
             // Renders one ingredient row with section-aware styling and a single primary action.
             // Long-press toggles pantry membership — moves the row between NEED and HAVE so the
             // user can override the AI when it misclassifies (e.g. "actually I do have feta").
-            const renderRow = (ing: any, kind: 'need' | 'have') => {
+            const renderRow = (ing: any, kind: 'need' | 'have' | 'basic') => {
               // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
               // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
               const wholeUnit = getWholeUnitDisplay(ing.name, ing.grams)
@@ -1070,15 +1087,15 @@ export default function MealDetailScreen() {
                     : getMeasuredDisplay(ing.name, ing.grams, ing.visual))
               const displayName = wholeUnit ? wholeUnit.name : ing.name
               const isAdded = addedToGrocery.has(ing.name)
-              const isHaveRow = kind === 'have'
+              // 'have' (in pantry) and 'basic' (assumed) both render muted vs the actionable NEED rows.
+              const isHaveRow = kind !== 'need'
               return (
                 <TouchableOpacity
                   key={ing.id}
                   style={[styles.ingredientRow, isHaveRow && styles.ingredientRowHave]}
-                  // Tap the row to mark "I have this" — moves it to YOU HAVE with the
-                  // right-side check (tap a HAVE row to move it back). The + button
-                  // keeps its own tap target for adding to grocery.
-                  onPress={() => toggleHaveIt(ing.name)}
+                  // NEED/HAVE rows toggle pantry membership; a BASIC (assumed) row taps to
+                  // "I don't keep this" → persists the opt-out and drops it into YOU'LL NEED.
+                  onPress={() => (kind === 'basic' ? excludeStaple(ing.name) : toggleHaveIt(ing.name))}
                   activeOpacity={0.7}
                 >
                   {/* Bullet dot replaces the per-ingredient thumbnail. AI-generated thumbs
@@ -1094,13 +1111,13 @@ export default function MealDetailScreen() {
                     <Text>  </Text>
                     <Text style={[styles.ingredientNameInline, isHaveRow && styles.ingredientNameHave]}>{displayName}</Text>
                   </Text>
-                  {isHaveRow ? (
+                  {kind === 'have' ? (
                     // HAVE row: just a quiet green check confirming state — no shopping action
                     // because buying something you already have is the whole bug we're fixing.
                     <View style={styles.haveIndicator}>
                       <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
                     </View>
-                  ) : (
+                  ) : kind === 'basic' ? null : (
                     // NEED row: single + button that flips to ✓ once added to grocery list
                     <TouchableOpacity
                       style={[styles.addToGroceryBtn, isAdded && styles.addToGroceryBtnAdded]}
@@ -1126,7 +1143,7 @@ export default function MealDetailScreen() {
               <>
                 {needRows.length > 0 && (
                   <>
-                    <Text style={styles.ingredientGroupLabel}>YOU NEED</Text>
+                    <Text style={styles.ingredientGroupLabel}>YOU'LL NEED</Text>
                     <View style={styles.ingredientList}>
                       {needRows.map(ing => renderRow(ing, 'need'))}
                     </View>
@@ -1134,13 +1151,23 @@ export default function MealDetailScreen() {
                 )}
                 {haveRows.length > 0 && (
                   <>
-                    <Text style={[styles.ingredientGroupLabel, needRows.length > 0 && styles.ingredientGroupLabelSpaced]}>YOU HAVE</Text>
+                    <Text style={[styles.ingredientGroupLabel, needRows.length > 0 && styles.ingredientGroupLabelSpaced]}>IN YOUR PANTRY</Text>
                     <View style={styles.ingredientList}>
                       {haveRows.map(ing => renderRow(ing, 'have'))}
                     </View>
                   </>
                 )}
-                {/* Hint shown once, only when there are have+need rows to swap between */}
+                {/* Assumed-basics tier — the quiet "we've got your basics" reassurance + the opt-out. */}
+                {basicRows.length > 0 && (
+                  <>
+                    <Text style={[styles.ingredientGroupLabel, (needRows.length > 0 || haveRows.length > 0) && styles.ingredientGroupLabelSpaced]}>PANTRY BASICS · WE ASSUMED</Text>
+                    <View style={styles.ingredientList}>
+                      {basicRows.map(ing => renderRow(ing, 'basic'))}
+                    </View>
+                    <Text style={styles.ingredientHint}>Basics most kitchens keep — tap any you don't have and we'll stop assuming it.</Text>
+                  </>
+                )}
+                {/* Swap hint only when there are have+need rows to move between */}
                 {needRows.length > 0 && haveRows.length > 0 && (
                   <Text style={styles.ingredientHint}>Tap a row to move it between sections</Text>
                 )}
