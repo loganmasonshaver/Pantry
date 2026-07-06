@@ -1175,14 +1175,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 return (
                   <View style={styles.staplesBar}>
                     <Text style={styles.staplesLabel}>Also have these? Tap to add</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.staplesChips} keyboardShouldPersistTaps="handled">
+                    {/* Wrap onto the page instead of a horizontal slide — every suggestion is visible
+                        without the user having to discover they can scroll sideways. */}
+                    <View style={styles.staplesChipsWrap}>
                       {available.map(s => (
                         <TouchableOpacity key={s} style={styles.stapleChip} onPress={() => addStapleChip(s)} activeOpacity={0.7}>
                           <Plus size={13} stroke="#4ADE80" strokeWidth={2.6} />
                           <Text style={styles.stapleChipText}>{s}</Text>
                         </TouchableOpacity>
                       ))}
-                    </ScrollView>
+                    </View>
                   </View>
                 )
               })()}
@@ -1431,6 +1433,7 @@ const styles = StyleSheet.create({
   staplesBar: { paddingTop: 6, paddingBottom: 2 },
   staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },
   staplesChips: { paddingHorizontal: 20, gap: 8 },
+  staplesChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20 },
   stapleChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,222,128,0.1)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)', borderRadius: 30, paddingVertical: 7, paddingLeft: 10, paddingRight: 13 },
   stapleChipText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
   missedBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 10 },
