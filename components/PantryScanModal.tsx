@@ -18,6 +18,7 @@ import {
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
+import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
 import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container } from 'lucide-react-native'
@@ -790,80 +791,75 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           const captureLabel = pendingLabel ?? stepConfig.label
           const captureTitle = pendingLabel ? `Photograph your ${pendingLabel.toLowerCase()}` : stepConfig.title
           return (
-            <View style={styles.step}>
-              {/* Camera viewfinder */}
-              <View style={styles.cameraContainer}>
-                {permission?.granted ? (
-                  <CameraView
-                    ref={cameraRef}
-                    style={styles.camera}
-                    facing="back"
-                    enableTorch={flashOn}
-                  />
-                ) : (
-                  <View style={[styles.camera, { backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' }]}>
-                    <Text style={{ color: COLORS.textMuted }}>Camera permission required</Text>
-                  </View>
-                )}
-
-                {/* Corner brackets */}
-                <View style={[styles.bracket, styles.bracketTL]} />
-                <View style={[styles.bracket, styles.bracketTR]} />
-                <View style={[styles.bracket, styles.bracketBL]} />
-                <View style={[styles.bracket, styles.bracketBR]} />
-
-                {/* Top bar overlay */}
-                <View style={[styles.cameraTopBar, { top: insets.top + 12 }]}>
-                  <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
-                    <X size={20} stroke="#FFFFFF" strokeWidth={2} />
-                  </TouchableOpacity>
-                  <View style={styles.cameraTopCenter}>
-                    {/* No fixed 3-step progress anymore — just show how many photos are in this scan. */}
-                    {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
-                  </View>
-                  <TouchableOpacity style={styles.cameraCloseBtn} onPress={() => setShowPrep(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                    <HelpCircle size={20} stroke="#FFFFFF" strokeWidth={2} />
-                  </TouchableOpacity>
+            <View style={styles.cameraScreen}>
+              {/* Full-bleed camera — fills the screen edge to edge, controls overlay on top */}
+              {permission?.granted ? (
+                <CameraView
+                  ref={cameraRef}
+                  style={StyleSheet.absoluteFill}
+                  facing="back"
+                  enableTorch={flashOn}
+                />
+              ) : (
+                <View style={[StyleSheet.absoluteFill, styles.cameraPermFallback]}>
+                  <Text style={{ color: COLORS.textMuted }}>Camera permission required</Text>
                 </View>
+              )}
 
-                {/* Photo thumbnails overlay */}
-                {photos.length > 0 && (
-                  <View style={styles.cameraPhotoRow}>
-                    {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
-                  </View>
-                )}
+              {/* Corner brackets */}
+              <View style={[styles.bracket, styles.bracketTL]} />
+              <View style={[styles.bracket, styles.bracketTR]} />
+              <View style={[styles.bracket, styles.bracketBL]} />
+              <View style={[styles.bracket, styles.bracketBR]} />
+
+              {/* Top scrim keeps the X / help / count legible over a bright frame */}
+              <LinearGradient colors={['rgba(0,0,0,0.55)', 'transparent']} style={styles.cameraTopScrim} pointerEvents="none" />
+              <View style={[styles.cameraTopBar, { top: insets.top + 12 }]}>
+                <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                  <X size={20} stroke="#FFFFFF" strokeWidth={2} />
+                </TouchableOpacity>
+                <View style={styles.cameraTopCenter}>
+                  {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
+                </View>
+                <TouchableOpacity style={styles.cameraCloseBtn} onPress={() => setShowPrep(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <HelpCircle size={20} stroke="#FFFFFF" strokeWidth={2} />
+                </TouchableOpacity>
               </View>
 
-              {/* Bottom controls */}
-              <View style={styles.cameraBottom}>
+              {/* Captured thumbnails — top-left under the bar, out of the shutter's way */}
+              {photos.length > 0 && (
+                <View style={[styles.cameraPhotoRow, { top: insets.top + 60 }]}>
+                  {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
+                </View>
+              )}
+
+              {/* Bottom scrim carries the copy + shutter so text is always readable over the camera */}
+              <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)']} style={[styles.cameraBottomOverlay, { paddingBottom: insets.bottom + 14 }]}>
                 <View style={styles.stepTextCompact}>
-                  <Text style={styles.title}>{captureTitle}</Text>
-                  <Text style={styles.subtitle}>{stepConfig.subtitle}</Text>
-                  <Text style={styles.cameraTip}>
-                    💡 {CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}
-                  </Text>
+                  <Text style={styles.cameraTitle}>{captureTitle}</Text>
+                  <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
+                  <Text style={styles.cameraTip}>💡 {CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
                 </View>
 
                 <View style={styles.shutterRow}>
                   <TouchableOpacity style={styles.flashBtn} onPress={() => setFlashOn(f => !f)} activeOpacity={0.7}>
-                    <Zap size={20} stroke={flashOn ? '#FFD700' : COLORS.textMuted} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
+                    <Zap size={20} stroke={flashOn ? '#FFD700' : '#FFFFFF'} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(captureLabel, 4)} activeOpacity={0.85}>
                     <View style={styles.shutterInner} />
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(captureLabel, 4)} activeOpacity={0.7}>
-                    <ImageIcon size={20} stroke={COLORS.textMuted} strokeWidth={2} />
+                    <ImageIcon size={20} stroke="#FFFFFF" strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
 
-                {/* Only offer "done" once there's a photo — the first capture is required, but after
-                    that one photo is enough to scan (no forced walk through every area). */}
+                {/* Only offer "done" once there's a photo — first capture required; after that one is enough. */}
                 {photos.length > 0 && (
                   <TouchableOpacity onPress={() => setStep(4)} activeOpacity={0.7}>
-                    <Text style={styles.skipText}>Done — review {photos.length} photo{photos.length !== 1 ? 's' : ''} →</Text>
+                    <Text style={styles.cameraDoneText}>Done — review {photos.length} photo{photos.length !== 1 ? 's' : ''} →</Text>
                   </TouchableOpacity>
                 )}
-              </View>
+              </LinearGradient>
             </View>
           )
         })()}
@@ -1594,6 +1590,14 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
+  // Full-bleed camera screen (steps 1–3)
+  cameraScreen: { flex: 1, backgroundColor: '#000000' },
+  cameraPermFallback: { backgroundColor: '#111111', alignItems: 'center', justifyContent: 'center' },
+  cameraTopScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 130 },
+  cameraBottomOverlay: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 44, paddingHorizontal: 24, gap: 14, alignItems: 'center' },
+  cameraTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 },
+  cameraSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.9)', lineHeight: 20, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 6 },
+  cameraDoneText: { fontSize: 14, color: '#4ADE80', fontWeight: '700' },
   cameraTopBar: {
     position: 'absolute',
     left: 16,
@@ -1628,7 +1632,6 @@ const styles = StyleSheet.create({
   },
   cameraPhotoRow: {
     position: 'absolute',
-    bottom: 12,
     left: 16,
     flexDirection: 'row',
     gap: 8,
@@ -1650,7 +1653,7 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
-  stepTextCompact: { gap: 4, alignSelf: 'stretch' },
+  stepTextCompact: { gap: 4, alignItems: 'center' },
   shutterRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1956,10 +1959,13 @@ const styles = StyleSheet.create({
 
   // Camera capture hint
   cameraTip: {
-    fontSize: 11,
-    color: '#666666',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.75)',
     fontWeight: '500',
-    marginTop: 6,
+    marginTop: 4,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 5,
   },
 
   // Missed-something input (zone review screen)
