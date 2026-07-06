@@ -91,6 +91,15 @@ const RESULT_CATEGORIES = [
 // flow the user is already in (curating the scan) instead of a separate post-scan popup.
 const COMMON_STAPLES = ['Eggs', 'Milk', 'Butter', 'Cheese', 'Rice', 'Bread', 'Onion', 'Garlic', 'Lemon', 'Soy Sauce', 'Flour', 'Sugar']
 
+// Context-aware quick-add suggestions, keyed by the container type the scan classifies each photo as.
+// A fridge photo suggests fridge basics, a pantry photo suggests dry goods, etc. Unknown → COMMON_STAPLES.
+const STAPLES_BY_CONTAINER: Record<string, string[]> = {
+  fridge: ['Eggs', 'Milk', 'Butter', 'Cheese', 'Yogurt', 'Mayonnaise', 'Ketchup', 'Mustard', 'Orange Juice', 'Sour Cream'],
+  freezer: ['Frozen Vegetables', 'Frozen Berries', 'Ice Cream', 'Frozen Chicken', 'Frozen Fish', 'Frozen Peas', 'Frozen Fruit', 'Frozen Pizza'],
+  pantry: ['Rice', 'Pasta', 'Flour', 'Sugar', 'Olive Oil', 'Canned Beans', 'Canned Tomatoes', 'Cereal', 'Peanut Butter', 'Oats'],
+  counter: ['Onion', 'Garlic', 'Potatoes', 'Bananas', 'Bread', 'Tomatoes', 'Apples', 'Avocado'],
+}
+
 // Max photos per scan — bounds the per-call GPT-4o vision cost. Mirrored server-side in
 // scan-pantry/index.ts (which truncates) so a modified client can't exceed it. A full
 // fridge + pantry fits comfortably in this many.
@@ -263,6 +272,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [customLabel, setCustomLabel] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
+  // Per-photo container type from the scan (fridge/freezer/pantry/counter) → context-aware quick-adds.
+  const [photoContainers, setPhotoContainers] = useState<string[]>([])
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
@@ -355,7 +366,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           ),
         ])
         if ('declined' in scanResult) { onClose(); return }
-        const result = scanResult.data as { layout: string; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
+        const result = scanResult.data as { layout: string; photoContainers?: string[]; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
         let itemIndex = 0
         const allItems: DetectedItem[] = []
         const zoneGroups: ZoneGroup[] = []
@@ -387,6 +398,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
         setDetectedItems(allItems)
         setZones(zoneGroups)
+        // Per-photo container type drives the context-aware quick-add rail in the review.
+        setPhotoContainers(Array.isArray(result.photoContainers) ? result.photoContainers.map((c: any) => String(c || '').toLowerCase()) : [])
         setShowDone(true)
       } catch (e: any) {
         // Surface the error inline (loading screen flips to error state with a
@@ -1192,7 +1205,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               {/* Common staples you likely have but the camera can't see — one tap to add. Folds
                   the old post-scan "kitchen basics?" popup into the flow the user is already in. */}
               {(() => {
-                const available = COMMON_STAPLES.filter(s => !detectedItems.some(d => d.name.toLowerCase() === s.toLowerCase()))
+                // Context-aware: suggest staples matching THIS photo's container type; fall back to
+                // the generic list when the scan didn't classify it (or classified "other").
+                const container = (photoContainers[cur] || '').toLowerCase()
+                const stapleList = STAPLES_BY_CONTAINER[container] ?? COMMON_STAPLES
+                const available = stapleList.filter(s => !detectedItems.some(d => d.name.toLowerCase() === s.toLowerCase()))
                 if (available.length === 0) return null
                 return (
                   <View style={styles.staplesBar}>

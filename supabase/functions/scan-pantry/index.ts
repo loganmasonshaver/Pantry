@@ -212,6 +212,7 @@ Apart from these exclusions, EVERY actual human food or drink item still follows
 Return a JSON object with this structure:
 {
   "layout": "shelves" | "horizontal",
+  "photoContainers": ["fridge"],
   "zones": [
     {
       "zone": "Top Shelf",
@@ -222,6 +223,9 @@ Return a JSON object with this structure:
     }
   ]
 }
+
+Photo classification:
+- "photoContainers" — an array with exactly ONE entry PER PHOTO (length ${images.length}), in photo order. Classify each photo as one of: "fridge" (refrigerator interior/shelves with cold items), "freezer" (freezer compartment / frozen foods), "pantry" (dry-goods shelves, cabinet, or pantry closet), "counter" (food sitting out on a countertop or table), or "other". ${images.length === 1 ? 'There is one photo → return exactly one entry, e.g. ["fridge"].' : `Classify each of the ${images.length} photos independently, e.g. ["fridge","freezer"].`} This drives context-aware quick-add suggestions, so pick the closest match.
 
 Zone detection rules:
 - First, look for VERTICAL layers (shelves, racks, rows stacked top to bottom). If you detect 2+ distinct horizontal layers, use layout "shelves" with zones like: "Top Shelf", "Upper Shelf", "Middle Shelf", "Lower Shelf", "Bottom Shelf", "Drawer", "Door"
