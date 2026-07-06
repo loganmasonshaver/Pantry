@@ -21,7 +21,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -297,6 +297,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const nudgedRef = useRef(false) // one-time "it swipes" nudge guard
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
   const [missedInput, setMissedInput] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null) // which detected chip is being renamed inline
+  const [editingText, setEditingText] = useState('')
+  const [staplesOpen, setStaplesOpen] = useState(false) // "Also have these" collapsed by default to give the list room
   const [addingMissed, setAddingMissed] = useState(false)
   // Post-save success step (returning scanners only) — offers the cook-reveal vs "maybe later".
   const [showSaved, setShowSaved] = useState(false)
@@ -635,6 +638,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       compress: 0.95, format: SaveFormat.JPEG, base64: true,
     })
     return out.base64 ?? undefined
+  }
+
+  // Commit an inline chip rename. Empty → keep the old name. Idempotent (onSubmit + onBlur both fire).
+  const commitRename = (id: string, name: string) => {
+    const trimmed = name.trim()
+    setDetectedItems(prev => prev.map(d => d.id === id ? { ...d, name: trimmed || d.name } : d))
+    setEditingId(null)
+    setEditingText('')
   }
 
   const capturePhoto = async (label: string, next: number) => {
@@ -1092,7 +1103,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           const curUri = pages[cur]?.uri
           const curDims = curUri ? photoDims[curUri] : undefined
           const curImgH = SCREEN_W * (curDims ? curDims.h / curDims.w : 4 / 3)
-          const frameH = Math.min(curImgH, Math.round(SCREEN_H * 0.48))
+          // Compact reference height (was 0.48): the LIST is the workspace for correcting the AI, the
+          // photo is a spot-check you tap to zoom. Smaller frame → the item list gets the room.
+          const frameH = Math.min(curImgH, Math.round(SCREEN_H * 0.32))
           const goTo = (i: number) => {
             const c = Math.max(0, Math.min(i, total - 1))
             pagerRef.current?.scrollTo({ x: c * SCREEN_W, animated: true })
@@ -1117,23 +1130,40 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 }
                 const zoneEntries = Array.from(byZone.entries())
                 const showZoneHeaders = zoneEntries.length > 1
-                const renderChip = (item: DetectedItem) => (
-                  <View key={item.id} style={[styles.zoneChip, activeBoxId === item.id && styles.zoneChipActive]}>
-                    <TouchableOpacity
-                      disabled={!item.box}
-                      onPress={() => setActiveBoxId(id => id === item.id ? null : item.id)}
-                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
-                    >
-                      <Text style={styles.zoneChipText}>{item.name}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
-                      <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
-                    </TouchableOpacity>
-                  </View>
-                )
+                const renderChip = (item: DetectedItem) => {
+                  const editing = editingId === item.id
+                  return (
+                    <View key={item.id} style={[styles.zoneChip, editing && styles.zoneChipEditing]}>
+                      {editing ? (
+                        <TextInput
+                          style={styles.zoneChipInput}
+                          value={editingText}
+                          onChangeText={setEditingText}
+                          autoFocus
+                          selectTextOnFocus
+                          returnKeyType="done"
+                          blurOnSubmit
+                          onSubmitEditing={() => commitRename(item.id, editingText)}
+                          onBlur={() => commitRename(item.id, editingText)}
+                        />
+                      ) : (
+                        // Tap the name to rename it — the AI mislabels ("Whole Milk" → "2% Milk"). ✕ removes.
+                        <TouchableOpacity
+                          onPress={() => { setEditingId(item.id); setEditingText(item.name) }}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+                        >
+                          <Text style={styles.zoneChipText}>{item.name}</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                      >
+                        <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                      </TouchableOpacity>
+                    </View>
+                  )
+                }
                 return (
                   <>
                     {/* Photo strip pulled to the very top, full-bleed. Swipe switches photos; the
@@ -1224,7 +1254,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       <Text style={styles.reviewFoundLabel}>
                         {curItems.length === 0
                           ? 'Nothing detected here — add anything you see below'
-                          : `Found ${curItems.length} — tap ✕ on anything that's wrong`}
+                          : `Found ${curItems.length} — tap a name to fix it, ✕ to remove`}
                       </Text>
                       {showZoneHeaders
                         ? zoneEntries.map(([zone, items]) => (
@@ -1250,17 +1280,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 if (available.length === 0) return null
                 return (
                   <View style={styles.staplesBar}>
-                    <Text style={styles.staplesLabel}>Also have these? Tap to add</Text>
-                    {/* Horizontal slider by design — a compact rail of quick-add suggestions that
-                        doesn't push the primary CTA down. (Context-aware per container type below.) */}
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.staplesChips} keyboardShouldPersistTaps="handled">
-                      {available.map(s => (
-                        <TouchableOpacity key={s} style={styles.stapleChip} onPress={() => addStapleChip(s)} activeOpacity={0.7}>
-                          <Plus size={13} stroke="#4ADE80" strokeWidth={2.6} />
-                          <Text style={styles.stapleChipText}>{s}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </ScrollView>
+                    {/* Collapsed by default — a one-line toggle so it doesn't permanently eat list room. */}
+                    <TouchableOpacity style={styles.staplesToggle} onPress={() => setStaplesOpen(o => !o)} activeOpacity={0.7}>
+                      <Text style={[styles.staplesLabel, { paddingHorizontal: 0, marginBottom: 0 }]}>Also have these? Tap to add ({available.length})</Text>
+                      {staplesOpen
+                        ? <ChevronUp size={16} stroke="#888888" strokeWidth={2} />
+                        : <ChevronDown size={16} stroke="#888888" strokeWidth={2} />}
+                    </TouchableOpacity>
+                    {staplesOpen && (
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.staplesChips} keyboardShouldPersistTaps="handled">
+                        {available.map(s => (
+                          <TouchableOpacity key={s} style={styles.stapleChip} onPress={() => addStapleChip(s)} activeOpacity={0.7}>
+                            <Plus size={13} stroke="#4ADE80" strokeWidth={2.6} />
+                            <Text style={styles.stapleChipText}>{s}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    )}
                   </View>
                 )
               })()}
@@ -1514,6 +1550,9 @@ const styles = StyleSheet.create({
   reviewFoundLabel: { fontSize: 13, color: '#888888', marginBottom: 12, fontWeight: '600' },
   staplesBar: { paddingTop: 6, paddingBottom: 2 },
   staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },
+  staplesToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 6 },
+  zoneChipInput: { fontSize: 12.5, fontWeight: '500', color: '#FFFFFF', minWidth: 64, padding: 0, marginVertical: -1 },
+  zoneChipEditing: { borderColor: '#4ADE80' },
   staplesChips: { paddingHorizontal: 20, gap: 8 },
   staplesChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20 },
   stapleChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,222,128,0.1)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)', borderRadius: 30, paddingVertical: 7, paddingLeft: 10, paddingRight: 13 },
