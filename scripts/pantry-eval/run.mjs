@@ -185,6 +185,19 @@ const GROUNDTRUTH = {
     { name: 'Olive/Cooking Oil', keys: ['oil'] },
     { name: 'Potato Chips', keys: ['chip'] },
   ],
+  // Logan's real counter-spread test shot. Conservative — only clearly-readable packaged goods,
+  // so recall measures "does raising the floor start killing REAL food" (the ceiling we care
+  // about). Many more items are in the photo; they'll show as "unverified" and that's expected.
+  'IMG_3577.jpg': [
+    { name: 'Quest Protein Bars', keys: ['quest', 'protein bar'] },
+    { name: 'Swiss Miss Hot Cocoa', keys: ['swiss miss', 'cocoa', 'hot chocolate'] },
+    { name: 'Protein Powder', keys: ['protein powder', 'dymatize', 'iso100', 'whey'] },
+    { name: 'Pecans', keys: ['pecan'] },
+    { name: 'Garlic', keys: ['garlic'] },
+    { name: 'Onions', keys: ['onion'] },
+    { name: 'Chocolate Syrup', keys: ['chocolate syrup', 'syrup'] },
+    { name: 'Flour', keys: ['flour'] },
+  ],
 }
 
 // Score one model's items against a photo's ground truth → caught / missed / extra.
