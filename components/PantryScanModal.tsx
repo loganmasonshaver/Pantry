@@ -49,6 +49,7 @@ type DetectedItem = {
   checked: boolean
   zone: string
   photo?: number | null // which source photo the AI saw this in (for the per-photo review). null = unknown.
+  box?: [number, number, number, number] | null // [x,y,w,h] normalized 0-1 in that photo (top-left origin). Drives the tap-to-locate overlay.
 }
 
 type ZoneGroup = {
@@ -267,6 +268,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [showPrep, setShowPrep] = useState(false) // first-run "how scanning works" overlay (sets expectations + coaches better photos)
   // Per-photo review carousel state
   const [currentPhoto, setCurrentPhoto] = useState(0)
+  // Natural pixel dims per photo uri (from Image onLoad) → render the review photo at its TRUE
+  // aspect ratio instead of a cropped fixed height, so the normalized detection boxes map on 1:1.
+  const [photoDims, setPhotoDims] = useState<Record<string, { w: number; h: number }>>({})
+  // Which detected item's box is highlighted on the photo (tap a chip to locate it; tap again clears).
+  const [activeBoxId, setActiveBoxId] = useState<string | null>(null)
+  const photoScrollRef = useRef<ScrollView>(null) // current page's vertical pan — scroll-to-box on chip tap
   const pagerRef = useRef<ScrollView>(null)
   const nudgedRef = useRef(false) // one-time "it swipes" nudge guard
   const [loadingMessageIdx, setLoadingMessageIdx] = useState(0)
@@ -363,6 +370,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               // Which source photo the AI attributed this item to — kept for the per-photo
               // review. Defaults to null when the model omits it (falls back to a "More" page).
               photo: typeof item.photo === 'number' ? item.photo : null,
+              // AI-estimated location of the item in its photo, normalized [x,y,w,h] 0-1 (top-left
+              // origin). Null when the model omits/malforms it — chip just isn't tap-to-locate then.
+              box: Array.isArray(item.box) && item.box.length === 4 && item.box.every((n: any) => typeof n === 'number')
+                ? item.box as [number, number, number, number] : null,
             }
             return detected
           })
@@ -462,6 +473,20 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     }, 45)
     return () => clearInterval(id)
   }, [showDone, detectedItems.length])
+
+  // Tap a chip → pan the photo so its detection box is in view (the box highlights via activeBoxId).
+  // Uses the item's own photo dims; no-op until that photo's dims have loaded.
+  useEffect(() => {
+    if (!activeBoxId) return
+    const it = detectedItems.find(d => d.id === activeBoxId)
+    if (!it?.box) return
+    const uri = photos[it.photo ?? 0]?.uri
+    const d = uri ? photoDims[uri] : undefined
+    if (!d) return
+    const imgH = SCREEN_W * (d.h / d.w)
+    const targetY = Math.max(0, it.box[1] * imgH - 48) // a little headroom above the box
+    photoScrollRef.current?.scrollTo({ y: targetY, animated: true })
+  }, [activeBoxId])
 
   // Request camera permission when modal opens
   useEffect(() => {
@@ -998,6 +1023,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               : photos.map((p, idx) => ({ uri: p.uri, label: `Photo ${idx + 1}`, items: detectedItems.filter(d => photoOf(d) === idx), photoIdx: idx }))
           const total = pages.length || 1
           const cur = Math.min(currentPhoto, total - 1)
+          // Render the photo at its TRUE aspect (full width) inside a frame capped at ~48% of the
+          // screen; taller shots pan vertically. Boxes map linearly onto this (no crop, no letterbox).
+          const curUri = pages[cur]?.uri
+          const curDims = curUri ? photoDims[curUri] : undefined
+          const curImgH = SCREEN_W * (curDims ? curDims.h / curDims.w : 4 / 3)
+          const frameH = Math.min(curImgH, Math.round(SCREEN_H * 0.48))
           const goTo = (i: number) => {
             const c = Math.max(0, Math.min(i, total - 1))
             pagerRef.current?.scrollTo({ x: c * SCREEN_W, animated: true })
@@ -1018,8 +1049,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 const zoneEntries = Array.from(byZone.entries())
                 const showZoneHeaders = zoneEntries.length > 1
                 const renderChip = (item: DetectedItem) => (
-                  <View key={item.id} style={styles.zoneChip}>
-                    <Text style={styles.zoneChipText}>{item.name}</Text>
+                  <View key={item.id} style={[styles.zoneChip, activeBoxId === item.id && styles.zoneChipActive]}>
+                    <TouchableOpacity
+                      disabled={!item.box}
+                      onPress={() => setActiveBoxId(id => id === item.id ? null : item.id)}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+                    >
+                      <Text style={styles.zoneChipText}>{item.name}</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -1032,7 +1069,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <>
                     {/* Photo strip pulled to the very top, full-bleed. Swipe switches photos; the
                         item list below follows `cur`. X + Zoom overlaid; tap a photo to zoom. */}
-                    <View style={[styles.reviewPhotoTop, { marginTop: -(insets.top + 8) }]}>
+                    <View style={[styles.reviewPhotoTop, { height: frameH, marginTop: -(insets.top + 8) }]}>
                       <ScrollView
                         ref={pagerRef}
                         horizontal
@@ -1041,11 +1078,53 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
                         keyboardShouldPersistTaps="handled"
                       >
-                        {pages.map((page, idx) => (
-                          <TouchableOpacity key={idx} activeOpacity={0.95} onPress={() => page.uri && setZoomUri(page.uri)} style={styles.reviewPhoto}>
-                            <Image source={{ uri: page.uri }} style={styles.reviewPhotoImg} resizeMode="cover" />
-                          </TouchableOpacity>
-                        ))}
+                        {pages.map((page, idx) => {
+                          const d = page.uri ? photoDims[page.uri] : undefined
+                          const imgH = SCREEN_W * (d ? d.h / d.w : 4 / 3)
+                          return (
+                            // Vertical pan of the full-aspect photo inside the fixed frame — reach food
+                            // anywhere in a tall shot without cropping or shrinking it.
+                            <ScrollView
+                              key={idx}
+                              ref={idx === cur ? photoScrollRef : undefined}
+                              style={{ width: SCREEN_W, height: frameH }}
+                              showsVerticalScrollIndicator={false}
+                              keyboardShouldPersistTaps="handled"
+                            >
+                              <TouchableOpacity activeOpacity={0.95} onPress={() => page.uri && setZoomUri(page.uri)} style={{ width: SCREEN_W, height: imgH }}>
+                                <Image
+                                  source={{ uri: page.uri }}
+                                  style={{ width: SCREEN_W, height: imgH }}
+                                  resizeMode="cover"
+                                  onLoad={e => {
+                                    const src = e.nativeEvent?.source
+                                    if (src?.width && src?.height && page.uri) {
+                                      // First load only — dims are immutable, avoid re-render churn.
+                                      setPhotoDims(prev => prev[page.uri!] ? prev : { ...prev, [page.uri!]: { w: src.width, h: src.height } })
+                                    }
+                                  }}
+                                />
+                                {/* Detection boxes over the photo: all faint, the tapped item's highlighted.
+                                    AI's normalized [x,y,w,h] mapped onto the full-width image. */}
+                                {page.items.map(it => it.box ? (
+                                  <View
+                                    key={it.id}
+                                    pointerEvents="none"
+                                    style={[
+                                      styles.detBox,
+                                      { left: it.box[0] * SCREEN_W, top: it.box[1] * imgH, width: it.box[2] * SCREEN_W, height: it.box[3] * imgH },
+                                      activeBoxId === it.id && styles.detBoxActive,
+                                    ]}
+                                  >
+                                    {activeBoxId === it.id && (
+                                      <View style={styles.detBoxLabel}><Text style={styles.detBoxLabelText} numberOfLines={1}>{it.name}</Text></View>
+                                    )}
+                                  </View>
+                                ) : null)}
+                              </TouchableOpacity>
+                            </ScrollView>
+                          )
+                        })}
                       </ScrollView>
                       <TouchableOpacity style={[styles.closeBtn, styles.reviewCloseOverlay, { top: insets.top + 8 }]} onPress={handleClose}>
                         <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
@@ -1328,6 +1407,12 @@ const styles = StyleSheet.create({
   reviewPhotoTop: { marginHorizontal: -24, position: 'relative' },
   reviewPhoto: { width: SCREEN_W, height: 264, backgroundColor: '#0A0A0A', overflow: 'hidden' },
   reviewPhotoImg: { width: SCREEN_W, height: 264 },
+  // Tap-to-locate detection boxes drawn over the review photo.
+  detBox: { position: 'absolute', borderWidth: 1.5, borderColor: 'rgba(74,222,128,0.45)', borderRadius: 5 },
+  detBoxActive: { borderColor: '#4ADE80', borderWidth: 2.5, backgroundColor: 'rgba(74,222,128,0.16)' },
+  detBoxLabel: { position: 'absolute', top: -21, left: -1.5, backgroundColor: '#4ADE80', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, maxWidth: SCREEN_W * 0.5 },
+  detBoxLabelText: { color: '#000000', fontSize: 11, fontWeight: '700' },
+  zoneChipActive: { borderColor: '#4ADE80', borderWidth: 1 },
   reviewCloseOverlay: { position: 'absolute', left: 12, zIndex: 10 },
   // Title row directly below the photo (within the step's normal 24px padding).
   reviewHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 10, paddingBottom: 4 },
