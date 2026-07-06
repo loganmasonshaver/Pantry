@@ -782,7 +782,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           const stepConfig = {
             // Single-photo-first: the first capture lands straight on the review/scan hub (step 4) —
             // no forced pantry→fridge→counter march. Extra areas are added optionally from the hub.
-            1: { dotIndex: 0, label: 'Kitchen', title: 'Scan your kitchen', subtitle: 'Snap your fridge, pantry, or freezer — one photo is enough to start', next: 4 },
+            1: { dotIndex: 0, label: 'Kitchen', title: 'Scan your kitchen', subtitle: 'Snap your fridge, pantry, or freezer to start', next: 4 },
             2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 4 },
             3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
           }[step]!
@@ -1646,8 +1646,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.6)',
     borderWidth: 3,
   },
-  bracketTL: { top: '20%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
-  bracketTR: { top: '20%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  bracketTL: { top: '24%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  bracketTR: { top: '24%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
   // Bottom brackets sit well above the copy/shutter scrim (was 20% → collided with the title).
   bracketBL: { bottom: '34%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
   bracketBR: { bottom: '34%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
