@@ -20,7 +20,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, UtensilsCrossed, Container } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -146,11 +146,13 @@ const CAMERA_TIPS = [
   'One photo per zone — pantry, fridge, and freezer separately',
 ]
 
-const EXTRA_OPTIONS = [
-  { id: 'freezer', label: 'Freezer' },
-  { id: 'fridge2', label: 'Second Fridge' },
-  { id: 'shelf',   label: 'Extra Shelf' },
-  { id: 'custom',  label: 'Custom' },
+const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
+  { id: 'fridge',  label: 'Fridge',        icon: Refrigerator },
+  { id: 'freezer', label: 'Freezer',       icon: Snowflake },
+  { id: 'pantry',  label: 'Pantry',        icon: Package },
+  { id: 'counter', label: 'Counter',       icon: UtensilsCrossed },
+  { id: 'fridge2', label: 'Second Fridge', icon: Container },
+  { id: 'custom',  label: 'Custom',        icon: Plus },
 ]
 
 // ── Sub-components ─────────────────────────────────────────────────────
@@ -874,20 +876,36 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               </TouchableOpacity>
               <View style={{ flex: 1 }} />
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
-              <Text style={styles.title}>Scan now, or add more</Text>
-              <Text style={[styles.subtitle, { marginBottom: 20 }]}>One photo is enough — add other storage areas only if you want a fuller pantry</Text>
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
+              <Text style={styles.hubTitle}>Add another area?</Text>
+              <Text style={styles.hubSubtitle}>One photo's enough — capture more storage areas for a fuller pantry.</Text>
+
+              {/* Captured so far — tangible progress, so the screen reads as a collection you're building. */}
               {photos.length > 0 && (
-                <View style={[styles.photoRow, { marginBottom: 20 }]}>
-                  {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
+                <View style={styles.capturedSection}>
+                  <Text style={styles.sectionEyebrow}>CAPTURED · {photos.length}</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.capturedRow}>
+                    {photos.map(p => (
+                      <View key={p.id} style={styles.capturedCard}>
+                        {p.uri
+                          ? <Image source={{ uri: p.uri }} style={styles.capturedImg} resizeMode="cover" />
+                          : <View style={[styles.capturedImg, styles.capturedImgEmpty]}><ScanLine size={18} stroke="#4ADE80" strokeWidth={1.5} /></View>}
+                        <View style={styles.capturedCheck}><Check size={11} stroke="#000" strokeWidth={3} /></View>
+                        <View style={styles.capturedLabelWrap}><Text style={styles.capturedLabel} numberOfLines={1}>{p.label}</Text></View>
+                      </View>
+                    ))}
+                  </ScrollView>
                 </View>
               )}
-              <View style={styles.extraGrid}>
+
+              <Text style={[styles.sectionEyebrow, { marginTop: 26 }]}>ADD AN AREA</Text>
+              <View style={styles.areaGrid}>
                 {EXTRA_OPTIONS.map(opt => {
                   const taken = photos.some(p => p.label === opt.label)
+                  const Icon = opt.icon
                   if (opt.id === 'custom') {
                     return (
-                      <View key={opt.id} style={styles.extraCardWrap}>
+                      <View key={opt.id} style={styles.areaCardWrap}>
                         {showCustomInput ? (
                           <View style={styles.customCard}>
                             <TextInput
@@ -913,41 +931,36 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                             </TouchableOpacity>
                           </View>
                         ) : (
-                          <TouchableOpacity style={styles.extraCard} onPress={() => setShowCustomInput(true)} activeOpacity={0.7}>
-                            <Plus size={20} stroke="#4ADE80" strokeWidth={2} />
-                            <Text style={styles.extraCardText}>Custom</Text>
+                          <TouchableOpacity style={styles.areaCard} onPress={() => setShowCustomInput(true)} activeOpacity={0.85}>
+                            <View style={styles.areaIconWrap}><Plus size={22} stroke="#4ADE80" strokeWidth={2} /></View>
+                            <Text style={styles.areaCardText}>Custom</Text>
                           </TouchableOpacity>
                         )}
                       </View>
                     )
                   }
                   return (
-                    <TouchableOpacity
-                      key={opt.id}
-                      style={[styles.extraCard, styles.extraCardWrap, taken && styles.extraCardTaken]}
-                      onPress={() => { if (!taken) { setPendingLabel(opt.label); setStep(1) } }}
-                      activeOpacity={0.7}
-                    >
-                      {taken && (
-                        <View style={styles.extraCheckBadge}>
-                          <Check size={10} stroke="#000" strokeWidth={3} />
+                    <View key={opt.id} style={styles.areaCardWrap}>
+                      <TouchableOpacity
+                        style={[styles.areaCard, taken && styles.areaCardTaken]}
+                        onPress={() => { if (!taken) { setPendingLabel(opt.label); setStep(1) } }}
+                        activeOpacity={0.85}
+                      >
+                        {taken && <View style={styles.areaCheck}><Check size={10} stroke="#000" strokeWidth={3} /></View>}
+                        <View style={[styles.areaIconWrap, taken && styles.areaIconWrapTaken]}>
+                          <Icon size={22} stroke={taken ? '#4ADE80' : '#FFFFFF'} strokeWidth={1.8} />
                         </View>
-                      )}
-                      <ScanLine size={20} stroke={taken ? '#4ADE80' : COLORS.textDim} strokeWidth={1.8} />
-                      <Text style={[styles.extraCardText, taken && { color: '#4ADE80' }]}>{opt.label}</Text>
-                    </TouchableOpacity>
+                        <Text style={[styles.areaCardText, taken && { color: '#4ADE80' }]}>{opt.label}</Text>
+                      </TouchableOpacity>
+                    </View>
                   )
                 })}
               </View>
             </ScrollView>
             <View style={styles.actions}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => setStep(5)} activeOpacity={0.85}>
-                <Text style={styles.primaryBtnText}>
-                  Scan {photos.length} Photo{photos.length !== 1 ? 's' : ''}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => setStep(1)} activeOpacity={0.7}>
-                <Text style={styles.skipText}>Take another with the camera</Text>
+              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8 }]} onPress={() => setStep(5)} activeOpacity={0.85}>
+                <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />
+                <Text style={styles.primaryBtnText}>Scan {photos.length} Photo{photos.length !== 1 ? 's' : ''}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1503,8 +1516,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addMoreScroll: {
-    paddingBottom: 8,
+    paddingBottom: 20,
   },
+
+  // ── Step-4 "add more" hub (redesigned) ──
+  hubTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 6 },
+  hubSubtitle: { fontSize: 14, color: '#888888', lineHeight: 20, marginBottom: 24 },
+  sectionEyebrow: { fontSize: 11, fontWeight: '700', color: '#666666', letterSpacing: 1.2, marginBottom: 12 },
+  capturedSection: { marginBottom: 4 },
+  capturedRow: { gap: 12, paddingRight: 24 },
+  capturedCard: { width: 88, height: 112, borderRadius: 14, overflow: 'hidden', backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)' },
+  capturedImg: { width: '100%', height: '100%' },
+  capturedImgEmpty: { alignItems: 'center', justifyContent: 'center' },
+  capturedCheck: { position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
+  capturedLabelWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 4, paddingHorizontal: 6 },
+  capturedLabel: { fontSize: 11, fontWeight: '600', color: '#FFFFFF', textAlign: 'center' },
+  areaGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+  areaCardWrap: { width: '48%' },
+  areaCard: { backgroundColor: '#141414', borderRadius: 16, paddingVertical: 18, paddingHorizontal: 14, alignItems: 'flex-start', gap: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
+  areaCardTaken: { borderColor: 'rgba(74,222,128,0.4)', backgroundColor: 'rgba(74,222,128,0.06)' },
+  areaIconWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)', alignItems: 'center', justifyContent: 'center' },
+  areaIconWrapTaken: { backgroundColor: 'rgba(74,222,128,0.14)' },
+  areaCardText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
+  areaCheck: { position: 'absolute', top: 12, right: 12, width: 20, height: 20, borderRadius: 10, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
 
   // Top bar
   topBar: {
