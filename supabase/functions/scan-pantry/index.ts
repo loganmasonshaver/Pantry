@@ -61,27 +61,6 @@ async function scanVision(messages: any[], maxTokens: number): Promise<string> {
   }
 }
 
-// Capture-time classifier: one cheap, LOW-detail vision call that returns just the container type,
-// so the capture hub can auto-label a photo (fridge/freezer/pantry/counter) BEFORE the full scan.
-// Reuses scanVision's provider chain; any failure falls back to 'other' (hub just stays generic).
-async function classifyContainer(imageBase64: string): Promise<string> {
-  const ALLOWED = new Set(['fridge', 'freezer', 'pantry', 'counter', 'other'])
-  try {
-    const messages = [{
-      role: "user",
-      content: [
-        { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageBase64}`, detail: "low" } },
-        { type: "text", text: 'What kind of food storage does this photo show? Reply with EXACTLY ONE lowercase word, no punctuation: fridge, freezer, pantry, counter, or other.' },
-      ],
-    }]
-    const raw = (await scanVision(messages, 8)).toLowerCase().replace(/[^a-z]/g, '')
-    return ALLOWED.has(raw) ? raw : 'other'
-  } catch (e) {
-    console.log(`[scan-pantry] classify failed: ${(e as Error).message}`)
-    return 'other'
-  }
-}
-
 // ── Post-generation cleanup (deterministic safety net over whatever the model returns) ──
 const NONFOOD_EXACT = new Set([
   'plate', 'plates', 'dinner plate', 'dinner plates', 'bowl', 'bowls', 'cup', 'cups', 'mug', 'mugs',
@@ -158,7 +137,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const tBody = Date.now()
-    const { images: rawImages, classifyOnly } = await req.json() as { images: string[]; classifyOnly?: boolean }
+    const { images: rawImages } = await req.json() as { images: string[] }
     console.log(`[scan-pantry] body read: ${Date.now() - tBody}ms`)
     if (!rawImages || rawImages.length === 0) {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
@@ -179,15 +158,6 @@ Deno.serve(async (req: Request) => {
     // req.json() above will have stalled for tens of seconds before this line.
     const payloadKB = Math.round(images.reduce((a, b) => a + b.length, 0) / 1024)
     console.log(`[scan-pantry] received ${images.length} image(s), ~${payloadKB}KB base64`)
-
-    // Capture-time "what is this?" mode — one cheap classification of the first image, returned
-    // before any heavy work. NO scan-cap consumed (it isn't a real scan) and no second pass.
-    // Everyone in-app is past the hard paywall, so the premium check above already covers it.
-    if (classifyOnly) {
-      const container = await classifyContainer(images[0])
-      console.log(`[scan-pantry] classifyOnly -> ${container}`)
-      return new Response(JSON.stringify({ container }), { headers: { "Content-Type": "application/json" } })
-    }
 
     // Gate the cost-bearing OpenAI call behind the rolling weekly cap. Atomic check+increment
     // — counts the attempt up front; the 504/500 paths below refund on transient fail.
