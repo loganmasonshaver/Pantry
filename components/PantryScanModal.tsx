@@ -21,7 +21,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -838,7 +838,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <View style={styles.stepTextCompact}>
                   <Text style={styles.cameraTitle}>{captureTitle}</Text>
                   <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
-                  <Text style={styles.cameraTip}>💡 {CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
+                  <View style={styles.cameraTipRow}>
+                    <Lightbulb size={13} stroke="rgba(255,255,255,0.75)" strokeWidth={2} />
+                    <Text style={styles.cameraTip}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
+                  </View>
                 </View>
 
                 <View style={styles.shutterRow}>
@@ -1645,8 +1648,9 @@ const styles = StyleSheet.create({
   },
   bracketTL: { top: '20%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
   bracketTR: { top: '20%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
-  bracketBL: { bottom: '20%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
-  bracketBR: { bottom: '20%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  // Bottom brackets sit well above the copy/shutter scrim (was 20% → collided with the title).
+  bracketBL: { bottom: '34%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '34%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
   cameraBottom: {
     paddingTop: 12,
     paddingBottom: 4,
@@ -1958,12 +1962,12 @@ const styles = StyleSheet.create({
   },
 
   // Camera capture hint
+  cameraTipRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, paddingHorizontal: 12 },
   cameraTip: {
+    flexShrink: 1,
     fontSize: 12,
     color: 'rgba(255,255,255,0.75)',
     fontWeight: '500',
-    marginTop: 4,
-    textAlign: 'center',
     textShadowColor: 'rgba(0,0,0,0.6)',
     textShadowRadius: 5,
   },
