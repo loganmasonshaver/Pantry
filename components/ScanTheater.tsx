@@ -1,157 +1,174 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Animated, Dimensions, Easing, Image, StyleSheet, Text, View } from 'react-native'
+import React, { useEffect, useRef, useState } from 'react'
+import { Dimensions, Image, StyleSheet, Text, View } from 'react-native'
+import Animated, { Easing, cancelAnimation, runOnJS, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated'
+import Svg, { Circle, Defs, Ellipse, Line, Polygon, RadialGradient, Stop } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const GREEN = '#4ADE80'
-const SWEEP_MS = 13000 // one full section-by-section pass per photo (a food-dense shot ≈ 13s to scan)
-const SECTIONS = ['Reading the top shelf', 'Scanning the middle', 'Checking the lower shelf', 'Door & drawers']
+const DWELL_MS = 3400          // pause + scan at each spot; + ~1.6s curved travel ≈ 5s per position
+const HOPS_PER_PHOTO = 3       // spots visited before drifting to the next photo
+const STATUS = ['Locking on', 'Reading the top shelf', 'Sweeping the door shelves', 'Repositioning', 'Checking the drawers', 'Decoding labels']
 
-// Decorative "detected item" boxes. We DON'T know the real items mid-scan, so these are plausible
-// positions that light up as the sweep passes — the thrill of "it's finding stuff" with zero risk of
-// a wrong label. Deterministic per photo (a tiny LCG) so they don't reshuffle every render.
-function genBoxes(seed: number) {
-  let s = (seed + 3) * 9301 + 49297
-  const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280 }
-  return Array.from({ length: 7 }, () => {
-    const w = 0.12 + rand() * 0.13
-    const h = 0.07 + rand() * 0.08
-    const x = 0.06 + rand() * (0.9 - w)
-    const y = 0.04 + rand() * (0.86 - h)
-    return { x, y, w, h }
-  })
-}
+// drone container geometry — the orb sits at (OX, OY); the scan cone fans DOWN from it.
+const CW = 170, CH = 224, OX = 85, OY = 60
 
 type Photo = { uri?: string; label?: string }
 
-export function ScanTheater({
-  photos,
-  photoDims,
-  showDone,
-  areaLabel,
-}: {
+// A random spot inside the photo (kept off the edges, and leaving cone room below the orb). Always
+// >0.32 away from `prev` so the drone actually travels a meaningful curve, never twitches in place.
+function rndPoint(prev?: { x: number; y: number }) {
+  for (let i = 0; i < 12; i++) {
+    const x = 0.2 + Math.random() * 0.6
+    const y = 0.14 + Math.random() * 0.52
+    if (!prev || Math.hypot(x - prev.x, y - prev.y) > 0.32) return { x, y }
+  }
+  return { x: 0.5, y: 0.4 }
+}
+
+export function ScanTheater({ photos, photoDims, showDone, areaLabel }: {
   photos: Photo[]
   photoDims: Record<string, { w: number; h: number }>
   showDone: boolean
   areaLabel?: (idx: number) => string
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
-  const [sectionIdx, setSectionIdx] = useState(0)
-  // photoDims is populated by the REVIEW screen's onLoad, which hasn't fired yet during loading — so
-  // capture each photo's true aspect here on first load, else the tall fridge shot renders at 4/3 and
-  // crops. Falls back to any dims we were handed, then 4/3.
+  const [statusIdx, setStatusIdx] = useState(0)
+  const [target, setTarget] = useState(() => rndPoint())
+  const [ghosts, setGhosts] = useState<{ x: number; y: number }[]>([])
   const [natAspect, setNatAspect] = useState<Record<string, number>>({})
-  const line = useRef(new Animated.Value(0)).current
-  const animRef = useRef<Animated.CompositeAnimation | null>(null)
-  const showDoneRef = useRef(showDone)
-  showDoneRef.current = showDone
+  const hopCount = useRef(0)
+  const dwell = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const showDoneRef = useRef(showDone); showDoneRef.current = showDone
 
-  const boxesByPhoto = useMemo(() => photos.map((_, i) => genBoxes(i)), [photos.length])
-
-  // Fit the current photo into a large centred box (contain), so the WHOLE fridge scans top-to-bottom.
   const uri = photos[activeIdx]?.uri
-  const dims = uri ? photoDims[uri] : undefined
-  const aspect = (uri && natAspect[uri]) || (dims ? dims.h / dims.w : 4 / 3)
+  const aspect = (uri && natAspect[uri]) || (uri && photoDims[uri] ? photoDims[uri].h / photoDims[uri].w : 4 / 3)
   const maxW = SCREEN_W - 44
-  const maxH = SCREEN_H * 0.58
+  const maxH = SCREEN_H * 0.56
   const natH = maxW * aspect
   const photoH = natH > maxH ? maxH : natH
   const photoW = natH > maxH ? maxH / aspect : maxW
 
-  // Per-photo sweep loop. When the sweep finishes, advance to the next photo (looping) unless the
-  // real scan already came back — then we hold on the fully-lit "complete" state.
+  // Drone motion. Curved travel = X and Y eased on DIFFERENT durations/curves, so the path bows
+  // instead of running straight. A slow hover-bob + halo spin run continuously so it's never still.
+  const dx = useSharedValue(photoW * 0.5)
+  const dy = useSharedValue(photoH * 0.35)
+  const bob = useSharedValue(-5)
+  const spin = useSharedValue(0)
+
+  useEffect(() => {
+    bob.value = withRepeat(withTiming(5, { duration: 1500, easing: Easing.inOut(Easing.sin) }), -1, true)
+    spin.value = withRepeat(withTiming(360, { duration: 7000, easing: Easing.linear }), -1, false)
+    const s = setInterval(() => setStatusIdx(i => (i + 1) % STATUS.length), 2600)
+    return () => { cancelAnimation(bob); cancelAnimation(spin); clearInterval(s) }
+  }, [])
+
+  const advance = () => {
+    if (showDoneRef.current) return
+    dwell.current = setTimeout(() => {
+      setGhosts(g => [target, ...g].slice(0, 2)) // faint breadcrumb of the last couple of spots
+      hopCount.current += 1
+      if (hopCount.current % HOPS_PER_PHOTO === 0 && photos.length > 1) setActiveIdx(i => (i + 1) % photos.length)
+      setTarget(t => rndPoint(t))
+    }, DWELL_MS)
+  }
+
   useEffect(() => {
     if (showDone) return
-    line.setValue(0)
-    const anim = Animated.timing(line, { toValue: 1, duration: SWEEP_MS, easing: Easing.linear, useNativeDriver: false })
-    animRef.current = anim
-    anim.start(({ finished }) => {
-      if (finished && !showDoneRef.current) setActiveIdx(i => (i + 1) % Math.max(1, photos.length))
+    const px = target.x * photoW, py = target.y * photoH
+    dx.value = withTiming(px, { duration: 1450, easing: Easing.inOut(Easing.cubic) })
+    dy.value = withTiming(py, { duration: 1850, easing: Easing.inOut(Easing.quad) }, (fin) => {
+      'worklet'; if (fin) runOnJS(advance)()
     })
-    const id = line.addListener(({ value }) => {
-      setSectionIdx(Math.min(SECTIONS.length - 1, Math.floor(value * SECTIONS.length)))
-    })
-    return () => { anim.stop(); line.removeListener(id) }
-  }, [activeIdx, photos.length, showDone])
+    return () => { if (dwell.current) clearTimeout(dwell.current) }
+  }, [target, photoW, photoH])
 
-  // Results landed → stop mid-sweep and fast-complete to fully-scanned so the payoff isn't gated on
-  // the 13s animation finishing.
+  // Results in → glide to centre and settle (the parent shows View Results).
   useEffect(() => {
     if (!showDone) return
-    animRef.current?.stop()
-    Animated.timing(line, { toValue: 1, duration: 600, easing: Easing.out(Easing.ease), useNativeDriver: false }).start()
+    if (dwell.current) clearTimeout(dwell.current)
+    dx.value = withTiming(photoW * 0.5, { duration: 700, easing: Easing.out(Easing.cubic) })
+    dy.value = withTiming(photoH * 0.42, { duration: 700, easing: Easing.out(Easing.cubic) })
   }, [showDone])
 
-  const lineY = line.interpolate({ inputRange: [0, 1], outputRange: [0, photoH] })
-  const revealH = line.interpolate({ inputRange: [0, 1], outputRange: [0, photoH] })
+  const droneStyle = useAnimatedStyle(() => ({ transform: [{ translateX: dx.value - OX }, { translateY: dy.value + bob.value - OY }] }))
+  const ringStyle = useAnimatedStyle(() => ({ transform: [{ rotateZ: `${spin.value}deg` }] }))
+
   const label = areaLabel ? areaLabel(activeIdx) : photos[activeIdx]?.label
 
   return (
     <View style={styles.wrap}>
       <View style={[styles.photoBox, { width: photoW, height: photoH }]}>
-        {/* Dim base — the "unscanned" state. Captures true aspect on first load. */}
         {uri && (
           <Image
             source={{ uri }}
-            style={[StyleSheet.absoluteFill, { opacity: 0.22 }]}
+            style={[StyleSheet.absoluteFill, { opacity: 0.4 }]}
             resizeMode="cover"
-            onLoad={e => {
-              const s = e.nativeEvent?.source
-              if (s?.width && s?.height && uri) setNatAspect(m => (m[uri] ? m : { ...m, [uri]: s.height / s.width }))
-            }}
+            onLoad={e => { const s = e.nativeEvent?.source; if (s?.width && s?.height && uri) setNatAspect(m => (m[uri] ? m : { ...m, [uri]: s.height / s.width })) }}
           />
         )}
-        {/* Bright reveal — clipped to the swept region, growing top-down as the line descends */}
-        <Animated.View style={{ position: 'absolute', top: 0, left: 0, width: photoW, height: revealH, overflow: 'hidden' }}>
-          {uri && <Image source={{ uri }} style={{ width: photoW, height: photoH }} resizeMode="cover" />}
-          {/* faint green wash over the scanned area for the "processed" look */}
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(74,222,128,0.06)' }]} />
+
+        {/* Faint breadcrumb of where the drone just was */}
+        {ghosts.map((g, i) => (
+          <View key={i} style={{ position: 'absolute', left: g.x * photoW - 5, top: g.y * photoH - 5, width: 10, height: 10, borderRadius: 5, backgroundColor: GREEN, opacity: 0.16 - i * 0.06 }} />
+        ))}
+
+        {/* The drone — glow + scan cone, spinning halo, body + eye */}
+        <Animated.View pointerEvents="none" style={[{ position: 'absolute', width: CW, height: CH }, droneStyle]}>
+          <Svg width={CW} height={CH} style={StyleSheet.absoluteFill}>
+            <Defs>
+              <RadialGradient id="dGlow" cx="50%" cy={`${(OY / CH) * 100}%`} r="46%">
+                <Stop offset="0" stopColor={GREEN} stopOpacity={0.85} />
+                <Stop offset="1" stopColor={GREEN} stopOpacity={0} />
+              </RadialGradient>
+              <RadialGradient id="dCone" cx="50%" cy={`${(OY / CH) * 100}%`} r="90%">
+                <Stop offset="0" stopColor={GREEN} stopOpacity={0.42} />
+                <Stop offset="1" stopColor={GREEN} stopOpacity={0} />
+              </RadialGradient>
+            </Defs>
+            {/* scan cone fanning down onto the photo */}
+            <Polygon points={`${OX},${OY} 20,${CH} ${CW - 20},${CH}`} fill="url(#dCone)" />
+            <Line x1={OX} y1={OY} x2={28} y2={CH} stroke={GREEN} strokeWidth={1.1} opacity={0.7} />
+            <Line x1={OX} y1={OY} x2={OX} y2={CH} stroke={GREEN} strokeWidth={1.1} opacity={0.7} />
+            <Line x1={OX} y1={OY} x2={CW - 28} y2={CH} stroke={GREEN} strokeWidth={1.1} opacity={0.7} />
+            {/* soft glow around the orb */}
+            <Circle cx={OX} cy={OY} r={50} fill="url(#dGlow)" />
+          </Svg>
+          {/* spinning halo ring */}
+          <Animated.View style={[{ position: 'absolute', left: OX - 34, top: OY - 34, width: 68, height: 68, alignItems: 'center', justifyContent: 'center' }, ringStyle]}>
+            <Svg width={68} height={68}>
+              <Ellipse cx={34} cy={34} rx={30} ry={11} stroke={GREEN} strokeWidth={1.6} fill="none" opacity={0.8} />
+            </Svg>
+          </Animated.View>
+          {/* body + eye + spark (own Defs — gradients are scoped per-Svg) */}
+          <Svg width={CW} height={CH} style={StyleSheet.absoluteFill}>
+            <Defs>
+              <RadialGradient id="dBody" cx="40%" cy="34%" r="72%">
+                <Stop offset="0" stopColor="#bff7d4" />
+                <Stop offset="0.5" stopColor="#2fae67" />
+                <Stop offset="1" stopColor="#0c3a24" />
+              </RadialGradient>
+            </Defs>
+            <Circle cx={OX} cy={OY} r={17} fill="url(#dBody)" />
+            <Circle cx={OX} cy={OY} r={17} stroke="#7dffb0" strokeWidth={1} fill="none" opacity={0.55} />
+            <Circle cx={OX} cy={OY} r={7.5} fill="#eafff2" />
+            <Circle cx={OX} cy={OY} r={3.4} fill="#22c55e" />
+            <Circle cx={OX + 27} cy={OY - 8} r={2.4} fill="#8affbe" />
+          </Svg>
         </Animated.View>
 
-        {/* Detection boxes — fade+scale in as the line passes each one's centre */}
-        {boxesByPhoto[activeIdx]?.map((b, i) => {
-          const cy = b.y + b.h / 2
-          const op = line.interpolate({ inputRange: [Math.max(0, cy - 0.03), Math.min(1, cy + 0.005)], outputRange: [0, 1], extrapolate: 'clamp' })
-          const sc = line.interpolate({ inputRange: [Math.max(0, cy - 0.03), Math.min(1, cy + 0.02)], outputRange: [0.8, 1], extrapolate: 'clamp' })
-          return (
-            <Animated.View
-              key={i}
-              pointerEvents="none"
-              style={{
-                position: 'absolute',
-                left: b.x * photoW, top: b.y * photoH, width: b.w * photoW, height: b.h * photoH,
-                borderWidth: 1.5, borderColor: GREEN, borderRadius: 5,
-                backgroundColor: 'rgba(74,222,128,0.08)',
-                opacity: op, transform: [{ scale: sc }],
-              }}
-            />
-          )
-        })}
-
-        {/* The scan-line + soft glow */}
-        <Animated.View pointerEvents="none" style={[styles.glow, { top: lineY }]} />
-        <Animated.View pointerEvents="none" style={[styles.scanline, { top: lineY }]} />
-
-        {/* Viewfinder corner brackets */}
+        {/* Viewfinder corners */}
         <View style={[styles.corner, styles.cTL]} />
         <View style={[styles.corner, styles.cTR]} />
         <View style={[styles.corner, styles.cBL]} />
         <View style={[styles.corner, styles.cBR]} />
       </View>
 
-      {/* Status — the section being read + which photo */}
-      <Text style={styles.section}>{showDone ? 'Scan complete' : SECTIONS[sectionIdx]}</Text>
+      <Text style={styles.section}>{showDone ? 'Scan complete' : STATUS[statusIdx]}</Text>
       {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
-
-      {/* Progress: a dot per photo + a thin within-photo bar */}
       {photos.length > 1 && (
-        <View style={styles.dots}>
-          {photos.map((_, i) => <View key={i} style={[styles.dot, i === activeIdx && styles.dotActive]} />)}
-        </View>
+        <View style={styles.dots}>{photos.map((_, i) => <View key={i} style={[styles.dot, i === activeIdx && styles.dotActive]} />)}</View>
       )}
-      <View style={styles.barTrack}>
-        <Animated.View style={[styles.barFill, { width: line.interpolate({ inputRange: [0, 1], outputRange: ['4%', '100%'] }) }]} />
-      </View>
     </View>
   )
 }
@@ -159,8 +176,6 @@ export function ScanTheater({
 const styles = StyleSheet.create({
   wrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22 },
   photoBox: { borderRadius: 16, overflow: 'hidden', backgroundColor: '#0A0A0A' },
-  scanline: { position: 'absolute', left: 0, right: 0, height: 2.5, backgroundColor: GREEN },
-  glow: { position: 'absolute', left: 0, right: 0, height: 22, marginTop: -10, backgroundColor: 'rgba(74,222,128,0.16)' },
   corner: { position: 'absolute', width: 24, height: 24, borderColor: GREEN },
   cTL: { top: 8, left: 8, borderTopWidth: 2.5, borderLeftWidth: 2.5, borderTopLeftRadius: 6 },
   cTR: { top: 8, right: 8, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 6 },
@@ -171,6 +186,4 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 6, marginTop: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#333' },
   dotActive: { backgroundColor: GREEN, width: 20 },
-  barTrack: { marginTop: 16, width: 200, height: 3, borderRadius: 3, backgroundColor: '#222', overflow: 'hidden' },
-  barFill: { height: 3, borderRadius: 3, backgroundColor: GREEN },
 })
