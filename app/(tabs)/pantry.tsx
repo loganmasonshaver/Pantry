@@ -34,6 +34,7 @@ import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/cat
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
+import PressableScale from '@/components/PressableScale'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 import { Shimmer } from '@/components/Shimmer'
 
@@ -208,6 +209,7 @@ export default function PantryScreen() {
   const router = useRouter()
   const { isPremium } = usePremium()
   const [categories, setCategories] = useState<Category[]>([])
+  const [loaded, setLoaded] = useState(false) // gate the empty state until the first fetch lands, so "your pantry is empty" doesn't flash before items arrive
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(['protein']))
   const [searchQuery, setSearchQuery] = useState('')
   const [showScanModal, setShowScanModal] = useState(false)
@@ -331,6 +333,7 @@ export default function PantryScreen() {
     } catch {}
 
     setCategories(result)
+    setLoaded(true)
   }, [user?.id])
 
   useFocusEffect(useCallback(() => {
@@ -486,19 +489,27 @@ export default function PantryScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 }}
           ListEmptyComponent={
+            loaded ? (
             <View style={styles.emptyStateInline}>
               <View style={styles.emptyIconCircle}>
                 <Camera size={28} stroke="#4ADE80" strokeWidth={1.8} />
               </View>
               <Text style={styles.emptyTitle}>
-                {isSearching ? 'No results' : 'Your pantry is empty'}
+                {isSearching ? 'No matches' : 'Your pantry is empty'}
               </Text>
               <Text style={styles.emptySub}>
                 {isSearching
-                  ? 'Try a different search'
-                  : 'Tap Scan Pantry above to auto-detect what you have, or add items manually.'}
+                  ? "Try a different search — or add it as a new item."
+                  : "Scan a shelf or your fridge and we'll fill this in for you."}
               </Text>
+              {!isSearching && (
+                <PressableScale style={styles.emptyScanBtn} haptic onPress={openScanWithConsent}>
+                  <ScanLine size={18} stroke="#000" strokeWidth={2.5} />
+                  <Text style={styles.emptyScanBtnText}>Scan Pantry</Text>
+                </PressableScale>
+              )}
             </View>
+            ) : null
           }
           ListHeaderComponent={
             <>
@@ -710,7 +721,12 @@ export default function PantryScreen() {
                         )
                       })}
                     </View>
-                  ) : null}
+                  ) : (
+                    // Zero meals came back (pantry too sparse) — nudge instead of rendering nothing.
+                    <View style={styles.cookTonightLoading}>
+                      <Text style={styles.cookTonightLoadingText}>Scan a few more items and we'll suggest meals you can make right now.</Text>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -1126,6 +1142,17 @@ const styles = StyleSheet.create({
   deleteText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
   emptyState: { alignItems: 'center', paddingTop: 60, gap: 8 },
+  emptyScanBtn: {
+    backgroundColor: COLORS.textWhite,
+    borderRadius: 30,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  emptyScanBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
   emptyStateInline: {
     alignItems: 'center',
     paddingTop: 48,

@@ -741,7 +741,7 @@ export default function MealDetailScreen() {
   if (!meal) {
     return (
       <SafeAreaView style={styles.safe}>
-        <Text style={styles.notFound}>{fetchingMeal ? 'Loading…' : 'Meal not found.'}</Text>
+        <Text style={styles.notFound}>{fetchingMeal ? 'Getting your recipe…' : "We couldn't find that meal."}</Text>
       </SafeAreaView>
     )
   }

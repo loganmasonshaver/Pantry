@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router'
-import { Bookmark, Search, X, Utensils, Clock, Plus, Link } from 'lucide-react-native'
+import { Bookmark, Search, X, Utensils, Clock, Plus, Link, Compass } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
@@ -137,6 +137,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
 // ── Screen ─────────────────────────────────────────────────────────────
 
 export default function SavedScreen() {
+  const router = useRouter()
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
   const { sharedUrl } = useLocalSearchParams<{ sharedUrl?: string }>()
@@ -432,13 +433,17 @@ export default function SavedScreen() {
           <ActivityIndicator color={COLORS.textWhite} />
         </View>
       ) : isEmpty ? (
-        <View style={styles.emptyState}>
+        <Reanimated.View entering={FadeIn.duration(300)} style={styles.emptyState}>
           <View style={styles.emptyCircle}>
             <Bookmark size={32} stroke="#4ADE80" strokeWidth={1.8} />
           </View>
-          <Text style={styles.emptyTitle}>No saved meals yet</Text>
-          <Text style={styles.emptySub}>Tap the bookmark on any meal to save it</Text>
-        </View>
+          <Text style={styles.emptyTitle}>Nothing saved yet</Text>
+          <Text style={styles.emptySub}>Bookmark any meal you love and it lands here — ready to cook.</Text>
+          <PressableScale style={styles.emptyBrowseBtn} haptic onPress={() => router.push('/(tabs)/discover')}>
+            <Compass size={18} stroke="#000" strokeWidth={2.5} />
+            <Text style={styles.emptyBrowseBtnText}>Browse trending</Text>
+          </PressableScale>
+        </Reanimated.View>
       ) : (
         <Reanimated.View entering={FadeIn.duration(300)} style={{ flex: 1 }}>
           <ScrollView
@@ -699,6 +704,17 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
+  emptyBrowseBtn: {
+    backgroundColor: COLORS.textWhite,
+    borderRadius: 30,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 22,
+  },
+  emptyBrowseBtnText: { color: '#000000', fontSize: 16, fontWeight: '700' },
 
   createBtn: {
     width: 40,

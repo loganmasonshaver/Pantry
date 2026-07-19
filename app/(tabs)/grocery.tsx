@@ -153,6 +153,7 @@ function GroceryRow({
 export default function GroceryScreen() {
   const { user } = useAuth()
   const [items, setItems] = useState<GroceryItem[]>([])
+  const [loaded, setLoaded] = useState(false) // gate the empty state until the first fetch lands, so "all stocked up" doesn't flash before items arrive
   const [showToast, setShowToast] = useState(false)
   const [toastMessage, setToastMessage] = useState('')
   // Inline-edit pattern (Reminders-style): tapping "+ Add Item" transforms the
@@ -208,6 +209,7 @@ export default function GroceryScreen() {
 
       setItems(deduped)
     }
+    setLoaded(true)
   }, [user?.id])
 
   // Check for today's order (prep timeline) and last order (reorder)
@@ -473,7 +475,7 @@ export default function GroceryScreen() {
         </View>
       </View>
 
-      {isEmpty ? (
+      {!loaded ? null : isEmpty ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyCircle}>
             <ShoppingCart size={32} stroke="#4ADE80" strokeWidth={2} />
