@@ -1,114 +1,108 @@
-# Handoff — Pantry — 2026-07-06 session
+# Handoff — Pantry — 2026-07-06 (scan pipeline + meals + loading animation)
 
 ## TL;DR
-A very long session, ~95% focused on the **scan flow** (`components/PantryScanModal.tsx`): capture →
-hub → review were reworked end-to-end for UX + polish. Also: a Fable-skills/CLAUDE.md handover and
-a full security sweep. **Everything is committed + pushed to `main`** (session range `4046ed1..HEAD`).
-`scan-pantry` edge function was deployed several times. App was rebuilt on the physical iPhone
-(`expo run:ios --device`). ~1 week to launch. Premium-only hard paywall (trial = access).
+Long session on **scan accuracy, meal quality, scan-review UX, and the scan loading animation.**
+Everything committed + pushed to `main` (range `87a0e01..e81686c`). Two edge functions were
+**deployed** (`scan-pantry`, `generate-meals`) and **one DB migration applied** to prod
+(`profiles.staples_excluded`). TypeScript baseline held at **198 pre-existing errors** the whole
+session (zero net new). The scanner drone animation is the newest, riskiest code and **still needs a
+device-tuning pass**; the Phase-2 roll-down transition is not built yet.
 
 ---
 
-## ⚠️ MUST DO BEFORE LAUNCH
-1. **Revert `SCAN_CAP_WEEK`.** For testing I ran `supabase secrets set SCAN_CAP_WEEK=99999` to lift
-   the weekly scan cap. `scan-pantry` reads `Number(Deno.env.get('SCAN_CAP_WEEK') ?? 7)`. Before
-   launch: `supabase secrets unset SCAN_CAP_WEEK` (reverts to safe default **7**) or set it to 7.
-   Leaving it high = the OpenAI cost cap is wide open in prod. (Tracked as a spawned task.)
-2. Re-verify edge deploy: `supabase functions deploy scan-pantry` (deployed this session; confirm).
+## ⚠️ MUST DO BEFORE LAUNCH (carried over from prior handoff — verify)
+- **Revert `SCAN_CAP_WEEK`** if it's still lifted for testing: `supabase secrets unset SCAN_CAP_WEEK`
+  (reverts to safe default 7). Not touched this session — confirm its current value.
 
-## Open spawned tasks (chips) — carryover work
-- **Revert SCAN_CAP_WEEK before launch** (see above).
-- **Lock subscription-lifecycle columns server-side** — `trial_started_at / subscribed_at /
-  churned_at` are client-writable (analytics poisoning, NOT an access bypass — real entitlement is
-  Superwall + is_premium/promo_active, already trigger-locked). Move writes to the Superwall webhook,
-  then extend `enforce_server_managed_premium` to cover them. Low priority, post-launch.
-- **Inline AI-consent in URL-import + recipe AI-generate** — `saved.tsx handleImportFromUrl` and
-  `RecipeFormModal handleGenerate` call `requestConsent()` from INSIDE a native `<Modal>` (two iOS
-  modals can't stack → hangs for a never-consented user). Needs an inline consent step, not the
-  root modal. Low priority: the primary AI paths (scan/receipt/AI-log/meal-gen/onboarding) already
-  gate consent correctly.
+## What shipped this session (all on `main`, deployed where noted)
 
----
+### Scan accuracy pipeline (`supabase/functions/scan-pantry/index.ts` — DEPLOYED)
+- `temperature: 0` on the vision call (was defaulting to 1 = the "same photo, different results" cause).
+- Confidence is now a **numeric 0–100** per item (was binary high/low), so the floor is tunable.
+- **Model migrated gpt-4.1 → `gpt-5.4` at `detail: 'original'`** (full-res patches read small labels;
+  gpt-4.1's tile tokenizer downscaled to 768px and shredded them). Eval on Logan's real photos:
+  **82% recall vs 63%**. gpt-5.4 needs `max_completion_tokens` and **rejects a forced temperature**
+  (we omit it). Gemini fallback keeps its classic params.
+- **Second pass DISABLED** — gpt-5.4's single pass out-recalls the old two-pass, halving scan cost
+  (~$0.10/scan, near incumbent). Vision timeout bumped 30s→60s for slow original-detail multi-photo.
+- **`SCAN_CONFIDENCE_FLOOR` default = 30** (env-overridable in Supabase). The pantry-eval sweep showed
+  everything <30 is vague blob-junk and no real ingredient dies until floor 40 → 30 with a buffer.
+- **Prompt fixes:** stop inventing container/leftover placeholders ("covered pot of leftovers",
+  "food in deli container") and hedged "A or B" names ("Lemon or orange") — name the food or skip it.
 
-## Current scan flow architecture (`components/PantryScanModal.tsx`)
-Step machine: **1** (camera) → **4** (hub) → **5** (loading/scan) → **55** (review) → saved.
-(Steps 2/3 = dead code, unreachable; step 6 = dead code. Left in place, low priority to remove.)
+### Eval harness (`scripts/pantry-eval/run.mjs`) — needs OPENAI key to run (Logan ran it, not me)
+- Hand-verified **ground truth for all 6 test photos** (`scripts/pantry-eval/images/`).
+- Model A/B (recall + REAL measured $), and a `SWEEP` mode (confidence-floor tuning + temp-0
+  consistency). Current lineup: gpt-4.1, gpt-5.4-mini, gpt-5.4 (gpt-4o removed — deprecated/404s).
+  Verdict: **gpt-5.4 single-pass** = the pick. mini was cheap but collapsed on dense fridge shots.
 
-- **Capture (step 1)** — *single-photo-first*. Full-bleed camera ("Scan your kitchen"), gradient
-  scrims for legible copy, corner brackets. Shutter → `capturePhoto(label, 4)` → lands on the hub.
-  `pendingLabel` carries the area name when the user adds a specific area from the hub.
-- **Hub (step 4)** — header **"More areas, better meals"**. `CAPTURED · N` showcase: photo cards
-  with a green "captured" check (top-right) + a **✕ remove** (top-left; removing the last photo
-  bounces to the camera). `ADD AN AREA` 2-col grid (Fridge/Freezer/Pantry/Counter/Second Fridge/
-  Custom, Lucide icons, green tiles). White **"Scan N Photos"** CTA (safe-area padded, centered).
-  Tapping an area → `setPendingLabel` + `setStep(1)` (uses the in-app camera).
-- **Review (step 55)** — **list-primary**. Compact pannable photo (**0.32** of screen — a spot-check
-  reference, tap to fullscreen-zoom), labeled by the area the scan classified (`photoContainers`,
-  e.g. "Fridge · 1/2"). Items grouped by shelf zone. **Tap an item's name → inline rename**
-  (`editingId`/`editingText`/`commitRename`); **✕** removes. "Also have these?" staples are
-  **collapsed behind a one-line toggle** (`staplesOpen`). "Add missing" input + **"Add N to Pantry"**
-  CTA (safe-area padded).
+### Meals (`supabase/functions/generate-meals/index.ts` — DEPLOYED; + client)
+- Meal gen now **assumes a conservative staples baseline** (salt/pepper/oils, **butter, flour, sugar,
+  full spice rack**) — cooking ENABLERS only, never meal-defining items (eggs/rice/produce/proteins,
+  which must come from the scan). Fixed "fridge-only scan → impoverished meals."
+- **Quality nudge:** "every meal must be genuinely delicious and cohesive, not a random assembly."
+- **`staplesExcluded`** honored (user opt-outs). **Diet-aware auto-exclusion**: vegan/dairy-free → no
+  butter, gluten-free → no flour (uses `dietary_restrictions`; deterministic, not model-reconciled).
+- Shared list: `constants/staples.ts` (client) mirrored in the edge prompt — KEEP IN SYNC.
+- **Recipe screen (`app/meal/[id].tsx`)**: ingredients now split 3 ways — YOU'LL NEED / IN YOUR
+  PANTRY / **PANTRY BASICS · WE ASSUMED** (muted). Tapping a basic = "I don't keep this" → persists to
+  `profiles.staples_excluded` and drops it to "you'll need". `useMealSuggestions` passes the exclusions.
+- **Migration applied to prod:** `supabase/migrations/20260706000000_profiles_staples_excluded.sql`
+  (`profiles.staples_excluded text[] default '{}'`).
 
-### Confirm → meals flow
-Hitting "Add N to Pantry" saves, then on the **first scan ever** auto-launches `/cook-reveal`
-(meals generated from what was just added). Later scans get a success step. This is the intended
-"scan → meals" payoff. (Backing out of review = nothing saved → stale meals, a past confusion.)
+### Scan review UX (`components/PantryScanModal.tsx`)
+- Photo demoted to a **compact preview banner** (0.32→0.15 of screen) + auto-pans to the food (uses
+  detected-item boxes) — a portrait fridge can't be shown big+whole next to chips; tap Zoom for full.
+- **Count-up reveal fixed:** killed the fake live ramp (overshot on slow scans, crawled on short). No
+  number while scanning; a fast fixed-duration count-up of the real total on results.
+- **Removed the "Also have these? Tap to add" staples dropdown** (redundant now that meals assume
+  basics). **Header** now leads with a bold **"N items found"** hero (was generic "Review your scan").
+  Placeholder nudges real items ("e.g. chicken, spinach") not assumed basics.
 
----
-
-## Key decisions this session (and REJECTED alternatives — important context)
-- **Detection boxes (tap chip → box drawn on photo): REJECTED.** GPT-4.1's bounding-box coords are
-  too imprecise for per-item pins (verified on real scans). The on-photo box overlay code is now
-  **dormant** (nothing sets `activeBoxId` since the chip tap was repurposed to rename). Safe to delete.
-- **Confidence triage ("double-check these" amber section): BUILT then REMOVED.** Went **trust-first**
-  — don't make the AI's uncertainty the user's homework over low-stakes data (a wrong pantry item is
-  a 1-tap delete). Confidence is still returned by the scan (potential backend quality telemetry),
-  just not shown in the UI.
-- **Per-photo pre-classify (`classifyOnly` mode on scan-pantry): BUILT then REVERTED.** Felt
-  bolted-on (extra vision call + ~1–2s relabel flicker on the hub). Chose **Option B**: the single
-  scan already returns `photoContainers` (location) alongside the food, so the review labels each
-  page by area with **no extra call**. The hub stays fast/generic; intelligence lives in the one scan.
-- **Single-photo-first capture: chosen** over the old forced pantry→fridge→counter guided march (friction).
-- **Camera unify:** "add another area" from the hub now uses the in-app camera (was the iOS system camera).
-- **Photo demoted to a 32% reference in review:** the screen's real job is *correcting an imperfect
-  list*, not admiring a photo. (0.32 is a starting guess — may need tuning.)
-
-## Backend — `scan-pantry` current output
-Returns `{ layout, photoContainers[], zones[].items[] }` where each item is
-`{ name, category, photo, box, confidence }`. **`box` and `confidence` are returned but NOT used in
-the UI** (dormant — box overlay rejected, confidence went backend-only). `photoContainers[i]` =
-`fridge|freezer|pantry|counter|other` per photo, drives review page labels + context-aware staples.
-Two-pass gpt-4.1 (Gemini 3.1 Flash-Lite fallback). `classifyOnly` mode was added then reverted (gone).
+### Scan LOADING animation (`components/ScanTheater.tsx` — NEW, Reanimated 4 + react-native-svg)
+- Replaced the empty black scan-frame with a **floating scanner drone** (Halo-Monitor style): glowing
+  orb + spinning halo ring + lens eye, casting a laser scan cone, drifting to a **new random vantage
+  every ~5s in curved arcs** (X/Y eased on different curves), faint breadcrumb trail, ~3 spots/photo
+  then floats to the next. Constant hover-bob + ring spin. Glides to center + "Scan complete" on results.
+- **Built blind (I can't see the animation) — NEEDS A DEVICE-TUNING PASS.** Do a FULL reload
+  (`npx expo start -c`), not Fast Refresh (it chokes on new Reanimated worklets — threw a stale
+  "areaLabel doesn't exist" render error earlier that a clean reload fixed).
 
 ---
 
-## Fable-skills handover (early in the session — durable artifacts)
-- `FABLE_POSTMORTEM.md` (repo root) — recurring failure patterns mined from ~851k tokens of past sessions.
-- **5 project skills** in `.claude/skills/`: `bug-hunter`, `security-sweep`, `build-planner`,
-  `honest-advisor`, `metadata-audit` (all seeded from real Pantry bugs; trigger on plain sentences).
-- **Global** `~/.claude/CLAUDE.md` + `~/.claude/skills/new-app-playbook` (+ build-planner/honest-advisor
-  copied global). Backed up in `~/my-briefing/claude-config/`.
-- `CLAUDE.md` (project) gained a **Gotchas/Landmines** + **Known baselines** section.
+## NEXT / PENDING
+1. **Tune the scanner drone on device** — robot-ness, curve strength, pacing (5s), cone/glow
+   brightness (does the fridge read as "being scanned"?), trail faintness, random-spot variety.
+2. **Phase 2 — teleprompter roll-down transition** (agreed, not built): on View Results, the scanned
+   photo shrinks into the compact preview and the ingredient list rolls up from underneath as ONE
+   connected page, **slow ~2.2s teleprompter pace**, with micro-animations: scan-line becomes the
+   divider, count ticks up, shelf headers fade in, chips stagger in, green "processed" wash fades off.
+3. **Dead-code cleanup** (harmless, left for a pass): in `PantryScanModal.tsx` the old count effects,
+   `beamAnim`, `SCAN_STATUS_LINES`, `msgAnim`, `loadingMessageIdx`, `scanCount`/`topTitle` styles are
+   now unused; the dropped dropdown left `addStapleChip`, `COMMON_STAPLES`, `STAPLES_BY_CONTAINER`
+   unused.
 
-## Security sweep (all findings fixed this session)
-- `scan-pantry` weekly cap was hardcoded **99999** ("TESTING ONLY") → now env-var, safe default 7.
-- `generate-meal-image`: removed client-controlled `bypassCache` (self-quota-drain vector).
-- `categorize-item`: rate limit keyed on `user.id` (was spoofable IP).
-- Cleared: entitlements trigger-locked, scan caps atomic (`FOR UPDATE`), referral single-use, all
-  secrets server-side, JWT verified everywhere. Strong posture overall.
+## DECISIONS MADE (don't re-litigate)
+- **Skipped Layer 2** (one-time cook-reveal primer) and **Layer 3** (manual bulk staples editor) —
+  redundant/workarounds; **diet-aware assumed staples** closed the real gap instead.
+- Scan photo = a preview you tap to zoom; the shelf-grouped chips are the review content.
+- Confidence floor doesn't fix the "wall of junk" (junk is high-confidence duplicates) — the fix was
+  the prompt (no containers/hedging) + numeric floor 30 for genuine blobs.
 
----
+## OPEN BUSINESS QUESTIONS (from the margin/pricing discussion — undecided)
+- **Pricing $7.99 → $9.99:** recommended to **A/B test in Superwall** (net revenue per trial-start),
+  not blind-switch. Not decided.
+- **Verify Apple Small Business Program enrollment (15%, not 30%)** — worth ~as much as the price hike;
+  it's a checkbox in App Store Connect.
+- **Meal generation is the biggest, UNCAPPED COGS** (text + image), bigger than scans for engaged
+  users. A whale generating ~150+ meals/mo approaches margin-negative. Consider caching/soft cap.
 
-## Testing / environment notes
-- Test on the wired iPhone (`expo run:ios --device`; UDID `00008150-0001691A3688401C`). Enable
-  **Personal Hotspot** first (device-build reachability). Prefix pod/build with
-  `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` (CocoaPods ASCII-8BIT fix).
-- `SCAN_CAP_WEEK=99999` currently lets you scan freely while testing (REVERT before launch).
-- Metro runs from `/Users/loganshaver/pantry` (main), not a worktree.
-- `insets.bottom` reports **0 inside the RN `<Modal>`** — that's why CTAs use `Math.max(insets.bottom, 24)`.
-
-## Likely next-session starting points
-1. Eyeball the review redesign on device: rename feel, photo at 0.32 (tune?), staples toggle.
-2. Any remaining scan-flow polish, then move off the scan flow toward launch (paywall/metadata — see
-   `~/my-briefing/todos/active.md`).
-3. Knock out the 3 spawned tasks when convenient (SCAN_CAP_WEEK revert is the only launch-blocker).
+## KEY FILES
+- `supabase/functions/scan-pantry/index.ts` — vision scan (gpt-5.4, floor, prompt).
+- `supabase/functions/generate-meals/index.ts` — meal gen (staples baseline, diet-aware, quality).
+- `constants/staples.ts` — canonical assumed-staples list + `isAssumedStaple` + `dietExcludedStaples`.
+- `components/PantryScanModal.tsx` — capture/review flow.
+- `components/ScanTheater.tsx` — NEW loading drone animation (WIP).
+- `app/meal/[id].tsx` — recipe screen with the "we assumed" tier.
+- `lib/useMealSuggestions.ts`, `lib/meals.ts` — meal-gen client plumbing.
+- `scripts/pantry-eval/` — model + confidence eval harness (needs API key to run).
