@@ -35,6 +35,7 @@ import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
+import Reanimated, { FadeIn } from 'react-native-reanimated'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 import { Shimmer } from '@/components/Shimmer'
 
@@ -677,7 +678,7 @@ export default function PantryScreen() {
                       </TouchableOpacity>
                     </View>
                   ) : meals.length > 0 ? (
-                    <View style={{ gap: 10 }}>
+                    <Reanimated.View entering={FadeIn.duration(300)} style={{ gap: 10 }}>
                       {meals.slice(0, 3).map((meal, idx) => {
                         // Compute against the LIVE pantry (the same check the meal-detail screen uses)
                         // so the card and the detail always agree. The old code trusted the server's
@@ -720,7 +721,7 @@ export default function PantryScreen() {
                           </TouchableOpacity>
                         )
                       })}
-                    </View>
+                    </Reanimated.View>
                   ) : (
                     // Zero meals came back (pantry too sparse) — nudge instead of rendering nothing.
                     <View style={styles.cookTonightLoading}>

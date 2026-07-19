@@ -531,6 +531,13 @@ export default function HomeScreen() {
   const [carbsGoal, setCarbsGoal] = useState(250)
   const [fatGoal, setFatGoal] = useState(80)
 
+  // Milestone celebration plumbing: mirror the live goal into a ref (so the logs fetch
+  // reads the CURRENT goal, not a stale closure) and track the previous calorie total.
+  // Starts null so the first load / a day switch establishes a baseline WITHOUT firing.
+  const calorieGoalRef = useRef(calorieGoal)
+  calorieGoalRef.current = calorieGoal
+  const calorieMilestoneRef = useRef<number | null>(null)
+
   useEffect(() => {
     if (!loading && meals.length > 0) trackMealsGenerated(meals.length)
   }, [loading])
@@ -618,6 +625,7 @@ export default function HomeScreen() {
   const [slots, setSlots] = useState<MealSlot[]>(INITIAL_SLOTS)
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set(['breakfast']))
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0])
+  useEffect(() => { calorieMilestoneRef.current = null }, [selectedDate]) // new day = fresh baseline, don't celebrate the goal on a day switch
   const isToday = selectedDate === new Date().toISOString().split('T')[0]
 
   // Anchor at noon when constructing the Date so DST transitions don't shift the day
@@ -681,6 +689,15 @@ export default function HomeScreen() {
       if (!seen.has(label)) {
         result.push({ id: label.toLowerCase().replace(/\s+/g, '-'), label, entries })
       }
+    }
+    // Milestone: fire a success tick the moment logging pushes today's calories across the
+    // goal. Compare prev→new total so opening the app or switching days (baseline null) never fires.
+    const newTotalCal = result.reduce((s, slot) => s + slot.entries.reduce((a, e) => a + e.calories, 0), 0)
+    const prevTotalCal = calorieMilestoneRef.current
+    calorieMilestoneRef.current = newTotalCal
+    const goal = calorieGoalRef.current
+    if (prevTotalCal !== null && goal > 0 && prevTotalCal < goal && newTotalCal >= goal) {
+      haptic.success()
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setSlots(result)

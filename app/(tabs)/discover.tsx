@@ -389,6 +389,7 @@ export default function DiscoverScreen() {
             <Compass size={32} stroke="#333" strokeWidth={1.5} />
           </View>
         ) : featured ? (
+          <Animated.View entering={FadeIn.duration(350)}>
           <PressableScale
             style={styles.featuredHero}
             scaleTo={0.98}
@@ -419,6 +420,7 @@ export default function DiscoverScreen() {
               </View>
             </View>
           </PressableScale>
+          </Animated.View>
         ) : null}
 
         {/* Trending Now rail — YouTube-sourced editorial-trendy recipes */}
