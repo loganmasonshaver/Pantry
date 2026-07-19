@@ -3,13 +3,13 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   Image,
   Linking,
   AppState,
   RefreshControl,
 } from 'react-native'
+import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Flame, Compass, Utensils, Plus } from 'lucide-react-native'
@@ -21,6 +21,7 @@ import { MealImage, prefetchMealImages } from '@/components/MealImage'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
+import PressableScale from '../../components/PressableScale'
 
 // Lifecycle filters mirror the home-tab logic so Discover shows the same trending
 // pool. They live here as a temporary duplicate; Phase 3b moves Trending out of
@@ -371,14 +372,13 @@ export default function DiscoverScreen() {
           {FILTERS.map(f => {
             const active = activeFilter === f
             return (
-              <TouchableOpacity
+              <PressableScale
                 key={f}
                 onPress={() => setActiveFilter(f)}
                 style={[styles.chip, active && styles.chipActive]}
-                activeOpacity={0.7}
               >
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>{f}</Text>
-              </TouchableOpacity>
+              </PressableScale>
             )
           })}
         </ScrollView>
@@ -389,9 +389,9 @@ export default function DiscoverScreen() {
             <Compass size={32} stroke="#333" strokeWidth={1.5} />
           </View>
         ) : featured ? (
-          <TouchableOpacity
+          <PressableScale
             style={styles.featuredHero}
-            activeOpacity={0.9}
+            scaleTo={0.98}
             onPress={() => openMeal(featured)}
           >
             {featured.image && featured.image.startsWith('http') ? (
@@ -418,7 +418,7 @@ export default function DiscoverScreen() {
                 {featured.protein > 0 && <Pill label={`${featured.protein}P`} tint="green" />}
               </View>
             </View>
-          </TouchableOpacity>
+          </PressableScale>
         ) : null}
 
         {/* Trending Now rail — YouTube-sourced editorial-trendy recipes */}
@@ -432,7 +432,11 @@ export default function DiscoverScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}
             >
-              {youtubeRail.map(meal => <RailCard key={meal.id} meal={meal} onPress={() => openMeal(meal)} />)}
+              {youtubeRail.map((meal, index) => (
+                <Animated.View key={meal.id} entering={FadeInDown.duration(260).delay(Math.min(index, 8) * 40)}>
+                  <RailCard meal={meal} onPress={() => openMeal(meal)} />
+                </Animated.View>
+              ))}
             </ScrollView>
           </View>
         )}
@@ -445,9 +449,9 @@ export default function DiscoverScreen() {
             <View style={styles.railHeader}>
               <Text style={styles.railTitle}>From Creators</Text>
               {promoActive && (
-                <TouchableOpacity onPress={() => setShowCreatorModal(true)} hitSlop={10} activeOpacity={0.7}>
+                <PressableScale onPress={() => setShowCreatorModal(true)} hitSlop={10}>
                   <Plus size={18} color="#4ADE80" strokeWidth={2.5} />
-                </TouchableOpacity>
+                </PressableScale>
               )}
             </View>
             {creatorRail.length > 0 ? (
@@ -456,7 +460,11 @@ export default function DiscoverScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}
               >
-                {creatorRail.map(meal => <RailCard key={meal.id} meal={meal} onPress={() => openMeal(meal)} />)}
+                {creatorRail.map((meal, index) => (
+                  <Animated.View key={meal.id} entering={FadeInDown.duration(260).delay(Math.min(index, 8) * 40)}>
+                    <RailCard meal={meal} onPress={() => openMeal(meal)} />
+                  </Animated.View>
+                ))}
               </ScrollView>
             ) : (
               <Text style={styles.creatorRailEmpty}>No creator recipes yet — tap + to post one.</Text>
@@ -476,13 +484,13 @@ export default function DiscoverScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No {activeFilter} recipes right now</Text>
             <Text style={styles.emptySub}>Try a different filter — the daily pool changes every morning.</Text>
-            <TouchableOpacity
+            <PressableScale
               onPress={() => setActiveFilter('All')}
               style={styles.emptyResetBtn}
-              activeOpacity={0.8}
+              haptic
             >
               <Text style={styles.emptyResetText}>Show all recipes</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         )}
       </ScrollView>
@@ -511,7 +519,7 @@ function safeOpenSocialUrl(url: string) {
 // rails so the two shelves visually rhyme.
 function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }) {
   return (
-    <TouchableOpacity style={styles.railCard} activeOpacity={0.85} onPress={onPress}>
+    <PressableScale style={styles.railCard} scaleTo={0.98} onPress={onPress}>
       {meal.image && meal.image.startsWith('http') ? (
         <MealImage uri={meal.image} style={styles.railImage} recyclingKey={String(meal.id)} />
       ) : (
@@ -531,7 +539,7 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
           </View>
         )
         return socialUrl
-          ? <TouchableOpacity onPress={() => safeOpenSocialUrl(socialUrl)} activeOpacity={0.7}>{badge}</TouchableOpacity>
+          ? <PressableScale scaleTo={0.98} onPress={() => safeOpenSocialUrl(socialUrl)}>{badge}</PressableScale>
           : badge
       })()}
       <View style={styles.railContent}>
@@ -543,7 +551,7 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
           {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
         </View>
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   )
 }
 

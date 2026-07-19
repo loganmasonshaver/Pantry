@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router'
 import { View, StyleSheet } from 'react-native'
+import * as Haptics from 'expo-haptics'
 import { COLORS } from '@/constants/colors'
 import {
   Home,
@@ -8,6 +9,11 @@ import {
   Bookmark,
   User,
 } from 'lucide-react-native'
+
+// Light selection tick on tab change — discrete selection feedback, the iOS-native feel.
+// selectionAsync is the lightest haptic and is meant for exactly this kind of change;
+// never fire heavier impacts (or anything on scroll) from a tab bar or it becomes noise.
+const tabPressHaptic = { tabPress: () => { Haptics.selectionAsync() } }
 
 type TabIconProps = {
   Icon: React.ElementType
@@ -36,10 +42,12 @@ export default function TabLayout() {
         tabBarStyle: styles.tabBar,
         tabBarActiveTintColor: '#FFFFFF',
         tabBarInactiveTintColor: '#AAAAAA',
+        animation: 'shift', // subtle directional shift+fade between tabs (v7); 'none' was the abrupt default
       }}
     >
       <Tabs.Screen
         name="index"
+        listeners={tabPressHaptic}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon Icon={Home} focused={focused} />
@@ -48,6 +56,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="pantry"
+        listeners={tabPressHaptic}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon Icon={UtensilsCrossed} focused={focused} />
@@ -56,6 +65,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="discover"
+        listeners={tabPressHaptic}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon Icon={Compass} focused={focused} />
@@ -64,6 +74,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="saved"
+        listeners={tabPressHaptic}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon Icon={Bookmark} focused={focused} />
@@ -81,6 +92,7 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="profile"
+        listeners={tabPressHaptic}
         options={{
           tabBarIcon: ({ focused }) => (
             <TabIcon Icon={User} focused={focused} />

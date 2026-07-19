@@ -3,7 +3,6 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   TextInput,
   StyleSheet,
   Dimensions,
@@ -14,6 +13,8 @@ import {
   Platform,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import Reanimated, { FadeIn } from 'react-native-reanimated'
+import PressableScale from '../../components/PressableScale'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -97,7 +98,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData } })
   }
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={handlePress}>
+    <PressableScale style={styles.card} scaleTo={0.98} onPress={handlePress}>
       {meal.image ? (
         <MealImage uri={meal.image} style={styles.cardImageReal} recyclingKey={String(meal.id)} />
       ) : (
@@ -112,14 +113,14 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
           <Text style={styles.myRecipeBadgeText}>My Recipe</Text>
         </View>
       )}
-      <TouchableOpacity
+      <PressableScale
         style={styles.cardBookmark}
         onPress={onUnsave}
-        activeOpacity={0.7}
+        haptic
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       >
         <Bookmark size={18} stroke="#4ADE80" fill="#4ADE80" strokeWidth={1.5} />
-      </TouchableOpacity>
+      </PressableScale>
       <View style={styles.cardContent}>
         <Text style={styles.cardName} numberOfLines={2}>{meal.name}</Text>
         <View style={styles.cardPillRow}>
@@ -128,7 +129,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
           {meal.protein != null && meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" />}
         </View>
       </View>
-    </TouchableOpacity>
+    </PressableScale>
   )
 }
 
@@ -372,9 +373,9 @@ export default function SavedScreen() {
             {meals.length} meal{meals.length !== 1 ? 's' : ''} saved
           </Text>
         </View>
-        <TouchableOpacity style={styles.createBtn} onPress={() => { setEditingMeal(null); setShowRecipeForm(true) }} activeOpacity={0.7}>
+        <PressableScale style={styles.createBtn} onPress={() => { setEditingMeal(null); setShowRecipeForm(true) }}>
           <Plus size={20} stroke={COLORS.textWhite} strokeWidth={2} />
-        </TouchableOpacity>
+        </PressableScale>
       </View>
 
       {/* ── Search ── */}
@@ -388,9 +389,9 @@ export default function SavedScreen() {
           onChangeText={setSearchQuery}
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7}>
+          <PressableScale onPress={() => setSearchQuery('')}>
             <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
-          </TouchableOpacity>
+          </PressableScale>
         )}
       </View>
 
@@ -402,16 +403,15 @@ export default function SavedScreen() {
         style={styles.filterScroll}
       >
         {FILTERS.map(f => (
-          <TouchableOpacity
+          <PressableScale
             key={f}
             style={[styles.filterPill, activeFilter === f && styles.filterPillActive]}
             onPress={() => setActiveFilter(f)}
-            activeOpacity={0.7}
           >
             <Text style={[styles.filterText, activeFilter === f && styles.filterTextActive]}>
               {f}
             </Text>
-          </TouchableOpacity>
+          </PressableScale>
         ))}
       </ScrollView>
 
@@ -428,25 +428,27 @@ export default function SavedScreen() {
           <Text style={styles.emptySub}>Tap the bookmark on any meal to save it</Text>
         </View>
       ) : (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.grid}
-          showsVerticalScrollIndicator={false}
-        >
-          {filtered.map(meal => (
-            <MealCard key={meal.id} meal={meal} onUnsave={() => unsave(meal.id)} onEdit={() => { setEditingMeal(meal); setShowRecipeForm(true) }} />
-          ))}
-          {filtered.length % 2 !== 0 && <View style={{ width: CARD_WIDTH }} />}
-        </ScrollView>
+        <Reanimated.View entering={FadeIn.duration(300)} style={{ flex: 1 }}>
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.grid}
+            showsVerticalScrollIndicator={false}
+          >
+            {filtered.map(meal => (
+              <MealCard key={meal.id} meal={meal} onUnsave={() => unsave(meal.id)} onEdit={() => { setEditingMeal(meal); setShowRecipeForm(true) }} />
+            ))}
+            {filtered.length % 2 !== 0 && <View style={{ width: CARD_WIDTH }} />}
+          </ScrollView>
+        </Reanimated.View>
       )}
 
       {/* ── Undo toast ── */}
       {removed && (
         <Animated.View style={[styles.toast, { opacity: toastOpacity }]}>
           <Text style={styles.toastText}>Meal removed</Text>
-          <TouchableOpacity onPress={undo} activeOpacity={0.7}>
+          <PressableScale onPress={undo}>
             <Text style={styles.toastUndo}>Undo</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </Animated.View>
       )}
       {/* ── Import URL modal ── */}
@@ -466,21 +468,21 @@ export default function SavedScreen() {
               keyboardType="url"
               autoFocus
             />
-            <TouchableOpacity
+            <PressableScale
               style={[styles.importBtn, (!importUrl.trim() || importing) && { opacity: 0.4 }]}
               onPress={handleImportFromUrl}
+              haptic
               disabled={!importUrl.trim() || importing}
-              activeOpacity={0.85}
             >
               {importing ? (
                 <ActivityIndicator color="#000" size="small" />
               ) : (
                 <Text style={styles.importBtnText}>Extract Recipe</Text>
               )}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.importCancel} onPress={() => { setShowImportModal(false); setImportUrl('') }} activeOpacity={0.7}>
+            </PressableScale>
+            <PressableScale style={styles.importCancel} onPress={() => { setShowImportModal(false); setImportUrl('') }}>
               <Text style={styles.importCancelText}>Cancel</Text>
-            </TouchableOpacity>
+            </PressableScale>
           </View>
         </KeyboardAvoidingView>
       </Modal>

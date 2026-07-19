@@ -35,6 +35,7 @@ import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated } from '../../lib/analytics'
 import AILogModal from '../../components/AILogModal'
 import { Shimmer } from '../../components/Shimmer'
+import PressableScale from '../../components/PressableScale'
 import FoodSearchModal from '../../components/FoodSearchModal'
 import EditPortionModal from '../../components/EditPortionModal'
 import PantryScanModal from '../../components/PantryScanModal'
@@ -343,10 +344,10 @@ function SlotCard({
       {expanded && slot.entries.length === 0 && (
         <View style={styles.slotEmpty}>
           <Text style={styles.slotEmptyText}>Nothing logged yet</Text>
-          <TouchableOpacity style={styles.slotLogBtn} onPress={onLog} activeOpacity={0.7}>
+          <PressableScale style={styles.slotLogBtn} onPress={onLog} haptic>
             <Plus size={14} stroke="#4ADE80" strokeWidth={2} />
             <Text style={styles.slotLogBtnText}>Log</Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       )}
     </View>
@@ -927,7 +928,7 @@ export default function HomeScreen() {
           <TouchableOpacity onPress={goBackDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setSelectedDate(new Date().toISOString().split('T')[0])} activeOpacity={0.7}>
+          <PressableScale scaleTo={0.94} haptic onPress={() => setSelectedDate(new Date().toISOString().split('T')[0])}>
             <Text style={styles.dayNavText}>
               {isToday ? 'Today' : (() => {
                 const d = new Date(selectedDate + 'T12:00:00')
@@ -937,7 +938,7 @@ export default function HomeScreen() {
                 return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
               })()}
             </Text>
-          </TouchableOpacity>
+          </PressableScale>
           <TouchableOpacity onPress={goForwardDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <ChevronRight size={20} stroke={isToday ? '#333' : COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
@@ -1020,9 +1021,10 @@ export default function HomeScreen() {
 
         {/* ── Hero scan-your-pantry card — sits high on screen as the unmissable first action ── */}
         {pantryFetched && pantryNames.size === 0 && (
-          <TouchableOpacity
+          <PressableScale
             style={styles.scanHero}
-            activeOpacity={0.9}
+            scaleTo={0.98}
+            haptic
             onPress={openScanWithConsent}
           >
             {/* Pantry-cabinet illustration in SVG: 3 shelves with visible depth,
@@ -1144,7 +1146,7 @@ export default function HomeScreen() {
             <View style={styles.scanHeroBtn}>
               <Text style={styles.scanHeroBtnText}>Scan Now</Text>
             </View>
-          </TouchableOpacity>
+          </PressableScale>
         )}
 
         {/* ── Compact "Cook from your pantry" tease — Phase 2a of the IA refactor.

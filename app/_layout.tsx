@@ -18,6 +18,7 @@ LogBox.ignoreLogs([
 import { StatusBar } from 'expo-status-bar'
 import { DarkTheme, ThemeProvider } from '@react-navigation/native'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
+import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { AuthProvider, useAuth } from '../context/AuthContext'
 import { AIConsentProvider } from '../context/AIConsentContext'
@@ -173,8 +174,10 @@ function RootLayoutNav() {
         <Stack.Screen name="onboarding/verify-email" />
         <Stack.Screen name="onboarding/reset-password" />
         <Stack.Screen name="meal/[id]" />
-        <Stack.Screen name="delivery-webview" />
-        <Stack.Screen name="food-preferences" />
+        {/* Secondary/sheet-style screens rise from the bottom — a different axis from the
+            drill-in-from-right of detail pushes, so the nav reads intentionally. */}
+        <Stack.Screen name="delivery-webview" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="food-preferences" options={{ animation: 'slide_from_bottom' }} />
         {/* Post-scan payoff screen. Registered explicitly + fade so the push from the pantry
             scan reliably lands instead of being dropped under the closing scan modal. */}
         <Stack.Screen name="cook-reveal" options={{ animation: 'fade' }} />
@@ -189,6 +192,10 @@ function RootLayoutNav() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* Global reduce-motion honoring: with System mode, every Reanimated animation
+          (press springs, list entrances, layout transitions) auto-jumps to its end
+          state when the OS "Reduce Motion" setting is on. One switch, whole app. */}
+      <ReducedMotionConfig mode={ReduceMotion.System} />
       <ThemeProvider value={AppTheme}>
         <ShareIntentProvider>
           <AuthProvider>

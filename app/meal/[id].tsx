@@ -20,6 +20,7 @@ const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, ChevronRight } from 'lucide-react-native'
+import PressableScale from '../../components/PressableScale'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
@@ -864,9 +865,9 @@ export default function MealDetailScreen() {
       {/* ── Header — floats over the full-bleed hero so the photo fills to the very
           top of the screen (status bar included), pulling the rest of the content up. ── */}
       <View style={[styles.header, { top: insets.top }]}>
-        <TouchableOpacity style={styles.headerBtn} onPress={() => router.back()} activeOpacity={0.7}>
+        <PressableScale style={styles.headerBtn} onPress={() => router.back()}>
           <ChevronLeft size={24} stroke={COLORS.textWhite} strokeWidth={2} />
-        </TouchableOpacity>
+        </PressableScale>
         <View style={{ flex: 1 }} />
         {canEditMeal && (
           <TouchableOpacity
@@ -1058,10 +1059,10 @@ export default function MealDetailScreen() {
               Anchors the dominant action (add the diff) above the per-row list so users don't
               have to scan and tap each missing ingredient. */}
           {missingNotInGrocery.length > 0 && (
-            <TouchableOpacity
+            <PressableScale
               style={styles.bulkAddCta}
               onPress={addAllMissingToGrocery}
-              activeOpacity={0.85}
+              haptic
             >
               <View style={styles.bulkAddIconWrap}>
                 <ShoppingCart size={18} stroke="#000" strokeWidth={2.4} />
@@ -1070,7 +1071,7 @@ export default function MealDetailScreen() {
                 Add {missingNotInGrocery.length} missing {missingNotInGrocery.length === 1 ? 'item' : 'items'} to grocery
               </Text>
               <ChevronRight size={18} stroke="#000" strokeWidth={2.2} />
-            </TouchableOpacity>
+            </PressableScale>
           )}
 
           {/* Split ingredients into NEED / HAVE buckets so the eye lands on what the user
@@ -1100,13 +1101,13 @@ export default function MealDetailScreen() {
               // 'have' (in pantry) and 'basic' (assumed) both render muted vs the actionable NEED rows.
               const isHaveRow = kind !== 'need'
               return (
-                <TouchableOpacity
+                <PressableScale
                   key={ing.id}
                   style={[styles.ingredientRow, isHaveRow && styles.ingredientRowHave]}
                   // NEED/HAVE rows toggle pantry membership; a BASIC (assumed) row taps to
                   // "I don't keep this" → persists the opt-out and drops it into YOU'LL NEED.
+                  // (excludeStaple fires its own Light haptic, so no `haptic` prop here — avoids double-tap.)
                   onPress={() => (kind === 'basic' ? excludeStaple(ing.name) : toggleHaveIt(ing.name))}
-                  activeOpacity={0.7}
                 >
                   {/* Bullet dot replaces the per-ingredient thumbnail. AI-generated thumbs
                       had a ~5-10% misgeneration rate (wrong food shown) — every comparable
@@ -1129,10 +1130,10 @@ export default function MealDetailScreen() {
                     </View>
                   ) : kind === 'basic' ? null : (
                     // NEED row: single + button that flips to ✓ once added to grocery list
-                    <TouchableOpacity
+                    <PressableScale
                       style={[styles.addToGroceryBtn, isAdded && styles.addToGroceryBtnAdded]}
                       onPress={() => toggleGrocery(ing.name)}
-                      activeOpacity={0.7}
+                      haptic
                       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     >
                       {isAdded ? (
@@ -1143,9 +1144,9 @@ export default function MealDetailScreen() {
                         // competing with the white bulk CTA pill.
                         <Plus size={18} stroke={COLORS.accent} strokeWidth={2.6} />
                       )}
-                    </TouchableOpacity>
+                    </PressableScale>
                   )}
-                </TouchableOpacity>
+                </PressableScale>
               )
             }
 
@@ -1213,26 +1214,26 @@ export default function MealDetailScreen() {
       {/* ── Fixed bottom buttons ── */}
       <View style={styles.bottomBar}>
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <TouchableOpacity
+          <PressableScale
             style={[styles.logButton, (logged || logging) && styles.logButtonDone]}
-            activeOpacity={0.85}
+            haptic
             onPress={handleLog}
             disabled={logged || logging}
           >
             <Text style={styles.logButtonText}>
               {logging ? 'Logging…' : logged ? 'Logged ✓' : 'Log Meal'}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </PressableScale>
+          <PressableScale
             style={[styles.saveButton, (saved || saving) && styles.saveButtonDone]}
-            activeOpacity={0.85}
+            haptic
             onPress={handleSave}
             disabled={saved || saving}
           >
             <Text style={styles.saveButtonText}>
               {saving ? 'Saving…' : saved ? 'Saved' : 'Save'}
             </Text>
-          </TouchableOpacity>
+          </PressableScale>
         </View>
       </View>
 
