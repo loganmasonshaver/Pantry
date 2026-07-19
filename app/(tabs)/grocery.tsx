@@ -9,6 +9,7 @@ import {
   TextInput,
   PanResponder,
   Alert,
+  LayoutAnimation,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
@@ -17,6 +18,7 @@ import Svg, { Circle as SvgCircle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
+import { haptic } from '@/lib/haptics'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 
@@ -262,11 +264,16 @@ export default function GroceryScreen() {
   const clearChecked = async () => {
     const ids = items.filter(i => i.checked).map(i => i.id)
     if (!ids.length) return
+    haptic.medium()
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut) // rows collapse together instead of blinking out
     setItems(prev => prev.filter(i => !i.checked))
     await supabase.from('grocery_items').delete().in('id', ids)
   }
 
   const deleteItem = async (id: string) => {
+    haptic.medium()
+    // Row already slid off via the swipe translateX; this eases the gap closed behind it.
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setItems(prev => prev.filter(i => i.id !== id))
     await supabase.from('grocery_items').delete().eq('id', id)
   }
@@ -280,6 +287,8 @@ export default function GroceryScreen() {
     const checked = items.filter(i => i.checked)
     if (!checked.length) return
     const count = checked.length
+    haptic.success() // completed task: these are moving into the pantry
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setItems(prev => prev.filter(i => !i.checked))
 
     // Check which items already exist in pantry

@@ -27,7 +27,9 @@ function TabIcon({ Icon, focused, size = 20 }: TabIconProps) {
       <Icon
         size={size}
         stroke={focused ? COLORS.textWhite : COLORS.tabInactive}
-        strokeWidth={1.8}
+        // Heavier stroke on the active tab so selection reads by WEIGHT, not color alone
+        // (lucide is outline-only, so stroke weight is our "filled" equivalent).
+        strokeWidth={focused ? 2.4 : 1.8}
       />
     </View>
   )
@@ -120,6 +122,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconWrapperActive: {
-    backgroundColor: COLORS.tabActive,
+    // Subtle teal pill behind the active icon — a visible surface, not the old #000000
+    // (which was invisible on the black bar, leaving color as the only active cue).
+    backgroundColor: COLORS.accentDim,
   },
 })

@@ -11,6 +11,7 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
+  LayoutAnimation,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Reanimated, { FadeIn } from 'react-native-reanimated'
@@ -310,16 +311,27 @@ export default function SavedScreen() {
   }
 
   const unsave = async (id: string) => {
+    // Optimistic: pull the card immediately so it feels instant instead of waiting on the
+    // DB round-trip — the 4s undo toast already covers a mistaken tap, and we restore below
+    // if the delete actually fails. LayoutAnimation eases the grid gap closed.
+    const index = meals.findIndex(m => m.id === id)
+    if (index === -1) return
+    const meal = meals[index]
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+    setRemoved({ meal, index })
+    setMeals(prev => prev.filter(m => m.id !== id))
+    showToast()
+    startTimer()
     const { error } = await supabase.from('saved_meals').delete().eq('id', id)
-    if (error) return
-    setMeals(prev => {
-      const index = prev.findIndex(m => m.id === id)
-      const meal = prev[index]
-      setRemoved({ meal, index })
-      showToast()
-      startTimer()
-      return prev.filter(m => m.id !== id)
-    })
+    if (error) {
+      // Delete failed — put the card back and cancel the undo toast.
+      setMeals(prev => {
+        const next = [...prev]
+        next.splice(index, 0, meal)
+        return next
+      })
+      setRemoved(null)
+    }
   }
 
   const undo = async () => {

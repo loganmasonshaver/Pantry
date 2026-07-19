@@ -15,6 +15,7 @@ import {
   Animated as RNAnimated,
   Easing,
   Alert,
+  LayoutAnimation,
 } from 'react-native'
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -27,6 +28,7 @@ import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
+import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
@@ -359,6 +361,8 @@ export default function PantryScreen() {
   }
 
   const deleteIngredient = async (categoryId: string, ingredientId: string) => {
+    haptic.medium() // stronger tick than a routine tap — this removes something
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut) // gap closes smoothly (and collapses a now-empty category) instead of snapping
     setCategories(prev =>
       prev
         .map(c =>
@@ -382,6 +386,8 @@ export default function PantryScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear', style: 'destructive', onPress: async () => {
+            haptic.warning() // heavier notification for a bulk, irreversible wipe
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
             setCategories([])
             const { error } = await supabase.from('pantry_items').delete().eq('user_id', user.id)
             if (error) { Alert.alert("Couldn't clear pantry", error.message); fetchItems() }

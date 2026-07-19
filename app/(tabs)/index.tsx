@@ -33,6 +33,7 @@ import { usePremium } from '../../context/SuperwallContext'
 import { useAIConsent } from '../../context/AIConsentContext'
 import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated } from '../../lib/analytics'
+import { haptic } from '../../lib/haptics'
 import AILogModal from '../../components/AILogModal'
 import { Shimmer } from '../../components/Shimmer'
 import PressableScale from '../../components/PressableScale'
@@ -713,6 +714,7 @@ export default function HomeScreen() {
   }
 
   const deleteEntry = async (slotId: string, entryId: string) => {
+    haptic.medium() // stronger than a routine tap — removing a logged meal
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setSlots(prev => prev.map(s => s.id === slotId ? { ...s, entries: s.entries.filter(e => e.id !== entryId) } : s))
     await supabase.from('meal_logs').delete().eq('id', entryId)
