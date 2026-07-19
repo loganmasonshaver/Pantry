@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import TurnstileWebView from '../../components/TurnstileWebView'
+import PressableScale from '../../components/PressableScale'
 
 const TEAL = '#4ADE80'
 const MUTED = '#888888'
@@ -46,7 +47,7 @@ export default function SignInScreen() {
 
   const handleSignIn = async () => {
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields')
+      Alert.alert('Almost there', 'Please fill in all fields to continue.')
       return
     }
     const now = Date.now()
@@ -240,9 +241,9 @@ export default function SignInScreen() {
       </KeyboardAvoidingView>
 
       <View style={s.bottom}>
-        <TouchableOpacity style={s.pill} activeOpacity={0.85} onPress={handleSignIn} disabled={loading}>
+        <PressableScale style={s.pill} onPress={handleSignIn} disabled={loading} haptic>
           <Text style={s.pillText}>{loading ? 'Signing in...' : 'Sign In'}</Text>
-        </TouchableOpacity>
+        </PressableScale>
         <TouchableOpacity
           style={s.switchLink}
           onPress={() => router.replace('/onboarding')}

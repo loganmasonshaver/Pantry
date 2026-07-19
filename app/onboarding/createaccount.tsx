@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router'
 import { Eye, EyeOff, ArrowLeft, Check } from 'lucide-react-native'
 import { useAuth } from '../../context/AuthContext'
 import { trackAccountCreated, trackMarketingOptIn } from '../../lib/analytics'
+import PressableScale from '../../components/PressableScale'
 import TurnstileWebView, { type TurnstileRef } from '../../components/TurnstileWebView'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { generateMeals } from '../../lib/meals'
@@ -53,11 +54,11 @@ export default function CreateAccountScreen() {
 
   const handleCreateAccount = async () => {
     if (!name || !email || !password) {
-      Alert.alert('Error', 'Please fill in all fields')
+      Alert.alert('Almost there', 'Please fill in all fields to continue.')
       return
     }
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters')
+      Alert.alert('Password too short', 'Use at least 6 characters.')
       return
     }
     const now = Date.now()
@@ -305,9 +306,9 @@ export default function CreateAccountScreen() {
       </KeyboardAvoidingView>
 
       <View style={s.bottom}>
-        <TouchableOpacity style={s.pill} onPress={handleCreateAccount} activeOpacity={0.85} disabled={loading}>
+        <PressableScale style={s.pill} onPress={handleCreateAccount} disabled={loading} haptic>
           <Text style={s.pillText}>{loading ? 'Creating account...' : 'Continue'}</Text>
-        </TouchableOpacity>
+        </PressableScale>
       </View>
     </SafeAreaView>
   )

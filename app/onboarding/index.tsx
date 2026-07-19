@@ -23,6 +23,8 @@ import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { VideoView, useVideoPlayer } from 'expo-video'
 import Svg, { Path, Line, Circle as SvgCircle, Text as SvgText } from 'react-native-svg'
+import PressableScale from '../../components/PressableScale'
+import { haptic } from '../../lib/haptics'
 import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
 
 const AnimatedPath = Animated.createAnimatedComponent(Path)
@@ -220,9 +222,9 @@ function WheelPicker({
 
 function PillButton({ label, onPress, variant = 'white', disabled }: { label: string; onPress: () => void; variant?: 'white' | 'dark'; disabled?: boolean }) {
   return (
-    <TouchableOpacity style={[s.pill, variant === 'dark' && s.pillDark, disabled && { opacity: 0.4 }]} onPress={onPress} activeOpacity={0.85} disabled={disabled}>
+    <PressableScale style={[s.pill, variant === 'dark' && s.pillDark, disabled && { opacity: 0.4 }]} onPress={onPress} disabled={disabled} haptic>
       <Text style={[s.pillText, variant === 'dark' && s.pillTextDark]}>{label}</Text>
-    </TouchableOpacity>
+    </PressableScale>
   )
 }
 
@@ -4018,6 +4020,10 @@ export default function Onboarding() {
     })
   }
 
+  // Like update(), but with a light selection tick — ONLY for tap-to-choose steps.
+  // Not for text fields or the weight/birthday wheels, which would buzz on every keystroke/detent.
+  const pick = (key: keyof OnboardingData) => (val: any) => { haptic.selection(); update(key)(val) }
+
   // Cross-fade between steps. Double requestAnimationFrame is intentional:
   // the inner rAF gives React one frame to commit the new screen's tree before
   // the outer rAF triggers the fade-in. A single rAF still flashes the old
@@ -4163,7 +4169,7 @@ export default function Onboarding() {
         }, { onConflict: 'id' })
 
         if (error) {
-          Alert.alert('Save Error', error.message)
+          Alert.alert("Couldn't save your info", error.message)
           return
         }
 
@@ -4239,25 +4245,25 @@ export default function Onboarding() {
       await AsyncStorage.setItem('onboarding_complete', 'true')
       router.replace('/(tabs)')
     } catch (error: any) {
-      Alert.alert('Error', error.message)
+      Alert.alert('Something went wrong', error.message)
     }
   }
 
   const screens: Record<number, React.ReactNode> = {
     1: <S1Welcome onNext={next} onSignIn={() => router.push('/onboarding/signin')} />,
-    2: <S1_5Gender value={data.gender} onChange={update('gender')} onNext={next} onBack={back} />,
-    3: <SActivityLevel value={data.activityLevel} onChange={update('activityLevel')} onNext={next} onBack={back} />,
-    4: <S3Attribution value={data.attribution} onChange={update('attribution')} onNext={next} onBack={back} />,
-    5: <S2Goal value={data.goal} onChange={update('goal')} onNext={next} onBack={back} />,
+    2: <S1_5Gender value={data.gender} onChange={pick('gender')} onNext={next} onBack={back} />,
+    3: <SActivityLevel value={data.activityLevel} onChange={pick('activityLevel')} onNext={next} onBack={back} />,
+    4: <S3Attribution value={data.attribution} onChange={pick('attribution')} onNext={next} onBack={back} />,
+    5: <S2Goal value={data.goal} onChange={pick('goal')} onNext={next} onBack={back} />,
     6: <S4LongTermResults goal={data.goal} onNext={next} onBack={back} />,
     7: <SGoalDelta goal={data.goal} value={data.targetWeightDelta} onChange={update('targetWeightDelta')} onNext={next} onBack={back} />,
     8: <S4AboutYou ft={data.ft} inches={data.inches} weight={data.weight} onFt={update('ft')} onInches={update('inches')} onWeight={update('weight')} onNext={next} onBack={back} />,
     9: <S5Birthday value={data.birthday} onChange={update('birthday')} onNext={next} onBack={back} />,
     10: <STargetWeight goal={data.goal} weight={data.weight} ft={data.ft} inches={data.inches} targetWeight={data.targetWeight} targetWeightDelta={data.targetWeightDelta} onChange={update('targetWeight')} onNext={next} onBack={back} />,
-    11: <SCookingSkill value={data.cookingSkill} onChange={update('cookingSkill')} onNext={next} onBack={back} />,
+    11: <SCookingSkill value={data.cookingSkill} onChange={pick('cookingSkill')} onNext={next} onBack={back} />,
     12: <SMealCadence meals={data.meals} prep={data.prep} onMeals={update('meals')} onPrep={update('prep')} onNext={next} onBack={back} />,
-    13: <SDietStyle value={data.dietStyle} onChange={update('dietStyle')} onNext={next} onBack={back} />,
-    14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={update('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
+    13: <SDietStyle value={data.dietStyle} onChange={pick('dietStyle')} onNext={next} onBack={back} />,
+    14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={pick('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
     15: <SNotificationPermission onNext={next} onBack={back} />,
     16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onGrantsPromo={update('grantsPromo')} onNext={next} onBack={back} />,
     17: <SGeneratingIntro onNext={next} onBack={back} />,
