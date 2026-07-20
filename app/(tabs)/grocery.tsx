@@ -475,7 +475,7 @@ export default function GroceryScreen() {
         </View>
       </View>
 
-      {!loaded ? null : isEmpty ? (
+      {!loaded ? null : (isEmpty && !inlineAdding) ? (
         <View style={styles.emptyState}>
           <View style={styles.emptyCircle}>
             <ShoppingCart size={32} stroke="#4ADE80" strokeWidth={2} />
@@ -497,7 +497,9 @@ export default function GroceryScreen() {
         </View>
       ) : (
         <>
-          {/* ── Progress Card with Ring ── */}
+          {/* ── Progress Card with Ring — hidden at 0 items (e.g. adding your first item to an
+              empty list) so the ring doesn't divide-by-zero and it doesn't say "All Done". ── */}
+          {items.length > 0 && (
           <View style={styles.progressCard}>
             <View style={{ flex: 1 }}>
               <Text style={styles.progressLabel}>
@@ -526,6 +528,7 @@ export default function GroceryScreen() {
               </View>
             </View>
           </View>
+          )}
 
           <ScrollView
             ref={scrollRef}
