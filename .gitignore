@@ -46,3 +46,12 @@ yarn-error.*
 # Pantry-scan eval test photos (local only)
 scripts/pantry-eval/images/*
 !scripts/pantry-eval/images/.gitkeep
+
+# Third-party agent skills installed via `npx skills add`.
+# superwall-editor reads a Superwall API key from its own .env — never let that
+# reach the repo. Only the vendor symlinks are ignored; our own .claude/skills/* stay tracked.
+.agents/
+.claude/skills/superwall
+.claude/skills/superwall-editor
+.claude/skills/wwdc
+.claude/worktrees/
