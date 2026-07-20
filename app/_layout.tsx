@@ -94,7 +94,9 @@ function RootLayoutNav() {
     if (hasShareIntent && shareIntent?.webUrl && session && !checking) {
       const url = shareIntent.webUrl
       if (/youtu\.?be|tiktok\.com/.test(url)) {
-        router.push({ pathname: '/(tabs)/saved', params: { sharedUrl: url } })
+        // navigate, NOT push — pushing a tab route stacks a duplicate tab navigator and
+        // renders black. Same bug as Home's "See all". Params still pass through.
+        router.navigate({ pathname: '/(tabs)/saved', params: { sharedUrl: url } })
       }
       resetShareIntent()
     }

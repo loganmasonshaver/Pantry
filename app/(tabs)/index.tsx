@@ -1175,7 +1175,9 @@ export default function HomeScreen() {
           <View style={{ marginBottom: 36 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
               <Text style={styles.sectionTitle}>Cook from your pantry</Text>
-              <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
+              {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
+                  navigator on top of itself and renders a black screen. navigate switches tabs. */}
+              <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
                 <Text style={{ color: '#4ADE80', fontSize: 13, fontWeight: '600' }}>See all →</Text>
               </TouchableOpacity>
             </View>
