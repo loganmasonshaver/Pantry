@@ -109,6 +109,10 @@ function GroceryRow({
       // 10px threshold filters out incidental finger jitter on tap.
       onMoveShouldSetPanResponder: (_, g) =>
         Math.abs(g.dx) > 10 && Math.abs(g.dx) > Math.abs(g.dy),
+      // Once we've claimed a horizontal swipe, don't hand it back to the ScrollView.
+      // A mid-gesture steal skips onPanResponderRelease entirely, which used to strand
+      // the row half-open with nothing left to reset it.
+      onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_, g) => {
         if (g.dx < 0) translateX.setValue(g.dx) // left-swipe only — right-swipe is a no-op
       },
@@ -123,6 +127,11 @@ function GroceryRow({
         } else {
           Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start()
         }
+      },
+      // Safety net: if the system terminates the gesture anyway (keyboard show/hide,
+      // navigation, re-layout), always snap back. A row must never be left stranded.
+      onPanResponderTerminate: () => {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start()
       },
     }),
   ).current
@@ -308,13 +317,10 @@ export default function GroceryScreen() {
 
   const deleteItem = async (id: string) => {
     haptic.medium()
-    // The row already slid itself off-screen via a NATIVE-driver translateX. Animate ONLY the
-    // siblings closing the gap (`update`) — adding a `delete` config makes LayoutAnimation fight
-    // the still-held native transform, which snaps/flickers the row mid-swipe.
-    LayoutAnimation.configureNext({
-      duration: 250,
-      update: { type: LayoutAnimation.Types.easeInEaseOut },
-    })
+    // NO LayoutAnimation here on purpose. The row already animates itself off-screen via the
+    // swipe, and forcing a layout pass right after the delete was stealing the NEXT swipe
+    // gesture — which stranded rows half-open. The bulk paths below still animate; only the
+    // swipe path stays untouched.
     setItems(prev => prev.filter(i => i.id !== id))
     await supabase.from('grocery_items').delete().eq('id', id)
   }
