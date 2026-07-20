@@ -45,6 +45,22 @@ function relativeTime(date: Date): string {
 
 const PRESET_CATEGORIES = STORE_CATEGORIES
 
+// Collapse a grocery name to a comparison key for fuzzy duplicate detection:
+// lowercase, drop punctuation/parens, crude-singularize longer words (trailing "s"),
+// then sort the words. So "chicken thigh", "thigh (chicken)", and "chicken thighs" all
+// map to the same key — while "chicken breast" stays distinct. Catches reorderings /
+// plurals that the exact word-for-word check misses.
+function fuzzyDupeKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]+/g, ' ') // parens, commas, etc. → spaces
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => (w.length > 3 ? w.replace(/s$/, '') : w)) // only singularize longer words so "peas"→"pea" but "as" stays
+    .sort()
+    .join(' ')
+}
+
 // ── Grocery item row ───────────────────────────────────────────────────
 
 function GroceryRow({
@@ -52,16 +68,27 @@ function GroceryRow({
   onToggle,
   onDelete,
   onRename,
+  highlighted,
 }: {
   item: GroceryItem
   onToggle: () => void
   onDelete: () => void
   onRename: (newName: string) => void
+  highlighted?: boolean
 }) {
   const translateX = useRef(new Animated.Value(0)).current
   const DELETE_THRESHOLD = -80
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState(item.name)
+  // Teal flash when this row is flagged as a likely duplicate of what's being added.
+  const highlightAnim = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    Animated.timing(highlightAnim, {
+      toValue: highlighted ? 1 : 0,
+      duration: highlighted ? 200 : 450, // quick in, gentle out
+      useNativeDriver: true,
+    }).start()
+  }, [highlighted])
 
   const startEdit = () => {
     setEditName(item.name.replace(/\s*\*\s*$/, ''))
@@ -110,6 +137,10 @@ function GroceryRow({
         {...panResponder.panHandlers}
       >
         <View style={styles.row}>
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFillObject, styles.dupeHighlight, { opacity: highlightAnim }]}
+          />
           {/* Checkbox toggles checked state. Tapping the row TEXT enters edit mode
               for renaming (Reminders pattern). Tapping the row outside both does nothing. */}
           <TouchableOpacity
@@ -161,6 +192,9 @@ export default function GroceryScreen() {
   // No modal — multi-add is fluid (just keep hitting return).
   const [inlineAdding, setInlineAdding] = useState(false)
   const [inlineName, setInlineName] = useState('')
+  // Row flagged as a likely duplicate of the item being added — flashed teal, then cleared.
+  const [dupeHighlightId, setDupeHighlightId] = useState<string | null>(null)
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const inlineInputRef = useRef<TextInput>(null)
   const scrollRef = useRef<ScrollView>(null)
   // In-flight guards: submitInline awaits categorizeItem (network) before inserting, and
@@ -341,6 +375,39 @@ export default function GroceryScreen() {
     // autoFocus on the TextInput handles initial focus
   }
 
+  // The actual insert — shared by the normal path and the "Add anyway" confirmation.
+  const addGroceryItem = async (name: string, category: string) => {
+    if (!user) return
+    const { data, error } = await supabase
+      .from('grocery_items')
+      .insert({
+        user_id: user.id,
+        name,
+        meal: '',
+        category,
+        checked: false,
+      })
+      .select('id, name, meal, category, checked')
+      .single()
+    if (!error && data) {
+      setItems(prev => [...prev, data])
+      setInlineName('')
+      // Keep focus + scroll the inline input back into view so user can see what
+      // they're typing as the list grows. setTimeout gives React time to commit
+      // the new item + relayout before the scroll.
+      inlineInputRef.current?.focus()
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)
+    }
+  }
+
+  // Flash the suspected duplicate so the user can SEE which item we mean, then clear it.
+  const flashDuplicate = (id: string) => {
+    if (highlightTimer.current) clearTimeout(highlightTimer.current)
+    setDupeHighlightId(id)
+    highlightTimer.current = setTimeout(() => setDupeHighlightId(null), 2600)
+  }
+  useEffect(() => () => { if (highlightTimer.current) clearTimeout(highlightTimer.current) }, [])
+
   const submitInline = async () => {
     const name = inlineName.trim()
     if (!name || !user) return
@@ -363,26 +430,25 @@ export default function GroceryScreen() {
       return
     }
 
-    const { data, error } = await supabase
-      .from('grocery_items')
-      .insert({
-        user_id: user.id,
-        name,
-        meal: '',
-        category,
-        checked: false,
-      })
-      .select('id, name, meal, category, checked')
-      .single()
-    if (!error && data) {
-      setItems(prev => [...prev, data])
-      setInlineName('')
-      // Keep focus + scroll the inline input back into view so user can see what
-      // they're typing as the list grows. setTimeout gives React time to commit
-      // the new item + relayout before the scroll.
-      inlineInputRef.current?.focus()
-      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)
+    // Near-duplicate: same words in a different order / punctuation / plural — e.g.
+    // "thigh (chicken)" vs "chicken thigh". Too risky to block outright (they might be
+    // genuinely different), so highlight the suspect and let the user decide.
+    const key = fuzzyDupeKey(name)
+    const near = items.find(existing => fuzzyDupeKey(existing.name) === key)
+    if (near) {
+      flashDuplicate(near.id)
+      Alert.alert(
+        'Possible duplicate',
+        `"${name}" looks a lot like "${near.name.replace(/\s*\*\s*$/, '')}" which is already on your list. Add it anyway?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Add anyway', onPress: () => addGroceryItem(name, category) },
+        ],
+      )
+      return
     }
+
+    await addGroceryItem(name, category)
     } finally {
       submittingRef.current = false
     }
@@ -581,7 +647,7 @@ export default function GroceryScreen() {
                     {group.items.map((item, i) => (
                       <View key={item.id}>
                         {i > 0 && <View style={styles.divider} />}
-                        <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} onRename={(name) => rename(item.id, name)} />
+                        <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} onRename={(name) => rename(item.id, name)} highlighted={item.id === dupeHighlightId} />
                       </View>
                     ))}
                   </View>
@@ -696,6 +762,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     marginBottom: 8,
     marginLeft: 4,
+  },
+  // Overlay on a row flagged as a possible duplicate — teal wash + accent edge.
+  // No borderRadius: groupCard already clips corners with overflow:'hidden'.
+  dupeHighlight: {
+    backgroundColor: 'rgba(0,212,170,0.20)',
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.accent,
   },
   groupCard: { backgroundColor: COLORS.cardElevated, borderRadius: 16, overflow: 'hidden' },
   divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginLeft: 56 },
