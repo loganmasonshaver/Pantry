@@ -366,7 +366,12 @@ export default function PantryScreen() {
 
   const deleteIngredient = async (categoryId: string, ingredientId: string) => {
     haptic.medium() // stronger tick than a routine tap — this removes something
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut) // gap closes smoothly (and collapses a now-empty category) instead of snapping
+    // Only animate the surrounding rows/categories closing the gap. The swiped row's transform
+    // is still held by gesture-handler, so a `delete` config here would fight it and glitch.
+    LayoutAnimation.configureNext({
+      duration: 250,
+      update: { type: LayoutAnimation.Types.easeInEaseOut },
+    })
     setCategories(prev =>
       prev
         .map(c =>

@@ -308,8 +308,13 @@ export default function GroceryScreen() {
 
   const deleteItem = async (id: string) => {
     haptic.medium()
-    // Row already slid off via the swipe translateX; this eases the gap closed behind it.
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+    // The row already slid itself off-screen via a NATIVE-driver translateX. Animate ONLY the
+    // siblings closing the gap (`update`) — adding a `delete` config makes LayoutAnimation fight
+    // the still-held native transform, which snaps/flickers the row mid-swipe.
+    LayoutAnimation.configureNext({
+      duration: 250,
+      update: { type: LayoutAnimation.Types.easeInEaseOut },
+    })
     setItems(prev => prev.filter(i => i.id !== id))
     await supabase.from('grocery_items').delete().eq('id', id)
   }
