@@ -1148,10 +1148,12 @@ export default function MealDetailScreen() {
                   ) : kind === 'basic' ? null : (
                     // NEED: a LABELED chip, not a bare "+" — the word says it adds to grocery
                     // (a lone + reads ambiguously), and "Added" is the state feedback without a
-                    // success popup. Non-interactive: the whole row is the tap target.
+                    // success popup. Added state uses a CART (grocery), NOT a check — the green
+                    // check means "in your pantry" on HAVE rows, so a check here would read as
+                    // "you now have it" instead of "it's on your shopping list". Whole row = tap.
                     <View style={[styles.addChip, isAdded && styles.addChipAdded]}>
                       {isAdded
-                        ? <Check size={14} stroke="#000" strokeWidth={3} />
+                        ? <ShoppingCart size={13} stroke="#000" strokeWidth={2.6} />
                         : <Plus size={14} stroke={COLORS.accent} strokeWidth={3} />}
                       <Text style={[styles.addChipText, isAdded && styles.addChipTextAdded]}>
                         {isAdded ? 'Added' : 'Add'}
