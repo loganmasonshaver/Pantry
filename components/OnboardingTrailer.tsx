@@ -21,9 +21,11 @@ const PHONE_H = PHONE_W * (19.5 / 9)
 // OUR hook is scan-pantry → cookable-meals, so we end on the meals payoff and stop. Ordered so
 // the magic (detection) leads the setup.
 const BEATS = [
-  { id: 'scan', headline: 'Point your camera\nat the shelf', ms: 2000 },
-  { id: 'detect', headline: 'AI finds everything\nyou have', ms: 2200 },
-  { id: 'meals', headline: 'Meals built around\nyour macros', ms: 2600 },
+  { id: 'scan', headline: 'Point your camera\nat the shelf', ms: 2800 },
+  // detect must outlast the chip cascade: 9 items land at 250 + 8*300 = 2650ms, so anything
+  // under ~3s cut off mid-animation and read as rushed. 3800 lets all items settle + register.
+  { id: 'detect', headline: 'AI finds everything\nyou have', ms: 3800 },
+  { id: 'meals', headline: 'Meals built around\nyour macros', ms: 3600 },
 ] as const
 
 // Real items visible in the bundled fridge photo — keep these in sync with onboarding-fridge.jpg
@@ -96,16 +98,36 @@ function BeatDetect() {
 }
 
 // ── Beat 3: the payoff — real meals with real macros ───────────────────────────
+// For a FOOD app the appetite appeal IS the conversion: a 42px thumbnail sells nothing, so
+// the top meal is a big hero photo and the other two ride below as compact rows — big food +
+// the "several meals" abundance message, without shrinking the hero.
 function BeatMeals() {
+  const [hero, ...rest] = MEALS
   return (
     <View style={[st.beat, st.beatPad]}>
       <Animated.Text entering={FadeIn.duration(260)} style={st.beatKicker}>TONIGHT</Animated.Text>
-      {MEALS.map((m, i) => (
-        <Animated.View key={m.name} entering={FadeInDown.duration(300).delay(180 + i * 220)} style={st.mealCard}>
+
+      <Animated.View entering={FadeInDown.duration(340).delay(160)} style={st.heroCard}>
+        <View style={st.heroImgWrap}>
+          {hero.img
+            ? <Image source={hero.img} style={st.heroImg} resizeMode="cover" />
+            : <UtensilsCrossed size={30} stroke="#4A4A4A" strokeWidth={1.6} />}
+        </View>
+        <View style={st.heroMeta}>
+          <Text style={st.heroName} numberOfLines={1}>{hero.name}</Text>
+          <View style={st.macroRow}>
+            <View style={st.macroPill}><Text style={st.macroText}>{hero.kcal} cal</Text></View>
+            <View style={st.macroPill}><Text style={st.macroText}>{hero.protein}g protein</Text></View>
+          </View>
+        </View>
+      </Animated.View>
+
+      {rest.map((m, i) => (
+        <Animated.View key={m.name} entering={FadeInDown.duration(300).delay(420 + i * 200)} style={st.mealCard}>
           <View style={st.mealThumb}>
             {m.img
               ? <Image source={m.img} style={st.mealThumbImg} resizeMode="cover" />
-              : <UtensilsCrossed size={17} stroke="#4A4A4A" strokeWidth={1.8} />}
+              : <UtensilsCrossed size={15} stroke="#4A4A4A" strokeWidth={1.8} />}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={st.mealName} numberOfLines={1}>{m.name}</Text>
@@ -116,7 +138,8 @@ function BeatMeals() {
           </View>
         </Animated.View>
       ))}
-      <Animated.View entering={FadeIn.duration(300).delay(700)} style={st.haveRow}>
+
+      <Animated.View entering={FadeIn.duration(300).delay(880)} style={st.haveRow}>
         <Check size={11} stroke={COLORS.accent} strokeWidth={3} />
         <Text style={st.haveText}>You already have everything</Text>
       </Animated.View>
@@ -232,6 +255,11 @@ const st = StyleSheet.create({
 
   // Beat 3
   beatKicker: { fontSize: 9, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.4, marginBottom: 10 },
+  heroCard: { backgroundColor: '#141414', borderRadius: 14, overflow: 'hidden', marginBottom: 8 },
+  heroImgWrap: { width: '100%', height: 128, backgroundColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center' },
+  heroImg: { width: '100%', height: '100%' },
+  heroMeta: { padding: 10 },
+  heroName: { fontSize: 13, fontWeight: '800', color: COLORS.textWhite, marginBottom: 5 },
   mealCard: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: '#141414', borderRadius: 14, padding: 10, marginBottom: 8,
