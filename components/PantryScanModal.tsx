@@ -62,6 +62,26 @@ type ZoneGroup = {
   items: DetectedItem[]
 }
 
+// Normalize a name for TRUE-duplicate matching across photos (e.g. an indoor + outdoor fridge that
+// both hold milk, or the AI labeling "Egg" in one shot and "Eggs" in another). Lowercase, collapse
+// whitespace, and strip a trailing plural 's' from each word. Deliberately conservative — it only
+// collapses genuine same-item cases; distinct products keep their own words ("oat milk" vs
+// "almond milk" vs "milk" all stay separate).
+const dedupeKey = (name: string) =>
+  name.toLowerCase().trim().replace(/\s+/g, ' ').replace(/s\b/g, '')
+
+// Merge cross-photo duplicates, keeping the FIRST occurrence (preserves its photo/zone/box). The
+// per-photo review used to show every raw detection, so two fridges inflated the count with visible
+// dupes ("Egg" + "Eggs"); this makes the count and the pantry write honest.
+function dedupeDetected(items: DetectedItem[]): DetectedItem[] {
+  const seen = new Map<string, DetectedItem>()
+  for (const it of items) {
+    const key = dedupeKey(it.name)
+    if (!seen.has(key)) seen.set(key, it)
+  }
+  return Array.from(seen.values())
+}
+
 // ── Mock detected ingredients ──────────────────────────────────────────
 
 const MOCK_DETECTED: DetectedItem[] = [
@@ -427,7 +447,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           zoneGroups.push({ zone: zoneData.zone, items: zoneItems })
         }
 
-        setDetectedItems(allItems)
+        // Dedupe across photos before anything reads the list — so the count, the review list, and
+        // the pantry write all agree on ONE honest number (no more "27 found" / "Add all 49").
+        setDetectedItems(dedupeDetected(allItems))
         setZones(zoneGroups)
         // Per-photo container type drives the context-aware quick-add rail in the review.
         setPhotoContainers(Array.isArray(result.photoContainers) ? result.photoContainers.map((c: any) => String(c || '').toLowerCase()) : [])
@@ -1118,29 +1140,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           return (
             <View style={stepWithSafeTop}>
               {(() => {
-                // Items below follow the CURRENT photo (cur). Computed here so the top strip stays
-                // just photos and the list re-renders on swipe — keeps photo + its items glanceable.
-                const curItems = pages[cur]?.items ?? []
-                // Trust-first: show every detected item grouped by shelf, all included by default. No
-                // "double-check" confidence section — that made the AI's uncertainty the USER's homework
-                // over low-stakes data (a wrong pantry item is a 1-tap delete). Clean list, remove the
-                // occasional wrong one, tap Add. (Confidence still flows from the scan for backend quality
-                // telemetry; it's just not a task on this screen.)
-                const byZone = new Map<string, DetectedItem[]>()
-                for (const it of curItems) {
-                  const z = (it.zone || '').trim() || 'Other'
-                  if (!byZone.has(z)) byZone.set(z, [])
-                  byZone.get(z)!.push(it)
-                }
-                const zoneEntries = Array.from(byZone.entries())
-                const showZoneHeaders = zoneEntries.length > 1
-                const renderChip = (item: DetectedItem) => {
+                // ONE unified, de-duplicated list — no per-photo split, no shelf grouping. Where an
+                // item sat (top shelf / drawer) is noise for a quick confirm; the user just wants to
+                // scan the list, remove the odd wrong one, and tap Add. The photo strip above is a
+                // visual reference only (tap to zoom); it no longer drives what's listed.
+                const renderRow = (item: DetectedItem) => {
                   const editing = editingId === item.id
                   return (
-                    <View key={item.id} style={[styles.zoneChip, editing && styles.zoneChipEditing]}>
+                    <View key={item.id} style={styles.reviewRow}>
                       {editing ? (
                         <TextInput
-                          style={styles.zoneChipInput}
+                          style={styles.reviewRowInput}
                           value={editingText}
                           onChangeText={setEditingText}
                           autoFocus
@@ -1153,17 +1163,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       ) : (
                         // Tap the name to rename it — the AI mislabels ("Whole Milk" → "2% Milk"). ✕ removes.
                         <TouchableOpacity
+                          style={{ flex: 1 }}
                           onPress={() => { setEditingId(item.id); setEditingText(item.name) }}
-                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 4 }}
+                          hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
                         >
-                          <Text style={styles.zoneChipText}>{item.name}</Text>
+                          <Text style={styles.reviewRowText}>{item.name}</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity
                         onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
-                        <X size={13} stroke={COLORS.textMuted} strokeWidth={2} />
+                        <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
                       </TouchableOpacity>
                     </View>
                   )
@@ -1246,7 +1257,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     <View style={styles.reviewHeader}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.reviewCountHero}>
-                          {curItems.length === 0 ? 'Nothing found here' : `${curItems.length} item${curItems.length === 1 ? '' : 's'} found`}
+                          {detectedItems.length === 0 ? 'Nothing found' : `${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} found`}
                         </Text>
                         <Text style={styles.reviewInstruction}>Tap a name to fix it  ·  ✕ to remove</Text>
                       </View>
@@ -1260,16 +1271,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       )}
                     </View>
 
-                    {/* Current photo's items, grouped by zone */}
+                    {/* One flat, ungrouped list of everything found (deduped across photos). Uniform
+                        rows scan far better than a cloud of ragged-width pills at 20+ items. */}
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                      {showZoneHeaders
-                        ? zoneEntries.map(([zone, items]) => (
-                            <View key={zone} style={styles.zoneGroup}>
-                              <Text style={styles.zoneHeader}>{zone}</Text>
-                              <View style={styles.zoneChipWrap}>{items.map(renderChip)}</View>
-                            </View>
-                          ))
-                        : <View style={styles.zoneChipWrap}>{curItems.map(renderChip)}</View>}
+                      {detectedItems.map(renderRow)}
                     </ScrollView>
                   </>
                 )
@@ -1283,7 +1288,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={styles.missedBar}>
                 <TextInput
                   style={styles.missedBarInput}
-                  placeholder={total > 1 ? `Add what's missing in ${pages[cur]?.label}…` : 'Add anything we missed — e.g. chicken, spinach'}
+                  placeholder="Add anything we missed — e.g. chicken, spinach"
                   placeholderTextColor={COLORS.textMuted}
                   value={missedInput}
                   onChangeText={setMissedInput}
@@ -1514,9 +1519,22 @@ const styles = StyleSheet.create({
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
   // No fixed width: the list lives inside the step's 24px horizontal padding, so forcing width
   // SCREEN_W made the content 48px wider than its viewport → sideways scroll + left-clipped chips.
-  reviewItemsScroll: { paddingTop: 16, paddingBottom: 20 },
+  reviewItemsScroll: { paddingTop: 8, paddingBottom: 20 },
   reviewCountHero: { fontSize: 27, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4 },
   reviewInstruction: { fontSize: 13, color: '#888888', marginTop: 3, fontWeight: '600' },
+  // Uniform full-width row per detected item — scans cleanly at 20+ items where ragged pills didn't.
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 13,
+    paddingHorizontal: 2,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  reviewRowText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
+  reviewRowInput: { flex: 1, fontSize: 15, fontWeight: '600', color: '#FFFFFF', padding: 0, borderBottomWidth: 1, borderBottomColor: '#4ADE80' },
   staplesBar: { paddingTop: 6, paddingBottom: 2 },
   staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },
   staplesToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 6 },
