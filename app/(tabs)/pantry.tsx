@@ -830,12 +830,17 @@ export default function PantryScreen() {
                                 {meal.prepTime > 0 ? `${meal.prepTime} min` : null}
                                 {meal.prepTime > 0 ? '  ·  ' : ''}
                                 {meal.calories} cal
-                                {meal.protein > 0 ? `  ·  ${meal.protein}g protein` : ''}
+                                {/* Protein — the app's north-star macro — gets a green weight so every
+                                    meal ties visibly to the user's protein goal. */}
+                                {meal.protein > 0 ? '  ·  ' : ''}
+                                {meal.protein > 0 ? <Text style={styles.cookTonightProtein}>{meal.protein}g protein</Text> : null}
                               </Text>
                               {missing.length === 0 ? (
-                                <View style={styles.cookTonightHaveRow}>
-                                  <Check size={11} stroke="#4ADE80" strokeWidth={2.5} />
-                                  <Text style={styles.cookTonightHaveText}>Got everything</Text>
+                                // "Ready to cook" reward pill — an earned, tappable-looking badge (vs
+                                // plain text) that makes the zero-shopping moment feel like a win.
+                                <View style={styles.cookTonightReadyPill}>
+                                  <Check size={10} stroke="#4ADE80" strokeWidth={3} />
+                                  <Text style={styles.cookTonightHaveText}>Ready to cook</Text>
                                 </View>
                               ) : (
                                 <Text style={styles.cookTonightNeedText} numberOfLines={1}>
@@ -1124,10 +1129,10 @@ const styles = StyleSheet.create({
   scanCard: {
     backgroundColor: '#191919',
     borderRadius: 24,
-    paddingVertical: 16,
+    paddingVertical: 13, // slimmed (was 16) — these are daily utility, not hero cards
     paddingHorizontal: 16,
     alignItems: 'flex-start',
-    gap: 10,
+    gap: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.05)',
     position: 'relative',
@@ -1165,8 +1170,8 @@ const styles = StyleSheet.create({
   // Mirrors the home-screen hero animation but downsized to fit the card width.
   scanCardVisual: {
     width: '100%',
-    height: 70,
-    marginTop: 6,
+    height: 50, // slimmed (was 70); SVG viewBox scales to fit, beam animation unaffected
+    marginTop: 4,
     position: 'relative',
     overflow: 'hidden',
   },
@@ -1501,10 +1506,22 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     fontWeight: '500',
   },
-  cookTonightHaveRow: {
+  // Green weight on the protein number — reinforces the app's core metric on every meal row.
+  cookTonightProtein: {
+    color: '#4ADE80',
+    fontWeight: '700',
+  },
+  // "Ready to cook" reward pill: subtle green fill + self-start so it hugs its text.
+  cookTonightReadyPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderRadius: 30,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    marginTop: 1,
   },
   cookTonightHaveText: {
     fontSize: 11,
