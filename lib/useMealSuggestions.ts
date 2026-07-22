@@ -11,9 +11,11 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 
 // Hard cap on user-initiated regens per day. The auto-fire on first daily visit is free
 // (doesn't count); this cap only governs the manual "Refresh after shopping" button.
-// 1 = one regen per day. Closes the unbounded refresh loop without losing the after-grocery
-// use case. Resets at midnight because cache is keyed by date.
-const MAX_DAILY_REGENS = 1
+// Manual rerolls per day. 3 (not 1) so a premium user who doesn't love today's set can get a
+// couple more without a "check back tomorrow" wall — generous but bounded (avoids endless-reroll
+// choice paralysis, and image gen is globally cached so the marginal cost is ~a GPT call). The
+// server MEAL_GEN_CAP_PER_DAY is the real backstop. Resets at midnight (cache is keyed by date).
+const MAX_DAILY_REGENS = 3
 
 // userId stamps ownership so the cache survives sign-out (restored for the same user on
 // re-login) without leaking to a different account on a shared device — reads that don't match
