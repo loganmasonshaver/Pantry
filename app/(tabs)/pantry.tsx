@@ -24,6 +24,7 @@ import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
+import { isAssumedStaple } from '@/constants/staples'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useAIConsent } from '@/context/AIConsentContext'
@@ -261,20 +262,15 @@ export default function PantryScreen() {
     )
   }, [categories])
 
-  // Staples we assume every kitchen has — keeps "Need: …" honest by not flagging
-  // salt/pepper/oil for every meal. Mirrors the ESSENTIAL_STAPLES list on Home.
-  const STAPLES = new Set([
-    'salt', 'pepper', 'olive oil', 'oil', 'water', 'butter', 'garlic',
-    'onion', 'sugar', 'flour', 'soy sauce', 'vinegar', 'lemon', 'lime',
-    'paprika', 'cumin', 'oregano', 'chili powder', 'cooking spray',
-  ])
-
   const missingFor = (mealIngs: { name: string }[] | undefined): string[] => {
     if (!mealIngs) return []
     const missing: string[] = []
     for (const ing of mealIngs) {
       const n = ing.name.toLowerCase()
-      if (STAPLES.has(n)) continue
+      // Canonical staple check (constants/staples) — keeps "Need: …" honest by not
+      // flagging salt/oil/etc. Single source of truth; the old local list drifted and
+      // missed aliases like "cooking oil", which then leaked into NEED.
+      if (isAssumedStaple(ing.name)) continue
       // Two-way substring match — pantry "chicken breast" covers meal "chicken",
       // and pantry "chicken" covers meal "chicken breast".
       let have = false
