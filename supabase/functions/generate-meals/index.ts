@@ -383,14 +383,21 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
           // temperature 0.8 — enough variety so consecutive generations don't return identical
           // meals, but not so high that the LLM ignores the dense constraint list above.
-          // max_tokens 2000 — 5 full meals with ingredient arrays + step arrays fits here;
-          // raise if we ever generate >7 meals per call (currently capped at genCount=5).
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 2000 }),
+          // max_tokens 4000 — 2000 truncated real full-fridge outputs mid-JSON (an unterminated
+          // string → JSON.parse throws → the provider gets treated as "failed"). 4000 gives
+          // comfortable headroom for up to ~7 meals with ingredient + step arrays; gpt-4o-mini
+          // and Gemini both allow far more, so the only cost is a few output tokens when needed.
+          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 4000 }),
         })
         const data = await response.json()
         if (data.error) {
           console.log(`${provider.name} error:`, data.error.message || JSON.stringify(data.error))
           continue
+        }
+        // Surface truncation explicitly — a 'length' finish means the JSON is cut off and the
+        // parse below WILL throw; the log makes that unambiguous instead of a cryptic parse error.
+        if (data.choices?.[0]?.finish_reason === "length") {
+          console.log(`${provider.name} hit max_tokens (output truncated) — raise max_tokens`)
         }
         const text = data.choices?.[0]?.message?.content || "[]"
         const clean = text.replace(/```json|```/g, "").trim()
