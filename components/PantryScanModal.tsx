@@ -1101,13 +1101,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
         {/* ── Step 5.5: unified review — one deduped list + a thumbnail strip of the scans ── */}
         {step === 55 && (() => {
-          // Responsive thumbnail size — the scan photos fill the row width: bigger when there are
-          // fewer (capped at 140 so 1-2 shots don't balloon, and centered), smaller as the count
-          // grows, floored at 52 and scrolling once more than ~5 no longer fit.
+          // Photo grid: 2 across for a typical scan (≤4 shots) so each preview is big; 3 across for
+          // 5+ so a lot of photos don't get too tall. Tiles are uniform and the grid hugs its content
+          // (no floating black space), wrapping to rows and centering any odd last tile.
           const CONTENT_W = SCREEN_W - 48 // step horizontal padding (24 × 2)
           const nPhotos = photos.length
-          const rawThumb = nPhotos > 0 ? (CONTENT_W - (nPhotos - 1) * 8) / nPhotos : 140
-          const thumbSize = Math.round(Math.max(52, Math.min(rawThumb, 140)))
+          const cols = nPhotos <= 2 ? Math.max(1, nPhotos) : nPhotos <= 4 ? 2 : 3
+          const tile = Math.round(Math.min((CONTENT_W - (cols - 1) * 8) / cols, 200))
           return (
             <View style={stepWithSafeTop}>
               {(() => {
@@ -1158,21 +1158,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
                     </View>
-                    {/* Scan thumbnails, sized to fill the width — bigger with fewer photos (centered),
-                        smaller with more, scrolling past what fits. Tap any to zoom full-screen. */}
+                    {/* Scan thumbnails as a centered, content-hugging grid (2 across for ≤4 photos,
+                        3 across beyond). Uniform tiles, odd last tile centered. Tap any to zoom. */}
                     {photos.length > 0 && (
-                      <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                        contentContainerStyle={styles.photoThumbStrip}
-                      >
+                      <View style={styles.photoGrid}>
                         {photos.map((p, idx) => (
-                          <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={[styles.photoThumb, { width: thumbSize, height: thumbSize }]}>
+                          <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={[styles.photoThumb, { width: tile, height: tile }]}>
                             <Image source={{ uri: p.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                           </TouchableOpacity>
                         ))}
-                      </ScrollView>
+                      </View>
                     )}
 
                     {/* Header — the COUNT is the hero (it continues the count-up reveal and is what
@@ -1427,7 +1422,9 @@ const styles = StyleSheet.create({
   // Close on its own row; the thumbnail strip below gets the full width. flexGrow+center makes the
   // strip CENTER its photos when they fit (few/big shots) and left-align + scroll when they don't.
   reviewCloseRow: { paddingBottom: 12 },
-  photoThumbStrip: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingBottom: 2 },
+  // Content-hugging wrap grid — centers each row (and any odd last tile). No flexGrow / vertical
+  // centering, so it can't balloon into empty black space the way the old scroll strip did.
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, paddingBottom: 4 },
   photoThumb: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#1A1A1A' }, // width/height set inline (responsive)
   reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
   // Fullscreen tap-to-zoom overlay.
