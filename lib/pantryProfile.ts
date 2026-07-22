@@ -197,6 +197,7 @@ export function buildInsight(
   cuisinePrefs: string[] = [],
   cookingSkill: string | null = null,
   maxPrepMinutes: number | null = null,
+  rotation: number = 0, // visit counter — rotates the headline among the top gaps (Step D)
 ): Insight {
   if (!items.length) {
     return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty', coverage: [] }
@@ -209,45 +210,51 @@ export function buildInsight(
   const have = new Set(items.map(i => (i.name || '').toLowerCase()))
   const pick = (pool: Sugg[]) => filterSuggestions(pool, diet, restrictions, dislikes, have, cuisinePrefs, lowEffort)
 
-  // Coverage is the same for whichever tier fires (it's a function of the pantry, not the headline),
-  // so compute it once and attach to the selected insight — keeps the tier returns unchanged.
+  // Coverage is the same regardless of which gap the headline shows (it's a function of the
+  // pantry), so compute it once and attach to whichever gap is selected.
   const coverage = computeCoverage(p, goal, diet)
-  const base = ((): Omit<Insight, 'coverage'> => {
 
-  // Tier 1 — foundational. Protein-absence before produce (can't build a meal without protein),
-  // then produce/fiber (the #1 real gap for most people). Threshold < 2 so a stocked pantry
-  // (2+ veg) isn't nagged every visit — bias toward silence over a repeated nudge.
+  // Collect EVERY applicable gap in priority order (severity high→low), then rotate the HEADLINE
+  // among the top few so the banner varies visit-to-visit instead of nagging the identical line
+  // (crack H — no dismissal yet). The coverage strip still shows the full picture, so a rotated
+  // headline stays coherent with it; and once a gap is stocked it drops out of the rotation.
+  const gaps: Array<Omit<Insight, 'coverage'>> = []
+  // Tier 1 — foundational: protein first (can't build a meal without it), then produce/fiber
+  // (the #1 real gap for most people). Produce threshold < 2 so a stocked pantry isn't flagged.
   if (!dietSafeProteinPresent(p, diet)) {
-    return { headline: 'Add a protein source', detail: `Your pantry has no ${diet === 'Vegan' || diet === 'Vegetarian' ? 'plant ' : ''}protein to build meals around — stock a few staples.`, suggestedItems: pick(PROTEIN_SUGG[diet]), tone: 'gap' }
+    gaps.push({ headline: 'Add a protein source', detail: `Your pantry has no ${diet === 'Vegan' || diet === 'Vegetarian' ? 'plant ' : ''}protein to build meals around — stock a few staples.`, suggestedItems: pick(PROTEIN_SUGG[diet]), tone: 'gap' })
   }
   if (p.produceCount < 2) {
-    const detail = goal === 'lose'
+    gaps.push({ headline: 'Add fruits & veg', detail: goal === 'lose'
       ? 'Fiber keeps you full on fewer calories — the one thing most pantries are short on.'
-      : 'Fiber and micronutrients for recovery — the one thing most pantries are short on.'
-    return { headline: 'Add fruits & veg', detail, suggestedItems: pick(PRODUCE_SUGG), tone: 'gap' }
+      : 'Fiber and micronutrients for recovery — the one thing most pantries are short on.', suggestedItems: pick(PRODUCE_SUGG), tone: 'gap' })
   }
-
   // Tier 2 — goal tuning.
   if (goal === 'gain' && !p.hasComplexCarb) {
-    return { headline: 'Fuel your gains', detail: 'Keep complex carbs on hand to power training and recovery.', suggestedItems: pick(CARB_SUGG), tone: 'gap' }
+    gaps.push({ headline: 'Fuel your gains', detail: 'Keep complex carbs on hand to power training and recovery.', suggestedItems: pick(CARB_SUGG), tone: 'gap' })
   }
-
   // Tier 3 — diet-specific, food-only (no micronutrient claims).
   if (diet === 'Vegetarian' && p.dairyProteinCount >= 2 && p.plantProteinVariety === 0) {
-    return { headline: 'Vary your protein beyond cheese', detail: 'Keep beans, lentils, tofu, or eggs on hand for more variety.', suggestedItems: pick([{ name: 'lentils' }, { name: 'tofu' }, { name: 'chickpeas' }, { name: 'eggs', contains: ['egg'] }]), tone: 'gap' }
+    gaps.push({ headline: 'Vary your protein beyond cheese', detail: 'Keep beans, lentils, tofu, or eggs on hand for more variety.', suggestedItems: pick([{ name: 'lentils' }, { name: 'tofu' }, { name: 'chickpeas' }, { name: 'eggs', contains: ['egg'] }]), tone: 'gap' })
   }
   if (diet === 'Pescatarian' && !p.hasFish) {
-    return { headline: 'Keep some fish on hand', detail: 'Salmon or tuna for easy protein and omega-3s.', suggestedItems: pick(FISH_SUGG), tone: 'gap' }
+    gaps.push({ headline: 'Keep some fish on hand', detail: 'Salmon or tuna for easy protein and omega-3s.', suggestedItems: pick(FISH_SUGG), tone: 'gap' })
   }
   if (diet === 'Vegan' && p.plantProteinVariety < 2) {
-    return { headline: 'Add plant-protein variety', detail: 'A couple of options keep meals interesting — tofu, tempeh, lentils.', suggestedItems: pick(PROTEIN_SUGG.Vegan), tone: 'gap' }
+    gaps.push({ headline: 'Add plant-protein variety', detail: 'A couple of options keep meals interesting — tofu, tempeh, lentils.', suggestedItems: pick(PROTEIN_SUGG.Vegan), tone: 'gap' })
   }
   if (!p.hasHealthyFat) {
-    return { headline: "You're light on healthy fats", detail: 'Avocado, olive oil, or seeds round out your meals.', suggestedItems: pick(FAT_SUGG), tone: 'gap' }
+    gaps.push({ headline: "You're light on healthy fats", detail: 'Avocado, olive oil, or seeds round out your meals.', suggestedItems: pick(FAT_SUGG), tone: 'gap' })
   }
 
-  // Tier 4 — nothing to flag: reward a well-rounded pantry.
-  return { headline: `Your pantry's dialed in for ${goalPhrase(goal)} 💪`, detail: 'Solid mix of protein, produce, and fats. Scan or add items anytime.', suggestedItems: [], tone: 'affirm' }
-  })()
-  return { ...base, coverage }
+  // Nothing to flag → reward a well-rounded pantry (affirmation never rotates: no gaps to cycle).
+  if (gaps.length === 0) {
+    return { headline: `Your pantry's dialed in for ${goalPhrase(goal)} 💪`, detail: 'Solid mix of protein, produce, and fats. Scan or add items anytime.', suggestedItems: [], tone: 'affirm', coverage }
+  }
+  // Rotate among the top 3 gaps only — keeps the rotation on the highest-severity items, never
+  // surfacing a minor nudge while a foundational gap sits lower in the pool. Modulo is written to
+  // stay non-negative even if a bad rotation value is ever passed in.
+  const pool = gaps.slice(0, 3)
+  const chosen = pool[((rotation % pool.length) + pool.length) % pool.length]
+  return { ...chosen, coverage }
 }

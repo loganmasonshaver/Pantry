@@ -105,6 +105,7 @@ const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
 }))
 
 const CATEGORY_ORDER_KEY = 'pantry_category_order' // device-local saved drag order of categories
+const INSIGHT_ROTATION_KEY = 'pantry_insight_rotation' // visit counter → rotates the insight headline (Step D)
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
@@ -291,12 +292,16 @@ export default function PantryScreen() {
       })
   }, [user])
 
+  // Visit counter → rotates the insight headline among the top gaps (Step D). Advanced once per
+  // screen focus in the focus effect below; stable within a visit so the banner doesn't flip mid-view.
+  const [insightRotation, setInsightRotation] = useState(0)
+
   // Personalized "what to stock next" insight — replaces the old item-count "Stock Level".
   // In-stock items only; keyed on the item's real store category (Produce, Meat & Fish, …).
   const pantryInsight = useMemo(() => {
     const items = categories.flatMap(c => c.ingredients.filter(i => i.inStock).map(i => ({ name: i.name, category: c.name })))
-    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [], insightProfile?.cuisines ?? [], insightProfile?.cookingSkill ?? null, insightProfile?.maxPrep ?? null)
-  }, [categories, insightProfile])
+    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [], insightProfile?.cuisines ?? [], insightProfile?.cookingSkill ?? null, insightProfile?.maxPrep ?? null, insightRotation)
+  }, [categories, insightProfile, insightRotation])
 
   // One-tap "Add to grocery" for the insight's suggestions (categorized, deduped by the DB flow).
   const [insightAdded, setInsightAdded] = useState(false)
@@ -384,6 +389,13 @@ export default function PantryScreen() {
 
   useFocusEffect(useCallback(() => {
     fetchItems()
+    // Advance the insight rotation once per visit: use the stored index for THIS visit, persist
+    // the next one. Cheap device-local counter — no server round-trip, survives app restarts.
+    AsyncStorage.getItem(INSIGHT_ROTATION_KEY).then(raw => {
+      const n = parseInt(raw ?? '0', 10) || 0
+      setInsightRotation(n)
+      AsyncStorage.setItem(INSIGHT_ROTATION_KEY, String(n + 1)).catch(() => {})
+    }).catch(() => {})
   }, [fetchItems]))
 
   const toggleSection = (id: string) => {
