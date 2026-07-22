@@ -32,6 +32,7 @@ import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
+import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { prefetchCookNowMeals } from '@/lib/mealPrefetch'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
@@ -1311,13 +1312,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     if (selected.length === 0) { handleClose(); return }
                     savingRef.current = true
                     setSaving(true)
-                    const rows = selected.map(item => ({
-                      user_id: user.id,
-                      name: item.name,
-                      category: item.category,
-                      in_stock: true,
-                    }))
-                    const { error } = await supabase.from('pantry_items').insert(rows)
+                    // Deduped insert — skips items already in the pantry so a re-scan can't
+                    // create a duplicate row; re-stocks any that were previously out.
+                    const { error } = await addPantryItemsDeduped(user.id, selected.map(item => ({ name: item.name, category: item.category })))
                     setSaving(false)
                     savingRef.current = false
                     if (error) {
@@ -1337,7 +1334,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       onSeeMeals()
                       return
                     }
-                    setSavedCount(rows.length)
+                    setSavedCount(selected.length)
                     setShowSaved(true)
                   }}
                 >
@@ -1398,14 +1395,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   if (selected.length === 0) { handleClose(); return }
                   savingRef.current = true
                   setSaving(true)
-                  const { error } = await supabase.from('pantry_items').insert(
-                    selected.map(item => ({
-                      user_id: user.id,
-                      name: item.name,
-                      category: item.category,
-                      in_stock: true,
-                    }))
-                  )
+                  // Deduped insert — see addPantryItemsDeduped; prevents duplicate rows on re-scan.
+                  const { error } = await addPantryItemsDeduped(user.id, selected.map(item => ({ name: item.name, category: item.category })))
                   setSaving(false)
                   savingRef.current = false
                   // Surface insert failures instead of silently dropping the scanned items

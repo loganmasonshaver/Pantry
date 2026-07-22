@@ -22,6 +22,7 @@ import * as ImageManipulator from 'expo-image-manipulator'
 import { X, Check, Receipt, Camera, ImageIcon, Zap, Plus } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
+import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
@@ -279,13 +280,9 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
     if (selected.length === 0) { handleClose(); return }
     savingRef.current = true
     setStep('saving')
-    const rows = selected.map(item => ({
-      user_id: user.id,
-      name: item.name,
-      category: item.category,
-      in_stock: true,
-    }))
-    const { error } = await supabase.from('pantry_items').insert(rows)
+    // Deduped insert — a receipt often lists items already in the pantry; skip those instead of
+    // inserting duplicate rows, and re-stock any that were previously out.
+    const { error } = await addPantryItemsDeduped(user.id, selected.map(item => ({ name: item.name, category: item.category })))
     if (error) {
       savingRef.current = false
       Alert.alert('Save failed', error.message)

@@ -257,9 +257,12 @@ export default function PantryScreen() {
   )
 
   // Lower-cased pantry names for fuzzy substring matching against meal ingredients.
+  // Only IN-STOCK items count — an "Out" item isn't on hand, so the Cook Tonight card must
+  // treat it as missing (matches the meal-detail screen, which queries in_stock=true). Without
+  // this filter the card said "have rice" for an out-of-stock item while the detail said "need".
   const pantryNameSet = useMemo(() => {
     return new Set(
-      categories.flatMap(c => c.ingredients.map(i => i.name.toLowerCase()))
+      categories.flatMap(c => c.ingredients.filter(i => i.inStock).map(i => i.name.toLowerCase()))
     )
   }, [categories])
 
@@ -501,7 +504,9 @@ export default function PantryScreen() {
         .map(cat => ({
           ...cat,
           ingredients: cat.ingredients.filter(i =>
-            i.name.toLowerCase().includes(searchQuery.toLowerCase())
+            // trim() the query — iOS leaves a trailing space after a word, and "rice " would
+            // never substring-match "cooked rice", showing a false "No matches".
+            i.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
           ),
         }))
         .filter(cat => cat.ingredients.length > 0)
