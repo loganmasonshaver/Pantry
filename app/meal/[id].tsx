@@ -902,8 +902,8 @@ export default function MealDetailScreen() {
           <View style={styles.mealMetaRow}>
             {meal.prepTime != null && meal.prepTime > 0 && (
               <View style={styles.mealMetaPill}>
-                <Clock size={14} stroke="#4ADE80" strokeWidth={2} />
-                <Text style={styles.mealMetaPillText}>{meal.prepTime} min</Text>
+                <Clock size={14} stroke="#F59E0B" strokeWidth={2} />
+                <Text style={[styles.mealMetaPillText, { color: '#F59E0B' }]}>{meal.prepTime} min</Text>
               </View>
             )}
             <View style={{ flex: 1 }} />
@@ -991,13 +991,15 @@ export default function MealDetailScreen() {
           return (
             <View style={styles.macroBar}>
               {[
-                { label: 'Kcal', value: String(correctedCal), color: '#4ADE80' },
-                { label: 'Protein',  value: `${meal.protein}g`,   color: '#4ADE80' },
-                { label: 'Carbs',    value: `${meal.carbs}g`,     color: '#F59E0B' },
-                { label: 'Fat',      value: `${meal.fat}g`,       color: '#60A5FA' },
+                // Color-coded to match the Discover pills: cals white, protein green, prep amber;
+                // carbs blue, fat violet added here.
+                { label: 'Kcal',    value: String(correctedCal), color: COLORS.textWhite },
+                { label: 'Protein', value: `${meal.protein}g`,    color: '#4ADE80' },
+                { label: 'Carbs',   value: `${meal.carbs}g`,      color: '#60A5FA' },
+                { label: 'Fat',     value: `${meal.fat}g`,        color: '#A78BFA' },
               ].map((stat, i, arr) => (
                 <View key={stat.label} style={[styles.macroStat, i < arr.length - 1 && styles.macroStatBorder]}>
-                  <Text style={[styles.macroValue, stat.label === 'Kcal' && { color: '#4ADE80' }]}>{stat.value}</Text>
+                  <Text style={[styles.macroValue, { color: stat.color }]}>{stat.value}</Text>
                   <Text style={styles.macroLabel}>{stat.label}</Text>
                 </View>
               ))}
