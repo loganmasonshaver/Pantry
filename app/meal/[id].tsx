@@ -1145,7 +1145,14 @@ export default function MealDetailScreen() {
                     <View style={styles.haveIndicator}>
                       <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
                     </View>
-                  ) : kind === 'basic' ? null : (
+                  ) : kind === 'basic' ? (
+                    // Assumed basic (now merged into IN YOUR PANTRY): a muted "assumed" tag marks
+                    // this as a GUESS (salt/oil/etc.) vs a confirmed item's green check — same
+                    // section, different confidence. Whole row still taps to "I don't keep this".
+                    <View style={styles.assumedPill}>
+                      <Text style={styles.assumedPillText}>assumed</Text>
+                    </View>
+                  ) : (
                     // NEED: a LABELED chip, not a bare "+" — the word says it adds to grocery
                     // (a lone + reads ambiguously), and "Added" is the state feedback without a
                     // success popup. Added state uses a CART (grocery), NOT a check — the green
@@ -1176,22 +1183,19 @@ export default function MealDetailScreen() {
                     <Text style={styles.ingredientHint}>Tap an item to add it to your grocery list.</Text>
                   </>
                 )}
-                {haveRows.length > 0 && (
+                {/* IN YOUR PANTRY = confirmed items + assumed basics in ONE section (both mean
+                    "don't buy"). Confirmed rows show a green check; assumed rows show a muted
+                    "assumed" tag and sit after the confirmed ones for soft grouping. */}
+                {(haveRows.length > 0 || basicRows.length > 0) && (
                   <>
                     <Text style={[styles.ingredientGroupLabel, needRows.length > 0 && styles.ingredientGroupLabelSpaced]}>IN YOUR PANTRY</Text>
                     <View style={styles.ingredientList}>
                       {haveRows.map(ing => renderRow(ing, 'have'))}
-                    </View>
-                  </>
-                )}
-                {/* Assumed-basics tier — the quiet "we've got your basics" reassurance + the opt-out. */}
-                {basicRows.length > 0 && (
-                  <>
-                    <Text style={[styles.ingredientGroupLabel, (needRows.length > 0 || haveRows.length > 0) && styles.ingredientGroupLabelSpaced]}>PANTRY BASICS · WE ASSUMED</Text>
-                    <View style={styles.ingredientList}>
                       {basicRows.map(ing => renderRow(ing, 'basic'))}
                     </View>
-                    <Text style={styles.ingredientHint}>Basics most kitchens keep — tap any you don't have and we'll stop assuming it.</Text>
+                    {basicRows.length > 0 && (
+                      <Text style={styles.ingredientHint}>“assumed” = a basic we expect you keep (salt, oil…). Tap one you don't have and we'll stop assuming it.</Text>
+                    )}
                   </>
                 )}
               </>
@@ -1715,6 +1719,20 @@ const styles = StyleSheet.create({
     height: 30,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Muted tag on assumed-basic rows — reads as a low-confidence "we're guessing" marker,
+  // deliberately quieter than the confirmed green check so the two don't look equivalent.
+  assumedPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  assumedPillText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    letterSpacing: 0.2,
   },
   // NEED row's "Add" chip. Labeled (not a bare +) so it self-explains as an add-to-grocery
   // action; muted teal so it doesn't shout over the white bulk CTA. Flips to solid teal +
