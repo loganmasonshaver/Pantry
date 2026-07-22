@@ -1112,11 +1112,11 @@ export default function MealDetailScreen() {
               const isAdded = addedToGrocery.has(ing.name)
               // 'have' (in pantry) and 'basic' (assumed) both render muted vs the actionable NEED rows.
               const isHaveRow = kind !== 'need'
-              // NEED taps toggle the grocery list; BASIC taps the staple opt-out (fires its own
-              // Light haptic, so no `haptic` prop for it); HAVE is inert (disabled → no press feel).
+              // NEED taps toggle the grocery list. HAVE and BASIC rows are inert at the row level —
+              // the basic opt-out now lives ONLY on the "assumed" pill (a precise, deliberate target),
+              // so a stray row tap never opts a staple out.
               const onRowPress =
                 kind === 'need' ? () => toggleGrocery(ing.name)
-                : kind === 'basic' ? () => excludeStaple(ing.name)
                 : undefined
               return (
                 <PressableScale
@@ -1146,12 +1146,17 @@ export default function MealDetailScreen() {
                       <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
                     </View>
                   ) : kind === 'basic' ? (
-                    // Assumed basic (now merged into IN YOUR PANTRY): a muted "assumed" tag marks
-                    // this as a GUESS (salt/oil/etc.) vs a confirmed item's green check — same
-                    // section, different confidence. Whole row still taps to "I don't keep this".
-                    <View style={styles.assumedPill}>
+                    // Assumed basic (merged into IN YOUR PANTRY): a muted "assumed" tag marks this
+                    // as a GUESS (salt/oil/etc.) vs a confirmed item's green check. The PILL is the
+                    // ONLY tap target — tapping it opts the staple out ("I don't keep this"). It
+                    // fires its own Light haptic, so no `haptic` prop here.
+                    <PressableScale
+                      style={styles.assumedPill}
+                      onPress={() => excludeStaple(ing.name)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
                       <Text style={styles.assumedPillText}>assumed</Text>
-                    </View>
+                    </PressableScale>
                   ) : (
                     // NEED: a LABELED chip, not a bare "+" — the word says it adds to grocery
                     // (a lone + reads ambiguously), and "Added" is the state feedback without a
@@ -1194,7 +1199,7 @@ export default function MealDetailScreen() {
                       {basicRows.map(ing => renderRow(ing, 'basic'))}
                     </View>
                     {basicRows.length > 0 && (
-                      <Text style={styles.ingredientHint}>“assumed” = a basic we expect you keep (salt, oil…). Tap one you don't have and we'll stop assuming it.</Text>
+                      <Text style={styles.ingredientHint}>“assumed” = a basic we expect you keep (salt, oil…). Tap the “assumed” tag on anything you don't have and we'll stop assuming it.</Text>
                     )}
                   </>
                 )}
