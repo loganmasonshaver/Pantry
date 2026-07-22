@@ -989,6 +989,8 @@ export default function HomeScreen() {
             <TouchableOpacity
               onPress={async () => {
                 const next = !macrosExpanded
+                // Animate the macros card AND the hero card resizing together in one smooth beat.
+                LayoutAnimation.configureNext(LayoutAnimation.create(260, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
                 setMacrosExpanded(next)
                 await AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false')
               }}
@@ -1183,7 +1185,7 @@ export default function HomeScreen() {
             </View>
 
             {loading ? (
-              <View style={[styles.heroMealCard, { marginHorizontal: 20, height: macrosExpanded ? 214 : 300, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' }]}>
+              <View style={[styles.heroMealCard, { marginHorizontal: 20, height: macrosExpanded ? 210 : 286, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' }]}>
                 <ActivityIndicator color="#4ADE80" />
                 <Text style={[styles.loadingText, { marginTop: 12 }]}>Finding a meal from your pantry…</Text>
               </View>
@@ -1193,7 +1195,7 @@ export default function HomeScreen() {
                   // Height adapts to the macros card: full 300 when it's collapsed, shorter when
                   // it's expanded (which eats ~90px) so the photo + title + pills always clear the
                   // tab bar instead of getting cut off at the fold.
-                  style={[styles.heroMealCard, { marginHorizontal: 20, height: macrosExpanded ? 214 : 300 }]}
+                  style={[styles.heroMealCard, { marginHorizontal: 20, height: macrosExpanded ? 210 : 286 }]}
                   activeOpacity={0.85}
                   onPress={() => {
                     // Guard against missing id (GPT sometimes omits it) — fall back
