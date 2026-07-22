@@ -7,7 +7,22 @@ const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const GREEN = '#4ADE80'
 const SWEEP_MS = 950            // one pass of the scan line (top→bottom or back)
 const PHOTO_MS = SWEEP_MS * 4   // ~two full down-up sweeps over a photo before advancing to the next
-const STATUS = ['Reading your shelves', 'Decoding labels', 'Checking every item', 'Building your pantry list']
+// Ordered as a natural read→identify→sort→build arc so the rotation still reads like progress even
+// though it cycles. Kept long (≈26s for a full loop at 2.4s each) so a typical scan rarely repeats
+// a line. Honest to what the scan actually does; no emoji (matches the app's clean voice).
+const STATUS = [
+  'Reading your shelves',
+  'Spotting jars, bottles, and bags',
+  'Decoding labels',
+  'Reading the fine print',
+  'Checking the back rows',
+  'Identifying each item',
+  'Telling similar items apart',
+  'Sorting into categories',
+  'Counting what you’ve got',
+  'Matching items to meals',
+  'Building your pantry list',
+]
 
 type Photo = { uri?: string; label?: string }
 
