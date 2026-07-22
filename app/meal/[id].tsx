@@ -416,6 +416,11 @@ export default function MealDetailScreen() {
   const [userRating, setUserRating] = useState<1 | -1 | null>(null)
   const [ratingToast, setRatingToast] = useState<string | null>(null)
   const ratingToastOpacity = useRef(new Animated.Value(0)).current
+  // Undo toast for the "I don't keep this" staple opt-out — the opt-out is one-tap and
+  // persistent, so a mistaken tap needs an immediate way back. { norm } is what we restore.
+  const [stapleUndo, setStapleUndo] = useState<{ norm: string; label: string } | null>(null)
+  const stapleToastOpacity = useRef(new Animated.Value(0)).current
+  const stapleUndoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showEditForm, setShowEditForm] = useState(false)
   const [showCreatorEdit, setShowCreatorEdit] = useState(false)
   const [portionMode, setPortionMode] = useState<PortionMode>('Measured')
@@ -449,6 +454,14 @@ export default function MealDetailScreen() {
       })
   }, [user])
 
+  const showStapleToast = () => {
+    Animated.timing(stapleToastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }).start()
+    if (stapleUndoTimer.current) clearTimeout(stapleUndoTimer.current)
+    stapleUndoTimer.current = setTimeout(() => {
+      Animated.timing(stapleToastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setStapleUndo(null))
+    }, 4000) // 4s undo window — matches the Saved-tab unsave toast
+  }
+
   // Tap an assumed-basic row → "I don't keep this". Persist to profile so meal generation stops
   // assuming it too, and move the row to "you'll need". Optimistic: update state before the write.
   const excludeStaple = async (name: string) => {
@@ -459,8 +472,26 @@ export default function MealDetailScreen() {
     setExcludedStaples(prev => new Set(prev).add(norm))
     const nextManual = Array.from(new Set([...manualExcludedRef.current, norm])) // persist only manual opt-outs
     manualExcludedRef.current = nextManual
+    setStapleUndo({ norm, label: name })
+    showStapleToast()
     await supabase.from('profiles').update({ staples_excluded: nextManual }).eq('id', user.id)
   }
+
+  // Undo half of excludeStaple — restores an accidentally opted-out basic. Removes it from BOTH
+  // the local set and the persisted staples_excluded, so it goes back to being assumed everywhere.
+  const restoreStaple = async () => {
+    if (!user || !stapleUndo) return
+    if (stapleUndoTimer.current) clearTimeout(stapleUndoTimer.current)
+    const { norm } = stapleUndo
+    setExcludedStaples(prev => { const n = new Set(prev); n.delete(norm); return n })
+    const nextManual = manualExcludedRef.current.filter(s => s !== norm)
+    manualExcludedRef.current = nextManual
+    Animated.timing(stapleToastOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setStapleUndo(null))
+    await supabase.from('profiles').update({ staples_excluded: nextManual }).eq('id', user.id)
+  }
+
+  // Clear the undo timer on unmount so it never fires setStapleUndo on a gone component.
+  useEffect(() => () => { if (stapleUndoTimer.current) clearTimeout(stapleUndoTimer.current) }, [])
 
   // Fetch this meal's existing rating so the UI reflects current state
   useEffect(() => {
@@ -1186,6 +1217,16 @@ export default function MealDetailScreen() {
       {ratingToast && (
         <Animated.View style={[styles.ratingToast, { opacity: ratingToastOpacity }]} pointerEvents="none">
           <Text style={styles.ratingToastText}>{ratingToast}</Text>
+        </Animated.View>
+      )}
+
+      {/* ── Staple opt-out undo toast — reverses an accidental "I don't keep this" tap ── */}
+      {stapleUndo && (
+        <Animated.View style={[styles.stapleToast, { opacity: stapleToastOpacity }]}>
+          <Text style={styles.stapleToastText} numberOfLines={1}>Won't assume {stapleUndo.label.toLowerCase()}</Text>
+          <PressableScale onPress={restoreStaple} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Text style={styles.stapleToastUndo}>Undo</Text>
+          </PressableScale>
         </Animated.View>
       )}
 
@@ -2019,6 +2060,33 @@ const styles = StyleSheet.create({
     color: '#4ADE80',
     fontSize: 14,
     fontWeight: '600',
+  },
+  // Sits above the fixed Log/Save bar (~bottom 96) so the Undo target isn't hidden behind it.
+  stapleToast: {
+    position: 'absolute',
+    bottom: 96,
+    left: 20,
+    right: 20,
+    backgroundColor: '#1A1A1A',
+    borderRadius: 30,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 100,
+  },
+  stapleToastText: {
+    fontSize: 14,
+    color: COLORS.textWhite,
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 12,
+  },
+  stapleToastUndo: {
+    fontSize: 14,
+    color: '#4ADE80',
+    fontWeight: '700',
   },
   logButton: {
     flex: 2,
