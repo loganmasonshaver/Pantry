@@ -52,6 +52,10 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
 
+// Touchable that accepts an animated height, so the hero meal card can glide its size in sync
+// with the macros accordion (both driven by macrosAnim).
+const AnimatedTouchable = RNAnimated.createAnimatedComponent(TouchableOpacity)
+
 const { width } = Dimensions.get('window')
 
 // FEATURE FLAGS
@@ -436,11 +440,23 @@ export default function HomeScreen() {
   // persists across sessions. Default compact since Pantry's audience cares
   // most about protein; carbs/fat are one tap away if they want them.
   const [macrosExpanded, setMacrosExpanded] = useState(false)
+  // One animated value (0=collapsed, 1=expanded) drives BOTH the carbs/fat accordion height AND
+  // the hero card resize, so they glide together instead of the old LayoutAnimation snap that made
+  // the "Cook from pantry" line skip. JS-driven (height can't use the native driver), 280ms.
+  const macrosAnim = useRef(new RNAnimated.Value(0)).current
+  const [extraRowsH, setExtraRowsH] = useState(0) // measured height of the carbs+fat rows
+  const extraRowsHRef = useRef(0)
+  useEffect(() => {
+    RNAnimated.timing(macrosAnim, { toValue: macrosExpanded ? 1 : 0, duration: 280, easing: Easing.inOut(Easing.ease), useNativeDriver: false }).start()
+  }, [macrosExpanded, macrosAnim])
   useEffect(() => {
     AsyncStorage.getItem('pantry_macros_expanded').then(v => {
-      if (v === 'true') setMacrosExpanded(true)
+      if (v === 'true') { setMacrosExpanded(true); macrosAnim.setValue(1) } // start expanded without an open-animation on launch
     })
   }, [])
+  // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
+  // macros card eats ~76px, so the photo + title + pills stay framed above the tab bar either way).
+  const heroHeight = macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [286, 210] })
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -980,17 +996,26 @@ export default function HomeScreen() {
                 bigger text). When expanded to all 3, protein drops back to
                 standard size so there's no glitchy size delta between bars. */}
             <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized={!macrosExpanded} />
-            {macrosExpanded && (
-              <>
+            {/* Carbs+Fat accordion — height glides 0↔measured with macrosAnim so the reflow below
+                is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
+            <RNAnimated.View style={{
+              overflow: 'hidden',
+              opacity: macrosAnim,
+              height: extraRowsH === 0 ? undefined : macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [0, extraRowsH] }),
+            }}>
+              <View
+                onLayout={e => { const h = e.nativeEvent.layout.height; if (h && Math.abs(h - extraRowsHRef.current) > 0.5) { extraRowsHRef.current = h; setExtraRowsH(h) } }}
+                style={{ gap: 10, paddingTop: 10 }}
+              >
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
-              </>
-            )}
+              </View>
+            </RNAnimated.View>
             <TouchableOpacity
               onPress={async () => {
                 const next = !macrosExpanded
-                // Animate the macros card AND the hero card resizing together in one smooth beat.
-                LayoutAnimation.configureNext(LayoutAnimation.create(260, LayoutAnimation.Types.easeInEaseOut, LayoutAnimation.Properties.opacity))
+                // macrosAnim (driven by the effect on macrosExpanded) glides both the accordion and
+                // the hero height — no LayoutAnimation snap.
                 setMacrosExpanded(next)
                 await AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false')
               }}
@@ -1185,17 +1210,16 @@ export default function HomeScreen() {
             </View>
 
             {loading ? (
-              <View style={[styles.heroMealCard, { marginHorizontal: 20, height: macrosExpanded ? 210 : 286, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' }]}>
+              <RNAnimated.View style={[styles.heroMealCard, { marginHorizontal: 20, height: heroHeight, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' }]}>
                 <ActivityIndicator color="#4ADE80" />
                 <Text style={[styles.loadingText, { marginTop: 12 }]}>Finding a meal from your pantry…</Text>
-              </View>
+              </RNAnimated.View>
             ) : heroMeal ? (
               <>
-                <TouchableOpacity
-                  // Height adapts to the macros card: full 300 when it's collapsed, shorter when
-                  // it's expanded (which eats ~90px) so the photo + title + pills always clear the
-                  // tab bar instead of getting cut off at the fold.
-                  style={[styles.heroMealCard, { marginHorizontal: 20, height: macrosExpanded ? 210 : 286 }]}
+                <AnimatedTouchable
+                  // Height glides with the macros card (heroHeight, driven by macrosAnim) so the
+                  // photo + title + pills stay framed above the tab bar in both states.
+                  style={[styles.heroMealCard, { marginHorizontal: 20, height: heroHeight }]}
                   activeOpacity={0.85}
                   onPress={() => {
                     // Guard against missing id (GPT sometimes omits it) — fall back
@@ -1241,7 +1265,7 @@ export default function HomeScreen() {
                       </View>
                     </View>
                   </RNAnimated.View>
-                </TouchableOpacity>
+                </AnimatedTouchable>
               </>
             ) : null}
           </View>
