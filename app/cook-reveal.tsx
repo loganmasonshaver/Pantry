@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import * as Haptics from 'expo-haptics'
 import { LinearGradient } from 'expo-linear-gradient'
-import { Utensils, X, Sparkles, Flame, Dumbbell, ChevronRight } from 'lucide-react-native'
+import { Utensils, X, Flame, Dumbbell, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
@@ -67,15 +67,7 @@ export default function CookReveal() {
 
   // ── Reveal animations ──
   const headerAnim = useRef(new Animated.Value(0)).current
-  const spin = useRef(new Animated.Value(0)).current
   const animatedRef = useRef(false)
-
-  // Loader spin while generating
-  useEffect(() => {
-    const loop = Animated.loop(Animated.timing(spin, { toValue: 1, duration: 2400, easing: Easing.linear, useNativeDriver: true }))
-    loop.start()
-    return () => loop.stop()
-  }, [])
 
   // Fire the header reveal + success haptic exactly once, when the meals first land.
   useEffect(() => {
@@ -120,7 +112,6 @@ export default function CookReveal() {
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
   }
 
-  const spinDeg = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] })
   const showLoader = revealed.length === 0 && !error
 
   return (
@@ -273,7 +264,6 @@ const styles = StyleSheet.create({
 
   loaderWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 18 },
   loaderTitle: { fontSize: 22, fontWeight: '800', color: COLORS.textWhite, textAlign: 'center', letterSpacing: -0.3, lineHeight: 28 },
-  loaderSub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20 },
   retryBtn: { backgroundColor: '#FFFFFF', borderRadius: 30, paddingHorizontal: 28, paddingVertical: 13 },
   retryText: { color: '#000000', fontWeight: '700', fontSize: 15 },
 
