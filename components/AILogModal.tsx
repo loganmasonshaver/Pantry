@@ -478,9 +478,9 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
                         setFat(String(Math.round(orig.fat * ratio)))
                       }
                     }},
-                    { label: 'Protein', key: 'protein' as const, value: protein, onChange: (v: string) => { setProtein(v); setLastEditedMacro('protein') }, unit: 'g', color: '#4ADE80' },
-                    { label: 'Carbs', key: 'carbs' as const, value: carbs, onChange: (v: string) => { setCarbs(v); setLastEditedMacro('carbs') }, unit: 'g', color: '#F59E0B' },
-                    { label: 'Fat', key: 'fat' as const, value: fat, onChange: (v: string) => { setFat(v); setLastEditedMacro('fat') }, unit: 'g', color: '#60A5FA' },
+                    { label: 'Protein', key: 'protein' as const, value: protein, onChange: (v: string) => { setProtein(v); setLastEditedMacro('protein') }, unit: 'g', color: COLORS.macroProtein },
+                    { label: 'Carbs', key: 'carbs' as const, value: carbs, onChange: (v: string) => { setCarbs(v); setLastEditedMacro('carbs') }, unit: 'g', color: COLORS.macroCarbs },
+                    { label: 'Fat', key: 'fat' as const, value: fat, onChange: (v: string) => { setFat(v); setLastEditedMacro('fat') }, unit: 'g', color: COLORS.macroFat },
                   ].map((m: any) => (
                     <View key={m.label} style={styles.macroCell}>
                       <View style={[styles.macroDot, { backgroundColor: m.color }]} />

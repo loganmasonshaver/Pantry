@@ -14,4 +14,10 @@ export const COLORS = {
   tabInactive: '#AAAAAA',     // Inactive tab icon color
   cardElevated: '#1f1f1f',    // Elevated card variant — slightly lighter than cardDark
   trackDark: 'rgba(255,255,255,0.08)', // Progress/slider track fill on dark surfaces
+  // Canonical MACRO colors — use these EVERYWHERE a macro is shown so the whole app matches.
+  // (Calories = textWhite; prep time = macroPrep amber, kept distinct from every macro.)
+  macroProtein: '#4ADE80',    // green
+  macroCarbs: '#60A5FA',      // blue
+  macroFat: '#A78BFA',        // purple
+  macroPrep: '#F59E0B',       // amber — prep time only, NOT a macro
 } as const

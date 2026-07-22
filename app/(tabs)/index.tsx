@@ -979,11 +979,11 @@ export default function HomeScreen() {
             {/* Default compact = Protein only, shown emphasized (thicker bar +
                 bigger text). When expanded to all 3, protein drops back to
                 standard size so there's no glitchy size delta between bars. */}
-            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color="#4ADE80" emphasized={!macrosExpanded} />
+            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized={!macrosExpanded} />
             {macrosExpanded && (
               <>
-                <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color="#F59E0B" />
-                <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color="#60A5FA" />
+                <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
+                <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
               </>
             )}
             <TouchableOpacity

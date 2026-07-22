@@ -104,9 +104,9 @@ export default function MacroEditModal({
 
   const fields = [
     { label: 'Calories', value: calories, onChange: setCalories, unit: 'kcal', color: '#FFFFFF' },
-    { label: 'Protein',  value: protein,  onChange: setProtein,  unit: 'g',    color: '#4ADE80' },
-    { label: 'Carbs',    value: carbs,    onChange: setCarbs,    unit: 'g',    color: '#F59E0B' },
-    { label: 'Fat',      value: fat,      onChange: setFat,      unit: 'g',    color: '#60A5FA' },
+    { label: 'Protein',  value: protein,  onChange: setProtein,  unit: 'g',    color: COLORS.macroProtein },
+    { label: 'Carbs',    value: carbs,    onChange: setCarbs,    unit: 'g',    color: COLORS.macroCarbs },
+    { label: 'Fat',      value: fat,      onChange: setFat,      unit: 'g',    color: COLORS.macroFat },
   ]
 
   return (

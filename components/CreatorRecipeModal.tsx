@@ -525,10 +525,10 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
                 {/* Macro bar */}
                 <View style={s.macroBar}>
                   {[
-                    { label: 'KCAL', value: calories, set: setCalories, color: '#4ADE80' },
-                    { label: 'PROTEIN', value: protein, set: setProtein, color: '#fff' },
-                    { label: 'CARBS', value: carbs, set: setCarbs, color: '#F59E0B' },
-                    { label: 'FAT', value: fat, set: setFat, color: '#60A5FA' },
+                    { label: 'KCAL', value: calories, set: setCalories, color: '#fff' },
+                    { label: 'PROTEIN', value: protein, set: setProtein, color: '#4ADE80' },
+                    { label: 'CARBS', value: carbs, set: setCarbs, color: '#60A5FA' },
+                    { label: 'FAT', value: fat, set: setFat, color: '#A78BFA' },
                   ].map(({ label, value, set, color }) => (
                     <View key={label} style={s.macroCell}>
                       <TextInput

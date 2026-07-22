@@ -902,8 +902,8 @@ export default function MealDetailScreen() {
           <View style={styles.mealMetaRow}>
             {meal.prepTime != null && meal.prepTime > 0 && (
               <View style={styles.mealMetaPill}>
-                <Clock size={14} stroke="#F59E0B" strokeWidth={2} />
-                <Text style={[styles.mealMetaPillText, { color: '#F59E0B' }]}>{meal.prepTime} min</Text>
+                <Clock size={14} stroke={COLORS.macroPrep} strokeWidth={2} />
+                <Text style={[styles.mealMetaPillText, { color: COLORS.macroPrep }]}>{meal.prepTime} min</Text>
               </View>
             )}
             <View style={{ flex: 1 }} />
@@ -994,9 +994,9 @@ export default function MealDetailScreen() {
                 // Color-coded to match the Discover pills: cals white, protein green, prep amber;
                 // carbs blue, fat violet added here.
                 { label: 'Kcal',    value: String(correctedCal), color: COLORS.textWhite },
-                { label: 'Protein', value: `${meal.protein}g`,    color: '#4ADE80' },
-                { label: 'Carbs',   value: `${meal.carbs}g`,      color: '#60A5FA' },
-                { label: 'Fat',     value: `${meal.fat}g`,        color: '#A78BFA' },
+                { label: 'Protein', value: `${meal.protein}g`,    color: COLORS.macroProtein },
+                { label: 'Carbs',   value: `${meal.carbs}g`,      color: COLORS.macroCarbs },
+                { label: 'Fat',     value: `${meal.fat}g`,        color: COLORS.macroFat },
               ].map((stat, i, arr) => (
                 <View key={stat.label} style={[styles.macroStat, i < arr.length - 1 && styles.macroStatBorder]}>
                   <Text style={[styles.macroValue, { color: stat.color }]}>{stat.value}</Text>

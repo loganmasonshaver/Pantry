@@ -386,9 +386,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
                   // Build ring segments — only include macros > 0
                   const segments = [
-                    { pct: proteinPct, color: '#4ADE80' },
-                    { pct: carbsPct, color: '#F59E0B' },
-                    { pct: fatPct, color: '#60A5FA' },
+                    { pct: proteinPct, color: COLORS.macroProtein },
+                    { pct: carbsPct, color: COLORS.macroCarbs },
+                    { pct: fatPct, color: COLORS.macroFat },
                   ].filter(s => s.pct > 0.01)
                   // 4-degree visual gap between ring segments
                   const gapDeg = segments.length > 1 ? 4 : 0 // 4 degree gap
@@ -428,9 +428,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                       {/* Macro legend */}
                       <View style={styles.macroLegend}>
                         {[
-                          { label: 'Protein', pct: proteinPct, color: '#4ADE80' },
-                          { label: 'Carbs', pct: carbsPct, color: '#F59E0B' },
-                          { label: 'Fat', pct: fatPct, color: '#60A5FA' },
+                          { label: 'Protein', pct: proteinPct, color: COLORS.macroProtein },
+                          { label: 'Carbs', pct: carbsPct, color: COLORS.macroCarbs },
+                          { label: 'Fat', pct: fatPct, color: COLORS.macroFat },
                         ].filter(l => l.pct > 0.01).map(l => (
                           <View key={l.label} style={styles.macroLegendItem}>
                             <View style={[styles.macroLegendDot, { backgroundColor: l.color }]} />
@@ -442,9 +442,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                       {/* Macro cards */}
                       <View style={styles.macroGrid}>
                         {[
-                          { label: 'PROTEIN', value: m.protein, unit: 'g', color: '#4ADE80' },
-                          { label: 'CARBS',   value: m.carbs,   unit: 'g', color: '#F59E0B' },
-                          { label: 'FAT',     value: m.fat,     unit: 'g', color: '#60A5FA' },
+                          { label: 'PROTEIN', value: m.protein, unit: 'g', color: COLORS.macroProtein },
+                          { label: 'CARBS',   value: m.carbs,   unit: 'g', color: COLORS.macroCarbs },
+                          { label: 'FAT',     value: m.fat,     unit: 'g', color: COLORS.macroFat },
                           { label: 'FIBER',   value: Math.round(Number(selectedServing.fiber || 0) * qty), unit: 'g', color: COLORS.textMuted },
                         ].map(macro => (
                           <View key={macro.label} style={styles.macroCell}>

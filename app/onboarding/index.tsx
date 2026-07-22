@@ -2729,7 +2729,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
               </View>
               <View style={{ gap: 12, alignItems: 'center', paddingLeft: 4 }}>
                 <PlanRing value={cals} label="KCAL/DAY" color={TEAL} delay={400} />
-                <PlanRing value={prot} unit="g" label="PROTEIN" color="#60A5FA" delay={600} />
+                <PlanRing value={prot} unit="g" label="PROTEIN" color="#4ADE80" delay={600} />
               </View>
             </View>
           </View>

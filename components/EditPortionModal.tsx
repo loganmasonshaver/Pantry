@@ -182,9 +182,9 @@ export default function EditPortionModal({
                   <View style={styles.macroGrid}>
                     {[
                       { label: 'Calories', value: liveMacros.calories, unit: 'kcal', color: '#FFFFFF' },
-                      { label: 'Protein',  value: liveMacros.protein,  unit: 'g',    color: '#4ADE80' },
-                      { label: 'Carbs',    value: liveMacros.carbs,    unit: 'g',    color: '#F59E0B' },
-                      { label: 'Fat',      value: liveMacros.fat,      unit: 'g',    color: '#60A5FA' },
+                      { label: 'Protein',  value: liveMacros.protein,  unit: 'g',    color: COLORS.macroProtein },
+                      { label: 'Carbs',    value: liveMacros.carbs,    unit: 'g',    color: COLORS.macroCarbs },
+                      { label: 'Fat',      value: liveMacros.fat,      unit: 'g',    color: COLORS.macroFat },
                     ].map(m => (
                       <View key={m.label} style={styles.macroCell}>
                         <View style={[styles.macroDot, { backgroundColor: m.color }]} />
