@@ -15,7 +15,10 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 // use case. Resets at midnight because cache is keyed by date.
 const MAX_DAILY_REGENS = 1
 
-type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number; regenCount?: number }
+// userId stamps ownership so the cache survives sign-out (restored for the same user on
+// re-login) without leaking to a different account on a shared device — reads that don't match
+// the current user are treated as a miss. Absent userId = legacy/onboarding write, accepted.
+type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number; regenCount?: number; userId?: string }
 
 // Local-timezone date string. Previously this used toISOString() which is UTC,
 // so reloading the app after ~7pm CT (00:00 UTC) treated cached meals as
@@ -162,7 +165,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes,
       // and regenCount to track how many manual refreshes have been used today (cap enforced in regenerate()).
       const maxPrep = profile?.max_prep_minutes || 30
-      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current }))
+      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
 
       // Append new meal names to the recent-meals list (keep last 12 names, ~3-4 gens) so
       // future generations can exclude them and feel fresh between regens.
@@ -190,7 +193,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             })
           }
         }))
-        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current }))
+        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
       })()
 
       return generated
@@ -217,8 +220,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
-          // Old cache format has no maxPrepMinutes — treat as miss so it regenerates with correct prep constraint
-          if (cached.maxPrepMinutes === undefined) {
+          // Cache belongs to a different account on this device — don't serve it; regenerate.
+          if (cached.userId && cached.userId !== userId) {
+            await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+          } else if (cached.maxPrepMinutes === undefined) {
+            // Old cache format has no maxPrepMinutes — treat as miss so it regenerates with correct prep constraint
             await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
           } else if (cached.date === todayStr() && cached.meals.length > 0) {
             const validMeals = cached.meals.filter(m => !m.prepTime || Number(m.prepTime) <= cached.maxPrepMinutes!)
@@ -244,7 +250,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                       })
                     }
                   }))
-                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, regenCount: cached.regenCount ?? 0 }))
+                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, regenCount: cached.regenCount ?? 0, userId }))
                 })()
               }
               return
@@ -298,8 +304,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
-        // Invalidate if no maxPrepMinutes stored (old cache format) — forces regeneration with correct prep constraint
-        if (cached.maxPrepMinutes === undefined) {
+        // Cache belongs to a different account on this device — don't serve it; regenerate.
+        if (cached.userId && cached.userId !== userId) {
+          await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+        } else if (cached.maxPrepMinutes === undefined) {
+          // Invalidate if no maxPrepMinutes stored (old cache format) — forces regeneration with correct prep constraint
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         } else if (cached.date === todayStr() && cached.meals.length > 0) {
           // Filter out any meals that somehow slipped past the prep cap
@@ -325,7 +334,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                     })
                   }
                 }))
-                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, regenCount: cached.regenCount ?? 0 }))
+                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, regenCount: cached.regenCount ?? 0, userId }))
               })()
             }
             return

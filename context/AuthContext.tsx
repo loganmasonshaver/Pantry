@@ -208,12 +208,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     // Clear the local flag that gates post-OTP screens before ending the Supabase session.
-    // Also wipe the per-device meal + image caches — these aren't user-scoped, so on a
-    // shared device the next person to sign in would otherwise see the prior user's meals.
+    // NOTE: the daily meal cache is deliberately NOT wiped here — doing so lost the user's own
+    // meals on every sign-out, forcing a regenerate that burned their daily server cap. The cache
+    // is now stamped with userId and ownership is checked on read (see useMealSuggestions), so a
+    // different account on a shared device regenerates instead of seeing the prior user's meals.
+    // Image URLs + recent-name lists are still cleared: they're a shared/global cache and a tiny
+    // dedupe list, not the user's meals, so clearing them costs nothing and avoids cross-user bleed.
     await AsyncStorage.multiRemove([
       'otp_verified',
-      'pantry_daily_meals_cookNow',
-      'pantry_daily_meals_mealPlan',
       'pantry_image_urls_v1',
       'pantry_recent_meal_names_cookNow',
       'pantry_recent_meal_names_mealPlan',

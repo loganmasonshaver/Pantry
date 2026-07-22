@@ -96,7 +96,8 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     if (!generated || generated.length === 0) return null
 
     // Write the exact cache shape the hook serves from (text only — images filled in on reveal).
-    await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: 0 }))
+    // userId stamps ownership so the cache survives sign-out for this user (see useMealSuggestions).
+    await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: 0, userId }))
     try {
       const merged = [...generated.map(m => m.name).filter(Boolean), ...recentMealNames].slice(0, 12)
       await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
