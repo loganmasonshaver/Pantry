@@ -271,7 +271,9 @@ export function buildInsight(
 
   // Nothing to flag → reward a well-rounded pantry (affirmation never rotates: no gaps to cycle).
   if (gaps.length === 0) {
-    return { headline: `Your pantry's dialed in for ${goalPhrase(goal)} 💪`, detail: 'Solid mix of protein, produce, and fats. Scan or add items anytime.', suggestedItems: [], tone: 'affirm', coverage }
+    // Detail intentionally restates nothing the coverage chips already show — the UI hides it in
+    // the affirm state so the chips carry the message (kept here for any non-chip consumer).
+    return { headline: `Dialed in for ${goalPhrase(goal)} 💪`, detail: 'Solid mix of protein, produce, and fats.', suggestedItems: [], tone: 'affirm', coverage }
   }
   // Rotate among the top 3 gaps only — keeps the rotation on the highest-severity items, never
   // surfacing a minor nudge while a foundational gap sits lower in the pool. Modulo is written to

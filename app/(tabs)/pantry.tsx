@@ -602,19 +602,25 @@ export default function PantryScreen() {
                   style={[styles.heroBannerImage, { opacity: totalItems >= 25 ? 0.6 : totalItems > 0 ? 0.45 : 0.35 }]}
                   resizeMode="cover"
                 />
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)', '#000000']} locations={[0.2, 0.7, 1]} style={styles.heroBannerGradient} />
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)', '#000000']} locations={[0, 0.45, 0.8, 1]} style={styles.heroBannerGradient} />
                 <View style={styles.heroBannerContent}>
                   <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'affirm' ? 'PANTRY CHECK' : pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
-                  <Text style={styles.heroInsightHeadline}>{pantryInsight.headline}</Text>
-                  <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
+                  <Text style={styles.heroInsightHeadline} numberOfLines={2}>{pantryInsight.headline}</Text>
+                  {/* Detail is hidden in the affirm state — the coverage chips below already say
+                      "protein/produce/fats are covered", so the sentence would just duplicate them.
+                      Gap/empty states keep it: there it explains the WHY and pairs with the CTA. */}
+                  {pantryInsight.tone !== 'affirm' && (
+                    <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
+                  )}
                   {/* Pantry Check strip — at-a-glance macro coverage (Step C). ✓ = stocked, ! = gap
-                      for this goal. Complements the headline (which names only the top gap). */}
+                      for this goal. In the affirm state this IS the content; in gap states it's the
+                      supporting overview under the headline+detail. */}
                   {pantryInsight.coverage.length > 0 && (
                     <View style={styles.coverageStrip}>
                       {pantryInsight.coverage.map(c => (
-                        <View key={c.label} style={styles.coverageChip}>
+                        <View key={c.label} style={[styles.coverageChip, !c.ok && styles.coverageChipWarn]}>
                           <Text style={[styles.coverageMark, { color: c.ok ? COLORS.macroProtein : COLORS.macroPrep }]}>{c.ok ? '✓' : '!'}</Text>
-                          <Text style={styles.coverageLabel}>{c.label}</Text>
+                          <Text style={[styles.coverageLabel, !c.ok && styles.coverageLabelWarn]}>{c.label}</Text>
                         </View>
                       ))}
                     </View>
@@ -1008,7 +1014,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 120,
+    height: 180, // tall enough to keep the taller gap-state stack (headline+detail+chips+CTA) on dark
   },
   heroBannerContent: {
     position: 'absolute',
@@ -1025,11 +1031,12 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   heroInsightHeadline: {
-    fontSize: 21,
+    fontSize: 19,
     fontWeight: '800',
     color: COLORS.textWhite,
-    letterSpacing: -0.4,
-    marginBottom: 4,
+    letterSpacing: -0.3,
+    lineHeight: 23,
+    marginBottom: 5,
   },
   heroInsightDetail: {
     fontSize: 12.5,
@@ -1040,8 +1047,8 @@ const styles = StyleSheet.create({
   coverageStrip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 10,
+    gap: 7,
+    marginTop: 11,
   },
   coverageChip: {
     flexDirection: 'row',
@@ -1049,8 +1056,15 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: 'rgba(255,255,255,0.08)', // subtle glass pill over the hero image
     borderRadius: 30,
-    paddingVertical: 4,
-    paddingHorizontal: 9,
+    paddingVertical: 4.5,
+    paddingHorizontal: 10,
+  },
+  // Gap chips get an amber tint + hairline so the eye lands on what's missing; ok chips stay quiet.
+  coverageChipWarn: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.4)',
+    paddingHorizontal: 9, // compensate for the added border so warn/ok chips read the same size
   },
   coverageMark: {
     fontSize: 11,
@@ -1060,6 +1074,9 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontWeight: '600',
     color: 'rgba(255,255,255,0.85)',
+  },
+  coverageLabelWarn: {
+    color: '#FDE68A', // warm off-white so the gap label reads a touch brighter than the ok labels
   },
   heroInsightCta: {
     alignSelf: 'flex-start',
