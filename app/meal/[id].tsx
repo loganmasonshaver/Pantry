@@ -568,33 +568,9 @@ export default function MealDetailScreen() {
     if (addedToGrocery.has(ingredientName)) removeFromGrocery(ingredientName)
     else addToGrocery(ingredientName)
   }
-
-  const addToPantry = async (ingredientName: string) => {
-    if (!user) return
-    setPantryNames(prev => { const n = new Set(prev); n.add(ingredientName.toLowerCase()); return n })
-    const { data: existing } = await supabase.from('pantry_items').select('id').eq('user_id', user.id).ilike('name', ingredientName).limit(1)
-    if (existing && existing.length > 0) {
-      await supabase.from('pantry_items').update({ in_stock: true }).eq('id', existing[0].id)
-    } else {
-      const category = await categorizeItem(ingredientName)
-      await supabase.from('pantry_items').insert({ user_id: user.id, name: ingredientName, category, in_stock: true })
-    }
-  }
-
-  const removeFromPantry = async (ingredientName: string) => {
-    if (!user) return
-    setPantryNames(prev => { const n = new Set(prev); n.delete(ingredientName.toLowerCase()); return n })
-    // Escape LIKE metacharacters so a name like "100% juice" matches literally instead of
-    // letting the % act as a wildcard that marks unrelated pantry rows out of stock.
-    const safe = ingredientName.replace(/[%_\\]/g, '\\$&')
-    await supabase.from('pantry_items').update({ in_stock: false }).eq('user_id', user.id).ilike('name', safe)
-  }
-
-  const toggleHaveIt = (ingredientName: string) => {
-    const inPantry = pantryNames.has(ingredientName.toLowerCase())
-    if (inPantry) removeFromPantry(ingredientName)
-    else addToPantry(ingredientName)
-  }
+  // Pantry edits (add/remove in_stock) used to happen via a whole-row tap here, but that
+  // silently wrote to pantry_items on a stray tap while the user was trying to add to grocery.
+  // Pantry corrections now live in the Pantry tab; this screen only shops + the basics opt-out.
 
   // Fallback DB lookup: when callers route via `{ id }` only (e.g. the home
   // "Your plan is ready" card), fetch the full row from saved_meals so we can
@@ -1084,9 +1060,12 @@ export default function MealDetailScreen() {
             const basicRows = meal.ingredients.filter(isBasic)
             const needRows = meal.ingredients.filter(i => !inPantry(i) && !isBasic(i))
 
-            // Renders one ingredient row with section-aware styling and a single primary action.
-            // Long-press toggles pantry membership — moves the row between NEED and HAVE so the
-            // user can override the AI when it misclassifies (e.g. "actually I do have feta").
+            // Renders one ingredient row. Tap does ONE thing per section, and never writes to
+            // the pantry by accident (the old whole-row "I have this" tap silently inserted
+            // pantry_items on a mis-tap):
+            //   NEED  → add/remove this item to the grocery list (the screen's whole job)
+            //   BASIC → "I don't keep this" staple opt-out (low-stakes preference write)
+            //   HAVE  → read-only; you already have it. Pantry corrections live in the Pantry tab.
             const renderRow = (ing: any, kind: 'need' | 'have' | 'basic') => {
               // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
               // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
@@ -1100,14 +1079,19 @@ export default function MealDetailScreen() {
               const isAdded = addedToGrocery.has(ing.name)
               // 'have' (in pantry) and 'basic' (assumed) both render muted vs the actionable NEED rows.
               const isHaveRow = kind !== 'need'
+              // NEED taps toggle the grocery list; BASIC taps the staple opt-out (fires its own
+              // Light haptic, so no `haptic` prop for it); HAVE is inert (disabled → no press feel).
+              const onRowPress =
+                kind === 'need' ? () => toggleGrocery(ing.name)
+                : kind === 'basic' ? () => excludeStaple(ing.name)
+                : undefined
               return (
                 <PressableScale
                   key={ing.id}
                   style={[styles.ingredientRow, isHaveRow && styles.ingredientRowHave]}
-                  // NEED/HAVE rows toggle pantry membership; a BASIC (assumed) row taps to
-                  // "I don't keep this" → persists the opt-out and drops it into YOU'LL NEED.
-                  // (excludeStaple fires its own Light haptic, so no `haptic` prop here — avoids double-tap.)
-                  onPress={() => (kind === 'basic' ? excludeStaple(ing.name) : toggleHaveIt(ing.name))}
+                  onPress={onRowPress}
+                  disabled={!onRowPress}
+                  haptic={kind === 'need'}
                 >
                   {/* Bullet dot replaces the per-ingredient thumbnail. AI-generated thumbs
                       had a ~5-10% misgeneration rate (wrong food shown) — every comparable
@@ -1129,13 +1113,9 @@ export default function MealDetailScreen() {
                       <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
                     </View>
                   ) : kind === 'basic' ? null : (
-                    // NEED row: single + button that flips to ✓ once added to grocery list
-                    <PressableScale
-                      style={[styles.addToGroceryBtn, isAdded && styles.addToGroceryBtnAdded]}
-                      onPress={() => toggleGrocery(ing.name)}
-                      haptic
-                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                    >
+                    // NEED +/✓ is now a NON-interactive state glyph — the whole row is the tap
+                    // target, so this just mirrors whether the item is on the grocery list.
+                    <View style={[styles.addToGroceryBtn, isAdded && styles.addToGroceryBtnAdded]}>
                       {isAdded ? (
                         // White check on solid teal — high contrast, signals "done"
                         <Check size={16} stroke="#fff" strokeWidth={2.8} />
@@ -1144,7 +1124,7 @@ export default function MealDetailScreen() {
                         // competing with the white bulk CTA pill.
                         <Plus size={18} stroke={COLORS.accent} strokeWidth={2.6} />
                       )}
-                    </PressableScale>
+                    </View>
                   )}
                 </PressableScale>
               )
@@ -1158,6 +1138,8 @@ export default function MealDetailScreen() {
                     <View style={styles.ingredientList}>
                       {needRows.map(ing => renderRow(ing, 'need'))}
                     </View>
+                    {/* Teaches that the whole row is tappable — the +/✓ is now just a status glyph. */}
+                    <Text style={styles.ingredientHint}>Tap an item to add it to your grocery list.</Text>
                   </>
                 )}
                 {haveRows.length > 0 && (
@@ -1177,10 +1159,6 @@ export default function MealDetailScreen() {
                     </View>
                     <Text style={styles.ingredientHint}>Basics most kitchens keep — tap any you don't have and we'll stop assuming it.</Text>
                   </>
-                )}
-                {/* Swap hint only when there are have+need rows to move between */}
-                {needRows.length > 0 && haveRows.length > 0 && (
-                  <Text style={styles.ingredientHint}>Tap a row to move it between sections</Text>
                 )}
               </>
             )
