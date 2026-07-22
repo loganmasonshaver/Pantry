@@ -5,7 +5,7 @@ import Animated, {
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withDelay,
   Easing, cancelAnimation,
 } from 'react-native-reanimated'
-import { Check } from 'lucide-react-native'
+import { Check, UtensilsCrossed } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 
 // Native replacement for the old 25s onboarding-preview.mov. Composing the demo out of real
@@ -20,16 +20,20 @@ const PHONE_H = PHONE_W * (19.5 / 9)
 // MAGIC leads (detection) rather than the setup; the old cut buried the best moments past 15s.
 const BEATS = [
   { id: 'scan', headline: 'Point your camera\nat the shelf', ms: 2600 },
-  { id: 'detect', headline: 'AI finds everything\nyou have', ms: 3400 },
+  { id: 'detect', headline: 'AI finds everything\nyou have', ms: 3800 },
   { id: 'meals', headline: 'Meals built around\nyour macros', ms: 3200 },
   { id: 'log', headline: 'Logged in one tap', ms: 2400 },
 ] as const
 
-const DETECTED = ['Chicken thigh', 'Greek yogurt', 'Brown rice', 'Spinach', 'Eggs', 'Olive oil']
+// Real items visible in the bundled fridge photo — keep these in sync with onboarding-fridge.jpg
+// so the "AI finds everything" beat is an honest depiction of a scan of THIS shelf.
+const DETECTED = ['Egg whites', 'Greek yogurt', 'Cottage cheese', 'Ground beef', 'Eggs', 'Peanut butter', 'Salsa', 'Oat milk', 'Maple syrup']
 
+// Meals built from the detected items above — this is what the app would actually suggest.
 const MEALS = [
-  { name: 'Garlic Chicken & Rice', kcal: 620, protein: 48, tint: '#3A2A1E' },
-  { name: 'Yogurt Protein Bowl', kcal: 410, protein: 32, tint: '#1E2A33' },
+  { name: 'Beef & Salsa Rice Bowl', kcal: 560, protein: 44 },
+  { name: 'Egg White Veggie Scramble', kcal: 320, protein: 31 },
+  { name: 'PB & Greek Yogurt Bowl', kcal: 400, protein: 28 },
 ]
 
 // ── Beat 1: camera viewfinder with a sweeping scan line ────────────────────────
@@ -45,7 +49,7 @@ function BeatScan() {
 
   return (
     <View style={st.beat}>
-      <Image source={require('../assets/scan-prep/do.jpg')} style={st.camImage} resizeMode="cover" />
+      <Image source={require('../assets/onboarding-fridge.jpg')} style={st.camImage} resizeMode="cover" />
       <View style={st.camScrim} />
       {/* Framing brackets — reads instantly as "camera", no chrome needed */}
       <View style={[st.bracket, { top: '18%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0 }]} />
@@ -61,8 +65,8 @@ function BeatScan() {
 function BeatDetect() {
   const [n, setN] = useState(0)
   useEffect(() => {
-    // Chips land every 380ms; the counter tracks them so the number feels *earned*.
-    const timers = DETECTED.map((_, i) => setTimeout(() => setN(i + 1), 300 + i * 380))
+    // Chips land in a quick cascade; the counter tracks them so the number feels *earned*.
+    const timers = DETECTED.map((_, i) => setTimeout(() => setN(i + 1), 250 + i * 300))
     return () => timers.forEach(clearTimeout)
   }, [])
 
@@ -76,7 +80,7 @@ function BeatDetect() {
         {DETECTED.map((item, i) => (
           <Animated.View
             key={item}
-            entering={FadeInDown.duration(260).delay(300 + i * 380)}
+            entering={FadeInDown.duration(240).delay(250 + i * 300)}
             style={st.chip}
           >
             <View style={st.chipDot} />
@@ -95,7 +99,9 @@ function BeatMeals() {
       <Animated.Text entering={FadeIn.duration(260)} style={st.beatKicker}>TONIGHT</Animated.Text>
       {MEALS.map((m, i) => (
         <Animated.View key={m.name} entering={FadeInDown.duration(300).delay(180 + i * 220)} style={st.mealCard}>
-          <View style={[st.mealThumb, { backgroundColor: m.tint }]} />
+          <View style={st.mealThumb}>
+            <UtensilsCrossed size={17} stroke="#4A4A4A" strokeWidth={1.8} />
+          </View>
           <View style={{ flex: 1 }}>
             <Text style={st.mealName} numberOfLines={1}>{m.name}</Text>
             <View style={st.macroRow}>
@@ -121,7 +127,7 @@ function BeatLog() {
         <Check size={44} stroke="#000000" strokeWidth={3.5} />
       </Animated.View>
       <Animated.Text entering={FadeInDown.duration(320).delay(160)} style={st.logText}>Logged</Animated.Text>
-      <Animated.Text entering={FadeIn.duration(320).delay(300)} style={st.logSub}>620 cal · 48g protein</Animated.Text>
+      <Animated.Text entering={FadeIn.duration(320).delay(300)} style={st.logSub}>560 cal · 44g protein</Animated.Text>
     </View>
   )
 }
@@ -239,7 +245,7 @@ const st = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: '#141414', borderRadius: 14, padding: 10, marginBottom: 8,
   },
-  mealThumb: { width: 42, height: 42, borderRadius: 10 },
+  mealThumb: { width: 42, height: 42, borderRadius: 10, backgroundColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center' },
   mealName: { fontSize: 12, fontWeight: '700', color: COLORS.textWhite },
   macroRow: { flexDirection: 'row', gap: 5, marginTop: 5 },
   macroPill: { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 30, paddingVertical: 3, paddingHorizontal: 7 },
