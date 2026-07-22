@@ -14,11 +14,15 @@ export type PantryItem = { name: string; category?: string | null }
 export type FitnessGoal = 'lose' | 'maintain' | 'gain'
 export type DietType = 'Classic' | 'Pescatarian' | 'Vegetarian' | 'Vegan'
 
+// One cell of the "Pantry Check" coverage strip. `ok=false` renders as a ⚠ chip.
+export type CoverageItem = { label: string; ok: boolean }
+
 export type Insight = {
   headline: string
   detail: string
   suggestedItems: string[] // diet-safe grocery suggestions for the "Add to grocery" CTA
   tone: 'gap' | 'affirm' | 'empty'
+  coverage: CoverageItem[] // at-a-glance macro-group scorecard (Protein/Produce/Carbs/Fats)
 }
 
 // ── keyword sets (lowercased, word-boundary matched) ───────────────────────────
@@ -161,6 +165,28 @@ function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[],
 
 const goalPhrase = (g: FitnessGoal) => g === 'lose' ? 'your cut' : g === 'gain' ? 'building muscle' : 'your recomp'
 
+// ── coverage scorecard (Step C) ─────────────────────────────────────────────────
+// The four macro groups as an at-a-glance strip. Each cell's `ok` MIRRORS the engine's own gap
+// gates, so a group reads ⚠ exactly when a gap-tier would fire for it — the headline names the top
+// gap, the strip shows the whole picture. Goal-weighted two ways:
+//   • Carbs: a cutter deliberately keeps carbs low, so Carbs never shows ⚠ on a cut (non-shaming);
+//     maintain/gain need complex carbs, so it reflects the real gap there.
+//   • Order: most-weighted group first for the goal, so the eye lands where it matters.
+function computeCoverage(p: PantryProfile, goal: FitnessGoal, diet: DietType): CoverageItem[] {
+  const cells: Record<string, CoverageItem> = {
+    Protein: { label: 'Protein', ok: dietSafeProteinPresent(p, diet) },
+    Produce: { label: 'Produce', ok: p.produceCount >= 2 }, // matches the produce gap threshold
+    Carbs:   { label: 'Carbs',   ok: goal === 'lose' ? true : p.hasComplexCarb },
+    Fats:    { label: 'Fats',    ok: p.hasHealthyFat },
+  }
+  const order: Record<FitnessGoal, string[]> = {
+    lose:     ['Protein', 'Produce', 'Fats', 'Carbs'],
+    gain:     ['Protein', 'Carbs', 'Produce', 'Fats'],
+    maintain: ['Protein', 'Produce', 'Carbs', 'Fats'],
+  }
+  return order[goal].map(label => cells[label])
+}
+
 // ── the rule engine (§6 + §13 order) ───────────────────────────────────────────
 export function buildInsight(
   items: PantryItem[],
@@ -173,7 +199,7 @@ export function buildInsight(
   maxPrepMinutes: number | null = null,
 ): Insight {
   if (!items.length) {
-    return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty' }
+    return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty', coverage: [] }
   }
   const goal: FitnessGoal = fitnessGoal ?? 'maintain'   // safe defaults for legacy/incomplete profiles
   const diet: DietType = dietType ?? 'Classic'
@@ -182,6 +208,11 @@ export function buildInsight(
   const p = buildPantryProfile(items)
   const have = new Set(items.map(i => (i.name || '').toLowerCase()))
   const pick = (pool: Sugg[]) => filterSuggestions(pool, diet, restrictions, dislikes, have, cuisinePrefs, lowEffort)
+
+  // Coverage is the same for whichever tier fires (it's a function of the pantry, not the headline),
+  // so compute it once and attach to the selected insight — keeps the tier returns unchanged.
+  const coverage = computeCoverage(p, goal, diet)
+  const base = ((): Omit<Insight, 'coverage'> => {
 
   // Tier 1 — foundational. Protein-absence before produce (can't build a meal without protein),
   // then produce/fiber (the #1 real gap for most people). Threshold < 2 so a stocked pantry
@@ -217,4 +248,6 @@ export function buildInsight(
 
   // Tier 4 — nothing to flag: reward a well-rounded pantry.
   return { headline: `Your pantry's dialed in for ${goalPhrase(goal)} 💪`, detail: 'Solid mix of protein, produce, and fats. Scan or add items anytime.', suggestedItems: [], tone: 'affirm' }
+  })()
+  return { ...base, coverage }
 }

@@ -579,6 +579,18 @@ export default function PantryScreen() {
                   <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'affirm' ? 'PANTRY CHECK' : pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
                   <Text style={styles.heroInsightHeadline}>{pantryInsight.headline}</Text>
                   <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
+                  {/* Pantry Check strip — at-a-glance macro coverage (Step C). ✓ = stocked, ! = gap
+                      for this goal. Complements the headline (which names only the top gap). */}
+                  {pantryInsight.coverage.length > 0 && (
+                    <View style={styles.coverageStrip}>
+                      {pantryInsight.coverage.map(c => (
+                        <View key={c.label} style={styles.coverageChip}>
+                          <Text style={[styles.coverageMark, { color: c.ok ? COLORS.macroProtein : COLORS.macroPrep }]}>{c.ok ? '✓' : '!'}</Text>
+                          <Text style={styles.coverageLabel}>{c.label}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                   {pantryInsight.suggestedItems.length > 0 && (
                     <PressableScale style={styles.heroInsightCta} onPress={addInsightToGrocery} haptic disabled={insightAdded}>
                       <Text style={styles.heroInsightCtaText}>
@@ -996,6 +1008,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: 'rgba(255,255,255,0.72)',
     lineHeight: 17,
+  },
+  coverageStrip: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+  },
+  coverageChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)', // subtle glass pill over the hero image
+    borderRadius: 30,
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+  },
+  coverageMark: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  coverageLabel: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
   },
   heroInsightCta: {
     alignSelf: 'flex-start',
