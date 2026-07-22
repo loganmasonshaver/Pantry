@@ -8,20 +8,31 @@ const GREEN = '#4ADE80'
 const SWEEP_MS = 950            // one pass of the scan line (top→bottom or back)
 const PHOTO_MS = SWEEP_MS * 4   // ~two full down-up sweeps over a photo before advancing to the next
 // Ordered as a natural read→identify→sort→build arc so the rotation still reads like progress even
-// though it cycles. Kept long (≈26s for a full loop at 2.4s each) so a typical scan rarely repeats
-// a line. Honest to what the scan actually does; no emoji (matches the app's clean voice).
+// though it cycles. Long list at a calm 3s pace (≈66s for a full loop) so even a slow multi-photo
+// scan makes roughly ONE pass instead of looping 3×. Honest to what the scan does; no emoji.
 const STATUS = [
   'Reading your shelves',
-  'Spotting jars, bottles, and bags',
+  'Scanning each shelf',
+  'Spotting jars and bottles',
+  'Checking the door shelves',
+  'Looking behind the front row',
+  'Checking the back rows',
   'Decoding labels',
   'Reading the fine print',
-  'Checking the back rows',
   'Identifying each item',
   'Telling similar items apart',
+  'Recognizing brands and sizes',
+  'Spotting the fresh produce',
+  'Catching the condiments',
+  'Noting the leftovers',
   'Sorting into categories',
+  'Grouping your staples',
+  'Cross-checking for doubles',
   'Counting what you’ve got',
   'Matching items to meals',
+  'Finding what you can cook',
   'Building your pantry list',
+  'Almost done',
 ]
 
 type Photo = { uri?: string; label?: string }
@@ -51,7 +62,7 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel }: {
   // Continuous up/down scan line + rotating status copy.
   useEffect(() => {
     sweep.value = withRepeat(withTiming(1, { duration: SWEEP_MS, easing: Easing.inOut(Easing.quad) }), -1, true)
-    const s = setInterval(() => setStatusIdx(i => (i + 1) % STATUS.length), 2400)
+    const s = setInterval(() => setStatusIdx(i => (i + 1) % STATUS.length), 3000)
     return () => { cancelAnimation(sweep); clearInterval(s) }
   }, [])
 
