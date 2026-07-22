@@ -32,6 +32,7 @@ import { supabase } from '@/lib/supabase'
 import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
+import { buildInsight, type FitnessGoal, type DietType } from '@/lib/pantryProfile'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
@@ -267,14 +268,41 @@ export default function PantryScreen() {
   // Mirrors meal-detail so an exclusion made there is honored in the Cook Tonight NEED
   // list here — otherwise the two surfaces disagree on what counts as a basic.
   const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
+  // Goal/diet fields for the personalized pantry insight (see lib/pantryProfile + PLAN.md).
+  const [insightProfile, setInsightProfile] = useState<{ goal: FitnessGoal | null; diet: DietType | null; restrictions: string[]; dislikes: string[] } | null>(null)
   useEffect(() => {
     if (!user) return
-    supabase.from('profiles').select('staples_excluded, dietary_restrictions').eq('id', user.id).single()
+    supabase.from('profiles').select('staples_excluded, dietary_restrictions, fitness_goal, diet_type, food_dislikes').eq('id', user.id).single()
       .then(({ data }) => {
         const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
         setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
+        setInsightProfile({
+          goal: (data?.fitness_goal as FitnessGoal) ?? null,
+          diet: (data?.diet_type as DietType) ?? null,
+          restrictions: data?.dietary_restrictions ?? [],
+          dislikes: data?.food_dislikes ?? [],
+        })
       })
   }, [user])
+
+  // Personalized "what to stock next" insight — replaces the old item-count "Stock Level".
+  // In-stock items only; keyed on the item's real store category (Produce, Meat & Fish, …).
+  const pantryInsight = useMemo(() => {
+    const items = categories.flatMap(c => c.ingredients.filter(i => i.inStock).map(i => ({ name: i.name, category: c.name })))
+    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [])
+  }, [categories, insightProfile])
+
+  // One-tap "Add to grocery" for the insight's suggestions (categorized, deduped by the DB flow).
+  const [insightAdded, setInsightAdded] = useState(false)
+  const addInsightToGrocery = async () => {
+    if (!user || pantryInsight.suggestedItems.length === 0 || insightAdded) return
+    setInsightAdded(true) // optimistic; the banner will re-evaluate on next pantry change
+    const rows = await Promise.all(pantryInsight.suggestedItems.map(async name => ({
+      user_id: user.id, name, category: await categorizeItem(name), checked: false,
+    })))
+    await supabase.from('grocery_items').insert(rows)
+  }
+  useEffect(() => { setInsightAdded(false) }, [pantryInsight.headline]) // reset the CTA when the insight changes
 
   const missingFor = (mealIngs: { name: string }[] | undefined): string[] => {
     if (!mealIngs) return []
@@ -530,21 +558,26 @@ export default function PantryScreen() {
           }
           ListHeaderComponent={
             <>
-              {/* Hero banner */}
+              {/* Hero banner — a personalized "what to stock next" insight (goal + diet aware),
+                  replacing the old item-count "Stock Level" (see lib/pantryProfile). */}
               <View style={[styles.heroBanner, { marginHorizontal: 0 }]}>
                 <Image
                   source={{ uri: 'https://fdafjnkqqtpsjtddbfdz.supabase.co/storage/v1/object/public/ingredient-images/pantry-hero.webp?v=2' }}
-                  style={[styles.heroBannerImage, { opacity: totalItems >= 50 ? 0.7 : totalItems >= 25 ? 0.6 : totalItems >= 10 ? 0.5 : totalItems > 0 ? 0.4 : 0.35 }]}
+                  style={[styles.heroBannerImage, { opacity: totalItems >= 25 ? 0.6 : totalItems > 0 ? 0.45 : 0.35 }]}
                   resizeMode="cover"
                 />
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)', '#000000']} locations={[0.2, 0.7, 1]} style={styles.heroBannerGradient} />
                 <View style={styles.heroBannerContent}>
-                  <Text style={styles.heroBannerLabel}>Stock Level</Text>
-                  <Text style={[styles.heroBannerValue, {
-                    color: totalItems >= 50 ? '#4ADE80' : totalItems >= 25 ? COLORS.textWhite : totalItems >= 10 ? '#F59E0B' : totalItems > 0 ? '#EF4444' : COLORS.textMuted
-                  }]}>
-                    {totalItems >= 50 ? 'Optimal' : totalItems >= 25 ? 'Stocked' : totalItems >= 10 ? 'Low' : totalItems > 0 ? 'Critical' : 'Empty'}
-                  </Text>
+                  <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'affirm' ? 'PANTRY CHECK' : pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
+                  <Text style={styles.heroInsightHeadline}>{pantryInsight.headline}</Text>
+                  <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
+                  {pantryInsight.suggestedItems.length > 0 && (
+                    <PressableScale style={styles.heroInsightCta} onPress={addInsightToGrocery} haptic disabled={insightAdded}>
+                      <Text style={styles.heroInsightCtaText}>
+                        {insightAdded ? '✓ Added to grocery' : `Add ${pantryInsight.suggestedItems.join(', ')} to grocery`}
+                      </Text>
+                    </PressableScale>
+                  )}
                 </View>
               </View>
 
@@ -931,8 +964,9 @@ const styles = StyleSheet.create({
   },
   heroBannerContent: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 18,
     left: 20,
+    right: 20,
   },
   heroBannerLabel: {
     fontSize: 10,
@@ -940,13 +974,33 @@ const styles = StyleSheet.create({
     color: '#4ADE80',
     textTransform: 'uppercase',
     letterSpacing: 2,
-    marginBottom: 4,
+    marginBottom: 5,
   },
-  heroBannerValue: {
-    fontSize: 28,
+  heroInsightHeadline: {
+    fontSize: 21,
     fontWeight: '800',
     color: COLORS.textWhite,
-    letterSpacing: -0.5,
+    letterSpacing: -0.4,
+    marginBottom: 4,
+  },
+  heroInsightDetail: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.72)',
+    lineHeight: 17,
+  },
+  heroInsightCta: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 30,
+    paddingVertical: 9,
+    paddingHorizontal: 16,
+  },
+  heroInsightCtaText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
   },
 
   scanRow: {
