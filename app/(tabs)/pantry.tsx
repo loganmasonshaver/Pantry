@@ -765,13 +765,14 @@ export default function PantryScreen() {
                       <Text style={styles.cookTonightTitle}>Cook tonight</Text>
                       <Text style={styles.cookTonightSub}>
                         {/* Personalized ready-count — rewards a stocked pantry ("cook these NOW, no
-                            shopping"). Falls back to the neutral line while regen is offered or if
-                            nothing's fully ready. */}
+                            shopping"). Excitement is carried by the GREEN accent on the ready count,
+                            not an emoji. Falls back to the neutral line while regen is offered or if
+                            nothing is fully ready. */}
                         {canRegenerate ? 'From what you have'
                           : readySummary && readySummary.ready > 0
                             ? (readySummary.ready === readySummary.total
-                                ? `🔥 All ${readySummary.total} ready to cook now`
-                                : `🔥 ${readySummary.ready} ready now · ${readySummary.total - readySummary.ready} to shop for`)
+                                ? <Text style={styles.cookTonightReadyAccent}>All {readySummary.total} ready to cook now</Text>
+                                : <><Text style={styles.cookTonightReadyAccent}>{readySummary.ready} ready now</Text>{` · ${readySummary.total - readySummary.ready} to shop for`}</>)
                             : 'Refreshed today · New tomorrow'}
                       </Text>
                     </View>
@@ -804,7 +805,9 @@ export default function PantryScreen() {
                     </View>
                   ) : meals.length > 0 ? (
                     <Reanimated.View entering={FadeIn.duration(300)} style={{ gap: 10 }}>
-                      {meals.slice(0, 3).map((meal, idx) => {
+                      {/* Ready-to-cook meals first (fewest missing items) so the list leads with what
+                          the user can make right now — matches the "N ready now" subtitle top-down. */}
+                      {[...meals].sort((a, b) => missingFor(a.ingredients).length - missingFor(b.ingredients).length).slice(0, 3).map((meal, idx) => {
                         // Compute against the LIVE pantry (the same check the meal-detail screen uses)
                         // so the card and the detail always agree. The old code trusted the server's
                         // self-reported missing_ingredients, but GPT returns [] even when the pantry is
@@ -825,7 +828,7 @@ export default function PantryScreen() {
                               <Shimmer style={styles.cookTonightThumb} />
                             )}
                             <View style={{ flex: 1, gap: 4 }}>
-                              <Text style={styles.cookTonightName} numberOfLines={1}>{meal.name}</Text>
+                              <Text style={styles.cookTonightName} numberOfLines={2}>{meal.name}</Text>
                               <Text style={styles.cookTonightMeta} numberOfLines={1}>
                                 {meal.prepTime > 0 ? `${meal.prepTime} min` : null}
                                 {meal.prepTime > 0 ? '  ·  ' : ''}
@@ -1481,14 +1484,14 @@ const styles = StyleSheet.create({
     gap: 12,
     backgroundColor: '#141414',
     borderRadius: 14,
-    padding: 10,
+    padding: 12, // slightly roomier now that we reclaimed vertical space above
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.04)',
   },
   cookTonightThumb: {
-    width: 64,
-    height: 64,
-    borderRadius: 10,
+    width: 84, // bigger, photo-forward (was 64) — food shots drive appetite/excitement
+    height: 84,
+    borderRadius: 12,
   },
   cookTonightThumbPlaceholder: {
     backgroundColor: '#2A2A2A',
@@ -1496,10 +1499,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cookTonightName: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: COLORS.textWhite,
     letterSpacing: -0.1,
+    lineHeight: 19, // 2-line names wrap cleanly instead of truncating mid-word
+  },
+  // Green accent on the ready-count in the Cook Tonight subtitle — carries excitement via color.
+  cookTonightReadyAccent: {
+    color: '#4ADE80',
+    fontWeight: '700',
   },
   cookTonightMeta: {
     fontSize: 11,
