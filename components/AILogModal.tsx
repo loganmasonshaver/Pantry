@@ -22,6 +22,7 @@ import * as ImageManipulator from 'expo-image-manipulator'
 import { X, Camera, FileText, ImageIcon, ChevronRight, Zap } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
+import { edgeErrorInfo } from '@/lib/edgeError'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
@@ -270,7 +271,9 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
       setStep('review')
     } catch (e) {
       trackAIError('estimate-meal-macros', e)
-      Alert.alert('Analysis failed', 'Could not estimate macros. Try again with a clearer description.')
+      // Surface the real reason (e.g. the daily cap) instead of always blaming the description.
+      const { message, code } = await edgeErrorInfo(e, 'Could not estimate macros. Try again with a clearer description.')
+      Alert.alert(code === 'scan_cap_reached' ? 'Daily limit reached' : 'Analysis failed', message)
       setStep('input')
     }
   }

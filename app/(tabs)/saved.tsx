@@ -26,6 +26,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import { useAIConsent } from '../../context/AIConsentContext'
 import { trackAIError } from '../../lib/analytics'
+import { edgeErrorInfo } from '../../lib/edgeError'
 import RecipeFormModal from '@/components/RecipeFormModal'
 
 const { width } = Dimensions.get('window')
@@ -201,7 +202,9 @@ export default function SavedScreen() {
       setShowRecipeForm(true)
     } catch (e: any) {
       trackAIError('extract-recipe-from-url', e)
-      Alert.alert('Import failed', e.message || 'Could not extract recipe from this link.')
+      // Show the server's reason (e.g. daily cap) rather than a blanket "import failed".
+      const { message, code } = await edgeErrorInfo(e, 'Could not extract recipe from this link.')
+      Alert.alert(code === 'scan_cap_reached' ? 'Daily limit reached' : 'Import failed', message)
     } finally {
       setImporting(false)
     }

@@ -20,6 +20,7 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { trackAIError } from '@/lib/analytics'
+import { edgeErrorInfo } from '@/lib/edgeError'
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -136,7 +137,9 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
       }
     } catch (e: any) {
       trackAIError('generate-recipe', e)
-      Alert.alert('Error', e.message ?? 'Failed to generate recipe')
+      // Unwrap the server body so a daily-cap gate reads as such, not a generic "Error".
+      const { message, code } = await edgeErrorInfo(e, 'Failed to generate recipe. Please try again.')
+      Alert.alert(code === 'scan_cap_reached' ? 'Daily limit reached' : "Couldn't generate recipe", message)
     } finally {
       setAiLoading(false)
     }

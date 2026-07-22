@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { trackAIError } from './analytics'
+import { edgeErrorInfo } from './edgeError'
 
 export type GeneratedMeal = {
   id: string
@@ -111,30 +112,9 @@ export async function generateMeals({
 // (when known) lets the UI adapt — e.g. hide a pointless "Try again" when the daily cap is hit.
 // Preserves .context so the existing diagnostic logging in useMealSuggestions still works.
 async function toUserFacingMealError(error: any): Promise<Error> {
-  let payload: any = {}
-  const status = error?.context?.status
-  try {
-    const ctx = error?.context
-    const bodyText = ctx?.clone ? await ctx.clone().text() : (ctx?.text ? await ctx.text() : '')
-    if (bodyText) payload = JSON.parse(bodyText)
-  } catch {}
-
-  let message: string
-  if (payload?.code === 'meal_cap_reached') {
-    // Server text is already user-ready: "Daily meal limit reached (3/day). Check back tomorrow."
-    message = payload.error || "You've reached today's meal limit. Check back tomorrow."
-  } else if (payload?.code === 'scan_cap_reached') {
-    message = payload.error || "You've reached today's scan limit. Try again tomorrow."
-  } else if (status === 429) {
-    message = 'Too many requests right now — give it a moment and try again.'
-  } else if (payload?.error) {
-    message = payload.error
-  } else {
-    message = "We couldn't generate meals right now. Please try again in a moment."
-  }
-
+  const { message, code } = await edgeErrorInfo(error, "We couldn't generate meals right now. Please try again in a moment.")
   const friendly: any = new Error(message)
-  if (payload?.code) friendly.code = payload.code
+  if (code) friendly.code = code
   friendly.context = error?.context // keep for diagnostics downstream
   return friendly
 }
