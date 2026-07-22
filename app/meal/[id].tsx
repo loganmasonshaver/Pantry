@@ -1729,22 +1729,27 @@ const styles = StyleSheet.create({
   // Small muted asterisk on assumed-basic rows — a low-confidence "we're guessing" marker,
   // deliberately lighter than the confirmed green check. Sized/positioned to match the check's
   // 30px slot so rows stay aligned; the "*" glyph sits high, so nudge it down to center.
+  // Tappability comes from SHAPE (a subtle round button), not color — teal read as tappable but
+  // collided with the green "have it" check. Neutral grey keeps it clearly distinct from confirmed
+  // items; the faint circle says "pressable".
   assumedStar: {
-    width: 30,
-    height: 30,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   assumedStarText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '700',
-    color: COLORS.accent, // teal = interactive in this app (matches the + Add chip), so the "*" reads as tappable
-    lineHeight: 22,
-    marginTop: 8, // asterisk renders top-aligned in its line box; pull it toward vertical center
+    color: COLORS.textMuted,
+    lineHeight: 18,
+    marginTop: 6, // asterisk renders top-aligned in its line box; pull it toward vertical center
   },
   hintStar: {
     fontWeight: '800',
-    color: COLORS.accent, // tie the footnote "*" to the teal tappable marker
+    color: '#B0B0B0', // brighter than the hint text so the "*" reads as the referenced marker
   },
   // NEED row's "Add" chip. Labeled (not a bare +) so it self-explains as an add-to-grocery
   // action; muted teal so it doesn't shout over the white bulk CTA. Flips to solid teal +
