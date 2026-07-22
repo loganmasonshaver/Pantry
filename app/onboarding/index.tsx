@@ -2740,14 +2740,17 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 14 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(74,222,128,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-                <Sparkles size={20} stroke={TEAL} strokeWidth={2} />
+                <Camera size={20} stroke={TEAL} strokeWidth={2} />
               </View>
               <View style={{ flex: 1 }}>
+                {/* Reframed to center the scan — the differentiator people download for. These curated
+                    meals are exactly what Pantry pulls from a scanned kitchen, so the reveal now sells
+                    the magic (scan → meals from what you have), not just the nutrition numbers. */}
                 <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 }}>
-                  {`Your ${mealsPerDay}-meal day`}
+                  Meals from your kitchen
                 </Text>
                 <Text style={{ fontSize: 12, color: MUTED, marginTop: 3, fontWeight: '500' }}>
-                  {`${data.dietStyle || 'Classic'} · built around your goals`}
+                  {`Scan what you have → ${data.dietStyle || 'Classic'} meals for your goal`}
                 </Text>
               </View>
             </View>
