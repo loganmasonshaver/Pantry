@@ -58,13 +58,21 @@ export function buildPantryProfile(items: PantryItem[]): PantryProfile {
     const n = (it.name || '').toLowerCase()
     const cat = it.category || ''
     if (cat === 'Produce' && !has(n, AROMATIC)) produceCount++
+    // Plant protein = keyword OR the Legumes category (robust to typos). Legumes are also a carb.
+    if (has(n, PLANT_PROTEIN) || cat === 'Legumes') { hasPlantProtein = true; plantProteinVariety++; hasComplexCarb = true }
     if (has(n, MEAT)) hasAnimalProtein = true
     if (has(n, FISH)) hasFish = true
     if (has(n, EGG)) hasEgg = true
+    // Category-robust: an unrecognized Meat & Fish item (e.g. a typo'd "chikn breast") is still
+    // an animal protein — NOT plant — so omnivores get credit and vegans never do.
+    if (cat === 'Meat & Fish' && !has(n, PLANT_PROTEIN) && !has(n, FISH) && !has(n, MEAT)) hasAnimalProtein = true
     // Dairy protein = anything in the Dairy & Eggs category that isn't an egg or a pure fat.
     // Category-driven (not a cheese-name list) so "mozzarella", "feta", etc. all count.
     if (cat === 'Dairy & Eggs' && !has(n, EGG) && !has(n, NON_PROTEIN_DAIRY)) { hasDairyProtein = true; dairyProteinCount++ }
-    if (has(n, PLANT_PROTEIN)) { hasPlantProtein = true; plantProteinVariety++ }
+    // Protein powder/shake is a real protein source. Plant if labeled so; otherwise treat as
+    // non-vegan (could be whey) so a vegan is never wrongly credited.
+    if (has(n, ['plant protein', 'pea protein', 'soy protein'])) { hasPlantProtein = true; plantProteinVariety++ }
+    else if (has(n, ['whey', 'protein powder', 'protein shake', 'protein isolate'])) hasDairyProtein = true
     if (has(n, HEALTHY_FAT)) hasHealthyFat = true
     if (has(n, COMPLEX_CARB)) hasComplexCarb = true
   }
