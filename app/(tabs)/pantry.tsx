@@ -251,7 +251,7 @@ export default function PantryScreen() {
   // Generation fires once per day (daily cache). Manual refresh button is capped at
   // 1/day per user to bound image-gen cost — see MAX_DAILY_REGENS in useMealSuggestions.
   const hasPantryItems = categories.some(c => c.ingredients.length > 0)
-  const { meals, loading: mealsLoading, error: mealsError, regenerate, retry, canRegenerate } = useMealSuggestions(
+  const { meals, loading: mealsLoading, error: mealsError, errorCode: mealsErrorCode, regenerate, retry, canRegenerate } = useMealSuggestions(
     user?.id, isPremium, 'cookNow', hasPantryItems
   )
 
@@ -688,10 +688,14 @@ export default function PantryScreen() {
                     </View>
                   ) : mealsError ? (
                     <View style={styles.cookTonightLoading}>
-                      <Text style={styles.cookTonightErrorText}>Couldn't generate meals</Text>
-                      <TouchableOpacity onPress={retry} activeOpacity={0.7}>
-                        <Text style={styles.cookTonightRetryText}>Try again →</Text>
-                      </TouchableOpacity>
+                      {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
+                      <Text style={styles.cookTonightErrorText}>{mealsError}</Text>
+                      {/* Retry is pointless once the daily cap is hit — hide it in that case. */}
+                      {mealsErrorCode !== 'meal_cap_reached' && (
+                        <TouchableOpacity onPress={retry} activeOpacity={0.7}>
+                          <Text style={styles.cookTonightRetryText}>Try again →</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   ) : meals.length > 0 ? (
                     <Reanimated.View entering={FadeIn.duration(300)} style={{ gap: 10 }}>

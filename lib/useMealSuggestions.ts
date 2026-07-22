@@ -33,6 +33,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Machine-readable reason alongside the human message, so the UI can adapt — e.g. suppress a
+  // "Try again" that can't work once the daily cap ('meal_cap_reached') is hit.
+  const [errorCode, setErrorCode] = useState<string | null>(null)
   // Track manual regens used today so the UI can disable the button at cap.
   // Mirrored to a ref so generate() can persist the right count without re-renders.
   const [regensUsedToday, setRegensUsedToday] = useState(0)
@@ -205,6 +208,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   const fetchAndGenerate = async (forceGenerate = false) => {
     if (!userId) return
     setError(null)
+    setErrorCode(null)
 
     try {
       // If a scan kicked off a background prefetch of these meals, wait for it to finish — it
@@ -289,6 +293,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         })
       } catch {}
       setError(err.message)
+      setErrorCode(err?.code ?? null)
     } finally {
       setLoading(false)
     }
@@ -365,5 +370,5 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     await fetchAndGenerate(true)
   }
 
-  return { meals, loading, error, regenerate, retry, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
+  return { meals, loading, error, errorCode, regenerate, retry, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
 }

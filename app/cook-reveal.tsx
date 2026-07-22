@@ -45,7 +45,7 @@ export default function CookReveal() {
   const { isPremium } = usePremium()
   // enabled=false skips the hook's auto cache-load so we never flash yesterday's meals;
   // retry() force-generates a fresh batch and BYPASSES the 1/day regen cap (a scan earns it).
-  const { meals, error, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
+  const { meals, error, errorCode, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
   const triggeredRef = useRef(false)
   const revealed = meals.slice(0, 3)
 
@@ -156,10 +156,14 @@ export default function CookReveal() {
         </>
       ) : error && revealed.length === 0 ? (
         <View style={styles.loaderWrap}>
-          <Text style={styles.loaderTitle}>Couldn't generate meals</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => { animatedRef.current = false; retry() }}>
-            <Text style={styles.retryText}>Try again</Text>
-          </TouchableOpacity>
+          {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
+          <Text style={styles.loaderTitle}>{error}</Text>
+          {/* Retry can't help once the daily cap is hit — hide it in that case. */}
+          {errorCode !== 'meal_cap_reached' && (
+            <TouchableOpacity style={styles.retryBtn} onPress={() => { animatedRef.current = false; retry() }}>
+              <Text style={styles.retryText}>Try again</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : (
         <>
