@@ -90,19 +90,22 @@ function dietSafeProteinPresent(p: PantryProfile, diet: DietType): boolean {
   }
 }
 
-// ── suggestion catalog (diet-tagged) ───────────────────────────────────────────
-type Sugg = { name: string; contains?: Array<'meat' | 'fish' | 'shellfish' | 'egg' | 'dairy' | 'gluten' | 'nut'> }
+// ── suggestion catalog (diet-tagged + cuisine-tagged) ──────────────────────────
+// `cuisines` lets us RANK suggestions toward the user's cuisine_preferences (Asian, Mexican,
+// Italian, Mediterranean, American). It only reorders within a pool AFTER diet/allergy filtering
+// — it never changes what's safe to suggest.
+type Sugg = { name: string; contains?: Array<'meat' | 'fish' | 'shellfish' | 'egg' | 'dairy' | 'gluten' | 'nut'>; cuisines?: string[] }
 
 const PROTEIN_SUGG: Record<DietType, Sugg[]> = {
-  Classic:     [{ name: 'chicken breast', contains: ['meat'] }, { name: 'salmon', contains: ['fish'] }, { name: 'eggs', contains: ['egg'] }, { name: 'greek yogurt', contains: ['dairy'] }, { name: 'lentils' }, { name: 'tofu' }],
-  Pescatarian: [{ name: 'salmon', contains: ['fish'] }, { name: 'tuna', contains: ['fish'] }, { name: 'eggs', contains: ['egg'] }, { name: 'greek yogurt', contains: ['dairy'] }, { name: 'tofu' }, { name: 'lentils' }],
-  Vegetarian:  [{ name: 'eggs', contains: ['egg'] }, { name: 'greek yogurt', contains: ['dairy'] }, { name: 'tofu' }, { name: 'tempeh' }, { name: 'lentils' }, { name: 'chickpeas' }],
-  Vegan:       [{ name: 'tofu' }, { name: 'tempeh' }, { name: 'lentils' }, { name: 'chickpeas' }, { name: 'edamame' }, { name: 'black beans' }],
+  Classic:     [{ name: 'chicken breast', contains: ['meat'], cuisines: ['American', 'Mexican', 'Italian'] }, { name: 'salmon', contains: ['fish'], cuisines: ['Mediterranean', 'Asian'] }, { name: 'eggs', contains: ['egg'], cuisines: ['American'] }, { name: 'greek yogurt', contains: ['dairy'], cuisines: ['Mediterranean'] }, { name: 'lentils', cuisines: ['Mediterranean'] }, { name: 'tofu', cuisines: ['Asian'] }],
+  Pescatarian: [{ name: 'salmon', contains: ['fish'], cuisines: ['Mediterranean', 'Asian'] }, { name: 'tuna', contains: ['fish'], cuisines: ['Mediterranean', 'Italian'] }, { name: 'eggs', contains: ['egg'], cuisines: ['American'] }, { name: 'greek yogurt', contains: ['dairy'], cuisines: ['Mediterranean'] }, { name: 'tofu', cuisines: ['Asian'] }, { name: 'lentils', cuisines: ['Mediterranean'] }],
+  Vegetarian:  [{ name: 'eggs', contains: ['egg'], cuisines: ['American'] }, { name: 'greek yogurt', contains: ['dairy'], cuisines: ['Mediterranean'] }, { name: 'tofu', cuisines: ['Asian'] }, { name: 'tempeh', cuisines: ['Asian'] }, { name: 'lentils', cuisines: ['Mediterranean'] }, { name: 'chickpeas', cuisines: ['Mediterranean', 'Mexican'] }],
+  Vegan:       [{ name: 'tofu', cuisines: ['Asian'] }, { name: 'tempeh', cuisines: ['Asian'] }, { name: 'lentils', cuisines: ['Mediterranean'] }, { name: 'chickpeas', cuisines: ['Mediterranean', 'Mexican'] }, { name: 'edamame', cuisines: ['Asian'] }, { name: 'black beans', cuisines: ['Mexican'] }],
 }
-const PRODUCE_SUGG: Sugg[] = [{ name: 'spinach' }, { name: 'broccoli' }, { name: 'bell peppers' }, { name: 'mixed greens' }, { name: 'berries' }, { name: 'carrots' }]
-const FAT_SUGG: Sugg[] = [{ name: 'avocado' }, { name: 'olive oil' }, { name: 'almonds', contains: ['nut'] }, { name: 'chia seeds' }, { name: 'walnuts', contains: ['nut'] }]
-const CARB_SUGG: Sugg[] = [{ name: 'oats', contains: ['gluten'] }, { name: 'brown rice' }, { name: 'quinoa' }, { name: 'sweet potato' }, { name: 'black beans' }]
-const FISH_SUGG: Sugg[] = [{ name: 'salmon', contains: ['fish'] }, { name: 'tuna', contains: ['fish'] }]
+const PRODUCE_SUGG: Sugg[] = [{ name: 'spinach' }, { name: 'broccoli' }, { name: 'bell peppers', cuisines: ['Mexican', 'Asian'] }, { name: 'mixed greens', cuisines: ['Mediterranean'] }, { name: 'berries', cuisines: ['American'] }, { name: 'carrots' }]
+const FAT_SUGG: Sugg[] = [{ name: 'avocado', cuisines: ['Mexican'] }, { name: 'olive oil', cuisines: ['Mediterranean', 'Italian'] }, { name: 'almonds', contains: ['nut'], cuisines: ['Mediterranean'] }, { name: 'chia seeds' }, { name: 'walnuts', contains: ['nut'], cuisines: ['Mediterranean'] }]
+const CARB_SUGG: Sugg[] = [{ name: 'oats', contains: ['gluten'], cuisines: ['American'] }, { name: 'brown rice', cuisines: ['Asian'] }, { name: 'quinoa', cuisines: ['Mediterranean'] }, { name: 'sweet potato', cuisines: ['American'] }, { name: 'black beans', cuisines: ['Mexican'] }]
+const FISH_SUGG: Sugg[] = [{ name: 'salmon', contains: ['fish'], cuisines: ['Mediterranean', 'Asian'] }, { name: 'tuna', contains: ['fish'], cuisines: ['Mediterranean', 'Italian'] }]
 
 // Map free-form dislikes → allergen classes so "shellfish" blocks "shrimp", "nuts" blocks "almond".
 function dislikeBlocks(sugg: Sugg, dislikes: string[]): boolean {
@@ -114,10 +117,12 @@ function dislikeBlocks(sugg: Sugg, dislikes: string[]): boolean {
 }
 
 // Apply the four filters (§5): diet_type → allergies (restrictions) → dislikes → already-have.
-function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[], dislikes: string[], have: Set<string>): string[] {
+// THEN rank by the user's cuisine preferences (matches float to the top) and take the top 3.
+// Ranking is stable and happens AFTER safety filtering — it can never surface a forbidden food.
+function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[], dislikes: string[], have: Set<string>, cuisinePrefs: string[] = []): string[] {
   const r = restrictions.map(x => x.toLowerCase())
   const dairyFree = r.includes('dairy-free'), glutenFree = r.includes('gluten-free'), nutFree = r.includes('nut-free'), shellfishFree = r.includes('shellfish-free')
-  return pool.filter(s => {
+  const safe = pool.filter(s => {
     const c = s.contains ?? []
     if (diet === 'Vegan' && (c.includes('meat') || c.includes('fish') || c.includes('shellfish') || c.includes('egg') || c.includes('dairy'))) return false
     if (diet === 'Vegetarian' && (c.includes('meat') || c.includes('fish') || c.includes('shellfish'))) return false
@@ -129,7 +134,13 @@ function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[],
     if (dislikeBlocks(s, dislikes)) return false
     if (have.has(s.name.toLowerCase())) return false
     return true
-  }).map(s => s.name).slice(0, 3)
+  })
+  const prefs = cuisinePrefs.map(c => c.toLowerCase())
+  return safe
+    .map((s, i) => ({ s, i, match: (s.cuisines ?? []).some(c => prefs.includes(c.toLowerCase())) ? 1 : 0 }))
+    .sort((a, b) => (b.match - a.match) || (a.i - b.i)) // cuisine matches first; otherwise keep catalog order
+    .slice(0, 3)
+    .map(x => x.s.name)
 }
 
 const goalPhrase = (g: FitnessGoal) => g === 'lose' ? 'your cut' : g === 'gain' ? 'building muscle' : 'your recomp'
@@ -141,6 +152,7 @@ export function buildInsight(
   dietType: DietType | null | undefined,
   restrictions: string[] = [],
   dislikes: string[] = [],
+  cuisinePrefs: string[] = [],
 ): Insight {
   if (!items.length) {
     return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty' }
@@ -149,7 +161,7 @@ export function buildInsight(
   const diet: DietType = dietType ?? 'Classic'
   const p = buildPantryProfile(items)
   const have = new Set(items.map(i => (i.name || '').toLowerCase()))
-  const pick = (pool: Sugg[]) => filterSuggestions(pool, diet, restrictions, dislikes, have)
+  const pick = (pool: Sugg[]) => filterSuggestions(pool, diet, restrictions, dislikes, have, cuisinePrefs)
 
   // Tier 1 — foundational. Protein-absence before produce (can't build a meal without protein),
   // then produce/fiber (the #1 real gap for most people). Threshold < 2 so a stocked pantry
