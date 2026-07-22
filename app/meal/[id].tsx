@@ -19,7 +19,7 @@ const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, ChevronRight } from 'lucide-react-native'
+import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus } from 'lucide-react-native'
 import PressableScale from '../../components/PressableScale'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
@@ -686,43 +686,8 @@ export default function MealDetailScreen() {
   const isCreatorOwner = !!(creator?.user_id && creator.user_id === user?.id)
   const canEditMeal = isUserCreated || isCreatorOwner
 
-  const missingIngredients = meal?.ingredients.filter(
-    i => !isAlreadyInList(i.name, pantryNames) && !isAssumedStaple(i.name, excludedStaples)
-  ) ?? []
-  const missingNotInGrocery = missingIngredients.filter(
-    i => !isAlreadyInList(i.name, new Set([...groceryNames, ...[...addedToGrocery].map(n => n.toLowerCase())]))
-  )
-
-  const addAllMissingToGrocery = async () => {
-    if (!user || !meal) return
-    const alreadyAdded = new Set([...groceryNames, ...[...addedToGrocery].map(n => n.toLowerCase())])
-    const toAdd = missingIngredients.filter(i => !isAlreadyInList(i.name, alreadyAdded))
-    if (toAdd.length === 0) {
-      Alert.alert('Already on your list', 'All missing ingredients are already in your grocery list.')
-      return
-    }
-    setAddedToGrocery(prev => {
-      const next = new Set(prev)
-      toAdd.forEach(i => next.add(i.name))
-      return next
-    })
-    setGroceryNames(prev => {
-      const next = new Set(prev)
-      toAdd.forEach(i => next.add(i.name.toLowerCase()))
-      return next
-    })
-    const categorized = await Promise.all(
-      toAdd.map(async i => ({
-        user_id: user.id,
-        name: i.name,
-        meal: meal.name,
-        category: await categorizeItem(i.name),
-        checked: false,
-      }))
-    )
-    await supabase.from('grocery_items').insert(categorized)
-    Alert.alert('Added to grocery list', `${toAdd.length} item${toAdd.length !== 1 ? 's' : ''} added`)
-  }
+  // Bulk "Add all missing to grocery" was removed — it overlapped the per-row "+ Add" (redundant
+  // CTAs). Per-row adding is the single, flexible way to build the grocery list now.
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (meal) trackMealViewed(meal.name) }, [mealData, id])
@@ -1061,27 +1026,6 @@ export default function MealDetailScreen() {
               ))}
             </View>
           </View>
-
-          {/* Bulk CTA — only shows when there are missing items not yet on the grocery list.
-              Anchors the dominant action (add the diff) above the per-row list so users don't
-              have to scan and tap each missing ingredient. Only shown for 2+ missing items —
-              with a single missing item the per-row "Add" does the exact same thing, so a bulk
-              pill there is pure redundancy (and reads as two buttons for one action). */}
-          {missingNotInGrocery.length > 1 && (
-            <PressableScale
-              style={styles.bulkAddCta}
-              onPress={addAllMissingToGrocery}
-              haptic
-            >
-              <View style={styles.bulkAddIconWrap}>
-                <ShoppingCart size={18} stroke="#000" strokeWidth={2.4} />
-              </View>
-              <Text style={styles.bulkAddText}>
-                Add all {missingNotInGrocery.length} missing items to grocery
-              </Text>
-              <ChevronRight size={18} stroke="#000" strokeWidth={2.2} />
-            </PressableScale>
-          )}
 
           {/* Split ingredients into NEED / HAVE buckets so the eye lands on what the user
               needs to act on. "Have" = explicitly in pantry OR a cooking basic (salt, oil, etc.)
@@ -1659,30 +1603,6 @@ const styles = StyleSheet.create({
   },
   // Primary action that lives above the lists — white pill so it reads as the dominant
   // affordance over any per-row + button.
-  bulkAddCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 30,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    gap: 10,
-    marginBottom: 16,
-  },
-  bulkAddIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bulkAddText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000',
-  },
   ingredientRow: {
     flexDirection: 'row',
     alignItems: 'center',
