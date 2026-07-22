@@ -1064,8 +1064,10 @@ export default function MealDetailScreen() {
 
           {/* Bulk CTA — only shows when there are missing items not yet on the grocery list.
               Anchors the dominant action (add the diff) above the per-row list so users don't
-              have to scan and tap each missing ingredient. */}
-          {missingNotInGrocery.length > 0 && (
+              have to scan and tap each missing ingredient. Only shown for 2+ missing items —
+              with a single missing item the per-row "Add" does the exact same thing, so a bulk
+              pill there is pure redundancy (and reads as two buttons for one action). */}
+          {missingNotInGrocery.length > 1 && (
             <PressableScale
               style={styles.bulkAddCta}
               onPress={addAllMissingToGrocery}
@@ -1075,7 +1077,7 @@ export default function MealDetailScreen() {
                 <ShoppingCart size={18} stroke="#000" strokeWidth={2.4} />
               </View>
               <Text style={styles.bulkAddText}>
-                Add {missingNotInGrocery.length} missing {missingNotInGrocery.length === 1 ? 'item' : 'items'} to grocery
+                Add all {missingNotInGrocery.length} missing items to grocery
               </Text>
               <ChevronRight size={18} stroke="#000" strokeWidth={2.2} />
             </PressableScale>
@@ -1144,17 +1146,16 @@ export default function MealDetailScreen() {
                       <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
                     </View>
                   ) : kind === 'basic' ? null : (
-                    // NEED +/✓ is now a NON-interactive state glyph — the whole row is the tap
-                    // target, so this just mirrors whether the item is on the grocery list.
-                    <View style={[styles.addToGroceryBtn, isAdded && styles.addToGroceryBtnAdded]}>
-                      {isAdded ? (
-                        // White check on solid teal — high contrast, signals "done"
-                        <Check size={16} stroke="#fff" strokeWidth={2.8} />
-                      ) : (
-                        // Teal plus on dim teal — matches the app's accent palette without
-                        // competing with the white bulk CTA pill.
-                        <Plus size={18} stroke={COLORS.accent} strokeWidth={2.6} />
-                      )}
+                    // NEED: a LABELED chip, not a bare "+" — the word says it adds to grocery
+                    // (a lone + reads ambiguously), and "Added" is the state feedback without a
+                    // success popup. Non-interactive: the whole row is the tap target.
+                    <View style={[styles.addChip, isAdded && styles.addChipAdded]}>
+                      {isAdded
+                        ? <Check size={14} stroke="#000" strokeWidth={3} />
+                        : <Plus size={14} stroke={COLORS.accent} strokeWidth={3} />}
+                      <Text style={[styles.addChipText, isAdded && styles.addChipTextAdded]}>
+                        {isAdded ? 'Added' : 'Add'}
+                      </Text>
                     </View>
                   )}
                 </PressableScale>
@@ -1713,20 +1714,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // NEED row's + button. Muted teal pill so it reads as available action without
-  // shouting over the white bulk CTA above. Flips to solid teal once added.
-  addToGroceryBtn: {
-    width: 32,
-    height: 32,
+  // NEED row's "Add" chip. Labeled (not a bare +) so it self-explains as an add-to-grocery
+  // action; muted teal so it doesn't shout over the white bulk CTA. Flips to solid teal +
+  // "Added" once on the list, which is the state feedback (no success popup, per UX rules).
+  addChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 9,
+    paddingRight: 11,
+    paddingVertical: 6,
     borderRadius: 16,
     backgroundColor: COLORS.accentDim,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  // Post-add state — solid teal so the state change is obvious without resorting
-  // to green (keeps the row palette consistent with the rest of the app).
-  addToGroceryBtnAdded: {
+  addChipAdded: {
     backgroundColor: COLORS.accent,
+  },
+  addChipText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.accent,
+  },
+  addChipTextAdded: {
+    color: '#000', // black on solid teal — high contrast, matches the app's filled-button convention
   },
   ingredientLine: {
     flex: 1,
