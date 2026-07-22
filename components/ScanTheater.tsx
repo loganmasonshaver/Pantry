@@ -6,7 +6,7 @@ import { COLORS } from '@/constants/colors'
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const GREEN = '#4ADE80'
 const SWEEP_MS = 950            // one pass of the scan line (top→bottom or back)
-const PHOTO_MS = SWEEP_MS * 4   // ~two full down-up sweeps over a photo before advancing to the next
+const STEP_MS = 5000            // photo + caption both advance on this shared tick (kept in sync)
 // Ordered as a natural read→identify→sort→build arc so the rotation still reads like progress even
 // though it cycles. Long list at a calm 3s pace (≈66s for a full loop) so even a slow multi-photo
 // scan makes roughly ONE pass instead of looping 3×. Honest to what the scan does; no emoji.
@@ -59,17 +59,21 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel }: {
 
   const sweep = useSharedValue(0)
 
-  // Continuous up/down scan line + rotating status copy.
+  // Continuous up/down scan line (independent of the photo/caption cadence).
   useEffect(() => {
     sweep.value = withRepeat(withTiming(1, { duration: SWEEP_MS, easing: Easing.inOut(Easing.quad) }), -1, true)
-    const s = setInterval(() => setStatusIdx(i => (i + 1) % STATUS.length), 3000)
-    return () => { cancelAnimation(sweep); clearInterval(s) }
+    return () => cancelAnimation(sweep)
   }, [])
 
-  // Advance through the captured photos like a carousel — one every PHOTO_MS (≈ two sweeps).
+  // ONE 5s tick advances the photo AND the caption together, so the line the user reads always
+  // matches the photo on screen. Photo only cycles when there's more than one; the caption rotates
+  // regardless. Stops once results land (showDone flips the caption to "Scan complete").
   useEffect(() => {
-    if (showDone || photos.length <= 1) return
-    const t = setInterval(() => setActiveIdx(i => (i + 1) % photos.length), PHOTO_MS)
+    if (showDone) return
+    const t = setInterval(() => {
+      setStatusIdx(i => (i + 1) % STATUS.length)
+      if (photos.length > 1) setActiveIdx(i => (i + 1) % photos.length)
+    }, STEP_MS)
     return () => clearInterval(t)
   }, [showDone, photos.length])
 
