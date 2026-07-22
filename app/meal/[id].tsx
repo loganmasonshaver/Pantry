@@ -1738,13 +1738,13 @@ const styles = StyleSheet.create({
   assumedStarText: {
     fontSize: 22,
     fontWeight: '700',
-    color: COLORS.textMuted,
+    color: COLORS.accent, // teal = interactive in this app (matches the + Add chip), so the "*" reads as tappable
     lineHeight: 22,
     marginTop: 8, // asterisk renders top-aligned in its line box; pull it toward vertical center
   },
   hintStar: {
     fontWeight: '800',
-    color: '#B0B0B0', // slightly brighter than the hint text so the "*" reads as the referenced marker
+    color: COLORS.accent, // tie the footnote "*" to the teal tappable marker
   },
   // NEED row's "Add" chip. Labeled (not a bare +) so it self-explains as an add-to-grocery
   // action; muted teal so it doesn't shout over the white bulk CTA. Flips to solid teal +
