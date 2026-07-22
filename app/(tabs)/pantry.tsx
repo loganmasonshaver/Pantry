@@ -602,7 +602,7 @@ export default function PantryScreen() {
                   style={[styles.heroBannerImage, { opacity: totalItems >= 25 ? 0.6 : totalItems > 0 ? 0.45 : 0.35 }]}
                   resizeMode="cover"
                 />
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)', '#000000']} locations={[0, 0.45, 0.8, 1]} style={styles.heroBannerGradient} />
+                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.9)', '#000000']} locations={[0, 0.4, 0.75, 1]} style={styles.heroBannerGradient} />
                 <View style={styles.heroBannerContent}>
                   <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'affirm' ? 'PANTRY CHECK' : pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
                   <Text style={styles.heroInsightHeadline} numberOfLines={2}>{pantryInsight.headline}</Text>
@@ -1000,27 +1000,32 @@ const styles = StyleSheet.create({
   heroBanner: {
     marginHorizontal: 20,
     marginBottom: 20,
-    height: 220,
+    // Height ADAPTS to content (was a fixed 220): compact for the common affirm state (headline +
+    // chips), taller only when a gap state adds a detail line + CTA. minHeight keeps a photo strip
+    // visible; flex-end anchors the content to the bottom over the darkened part of the image.
+    minHeight: 168,
+    justifyContent: 'flex-end',
     borderRadius: 24,
     overflow: 'hidden',
     position: 'relative',
   },
   heroBannerImage: {
-    width: '100%',
-    height: '100%',
+    // Absolute so the image doesn't drive the banner's height — the content does.
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
   },
   heroBannerGradient: {
+    // Full-cover scrim: transparent at the top of the card, solid black at the bottom, so the
+    // content sits on dark regardless of how tall the (adaptive) banner grows.
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 180, // tall enough to keep the taller gap-state stack (headline+detail+chips+CTA) on dark
+    top: 0, left: 0, right: 0, bottom: 0,
   },
   heroBannerContent: {
-    position: 'absolute',
-    bottom: 18,
-    left: 20,
-    right: 20,
+    // In normal flow now (not absolute) so the banner sizes to it. paddingTop leaves a photo strip
+    // visible above the text even when the content is short.
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
   },
   heroBannerLabel: {
     fontSize: 10,
