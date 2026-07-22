@@ -352,6 +352,16 @@ export default function PantryScreen() {
     return missing
   }
 
+  // "Ready to cook now" count — the exciting, personalized signal for the Cook Tonight subtitle:
+  // how many of today's meals need zero shopping. Uses the same missingFor as the per-meal rows,
+  // so the count and the rows never disagree. Recomputes when the pantry or meals change.
+  const readySummary = useMemo(() => {
+    if (!meals?.length) return null
+    const ready = meals.filter(m => missingFor(m.ingredients).length === 0).length
+    return { ready, total: meals.length }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meals, pantryNameSet, excludedStaples])
+
   // Manual refresh removed — Cook Tonight regenerates automatically when (a) a new day
   // starts (daily cache) or (b) pantry changes by 3+ items since last gen (handled in
   // useMealSuggestions). Killing the button bounds image-gen cost at scale.
@@ -754,7 +764,15 @@ export default function PantryScreen() {
                     <View>
                       <Text style={styles.cookTonightTitle}>Cook tonight</Text>
                       <Text style={styles.cookTonightSub}>
-                        {canRegenerate ? 'From what you have' : 'Refreshed today · New tomorrow'}
+                        {/* Personalized ready-count — rewards a stocked pantry ("cook these NOW, no
+                            shopping"). Falls back to the neutral line while regen is offered or if
+                            nothing's fully ready. */}
+                        {canRegenerate ? 'From what you have'
+                          : readySummary && readySummary.ready > 0
+                            ? (readySummary.ready === readySummary.total
+                                ? `🔥 All ${readySummary.total} ready to cook now`
+                                : `🔥 ${readySummary.ready} ready now · ${readySummary.total - readySummary.ready} to shop for`)
+                            : 'Refreshed today · New tomorrow'}
                       </Text>
                     </View>
                     <TouchableOpacity
