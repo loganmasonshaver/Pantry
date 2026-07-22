@@ -1249,6 +1249,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         <Maximize2 size={12} stroke="#FFFFFF" strokeWidth={2} />
                         <Text style={styles.zoomHintText}>Zoom</Text>
                       </View>
+                      {/* Carousel dots belong to the PHOTO strip (swipe through your N shots), not the
+                          list — the list is one unified set. Overlaid on the photo so it's unambiguous. */}
+                      {total > 1 && (
+                        <View style={styles.photoDotsOverlay} pointerEvents="none">
+                          {pages.map((_, i) => <View key={i} style={[styles.pagerDot, i === cur && styles.pagerDotActive]} />)}
+                        </View>
+                      )}
                     </View>
 
                     {/* Header — the COUNT is the hero (it continues the count-up reveal and is what
@@ -1261,14 +1268,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         </Text>
                         <Text style={styles.reviewInstruction}>Tap a name to fix it  ·  ✕ to remove</Text>
                       </View>
-                      {total > 1 && (
-                        <View style={styles.reviewHeaderRight}>
-                          <Text style={styles.pagerLabel}>{pages[cur]?.label}  ·  {cur + 1}/{total}</Text>
-                          <View style={styles.dotsRow}>
-                            {pages.map((_, i) => <View key={i} style={[styles.pagerDot, i === cur && styles.pagerDotActive]} />)}
-                          </View>
-                        </View>
-                      )}
                     </View>
 
                     {/* One flat, ungrouped list of everything found (deduped across photos). Uniform
@@ -1487,8 +1486,10 @@ const styles = StyleSheet.create({
   pagerCtrl: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 4 },
   pagerLabel: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.2 },
   dotsRow: { flexDirection: 'row', gap: 6, marginTop: 7, alignItems: 'center' },
-  pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.25)' },
+  pagerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.4)' },
   pagerDotActive: { backgroundColor: '#4ADE80', width: 18 },
+  // Carousel dots centered along the bottom of the photo strip (photo indicator, not list).
+  photoDotsOverlay: { position: 'absolute', bottom: 8, left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
   // Photo strip pinned to the very top, full-bleed (breaks out of the step's 24px side padding).
   reviewPhotoTop: { marginHorizontal: -24, position: 'relative' },
   reviewPhoto: { width: SCREEN_W, height: 264, backgroundColor: '#0A0A0A', overflow: 'hidden' },
