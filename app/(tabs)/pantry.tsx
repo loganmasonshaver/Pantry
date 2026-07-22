@@ -269,10 +269,10 @@ export default function PantryScreen() {
   // list here — otherwise the two surfaces disagree on what counts as a basic.
   const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
   // Goal/diet fields for the personalized pantry insight (see lib/pantryProfile + PLAN.md).
-  const [insightProfile, setInsightProfile] = useState<{ goal: FitnessGoal | null; diet: DietType | null; restrictions: string[]; dislikes: string[]; cuisines: string[] } | null>(null)
+  const [insightProfile, setInsightProfile] = useState<{ goal: FitnessGoal | null; diet: DietType | null; restrictions: string[]; dislikes: string[]; cuisines: string[]; cookingSkill: string | null; maxPrep: number | null } | null>(null)
   useEffect(() => {
     if (!user) return
-    supabase.from('profiles').select('staples_excluded, dietary_restrictions, fitness_goal, diet_type, food_dislikes, cuisine_preferences').eq('id', user.id).single()
+    supabase.from('profiles').select('staples_excluded, dietary_restrictions, fitness_goal, diet_type, food_dislikes, cuisine_preferences, cooking_skill, max_prep_minutes').eq('id', user.id).single()
       .then(({ data }) => {
         const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
         setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
@@ -282,6 +282,8 @@ export default function PantryScreen() {
           restrictions: data?.dietary_restrictions ?? [],
           dislikes: data?.food_dislikes ?? [],
           cuisines: data?.cuisine_preferences ?? [],
+          cookingSkill: data?.cooking_skill ?? null,
+          maxPrep: data?.max_prep_minutes ?? null,
         })
       })
   }, [user])
@@ -290,7 +292,7 @@ export default function PantryScreen() {
   // In-stock items only; keyed on the item's real store category (Produce, Meat & Fish, …).
   const pantryInsight = useMemo(() => {
     const items = categories.flatMap(c => c.ingredients.filter(i => i.inStock).map(i => ({ name: i.name, category: c.name })))
-    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [], insightProfile?.cuisines ?? [])
+    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [], insightProfile?.cuisines ?? [], insightProfile?.cookingSkill ?? null, insightProfile?.maxPrep ?? null)
   }, [categories, insightProfile])
 
   // One-tap "Add to grocery" for the insight's suggestions (categorized, deduped by the DB flow).

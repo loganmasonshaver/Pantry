@@ -107,6 +107,19 @@ const FAT_SUGG: Sugg[] = [{ name: 'avocado', cuisines: ['Mexican'] }, { name: 'o
 const CARB_SUGG: Sugg[] = [{ name: 'oats', contains: ['gluten'], cuisines: ['American'] }, { name: 'brown rice', cuisines: ['Asian'] }, { name: 'quinoa', cuisines: ['Mediterranean'] }, { name: 'sweet potato', cuisines: ['American'] }, { name: 'black beans', cuisines: ['Mexican'] }]
 const FISH_SUGG: Sugg[] = [{ name: 'salmon', contains: ['fish'], cuisines: ['Mediterranean', 'Asian'] }, { name: 'tuna', contains: ['fish'], cuisines: ['Mediterranean', 'Italian'] }]
 
+// Effort of a suggested food, for low-effort cooks (minimal skill or very short prep budget):
+// ready-to-eat floats up, needs-real-cooking sinks. Kept as name-keyed sets (not inline tags) so
+// the catalog stays readable. Untagged items are "quick" (rank 1) — the neutral middle.
+const READY_TO_EAT = new Set(['tuna', 'greek yogurt', 'chickpeas', 'black beans', 'cottage cheese', 'edamame'])
+const NEEDS_COOKING = new Set(['chicken breast', 'salmon', 'lentils', 'tempeh', 'brown rice', 'quinoa', 'sweet potato'])
+function effortRank(name: string, lowEffort: boolean): number {
+  if (!lowEffort) return 0 // no effort preference for capable cooks → all equal, cuisine leads
+  const n = name.toLowerCase()
+  if (READY_TO_EAT.has(n)) return 0
+  if (NEEDS_COOKING.has(n)) return 2
+  return 1
+}
+
 // Map free-form dislikes → allergen classes so "shellfish" blocks "shrimp", "nuts" blocks "almond".
 function dislikeBlocks(sugg: Sugg, dislikes: string[]): boolean {
   const dl = dislikes.map(d => d.toLowerCase())
@@ -119,7 +132,7 @@ function dislikeBlocks(sugg: Sugg, dislikes: string[]): boolean {
 // Apply the four filters (§5): diet_type → allergies (restrictions) → dislikes → already-have.
 // THEN rank by the user's cuisine preferences (matches float to the top) and take the top 3.
 // Ranking is stable and happens AFTER safety filtering — it can never surface a forbidden food.
-function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[], dislikes: string[], have: Set<string>, cuisinePrefs: string[] = []): string[] {
+function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[], dislikes: string[], have: Set<string>, cuisinePrefs: string[] = [], lowEffort = false): string[] {
   const r = restrictions.map(x => x.toLowerCase())
   const dairyFree = r.includes('dairy-free'), glutenFree = r.includes('gluten-free'), nutFree = r.includes('nut-free'), shellfishFree = r.includes('shellfish-free')
   const safe = pool.filter(s => {
@@ -136,9 +149,12 @@ function filterSuggestions(pool: Sugg[], diet: DietType, restrictions: string[],
     return true
   })
   const prefs = cuisinePrefs.map(c => c.toLowerCase())
+  // Composite rank (all AFTER safety filtering, so it can't surface a forbidden food):
+  //   effort → cuisine match → original catalog order.
+  // effort is 0 for everyone unless lowEffort, so capable cooks keep pure cuisine ranking (Step A).
   return safe
-    .map((s, i) => ({ s, i, match: (s.cuisines ?? []).some(c => prefs.includes(c.toLowerCase())) ? 1 : 0 }))
-    .sort((a, b) => (b.match - a.match) || (a.i - b.i)) // cuisine matches first; otherwise keep catalog order
+    .map((s, i) => ({ s, i, effort: effortRank(s.name, lowEffort), cuisine: (s.cuisines ?? []).some(c => prefs.includes(c.toLowerCase())) ? 0 : 1 }))
+    .sort((a, b) => (a.effort - b.effort) || (a.cuisine - b.cuisine) || (a.i - b.i))
     .slice(0, 3)
     .map(x => x.s.name)
 }
@@ -153,15 +169,19 @@ export function buildInsight(
   restrictions: string[] = [],
   dislikes: string[] = [],
   cuisinePrefs: string[] = [],
+  cookingSkill: string | null = null,
+  maxPrepMinutes: number | null = null,
 ): Insight {
   if (!items.length) {
     return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty' }
   }
   const goal: FitnessGoal = fitnessGoal ?? 'maintain'   // safe defaults for legacy/incomplete profiles
   const diet: DietType = dietType ?? 'Classic'
+  // "Low-effort" cook → prefer ready-to-eat picks: minimal skill, or a very short prep budget.
+  const lowEffort = cookingSkill === 'minimal' || (maxPrepMinutes != null && maxPrepMinutes <= 15)
   const p = buildPantryProfile(items)
   const have = new Set(items.map(i => (i.name || '').toLowerCase()))
-  const pick = (pool: Sugg[]) => filterSuggestions(pool, diet, restrictions, dislikes, have, cuisinePrefs)
+  const pick = (pool: Sugg[]) => filterSuggestions(pool, diet, restrictions, dislikes, have, cuisinePrefs, lowEffort)
 
   // Tier 1 — foundational. Protein-absence before produce (can't build a meal without protein),
   // then produce/fiber (the #1 real gap for most people). Threshold < 2 so a stocked pantry
