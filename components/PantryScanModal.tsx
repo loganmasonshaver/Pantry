@@ -1101,6 +1101,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
         {/* ── Step 5.5: unified review — one deduped list + a thumbnail strip of the scans ── */}
         {step === 55 && (() => {
+          // Responsive thumbnail size — the scan photos fill the row width: bigger when there are
+          // fewer (capped at 140 so 1-2 shots don't balloon, and centered), smaller as the count
+          // grows, floored at 52 and scrolling once more than ~5 no longer fit.
+          const CONTENT_W = SCREEN_W - 48 // step horizontal padding (24 × 2)
+          const nPhotos = photos.length
+          const rawThumb = nPhotos > 0 ? (CONTENT_W - (nPhotos - 1) * 8) / nPhotos : 140
+          const thumbSize = Math.round(Math.max(52, Math.min(rawThumb, 140)))
           return (
             <View style={stepWithSafeTop}>
               {(() => {
@@ -1145,33 +1152,28 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 }
                 return (
                   <>
-                    {/* Top bar — close + a small thumbnail strip of the user's scans (tap any to zoom
-                        full-screen). Replaces the old cropped full-bleed band that cut ~2/3 off a
-                        portrait shot and read as "glitched"; small cover-crops look intentional and
-                        every photo shows at once, so it scales cleanly to 3, 5, or more scans. */}
-                    <View style={styles.reviewTopBar}>
+                    {/* Close on its own row so the thumbnails below get the FULL width to fill. */}
+                    <View style={styles.reviewCloseRow}>
                       <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                         <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
-                      {photos.length > 0 && (
-                        <ScrollView
-                          horizontal
-                          showsHorizontalScrollIndicator={false}
-                          keyboardShouldPersistTaps="handled"
-                          contentContainerStyle={styles.photoThumbStrip}
-                          style={{ flex: 1 }}
-                        >
-                          {photos.map((p, idx) => (
-                            <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={styles.photoThumb}>
-                              <Image source={{ uri: p.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-                              <View style={styles.photoThumbZoom} pointerEvents="none">
-                                <Maximize2 size={10} stroke="#FFFFFF" strokeWidth={2.2} />
-                              </View>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      )}
                     </View>
+                    {/* Scan thumbnails, sized to fill the width — bigger with fewer photos (centered),
+                        smaller with more, scrolling past what fits. Tap any to zoom full-screen. */}
+                    {photos.length > 0 && (
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        contentContainerStyle={styles.photoThumbStrip}
+                      >
+                        {photos.map((p, idx) => (
+                          <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={[styles.photoThumb, { width: thumbSize, height: thumbSize }]}>
+                            <Image source={{ uri: p.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                    )}
 
                     {/* Header — the COUNT is the hero (it continues the count-up reveal and is what
                         people actually read), with the action instruction right under it. The generic
@@ -1422,12 +1424,11 @@ const styles = StyleSheet.create({
   reviewCloseOverlay: { position: 'absolute', left: 12, zIndex: 10 },
   // Title row directly below the photo (within the step's normal 24px padding).
   reviewHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingTop: 12, paddingBottom: 4 },
-  // Top bar: close button + a horizontal strip of scan thumbnails (tap to zoom). Small cover-crops
-  // instead of one cropped full-bleed band — reads as intentional and shows every photo at once.
-  reviewTopBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 10 },
-  photoThumbStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 8 },
-  photoThumb: { width: 58, height: 58, borderRadius: 12, overflow: 'hidden', backgroundColor: '#1A1A1A' },
-  photoThumbZoom: { position: 'absolute', bottom: 3, right: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 7, padding: 2 },
+  // Close on its own row; the thumbnail strip below gets the full width. flexGrow+center makes the
+  // strip CENTER its photos when they fit (few/big shots) and left-align + scroll when they don't.
+  reviewCloseRow: { paddingBottom: 12 },
+  photoThumbStrip: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingBottom: 2 },
+  photoThumb: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#1A1A1A' }, // width/height set inline (responsive)
   reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
   // Fullscreen tap-to-zoom overlay.
   zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
@@ -1450,7 +1451,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    paddingVertical: 13,
+    paddingVertical: 15,
     paddingHorizontal: 2,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.06)',
