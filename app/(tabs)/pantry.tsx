@@ -24,7 +24,7 @@ import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { isAssumedStaple } from '@/constants/staples'
+import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useAIConsent } from '@/context/AIConsentContext'
@@ -262,6 +262,20 @@ export default function PantryScreen() {
     )
   }, [categories])
 
+  // Staples the user has opted out of assuming — their manual "I don't keep this" taps
+  // (staples_excluded) PLUS diet-conflicting basics (butter for vegan, flour for GF).
+  // Mirrors meal-detail so an exclusion made there is honored in the Cook Tonight NEED
+  // list here — otherwise the two surfaces disagree on what counts as a basic.
+  const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!user) return
+    supabase.from('profiles').select('staples_excluded, dietary_restrictions').eq('id', user.id).single()
+      .then(({ data }) => {
+        const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
+        setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
+      })
+  }, [user])
+
   const missingFor = (mealIngs: { name: string }[] | undefined): string[] => {
     if (!mealIngs) return []
     const missing: string[] = []
@@ -269,8 +283,9 @@ export default function PantryScreen() {
       const n = ing.name.toLowerCase()
       // Canonical staple check (constants/staples) — keeps "Need: …" honest by not
       // flagging salt/oil/etc. Single source of truth; the old local list drifted and
-      // missed aliases like "cooking oil", which then leaked into NEED.
-      if (isAssumedStaple(ing.name)) continue
+      // missed aliases like "cooking oil", which then leaked into NEED. Excluded set
+      // makes a user's "I don't keep this" opt-out flip the basic back into NEED.
+      if (isAssumedStaple(ing.name, excludedStaples)) continue
       // Two-way substring match — pantry "chicken breast" covers meal "chicken",
       // and pantry "chicken" covers meal "chicken breast".
       let have = false
