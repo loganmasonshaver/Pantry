@@ -193,6 +193,13 @@ Deno.serve(async (req: Request) => {
     const calorieTarget = Math.round(calorieGoal / mealsPerDay)
     const calorieMin = Math.floor(calorieTarget * 0.85)
     const calorieMax = Math.ceil(calorieTarget * 1.15)
+    // Per-meal FAT ceiling. There's no stored fat goal, so derive a sane daily fat (~30% of
+    // kcal) split per meal — stops a single meal (e.g. beef + cheese + creamy dressing +
+    // buttered bread) from eating the whole day's fat. Skipped for keto/low-carb/carnivore,
+    // where high fat IS the intended fuel. Enforced both in the prompt and by the drop+rank below.
+    const highFatDiet = dietaryRestrictions.some((d: string) => /keto|low[- ]?carb|carnivore/i.test(String(d)))
+    const fatTarget = Math.round((calorieGoal * 0.30 / 9) / mealsPerDay)
+    const fatMax = Math.max(25, Math.ceil(fatTarget * 1.15))
     const restrictions = dietaryRestrictions.filter((d: string) => d !== "None").join(", ") || "none"
     const restrictionsLine = restrictions !== "none"
       ? `\n- STRICT dietary requirements — NEVER violate these under any circumstances: ${restrictions}. Any meal that includes a forbidden ingredient for these restrictions must be discarded entirely.`
@@ -212,6 +219,8 @@ Deno.serve(async (req: Request) => {
     const recentMealsLine = recentMealNames.length > 0
       ? `\nDO NOT SUGGEST these meals — they were shown in recent generations and would feel like a repeat: ${recentMealNames.join(", ")}. Suggest different dishes, even if the same ingredients are involved.`
       : ""
+    const fatLine = highFatDiet ? "" :
+      `\n- FAT CEILING (blocking constraint): every meal MUST have ≤ ${fatMax}g fat (aim ~${fatTarget}g). A single meal must NOT eat the whole day's fat budget — a beef + cheese + creamy dressing + buttered bread pileup at 50g+ fat is disqualified. Use leaner cuts, less cheese/oil, or pick a naturally leaner dish to stay under. Protein and carbs matter more than packing in fat.`
 
     // Recipe complexity scales with cookingSkill from onboarding.
     // Minimal cooks get short weeknight meals; culinary cooks get real chef-level dishes.
@@ -304,7 +313,7 @@ Rules:
 ${ingredientRule}${proteinVarietyRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
-- CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.
+- CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.${fatLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -327,6 +336,8 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
   Combine ONLY when actions happen simultaneously without a state change (e.g. "season with salt and pepper" is one step).
 - No filler steps ("Set aside" or "Wait" as their own step) — fold those into the adjacent action step.
 - ONLY suggest real, practical meals that people actually eat. No bizarre combinations.
+- REAL, ESTABLISHED DISHES ONLY (mandatory): every meal must be a genuine, widely-recognized dish that real people already make and that is proven to taste good — the kind you'd find on a restaurant menu, a popular recipe site, or in common home cooking (e.g. "Beef Taco Bowl", "Chicken Fried Rice", "Greek Yogurt Parfait", "Cheeseburger & Fries"). Do NOT invent new dishes, novel fusions, or made-up "power bowl / protein bowl" combinations. If the pantry can't authentically make a known dish, pick the CLOSEST established dish and use pantry items ONLY where they genuinely belong in it. Name each meal after the real dish it actually is — never an invented marketing name.
+- USE INGREDIENTS IN THEIR CORRECT CULINARY FORM: prepare each ingredient the way the real dish requires, not the raw pantry form. For a taco bowl, nachos, chili, pasta, or any melt, cheese is SHREDDED and melted into the hot food — NEVER cold deli slices draped on top. If the pantry only has an ill-fitting form (e.g. sliced sandwich cheese), either use it correctly (melt it in) OR choose a dish where that form is authentic (sliced cheese → cheeseburger, patty melt, grilled cheese, sandwich). Match every ingredient's preparation to how the dish is genuinely made.
 - CRITICAL: You do NOT need to use every pantry ingredient. Only include ingredients that make culinary sense for THIS specific meal. It is BETTER to skip a pantry ingredient than to force it into a meal where it doesn't belong.
 - CUISINE COHERENCE IS MANDATORY: Every meal must fit ONE identifiable cuisine or style (Italian, Mexican, Asian/Thai/Chinese/Japanese, Mediterranean, American comfort, Middle Eastern, Indian, etc.). Before picking ingredients, decide the cuisine FIRST, then only include pantry items that belong in that cuisine. Do NOT create cuisine mash-ups (e.g. no peanut butter in Italian pasta, no soy sauce in Mediterranean bowls, no curry powder in Tex-Mex).
 - NEVER include dessert ingredients (cheesecake mix, cake mix, cookie dough, pudding mix, frosting, brownie mix, pancake mix, ice cream, etc.) in savory main dishes (pasta, rice bowls, stir fries, salads, meat dishes, etc.). Dessert ingredients belong only in dessert meals.
@@ -435,14 +446,16 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     // pass but genuine outliers (e.g. 96g protein, 1500 cal bombs) get caught.
     const proteinDropThreshold = proteinMax * 1.40
     const calorieDropThreshold = calorieMax * 1.40
+    const fatDropThreshold = fatMax * 1.40 // fat-bomb guard — code-enforced, since the LLM ignores prompt caps under load
     const beforeBands = meals.length
     meals = meals.filter((m: any) =>
       Number(m.protein) <= proteinDropThreshold &&
-      Number(m.calories) <= calorieDropThreshold
+      Number(m.calories) <= calorieDropThreshold &&
+      (highFatDiet || Number(m.fat) <= fatDropThreshold) // keto/low-carb exempt — high fat is the point there
     )
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding 1.4× caps (protein > ${Math.round(proteinDropThreshold)}g or calories > ${Math.round(calorieDropThreshold)} kcal)`)
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding 1.4× caps (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${highFatDiet ? '' : `, or fat > ${Math.round(fatDropThreshold)}g`})`)
     }
 
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
@@ -454,7 +467,10 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
         .map((m: any) => {
           const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
           const cDelta = (Number(m.calories) - calorieTarget) / Math.max(calorieTarget, 1)
-          const fitScore = pDelta * pDelta + cDelta * cDelta
+          // One-sided fat penalty: only meals ABOVE the fat target lose points, so leaner meals
+          // rank higher without punishing a naturally-lean dish. Off for keto/low-carb.
+          const fExcess = highFatDiet ? 0 : Math.max(0, (Number(m.fat) - fatTarget) / Math.max(fatTarget, 1))
+          const fitScore = pDelta * pDelta + cDelta * cDelta + fExcess * fExcess
           return { ...m, _fitScore: fitScore }
         })
         .sort((a: any, b: any) => a._fitScore - b._fitScore)
