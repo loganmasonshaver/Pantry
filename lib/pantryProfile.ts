@@ -17,6 +17,17 @@ export type DietType = 'Classic' | 'Pescatarian' | 'Vegetarian' | 'Vegan'
 // One cell of the "Pantry Check" coverage strip. `ok=false` renders as a ⚠ chip.
 export type CoverageItem = { label: string; ok: boolean }
 
+// Weekly meal-log rollup (Step E). Averages are over DAYS WITH LOGS only, not calendar days, so a
+// few skipped days don't drag the average down and misfire the nudge. Deliberately protein-only:
+// protein is universally beneficial and frames cleanly as a stocking nudge, whereas surfacing
+// calorie intake edges into shaming — especially for someone on a cut. See buildInsight guard.
+export type LogStats = { avgDailyProtein: number; proteinGoal: number; daysLogged: number }
+// Need at least this many logged days before trusting the average — one big lunch isn't a trend.
+const MIN_LOGGED_DAYS = 3
+// Fire only on a MEANINGFUL shortfall (averaging under this fraction of goal) — small misses stay
+// silent, matching the feature's bias toward silence over a repeated nag.
+const PROTEIN_SHORTFALL_RATIO = 0.8
+
 export type Insight = {
   headline: string
   detail: string
@@ -198,6 +209,7 @@ export function buildInsight(
   cookingSkill: string | null = null,
   maxPrepMinutes: number | null = null,
   rotation: number = 0, // visit counter — rotates the headline among the top gaps (Step D)
+  logStats: LogStats | null = null, // weekly meal-log rollup — powers the protein-intake nudge (Step E)
 ): Insight {
   if (!items.length) {
     return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty', coverage: [] }
@@ -230,6 +242,16 @@ export function buildInsight(
       : 'Fiber and micronutrients for recovery — the one thing most pantries are short on.', suggestedItems: pick(PRODUCE_SUGG), tone: 'gap' })
   }
   // Tier 2 — goal tuning.
+  // Meal-log protein nudge (Step E). Only when the pantry ALREADY has protein — an empty-protein
+  // pantry is covered by Tier 1, so this stays the distinct "you have it but keep more on hand to
+  // hit your goal" signal rather than double-nagging. Guarded on enough logged days + a real
+  // shortfall. Stocking framing, protein-only — never a calorie/intake judgment (cutter-safe).
+  if (dietSafeProteinPresent(p, diet) && logStats && logStats.proteinGoal > 0
+      && logStats.daysLogged >= MIN_LOGGED_DAYS
+      && logStats.avgDailyProtein < logStats.proteinGoal * PROTEIN_SHORTFALL_RATIO) {
+    const avg = Math.round(logStats.avgDailyProtein)
+    gaps.push({ headline: 'Keep protein front and center', detail: `You've averaged ${avg}g protein a day — keep a few high-protein staples stocked so hitting your ${logStats.proteinGoal}g goal is easy.`, suggestedItems: pick(PROTEIN_SUGG[diet]), tone: 'gap' })
+  }
   if (goal === 'gain' && !p.hasComplexCarb) {
     gaps.push({ headline: 'Fuel your gains', detail: 'Keep complex carbs on hand to power training and recovery.', suggestedItems: pick(CARB_SUGG), tone: 'gap' })
   }

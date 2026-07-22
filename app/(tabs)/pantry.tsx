@@ -32,7 +32,7 @@ import { supabase } from '@/lib/supabase'
 import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
-import { buildInsight, type FitnessGoal, type DietType } from '@/lib/pantryProfile'
+import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
@@ -274,9 +274,11 @@ export default function PantryScreen() {
   const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
   // Goal/diet fields for the personalized pantry insight (see lib/pantryProfile + PLAN.md).
   const [insightProfile, setInsightProfile] = useState<{ goal: FitnessGoal | null; diet: DietType | null; restrictions: string[]; dislikes: string[]; cuisines: string[]; cookingSkill: string | null; maxPrep: number | null } | null>(null)
+  // Weekly meal-log rollup for the protein-intake nudge (Step E). null = no data / not loaded yet.
+  const [logStats, setLogStats] = useState<LogStats | null>(null)
   useEffect(() => {
     if (!user) return
-    supabase.from('profiles').select('staples_excluded, dietary_restrictions, fitness_goal, diet_type, food_dislikes, cuisine_preferences, cooking_skill, max_prep_minutes').eq('id', user.id).single()
+    supabase.from('profiles').select('staples_excluded, dietary_restrictions, fitness_goal, diet_type, food_dislikes, cuisine_preferences, cooking_skill, max_prep_minutes, protein_goal').eq('id', user.id).single()
       .then(({ data }) => {
         const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
         setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
@@ -289,6 +291,20 @@ export default function PantryScreen() {
           cookingSkill: data?.cooking_skill ?? null,
           maxPrep: data?.max_prep_minutes ?? null,
         })
+
+        // Weekly protein average, computed over DAYS WITH LOGS (not calendar days). logged_at is a
+        // DATE column (the day a meal counts for); created_at is insert time — use logged_at here.
+        const proteinGoal = data?.protein_goal ?? 0
+        if (proteinGoal > 0) {
+          const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+          supabase.from('meal_logs').select('protein, logged_at').eq('user_id', user.id).gte('logged_at', sevenDaysAgo)
+            .then(({ data: logs }) => {
+              if (!logs?.length) return
+              const totalProtein = logs.reduce((s, r) => s + (r.protein ?? 0), 0)
+              const daysLogged = new Set(logs.map(r => r.logged_at)).size
+              setLogStats({ avgDailyProtein: totalProtein / daysLogged, proteinGoal, daysLogged })
+            })
+        }
       })
   }, [user])
 
@@ -300,8 +316,8 @@ export default function PantryScreen() {
   // In-stock items only; keyed on the item's real store category (Produce, Meat & Fish, …).
   const pantryInsight = useMemo(() => {
     const items = categories.flatMap(c => c.ingredients.filter(i => i.inStock).map(i => ({ name: i.name, category: c.name })))
-    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [], insightProfile?.cuisines ?? [], insightProfile?.cookingSkill ?? null, insightProfile?.maxPrep ?? null, insightRotation)
-  }, [categories, insightProfile, insightRotation])
+    return buildInsight(items, insightProfile?.goal, insightProfile?.diet, insightProfile?.restrictions ?? [], insightProfile?.dislikes ?? [], insightProfile?.cuisines ?? [], insightProfile?.cookingSkill ?? null, insightProfile?.maxPrep ?? null, insightRotation, logStats)
+  }, [categories, insightProfile, insightRotation, logStats])
 
   // One-tap "Add to grocery" for the insight's suggestions (categorized, deduped by the DB flow).
   const [insightAdded, setInsightAdded] = useState(false)
