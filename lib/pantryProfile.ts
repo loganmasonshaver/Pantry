@@ -212,7 +212,14 @@ export function buildInsight(
   logStats: LogStats | null = null, // weekly meal-log rollup — powers the protein-intake nudge (Step E)
 ): Insight {
   if (!items.length) {
-    return { headline: 'Scan your pantry', detail: 'Get picks tailored to your goal and diet.', suggestedItems: [], tone: 'empty', coverage: [] }
+    // Personalized hook off the user's goal — a concrete promise ("build muscle" / "lose weight")
+    // motivates the first scan far more than the generic "tailored to your goal". "Turn what you
+    // already have" leads with the core magic (cook from your kitchen). Falls back cleanly if unset.
+    const goalHook = fitnessGoal === 'gain' ? 'high-protein meals to build muscle'
+      : fitnessGoal === 'lose' ? 'filling meals to lose weight'
+      : fitnessGoal === 'maintain' ? 'balanced meals to stay on track'
+      : 'meals matched to your goals'
+    return { headline: 'Scan your pantry', detail: `Turn what you already have into ${goalHook}.`, suggestedItems: [], tone: 'empty', coverage: [] }
   }
   const goal: FitnessGoal = fitnessGoal ?? 'maintain'   // safe defaults for legacy/incomplete profiles
   const diet: DietType = dietType ?? 'Classic'

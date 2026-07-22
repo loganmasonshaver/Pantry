@@ -98,7 +98,9 @@ export function scanCapResponse(cap: number, period: "day" | "week" = "day"): Re
   const retry = period === "week" ? "in a few days" : "tomorrow"
   return new Response(
     JSON.stringify({
-      error: `Scan limit reached (${cap}/${period}). Try again ${retry}.`,
+      // Warm, non-punitive, and no advertised number — the cap is an invisible abuse backstop most
+      // users never hit, so a rare cap-hit reads as "you've been busy", not "you're rate-limited".
+      error: `You've done a lot of scanning this ${period} — your scans refresh ${retry}.`,
       code: "scan_cap_reached",
     }),
     { status: 429, headers: { "Content-Type": "application/json" } },
