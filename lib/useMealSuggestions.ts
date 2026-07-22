@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
+import { takeCookNowPrefetch } from './mealPrefetch'
 import { useAIConsent } from '../context/AIConsentContext'
 
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
@@ -203,6 +204,14 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     setError(null)
 
     try {
+      // If a scan kicked off a background prefetch of these meals, wait for it to finish — it
+      // writes the SAME cache we read just below, so we serve its result instead of paying to
+      // generate a second time (prevents a double-spend race when cook-reveal mounts early).
+      if (!forceGenerate) {
+        const pre = takeCookNowPrefetch(userId, mode)
+        if (pre) { setLoading(true); await pre }
+      }
+
       // Serve cached meals instantly (no loading state)
       if (!forceGenerate) {
         const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)

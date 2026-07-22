@@ -133,13 +133,27 @@ export default function CookReveal() {
       </View>
 
       {showLoader ? (
-        <View style={styles.loaderWrap}>
-          <Animated.View style={{ transform: [{ rotate: spinDeg }] }}>
-            <Sparkles size={56} stroke={'#4ADE80'} strokeWidth={1.4} />
-          </Animated.View>
-          <Text style={styles.loaderTitle}>Cooking up meals{'\n'}from your pantry…</Text>
-          <Text style={styles.loaderSub}>Finding the tastiest things you can make right now</Text>
-        </View>
+        <>
+          {/* Populated skeleton instead of an empty spinner — reads as "almost ready", not
+              "still nothing". With the scan-time prefetch this is usually skipped entirely. */}
+          <View style={styles.header}>
+            <Text style={styles.eyebrow}>✨ FROM YOUR PANTRY</Text>
+            <Text style={styles.title}>Cooking up meals{'\n'}from your pantry…</Text>
+          </View>
+          <ScrollView
+            horizontal
+            scrollEnabled={false}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: SIDE, alignItems: 'center' }}
+            style={styles.deck}
+          >
+            {[0, 1, 2].map(i => (
+              <View key={i} style={[styles.cardWrap, i !== 0 && { opacity: 0.5 }]}>
+                <Shimmer style={styles.card} />
+              </View>
+            ))}
+          </ScrollView>
+        </>
       ) : error && revealed.length === 0 ? (
         <View style={styles.loaderWrap}>
           <Text style={styles.loaderTitle}>Couldn't generate meals</Text>

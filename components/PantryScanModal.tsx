@@ -32,6 +32,7 @@ import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
+import { prefetchCookNowMeals } from '@/lib/mealPrefetch'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
@@ -280,6 +281,20 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [customLabel, setCustomLabel] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
+
+  // Prefetch cook-now meals the moment a scan produces items and we're heading toward the
+  // cook-reveal (onSeeMeals wired) — NOT the Home-entry path. Runs during the user's review
+  // window so the reveal is instant instead of a second loading screen. Text only; fires once
+  // per modal-open (reset below) so a review re-render doesn't re-trigger it.
+  const prefetchFiredRef = useRef(false)
+  useEffect(() => { if (visible) prefetchFiredRef.current = false }, [visible])
+  useEffect(() => {
+    if (prefetchFiredRef.current || !user || !onSeeMeals) return
+    const names = detectedItems.filter(i => i.checked).map(i => i.name)
+    if (names.length === 0) return
+    prefetchFiredRef.current = true
+    prefetchCookNowMeals(user.id, names)
+  }, [detectedItems, user, onSeeMeals, visible])
   // Per-photo container type from the scan (fridge/freezer/pantry/counter) → context-aware quick-adds.
   const [photoContainers, setPhotoContainers] = useState<string[]>([])
   // Friendly area name per photo from its classified container ("Fridge"/"Freezer"/…). Lifted to
