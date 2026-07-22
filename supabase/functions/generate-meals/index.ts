@@ -455,12 +455,20 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     const beforeBands = meals.length
     meals = meals.filter((m: any) =>
       Number(m.protein) <= proteinDropThreshold &&
-      Number(m.calories) <= calorieDropThreshold &&
-      (highFatDiet || Number(m.fat) <= fatDropThreshold) // keto/low-carb exempt — high fat is the point there
+      Number(m.calories) <= calorieDropThreshold
     )
+    // FAT is a FLOORED drop, not a hard one: on a fatty pantry (beef/cheese/dressings) almost every
+    // meal exceeds the cap, so hard-dropping collapsed the list to a single meal. Drop fat-bombs
+    // ONLY while ≥ displayCount lean meals remain; otherwise keep them and let the ranking below
+    // (one-sided fat penalty) surface the leanest displayCount. Prefer lean, never starve the list.
+    let droppedByFat = 0
+    if (!highFatDiet) {
+      const lean = meals.filter((m: any) => Number(m.fat) <= fatDropThreshold)
+      if (lean.length >= displayCount) { droppedByFat = meals.length - lean.length; meals = lean }
+    }
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} meals exceeding 1.4× caps (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${highFatDiet ? '' : `, or fat > ${Math.round(fatDropThreshold)}g`})`)
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedByFat ? `, ${droppedByFat} fat-bombs > ${Math.round(fatDropThreshold)}g` : ''})`)
     }
 
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
