@@ -1099,44 +1099,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           </View>
         )}
 
-        {/* ── Step 5.5: Zone-based visual review ── */}
+        {/* ── Step 5.5: unified review — one deduped list + a thumbnail strip of the scans ── */}
         {step === 55 && (() => {
-          // One review page per captured photo — each shows that photo full + ONLY the items
-          // the AI attributed to it (item.photo), so the user compares photo-vs-list to catch
-          // misses. Items the model didn't attribute fall onto a trailing "More" page.
-          // Single photo: every item belongs to it — skip the per-photo split entirely so the
-          // model omitting a `photo` index can't dump everything onto a phantom "More" page.
-          // Map every item to a REAL photo. The model often omits/garbles the per-item `photo`
-          // index, so anything unattributed falls back to photo 0 — never a separate photo-less
-          // "More" page (that was the bug: 2 photos rendered a phantom 3rd page holding everything).
-          // Pages always == photo count.
-          const photoOf = (d: DetectedItem) =>
-            (typeof d.photo === 'number' && d.photo >= 0 && d.photo < photos.length) ? d.photo : 0
-          // Label each photo page by the area the SCAN classified it as (fridge/pantry/…), falling
-          // back to "Photo N" when unknown. This is the "one smart scan, location→food" behavior:
-          // no separate pre-scan classify call — the scan already returns photoContainers.
-          const pages: { uri?: string; label: string; items: DetectedItem[]; photoIdx: number }[] =
-            photos.length <= 1
-              ? [{ uri: photos[0]?.uri, label: areaLabel(0), items: detectedItems, photoIdx: 0 }]
-              : photos.map((p, idx) => ({ uri: p.uri, label: areaLabel(idx), items: detectedItems.filter(d => photoOf(d) === idx), photoIdx: idx }))
-          const total = pages.length || 1
-          const cur = Math.min(currentPhoto, total - 1)
-          // Render the photo at its TRUE aspect (full width) inside a frame capped at ~48% of the
-          // screen; taller shots pan vertically. Boxes map linearly onto this (no crop, no letterbox).
-          const curUri = pages[cur]?.uri
-          const curDims = curUri ? photoDims[curUri] : undefined
-          const curImgH = SCREEN_W * (curDims ? curDims.h / curDims.w : 4 / 3)
-          // Compact PREVIEW banner (was 0.32, 0.48 before). A portrait fridge shot can't be shown big
-          // AND whole in a review that also lists chips — a large frame just crops it and reads as
-          // "glitched, only part of my photo shows." So the photo is now a small food-centred preview
-          // (auto-panned to the items); the WHOLE photo is one tap away via the Zoom pill. The chips —
-          // grouped by shelf — are the real content and get the screen.
-          const frameH = Math.min(curImgH, Math.round(SCREEN_H * 0.15))
-          const goTo = (i: number) => {
-            const c = Math.max(0, Math.min(i, total - 1))
-            pagerRef.current?.scrollTo({ x: c * SCREEN_W, animated: true })
-            setCurrentPhoto(c)
-          }
           return (
             <View style={stepWithSafeTop}>
               {(() => {
@@ -1181,80 +1145,31 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 }
                 return (
                   <>
-                    {/* Photo strip pulled to the very top, full-bleed. Swipe switches photos; the
-                        item list below follows `cur`. X + Zoom overlaid; tap a photo to zoom. */}
-                    <View style={[styles.reviewPhotoTop, { height: frameH, marginTop: -(insets.top + 8) }]}>
-                      <ScrollView
-                        ref={pagerRef}
-                        horizontal
-                        pagingEnabled
-                        // Single photo has nothing to page to — disable scroll+bounce so the strip can't
-                        // rubber-band left/right (read as "the area wobbles"). Multi-photo keeps swiping.
-                        scrollEnabled={total > 1}
-                        bounces={total > 1}
-                        showsHorizontalScrollIndicator={false}
-                        onMomentumScrollEnd={e => setCurrentPhoto(Math.round(e.nativeEvent.contentOffset.x / SCREEN_W))}
-                        keyboardShouldPersistTaps="handled"
-                      >
-                        {pages.map((page, idx) => {
-                          const d = page.uri ? photoDims[page.uri] : undefined
-                          const imgH = SCREEN_W * (d ? d.h / d.w : 4 / 3)
-                          return (
-                            // Vertical pan of the full-aspect photo inside the fixed frame — reach food
-                            // anywhere in a tall shot without cropping or shrinking it.
-                            <ScrollView
-                              key={idx}
-                              ref={idx === cur ? photoScrollRef : undefined}
-                              style={{ width: SCREEN_W, height: frameH }}
-                              showsVerticalScrollIndicator={false}
-                              keyboardShouldPersistTaps="handled"
-                            >
-                              <TouchableOpacity activeOpacity={0.95} onPress={() => page.uri && setZoomUri(page.uri)} style={{ width: SCREEN_W, height: imgH }}>
-                                <Image
-                                  source={{ uri: page.uri }}
-                                  style={{ width: SCREEN_W, height: imgH }}
-                                  resizeMode="cover"
-                                  onLoad={e => {
-                                    const src = e.nativeEvent?.source
-                                    if (src?.width && src?.height && page.uri) {
-                                      // First load only — dims are immutable, avoid re-render churn.
-                                      setPhotoDims(prev => prev[page.uri!] ? prev : { ...prev, [page.uri!]: { w: src.width, h: src.height } })
-                                    }
-                                  }}
-                                />
-                                {/* Only the TAPPED item's box shows — drawing all of them at once turned the
-                                    photo into an unreadable wireframe. One box at a time = one confirmation. */}
-                                {page.items.map(it => (it.box && activeBoxId === it.id) ? (
-                                  <View
-                                    key={it.id}
-                                    pointerEvents="none"
-                                    style={[
-                                      styles.detBox,
-                                      styles.detBoxActive,
-                                      { left: it.box[0] * SCREEN_W, top: it.box[1] * imgH, width: it.box[2] * SCREEN_W, height: it.box[3] * imgH },
-                                    ]}
-                                  >
-                                    <View style={styles.detBoxLabel}><Text style={styles.detBoxLabelText} numberOfLines={1}>{it.name}</Text></View>
-                                  </View>
-                                ) : null)}
-                              </TouchableOpacity>
-                            </ScrollView>
-                          )
-                        })}
-                      </ScrollView>
-                      <TouchableOpacity style={[styles.closeBtn, styles.reviewCloseOverlay, { top: insets.top + 8 }]} onPress={handleClose}>
+                    {/* Top bar — close + a small thumbnail strip of the user's scans (tap any to zoom
+                        full-screen). Replaces the old cropped full-bleed band that cut ~2/3 off a
+                        portrait shot and read as "glitched"; small cover-crops look intentional and
+                        every photo shows at once, so it scales cleanly to 3, 5, or more scans. */}
+                    <View style={styles.reviewTopBar}>
+                      <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
                         <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
-                      <View style={styles.zoomHint} pointerEvents="none">
-                        <Maximize2 size={12} stroke="#FFFFFF" strokeWidth={2} />
-                        <Text style={styles.zoomHintText}>Zoom</Text>
-                      </View>
-                      {/* Carousel dots belong to the PHOTO strip (swipe through your N shots), not the
-                          list — the list is one unified set. Overlaid on the photo so it's unambiguous. */}
-                      {total > 1 && (
-                        <View style={styles.photoDotsOverlay} pointerEvents="none">
-                          {pages.map((_, i) => <View key={i} style={[styles.pagerDot, i === cur && styles.pagerDotActive]} />)}
-                        </View>
+                      {photos.length > 0 && (
+                        <ScrollView
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          keyboardShouldPersistTaps="handled"
+                          contentContainerStyle={styles.photoThumbStrip}
+                          style={{ flex: 1 }}
+                        >
+                          {photos.map((p, idx) => (
+                            <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={styles.photoThumb}>
+                              <Image source={{ uri: p.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                              <View style={styles.photoThumbZoom} pointerEvents="none">
+                                <Maximize2 size={10} stroke="#FFFFFF" strokeWidth={2.2} />
+                              </View>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
                       )}
                     </View>
 
@@ -1507,6 +1422,12 @@ const styles = StyleSheet.create({
   reviewCloseOverlay: { position: 'absolute', left: 12, zIndex: 10 },
   // Title row directly below the photo (within the step's normal 24px padding).
   reviewHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingTop: 12, paddingBottom: 4 },
+  // Top bar: close button + a horizontal strip of scan thumbnails (tap to zoom). Small cover-crops
+  // instead of one cropped full-bleed band — reads as intentional and shows every photo at once.
+  reviewTopBar: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 10 },
+  photoThumbStrip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingRight: 8 },
+  photoThumb: { width: 58, height: 58, borderRadius: 12, overflow: 'hidden', backgroundColor: '#1A1A1A' },
+  photoThumbZoom: { position: 'absolute', bottom: 3, right: 3, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 7, padding: 2 },
   reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
   // Fullscreen tap-to-zoom overlay.
   zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
