@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { View, Text, Image, StyleSheet } from 'react-native'
 import Animated, {
-  FadeIn, FadeOut, FadeInDown, ZoomIn,
+  FadeIn, FadeOut, FadeInDown,
   useSharedValue, useAnimatedStyle, withRepeat, withTiming, withDelay,
   Easing, cancelAnimation,
 } from 'react-native-reanimated'
@@ -16,13 +16,14 @@ import { COLORS } from '@/constants/colors'
 const PHONE_W = 250
 const PHONE_H = PHONE_W * (19.5 / 9)
 
-// Four beats, ~11.6s total — down from a 32s loop most users never finished. Ordered so the
-// MAGIC leads (detection) rather than the setup; the old cut buried the best moments past 15s.
+// Three beats, ~6.4s — Cal-AI-form: one quick continuous magic moment (scan → find → meals),
+// not a slideshow. Dropped the old 4th "Logged" beat: logging is table stakes Cal AI owns;
+// OUR hook is scan-pantry → cookable-meals, so we end on the meals payoff and stop. Ordered so
+// the magic (detection) leads the setup.
 const BEATS = [
-  { id: 'scan', headline: 'Point your camera\nat the shelf', ms: 2600 },
-  { id: 'detect', headline: 'AI finds everything\nyou have', ms: 3800 },
-  { id: 'meals', headline: 'Meals built around\nyour macros', ms: 3200 },
-  { id: 'log', headline: 'Logged in one tap', ms: 2400 },
+  { id: 'scan', headline: 'Point your camera\nat the shelf', ms: 2000 },
+  { id: 'detect', headline: 'AI finds everything\nyou have', ms: 2200 },
+  { id: 'meals', headline: 'Meals built around\nyour macros', ms: 2600 },
 ] as const
 
 // Real items visible in the bundled fridge photo — keep these in sync with onboarding-fridge.jpg
@@ -30,10 +31,12 @@ const BEATS = [
 const DETECTED = ['Egg whites', 'Greek yogurt', 'Cottage cheese', 'Ground beef', 'Eggs', 'Peanut butter', 'Salsa', 'Oat milk', 'Maple syrup']
 
 // Meals built from the detected items above — this is what the app would actually suggest.
+// `img` stays null until real generated photos are dropped in assets/ — then flip on the
+// require (one line each) and the thumbnail swaps from the glyph to the real photo.
 const MEALS = [
-  { name: 'Beef & Salsa Rice Bowl', kcal: 560, protein: 44 },
-  { name: 'Egg White Veggie Scramble', kcal: 320, protein: 31 },
-  { name: 'PB & Greek Yogurt Bowl', kcal: 400, protein: 28 },
+  { name: 'Beef & Salsa Rice Bowl', kcal: 560, protein: 44, img: null as any }, // img: require('../assets/trailer-beef-bowl.jpg')
+  { name: 'Egg White Veggie Scramble', kcal: 320, protein: 31, img: null as any }, // img: require('../assets/trailer-egg-scramble.jpg')
+  { name: 'PB & Greek Yogurt Bowl', kcal: 400, protein: 28, img: null as any }, // img: require('../assets/trailer-pb-yogurt.jpg')
 ]
 
 // ── Beat 1: camera viewfinder with a sweeping scan line ────────────────────────
@@ -100,7 +103,9 @@ function BeatMeals() {
       {MEALS.map((m, i) => (
         <Animated.View key={m.name} entering={FadeInDown.duration(300).delay(180 + i * 220)} style={st.mealCard}>
           <View style={st.mealThumb}>
-            <UtensilsCrossed size={17} stroke="#4A4A4A" strokeWidth={1.8} />
+            {m.img
+              ? <Image source={m.img} style={st.mealThumbImg} resizeMode="cover" />
+              : <UtensilsCrossed size={17} stroke="#4A4A4A" strokeWidth={1.8} />}
           </View>
           <View style={{ flex: 1 }}>
             <Text style={st.mealName} numberOfLines={1}>{m.name}</Text>
@@ -119,23 +124,10 @@ function BeatMeals() {
   )
 }
 
-// ── Beat 4: the ease — one tap, done ──────────────────────────────────────────
-function BeatLog() {
-  return (
-    <View style={[st.beat, st.beatCenter]}>
-      <Animated.View entering={ZoomIn.springify().damping(11).stiffness(140)} style={st.logCircle}>
-        <Check size={44} stroke="#000000" strokeWidth={3.5} />
-      </Animated.View>
-      <Animated.Text entering={FadeInDown.duration(320).delay(160)} style={st.logText}>Logged</Animated.Text>
-      <Animated.Text entering={FadeIn.duration(320).delay(300)} style={st.logSub}>560 cal · 44g protein</Animated.Text>
-    </View>
-  )
-}
-
 // Untyped on purpose — BEATS is `as const`, so beat.id narrows to the literal union and
 // indexing this map stays fully type-safe without needing the global JSX namespace.
 const BEAT_VIEWS = {
-  scan: BeatScan, detect: BeatDetect, meals: BeatMeals, log: BeatLog,
+  scan: BeatScan, detect: BeatDetect, meals: BeatMeals,
 }
 
 export default function OnboardingTrailer() {
@@ -210,7 +202,6 @@ const st = StyleSheet.create({
 
   beat: { flex: 1, backgroundColor: '#0A0A0A' },
   beatPad: { paddingHorizontal: 14, paddingTop: 26 },
-  beatCenter: { alignItems: 'center', justifyContent: 'center' },
 
   // Beat 1
   camImage: { ...StyleSheet.absoluteFillObject, width: undefined, height: undefined },
@@ -245,22 +236,14 @@ const st = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: '#141414', borderRadius: 14, padding: 10, marginBottom: 8,
   },
-  mealThumb: { width: 42, height: 42, borderRadius: 10, backgroundColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center' },
+  mealThumb: { width: 42, height: 42, borderRadius: 10, backgroundColor: '#1E1E1E', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  mealThumbImg: { width: 42, height: 42, borderRadius: 10 },
   mealName: { fontSize: 12, fontWeight: '700', color: COLORS.textWhite },
   macroRow: { flexDirection: 'row', gap: 5, marginTop: 5 },
   macroPill: { backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 30, paddingVertical: 3, paddingHorizontal: 7 },
   macroText: { fontSize: 9, fontWeight: '600', color: '#BBBBBB' },
   haveRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
   haveText: { fontSize: 10, fontWeight: '600', color: COLORS.accent },
-
-  // Beat 4
-  logCircle: {
-    width: 92, height: 92, borderRadius: 46, backgroundColor: COLORS.accent,
-    alignItems: 'center', justifyContent: 'center',
-    shadowColor: COLORS.accent, shadowOpacity: 0.5, shadowRadius: 22, shadowOffset: { width: 0, height: 0 },
-  },
-  logText: { fontSize: 22, fontWeight: '800', color: COLORS.textWhite, marginTop: 18 },
-  logSub: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, marginTop: 5 },
 
   dots: { flexDirection: 'row', gap: 6, marginTop: 20 },
   dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.18)' },
