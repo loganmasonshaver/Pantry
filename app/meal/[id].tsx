@@ -1146,16 +1146,17 @@ export default function MealDetailScreen() {
                       <Check size={15} stroke="#4ADE80" strokeWidth={2.4} />
                     </View>
                   ) : kind === 'basic' ? (
-                    // Assumed basic (merged into IN YOUR PANTRY): a muted "assumed" tag marks this
-                    // as a GUESS (salt/oil/etc.) vs a confirmed item's green check. The PILL is the
-                    // ONLY tap target — tapping it opts the staple out ("I don't keep this"). It
-                    // fires its own Light haptic, so no `haptic` prop here.
+                    // Assumed basic: a small muted asterisk (lighter than a tag) marks this as a
+                    // GUESS (salt/oil/etc.) vs a confirmed item's green check. The "*" is the ONLY
+                    // tap target — tapping it opts the staple out. Big hitSlop since the glyph is
+                    // tiny; excludeStaple fires its own Light haptic, so no `haptic` prop here.
                     <PressableScale
-                      style={styles.assumedPill}
+                      style={styles.assumedStar}
                       onPress={() => excludeStaple(ing.name)}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      hitSlop={{ top: 14, bottom: 14, left: 16, right: 16 }}
+                      accessibilityLabel={`${displayName} is an assumed basic — tap to remove`}
                     >
-                      <Text style={styles.assumedPillText}>assumed</Text>
+                      <Text style={styles.assumedStarText}>*</Text>
                     </PressableScale>
                   ) : (
                     // NEED: a LABELED chip, not a bare "+" — the word says it adds to grocery
@@ -1199,7 +1200,7 @@ export default function MealDetailScreen() {
                       {basicRows.map(ing => renderRow(ing, 'basic'))}
                     </View>
                     {basicRows.length > 0 && (
-                      <Text style={styles.ingredientHint}>“assumed” = a basic we expect you keep (salt, oil…). Tap the “assumed” tag on anything you don't have and we'll stop assuming it.</Text>
+                      <Text style={styles.ingredientHint}><Text style={styles.hintStar}>*</Text> a basic we assume you keep (salt, oil…). Tap the <Text style={styles.hintStar}>*</Text> on anything you don't have and we'll stop assuming it.</Text>
                     )}
                   </>
                 )}
@@ -1725,19 +1726,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Muted tag on assumed-basic rows — reads as a low-confidence "we're guessing" marker,
-  // deliberately quieter than the confirmed green check so the two don't look equivalent.
-  assumedPill: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+  // Small muted asterisk on assumed-basic rows — a low-confidence "we're guessing" marker,
+  // deliberately lighter than the confirmed green check. Sized/positioned to match the check's
+  // 30px slot so rows stay aligned; the "*" glyph sits high, so nudge it down to center.
+  assumedStar: {
+    width: 30,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  assumedPillText: {
-    fontSize: 10,
-    fontWeight: '600',
+  assumedStarText: {
+    fontSize: 22,
+    fontWeight: '700',
     color: COLORS.textMuted,
-    letterSpacing: 0.2,
+    lineHeight: 22,
+    marginTop: 8, // asterisk renders top-aligned in its line box; pull it toward vertical center
+  },
+  hintStar: {
+    fontWeight: '800',
+    color: '#B0B0B0', // slightly brighter than the hint text so the "*" reads as the referenced marker
   },
   // NEED row's "Add" chip. Labeled (not a bare +) so it self-explains as an add-to-grocery
   // action; muted teal so it doesn't shout over the white bulk CTA. Flips to solid teal +
