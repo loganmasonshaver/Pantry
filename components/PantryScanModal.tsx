@@ -823,11 +823,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             <View style={styles.savedBody}>
               <View style={styles.savedCheck}><Check size={40} stroke="#000000" strokeWidth={3} /></View>
               <Text style={styles.savedTitle}>{savedCount} item{savedCount !== 1 ? 's' : ''} added</Text>
-              <Text style={styles.savedSub}>Your pantry's updated. Want to see what you can make right now?</Text>
+              <Text style={styles.savedSub}>Now the good part — we've lined up meals you can cook right now with what you have. No shopping.</Text>
             </View>
             <View style={styles.savedActions}>
-              <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.85} onPress={() => { handleClose(); onSeeMeals?.() }}>
+              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={() => { handleClose(); onSeeMeals?.() }}>
                 <Text style={styles.primaryBtnText}>See what you can cook</Text>
+                <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.savedLater} activeOpacity={0.7} onPress={() => handleClose()}>
                 <Text style={styles.savedLaterText}>Maybe later</Text>
