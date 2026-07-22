@@ -106,6 +106,7 @@ const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
 
 const CATEGORY_ORDER_KEY = 'pantry_category_order' // device-local saved drag order of categories
 const INSIGHT_ROTATION_KEY = 'pantry_insight_rotation' // visit counter → rotates the insight headline (Step D)
+const MEAL_FRESH_DATE_KEY = 'cook_tonight_fresh_date' // last local date the user saw today's meals → drives the "Fresh today" pop on day-change
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
@@ -361,6 +362,23 @@ export default function PantryScreen() {
     return { ready, total: meals.length }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meals, pantryNameSet, excludedStaples])
+
+  // "Fresh today" marker for Cook Tonight — reassures the user these are TODAY's picks, not
+  // yesterday's, and reinforces the daily rotation ("New tomorrow"). 'new' = first view of a new
+  // day → the pill pops in; 'seen' = already viewed today → static pill; null = no meals, hidden.
+  const [freshState, setFreshState] = useState<'new' | 'seen' | null>(null)
+  useEffect(() => {
+    if (mealsLoading || mealsError || meals.length === 0) { setFreshState(null); return }
+    let cancelled = false
+    ;(async () => {
+      const today = new Date().toLocaleDateString('en-CA') // local YYYY-MM-DD (matches the daily cache's local-date keying)
+      const last = await AsyncStorage.getItem(MEAL_FRESH_DATE_KEY)
+      if (cancelled) return
+      setFreshState(last === today ? 'seen' : 'new')
+      if (last !== today) AsyncStorage.setItem(MEAL_FRESH_DATE_KEY, today).catch(() => {})
+    })()
+    return () => { cancelled = true }
+  }, [meals.length, mealsLoading, mealsError])
 
   // Manual refresh removed — Cook Tonight regenerates automatically when (a) a new day
   // starts (daily cache) or (b) pantry changes by 3+ items since last gen (handled in
@@ -762,7 +780,17 @@ export default function PantryScreen() {
                 <View style={{ marginBottom: 24 }}>
                   <View style={styles.cookTonightHeader}>
                     <View>
-                      <Text style={styles.cookTonightTitle}>Cook tonight</Text>
+                      <View style={styles.cookTonightTitleRow}>
+                        <Text style={styles.cookTonightTitle}>Cook tonight</Text>
+                        {/* "Fresh today" — these are today's picks, not yesterday's. Pops in on the
+                            first view of a new day (freshState 'new'); static once seen today. */}
+                        {freshState && (
+                          <Reanimated.View entering={freshState === 'new' ? FadeIn.duration(500) : undefined} style={styles.freshPill}>
+                            <View style={styles.freshDot} />
+                            <Text style={styles.freshPillText}>Fresh today</Text>
+                          </Reanimated.View>
+                        )}
+                      </View>
                       <Text style={styles.cookTonightSub}>
                         {/* Personalized ready-count — rewards a stocked pantry ("cook these NOW, no
                             shopping"). Excitement is carried by the GREEN accent on the ready count,
@@ -1456,12 +1484,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 14,
   },
+  cookTonightTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cookTonightTitle: {
     fontSize: 18,
     fontWeight: '800',
     color: COLORS.textWhite,
     letterSpacing: -0.3,
   },
+  // "Fresh today" pill — quiet green marker that these are the day's new picks.
+  freshPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(74,222,128,0.14)', borderRadius: 30, paddingVertical: 3, paddingHorizontal: 8 },
+  freshDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#4ADE80' },
+  freshPillText: { fontSize: 10.5, fontWeight: '700', color: '#4ADE80', letterSpacing: 0.3 },
   cookTonightSub: {
     fontSize: 12,
     color: COLORS.textMuted,
