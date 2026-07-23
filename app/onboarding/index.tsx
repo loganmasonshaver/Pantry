@@ -2761,16 +2761,6 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
               const SlotIcon = !isSwipedMeal ? (m as any).Icon : null
               const slotTint = !isSwipedMeal ? ((m as any).tint ?? TEAL) : TEAL
               const cardAnim = mealCardAnims[Math.min(i, mealCardAnims.length - 1)]
-              // Derive slot label from position when meal doesn't carry one (AI-generated meals)
-              const SLOT_LABELS: Record<number, string[]> = {
-                1: ['Main Meal'],
-                2: ['Breakfast', 'Dinner'],
-                3: ['Breakfast', 'Lunch', 'Dinner'],
-                4: ['Breakfast', 'Lunch', 'Dinner', 'Snack'],
-                5: ['Breakfast', 'Morning Snack', 'Lunch', 'Afternoon Snack', 'Dinner'],
-                6: ['Breakfast', 'Morning Snack', 'Lunch', 'Afternoon Snack', 'Dinner', 'Evening Snack'],
-              }
-              const slotLabel = (m as any).slot || (SLOT_LABELS[mealsPerDay] ?? SLOT_LABELS[3])[i] || ''
               return (
                 <Animated.View key={i} style={{
                   opacity: cardAnim,
@@ -2788,11 +2778,6 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                     }
                   </View>
                   <View style={{ flex: 1, gap: 4 }}>
-                    {slotLabel ? (
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: TEAL, letterSpacing: 1.5, textTransform: 'uppercase' }}>
-                        {slotLabel}
-                      </Text>
-                    ) : null}
                     {/* Name — single line with ellipsis */}
                     <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
                     {/* Meta row: prep time only — macros are individualized per user in the main app */}
