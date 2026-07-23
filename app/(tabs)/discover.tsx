@@ -547,7 +547,7 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
       <View style={styles.railContent}>
         <Text style={styles.railName} numberOfLines={2}>{meal.name}</Text>
         <View style={{ flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-          {meal.prepTime > 0 && <Pill label={`${meal.prepTime}m`} tint="amber" small />}
+          {meal.prepTime > 0 && <Pill label={`${meal.prepTime} min`} tint="amber" small />}
           <Pill label={`${meal.calories} CAL`} tint="white" small />
           {meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" small />}
           {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
