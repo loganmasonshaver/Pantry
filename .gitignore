@@ -56,5 +56,3 @@ scripts/pantry-eval/images/*
 .claude/skills/wwdc
 .claude/worktrees/
 
-# Growth research / teardowns — local only, keep out of the public repo
-research/
