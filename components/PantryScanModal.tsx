@@ -320,7 +320,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [photoContainers, setPhotoContainers] = useState<string[]>([])
   // Friendly area name per photo from its classified container ("Fridge"/"Freezer"/…). Lifted to
   // component scope so both the loading theatre and the review carousel use the same labels.
-  const areaLabel = (idx: number) => CONTAINER_LABEL[(photoContainers[idx] || '').toLowerCase()] ?? `Photo ${idx + 1}`
+  // Caption label chain: prefer the AI-detected container (only set post-scan), otherwise the label
+  // the photo was captured under (Fridge/Freezer/Pantry/Counter…) so the scan animation shows the
+  // real area instead of a generic "Photo N". The numeric fallback is now effectively unreachable.
+  const areaLabel = (idx: number) => CONTAINER_LABEL[(photoContainers[idx] || '').toLowerCase()] ?? photos[idx]?.label ?? `Photo ${idx + 1}`
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
