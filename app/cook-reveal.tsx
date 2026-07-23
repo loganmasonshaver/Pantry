@@ -48,9 +48,10 @@ export default function CookReveal() {
   const router = useRouter()
   const { user } = useAuth()
   const { isPremium } = usePremium()
-  // enabled=false skips the hook's auto cache-load so we never flash yesterday's meals;
-  // retry() force-generates a fresh batch and BYPASSES the 1/day regen cap (a scan earns it).
-  const { meals, error, errorCode, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
+  // enabled=false: we drive the fetch manually (below) instead of via the hook's auto effect, which
+  // reads cache-FIRST and could serve a stale today-cache before the scan's prefetch lands. load()
+  // awaits the scan's prefetch, so the reveal reuses the exact set the pantry tab serves.
+  const { meals, error, errorCode, retry, load } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
   const triggeredRef = useRef(false)
   const revealed = meals.slice(0, 3)
 
@@ -60,7 +61,10 @@ export default function CookReveal() {
   useEffect(() => {
     if (triggeredRef.current || !user?.id) return
     triggeredRef.current = true
-    retry() // force a fresh generation from the freshly-scanned pantry
+    // Consume the scan's prefetch (or today's cache) instead of force-generating a SECOND batch.
+    // This makes the reveal near-instant AND show the same meals the pantry serves (mismatch fix).
+    // Only a genuine miss generates. retry() (force) stays for the error "Try again" button.
+    load()
   }, [user?.id])
 
   // ── Carousel state ──

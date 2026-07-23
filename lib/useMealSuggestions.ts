@@ -372,5 +372,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     await fetchAndGenerate(true)
   }
 
-  return { meals, loading, error, errorCode, regenerate, retry, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
+  // load() = the normal, NON-forced fetch: await a scan's in-flight prefetch (takeCookNowPrefetch)
+  // or serve today's cache, and only generate on a genuine miss. cook-reveal uses this so it reuses
+  // the SAME set the pantry tab serves (fixes the reveal-vs-pantry mismatch) instead of force-
+  // generating a second batch — which also kills the wasted generation + the long reveal wait.
+  const load = () => fetchAndGenerate(false)
+  return { meals, loading, error, errorCode, regenerate, retry, load, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
 }
