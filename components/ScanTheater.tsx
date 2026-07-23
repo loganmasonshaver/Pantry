@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Dimensions, StyleSheet, Text, View } from 'react-native'
-import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn } from 'react-native-reanimated'
+import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn, ZoomIn } from 'react-native-reanimated'
+import { Check } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
@@ -43,11 +44,12 @@ type Photo = { uri?: string; label?: string }
 // bracket treatment as the onboarding trailer: a teal line sweeps up and down a couple of times
 // over each photo, then it crossfades to the next in a carousel. (Replaces the earlier "drone"
 // animation — the simple sweep reads better and matches the trailer's look.)
-export function ScanTheater({ photos, photoDims, showDone, areaLabel }: {
+export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount }: {
   photos: Photo[]
   photoDims: Record<string, { w: number; h: number }>
   showDone: boolean
   areaLabel?: (idx: number) => string
+  itemCount?: number // live count ramped by the modal; rendered as the payoff on completion
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
   const [statusIdx, setStatusIdx] = useState(0)
@@ -110,10 +112,25 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel }: {
         <View style={[styles.corner, styles.cBR]} />
       </View>
 
-      <Text style={styles.section}>{showDone ? 'Scan complete' : STATUS[statusIdx]}</Text>
-      {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
-      {photos.length > 1 && (
-        <View style={styles.dots}>{photos.map((_, i) => <View key={i} style={[styles.dot, i === activeIdx && styles.dotActive]} />)}</View>
+      {showDone ? (
+        // Payoff: reveal the item count as the hero (itemCount ramps up from the modal) with a
+        // checkmark that pops in — replaces the flat "Scan complete" + progress UI.
+        <Animated.View entering={FadeIn.duration(300)} style={styles.doneBlock}>
+          <Animated.View entering={ZoomIn.springify().damping(11)} style={styles.checkCircle}>
+            <Check size={24} stroke="#0A0A0A" strokeWidth={3.5} />
+          </Animated.View>
+          <Text style={styles.doneCount}>{itemCount ?? 0}</Text>
+          <Text style={styles.doneLabel}>items in your pantry</Text>
+          <Text style={styles.doneSub}>Now let's see what you can cook</Text>
+        </Animated.View>
+      ) : (
+        <>
+          <Text style={styles.section}>{STATUS[statusIdx]}</Text>
+          {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
+          {photos.length > 1 && (
+            <View style={styles.dots}>{photos.map((_, i) => <View key={i} style={[styles.dot, i === activeIdx && styles.dotActive]} />)}</View>
+          )}
+        </>
       )}
     </View>
   )
@@ -137,4 +154,11 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 6, marginTop: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#333' },
   dotActive: { backgroundColor: GREEN, width: 20 },
+
+  // Completion payoff — checkmark + hero count + forward-looking line.
+  doneBlock: { marginTop: 24, alignItems: 'center' },
+  checkCircle: { width: 44, height: 44, borderRadius: 22, backgroundColor: GREEN, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  doneCount: { fontSize: 52, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -1.5, lineHeight: 56 },
+  doneLabel: { marginTop: 2, fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.8)' },
+  doneSub: { marginTop: 10, fontSize: 13, fontWeight: '500', color: COLORS.textMuted },
 })

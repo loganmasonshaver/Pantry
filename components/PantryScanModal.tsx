@@ -523,7 +523,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setSpottedCount(current)
       const now = Date.now()
       if (now - lastHaptic > 50) { lastHaptic = now; Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}) }
-      if (current >= target) clearInterval(id)
+      if (current >= target) {
+        clearInterval(id)
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}) // the "done!" thud that lands the count
+      }
     }, 36)
     return () => clearInterval(id)
   }, [showDone, detectedItems.length])
@@ -1071,7 +1074,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>{scanError}</Text>
               </View>
             ) : (
-              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} areaLabel={areaLabel} />
+              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} areaLabel={areaLabel} itemCount={spottedCount} />
             )}
 
             {/* Footer button — state-aware: View Results / Retry / nothing (still scanning) */}
