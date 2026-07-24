@@ -17,6 +17,8 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -811,6 +813,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // Use this style on every non-camera step container.
   const stepWithSafeTop = [styles.step, { paddingTop: insets.top + 8 }]
 
+  // The review screen's photo grid is ~400px tall — with the keyboard up there isn't room for it
+  // AND the list AND the input, so the input ended up underneath the keyboard. Collapse the grid
+  // while typing: you're searching the list at that point, not looking at thumbnails.
+  const [keyboardUp, setKeyboardUp] = useState(false)
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow'
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide'
+    const s = Keyboard.addListener(showEvt, () => setKeyboardUp(true))
+    const h = Keyboard.addListener(hideEvt, () => setKeyboardUp(false))
+    return () => { s.remove(); h.remove() }
+  }, [])
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
@@ -1142,6 +1156,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               style={stepWithSafeTop}
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
+              {/* Tapping anywhere outside the field (photos, header, empty list space) closes the
+                  keyboard. Rows/✕ keep working — they handle their own touches first. */}
+              <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()} accessible={false}>
+                <View style={{ flex: 1 }}>
               {(() => {
                 // ONE unified, de-duplicated list — no per-photo split, no shelf grouping. Where an
                 // item sat (top shelf / drawer) is noise for a quick confirm; the user just wants to
@@ -1193,7 +1211,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     </View>
                     {/* Scan thumbnails as a centered, content-hugging grid (2 across for ≤4 photos,
                         3 across beyond). Uniform tiles, odd last tile centered. Tap any to zoom. */}
-                    {photos.length > 0 && (
+                    {photos.length > 0 && !keyboardUp && (
                       <View style={styles.photoGrid}>
                         {photos.map((p, idx) => (
                           <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={[styles.photoThumb, { width: tile, height: tile }]}>
@@ -1221,7 +1239,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
                     {/* One flat, ungrouped list of everything found (deduped across photos). Uniform
                         rows scan far better than a cloud of ragged-width pills at 20+ items. */}
-                    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
                       {visibleItems.map(renderRow)}
                       {/* Searching for something that isn't there IS the answer — say so, and the
                           + button below adds it. */}
@@ -1232,6 +1250,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   </>
                 )
               })()}
+                </View>
+              </TouchableWithoutFeedback>
 
               {/* The old "Also have these? Tap to add" staples dropdown was removed — it was the
                   legacy way of nagging users to add basics, now superseded by assuming staples for
