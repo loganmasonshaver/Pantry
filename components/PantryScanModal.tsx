@@ -983,9 +983,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.capturedRow}>
                     {photos.map(p => (
                       <View key={p.id} style={styles.capturedCard}>
-                        {p.uri
-                          ? <Image source={{ uri: p.uri }} style={styles.capturedImg} resizeMode="cover" />
-                          : <View style={[styles.capturedImg, styles.capturedImgEmpty]}><ScanLine size={18} stroke="#4ADE80" strokeWidth={1.5} /></View>}
+                        {/* Tap the thumbnail to check the shot full-screen before scanning — the ✕ /
+                            check badges sit above it (absolute), so they still take their own taps. */}
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          disabled={!p.uri}
+                          onPress={() => p.uri && setZoomUri(p.uri)}
+                          style={styles.capturedImg}
+                        >
+                          {p.uri
+                            ? <Image source={{ uri: p.uri }} style={styles.capturedImg} resizeMode="cover" />
+                            : <View style={[styles.capturedImg, styles.capturedImgEmpty]}><ScanLine size={18} stroke="#4ADE80" strokeWidth={1.5} /></View>}
+                        </TouchableOpacity>
                         <View style={styles.capturedCheck}><Check size={11} stroke="#000" strokeWidth={3} /></View>
                         {/* Tap ✕ to drop this photo; removing the last one bounces back to the camera
                             (can't scan zero). Silent, no confirm — matches the app's UX convention. */}
