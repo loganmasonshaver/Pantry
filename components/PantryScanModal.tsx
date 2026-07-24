@@ -33,7 +33,7 @@ import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
-import { prefetchCookNowMeals } from '@/lib/mealPrefetch'
+import { prefetchCookNowMeals, warmMealImages } from '@/lib/mealPrefetch'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
@@ -1247,6 +1247,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     onItemsAdded?.()
                     // No cook-reveal flow wired (e.g. Home entry) → close as before.
                     if (!onSeeMeals) { handleClose(); return }
+                    // Committed to the reveal → warm the remaining meal images now, a few seconds
+                    // before it mounts, so the deck doesn't out-run them. (The hero was warmed
+                    // during review; these resolve from cache there.) Fire-and-forget.
+                    warmMealImages(user.id, 'cookNow', 3)
                     // First scan ever: auto-reveal the magic (no choice). After that, returning
                     // scanners get the success step with a "Maybe later" off-ramp, so we don't
                     // force a meal generation on every restock.

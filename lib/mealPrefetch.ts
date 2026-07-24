@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
+import { fetchMealImage } from './mealImages'
 
 // Speculative "cook now" meal generation, kicked off while the user reviews a scan so the
 // cook-reveal screen can reuse the result instead of generating a SECOND time. This removes
@@ -103,10 +104,43 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
       await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
     } catch {}
 
+    // Warm the HERO image only (fire-and-forget). Images are the slow half — they used to start
+    // only when cook-reveal mounted (~10s of skeletons while the deck out-ran them). Warming the
+    // first one now, during the review window, means the reveal's first card lands with a photo.
+    // Hero ONLY: an abandoned scan costs at most one image, keeping the text-only cost intent.
+    // NOTE: must not call warmMealImages() here — it awaits the in-flight prefetch, which is this
+    // very promise, and would deadlock.
+    const hero = generated[0]
+    if (hero?.name) {
+      fetchMealImage(hero.name, hero.ingredients?.map((ing: any) => ing.name) ?? [], hero.steps ?? []).catch(() => {})
+    }
+
     return generated
   } catch {
     return null // best-effort — any failure just means the hook generates normally
   }
+}
+
+// Warm images for the first `count` cached meals into the shared device image cache, so the reveal's
+// own fetch resolves instantly instead of generating on-screen. Called once the user has COMMITTED
+// (tapped "Add all to Pantry") — at that point they're heading to the reveal, so this is the same
+// spend the reveal would make anyway, just a few seconds earlier.
+export async function warmMealImages(userId: string, mode: 'cookNow' | 'mealPlan', count: number) {
+  try {
+    const pre = takeCookNowPrefetch(userId, mode)
+    if (pre) await pre // text may still be generating — its meals are what we're warming
+    const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
+    if (!raw) return
+    const cached = JSON.parse(raw)
+    if (cached?.userId && cached.userId !== userId) return // different account on this device
+    if (cached?.date !== todayStr()) return                // stale day — the hook will regenerate
+    const meals: GeneratedMeal[] = (cached.meals ?? []).slice(0, count)
+    await Promise.all(meals.map(m =>
+      m?.image || !m?.name
+        ? null
+        : fetchMealImage(m.name, m.ingredients?.map((ing: any) => ing.name) ?? [], m.steps ?? []).catch(() => null)
+    ))
+  } catch {}
 }
 
 // Fire-and-forget. Safe to call more than once; the latest call replaces the in-flight slot.
