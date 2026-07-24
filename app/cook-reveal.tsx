@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import * as Haptics from 'expo-haptics'
 import { LinearGradient } from 'expo-linear-gradient'
+import Svg, { Defs, RadialGradient, Stop, Rect } from 'react-native-svg'
 import { Utensils, X, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
@@ -20,6 +21,15 @@ const CARD_H = Math.round(CARD_W * 1.4)
 const SPACING = 16
 const INTERVAL = CARD_W + SPACING
 const SIDE = (SCREEN_W - CARD_W) / 2 // centers each snapped card
+const GLOW_W = Math.round(CARD_W * 1.75)
+const GLOW_H = Math.round(CARD_H * 1.15)
+
+// Reveal pacing. Dopamine fires during ANTICIPATION, not delivery — so even when the meals are
+// already cached we hold a short build-up floor rather than snapping straight to the payoff.
+const MIN_BUILD_MS = 1400       // anticipation floor before the reveal is allowed to open
+const HERO_IMG_GRACE_MS = 2600  // extra hold for the hero photo (capped — never stalls)
+const DWELL_MS = 3000           // auto-advance dwell when the next photo is ready
+const IMG_GRACE_MS = 2000       // extra dwell when the next photo hasn't landed yet
 
 // Animated count-up — the dopamine beat. Rolls 0→value the FIRST time its card becomes active,
 // then holds forever — it must NOT re-roll when the user swipes back to a card they've already seen
@@ -42,8 +52,9 @@ function CountUp({ value, active, reduceMotion, style }: { value: number; active
   return <Text style={style}>{display}</Text>
 }
 
-// Post-scan payoff screen: generates fresh cook-now meals from the just-updated pantry and
-// reveals them as a slow, satisfying card deck — the "look what you can make right now" moment.
+// Post-scan payoff screen: reveals the cook-now meals generated from the just-scanned pantry as a
+// card deck. The choreography is built around one engineered PEAK — the hero card landing with a
+// glow bloom + success haptic — because that single moment is what the user remembers.
 export default function CookReveal() {
   const router = useRouter()
   const { user } = useAuth()
@@ -54,6 +65,7 @@ export default function CookReveal() {
   const { meals, error, errorCode, retry, load } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
   const triggeredRef = useRef(false)
   const revealed = meals.slice(0, 3)
+  const heroImage = revealed[0]?.image
 
   const [reduceMotion, setReduceMotion] = useState(false)
   useEffect(() => { AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {}) }, [])
@@ -74,38 +86,83 @@ export default function CookReveal() {
   const userTookOver = useRef(false) // once the user scrolls/taps, stop auto-advancing
   const prevActive = useRef(0)
 
-  // ── Reveal animations ──
+  // ── Reveal gate + animations ──
+  const [gateOpen, setGateOpen] = useState(false)
+  const mountedAtRef = useRef(Date.now())
   const headerAnim = useRef(new Animated.Value(0)).current
+  const revealAnim = useRef(new Animated.Value(0)).current
+  const glowAnim = useRef(new Animated.Value(0)).current
   const animatedRef = useRef(false)
 
-  // Fire the header reveal + success haptic exactly once, when the meals first land.
+  // Rising haptic ramp through the build-up (Soft → Light → Medium). This is what makes the
+  // Success notification at the peak land as a THUD you felt coming, instead of a lone buzz.
   useEffect(() => {
-    if (revealed.length === 0 || animatedRef.current) return
+    const ts = [
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {}), 140),
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), 540),
+      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}), 960),
+    ]
+    return () => ts.forEach(clearTimeout)
+  }, [])
+
+  // The gate: hold the reveal until (a) the anticipation floor has elapsed AND (b) the hero photo
+  // is in hand — so the peak lands on a real image, not a skeleton. The photo wait is capped, so a
+  // slow/failed image delays the reveal by at most HERO_IMG_GRACE_MS instead of stalling it.
+  useEffect(() => {
+    if (gateOpen || revealed.length === 0) return
+    const elapsed = Date.now() - mountedAtRef.current
+    const floorLeft = Math.max(0, MIN_BUILD_MS - elapsed)
+    const wait = heroImage ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + HERO_IMG_GRACE_MS - elapsed)
+    const t = setTimeout(() => setGateOpen(true), wait)
+    return () => clearTimeout(t)
+  }, [revealed.length, heroImage, gateOpen])
+
+  // THE PEAK — fires once, when the gate opens: success haptic + the deck springing in + a green
+  // glow blooming behind the hero card, all on the same beat. One stacked moment, then it settles.
+  useEffect(() => {
+    if (!gateOpen || animatedRef.current) return
     animatedRef.current = true
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
-    Animated.timing(headerAnim, { toValue: 1, duration: 450, useNativeDriver: true }).start()
-  }, [revealed.length])
+    if (reduceMotion) {
+      headerAnim.setValue(1); revealAnim.setValue(1); glowAnim.setValue(0.4)
+      return
+    }
+    Animated.parallel([
+      Animated.timing(headerAnim, { toValue: 1, duration: 450, useNativeDriver: true }),
+      Animated.spring(revealAnim, { toValue: 1, damping: 18, stiffness: 220, mass: 1, useNativeDriver: true }),
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 1, duration: 340, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0.4, duration: 460, useNativeDriver: true }),
+      ]),
+    ]).start()
+  }, [gateOpen, reduceMotion])
 
-  // Auto-advance through the deck — the "shifting to the next meal" beat. Stops at the last card
-  // or as soon as the user takes over (so we never yank the deck while they're reading). Disabled
-  // under reduce-motion; the user drives manually instead.
+  // Auto-advance — IMAGE-AWARE. A card whose photo hasn't landed yet gets extra dwell, so the deck
+  // stops out-running the image generation (the old fixed 3s cadence reached the last card before
+  // its photo existed). Stops at the last card or the moment the user takes over.
+  const cardShownAtRef = useRef(Date.now())
+  useEffect(() => { cardShownAtRef.current = Date.now() }, [activeIndex, gateOpen])
+  const nextImageReady = !!revealed[activeIndex + 1]?.image
   useEffect(() => {
-    if (revealed.length === 0 || userTookOver.current || reduceMotion) return
+    if (!gateOpen || revealed.length === 0 || userTookOver.current || reduceMotion) return
     if (activeIndex >= revealed.length - 1) return
+    const held = Date.now() - cardShownAtRef.current
+    const target = nextImageReady ? DWELL_MS : DWELL_MS + IMG_GRACE_MS
     const t = setTimeout(() => {
       if (userTookOver.current) return
       const next = activeIndex + 1
       scrollRef.current?.scrollTo({ x: next * INTERVAL, animated: true })
       setActiveIndex(next)
-    }, 3000) // auto-advance cadence; stops for good the moment the user swipes/taps (userTookOver)
+    }, Math.max(0, target - held))
     return () => clearTimeout(t)
-  }, [activeIndex, revealed.length, reduceMotion])
+  }, [activeIndex, revealed.length, reduceMotion, gateOpen, nextImageReady])
 
-  // Medium haptic each time a NEW card lands (the first card's beat is the success haptic above).
+  // Light tap as each NEW card lands — deliberately quieter than the peak's Success notification,
+  // so the secondary beats don't compete with the moment they're following.
   useEffect(() => {
     if (activeIndex !== prevActive.current) {
       prevActive.current = activeIndex
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
     }
   }, [activeIndex])
 
@@ -121,8 +178,6 @@ export default function CookReveal() {
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
   }
 
-  const showLoader = revealed.length === 0 && !error
-
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       {/* Close → back to the pantry screen the scan was launched from */}
@@ -132,13 +187,24 @@ export default function CookReveal() {
         </TouchableOpacity>
       </View>
 
-      {showLoader ? (
+      {error && revealed.length === 0 ? (
+        <View style={styles.loaderWrap}>
+          {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
+          <Text style={styles.loaderTitle}>{error}</Text>
+          {/* Retry can't help once the daily cap is hit — hide it in that case. */}
+          {errorCode !== 'meal_cap_reached' && (
+            <TouchableOpacity style={styles.retryBtn} onPress={() => { animatedRef.current = false; retry() }}>
+              <Text style={styles.retryText}>Try again</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : !gateOpen ? (
         <View style={styles.centerRegion}>
-          {/* Populated skeleton instead of an empty spinner — reads as "almost ready", not
-              "still nothing". With the scan-time prefetch this is usually skipped entirely. */}
+          {/* The build-up. A populated skeleton + a line that narrates real work reads as
+              "working for you"; a bare spinner reads as lag. The haptic ramp runs underneath. */}
           <View style={styles.header}>
             <Text style={styles.eyebrow}>FROM YOUR PANTRY</Text>
-            <Text style={styles.title}>Cooking up meals{'\n'}from your pantry…</Text>
+            <Text style={styles.title}>Plating your meals…</Text>
           </View>
           <ScrollView
             horizontal
@@ -149,21 +215,11 @@ export default function CookReveal() {
           >
             {[0, 1, 2].map(i => (
               <View key={i} style={[styles.cardWrap, i !== 0 && { opacity: 0.5 }]}>
-                <Shimmer style={styles.card} />
+                {/* Slow sweep — a fast shimmer reads as shuddering, not loading. */}
+                <Shimmer style={styles.card} durationMs={1600} />
               </View>
             ))}
           </ScrollView>
-        </View>
-      ) : error && revealed.length === 0 ? (
-        <View style={styles.loaderWrap}>
-          {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
-          <Text style={styles.loaderTitle}>{error}</Text>
-          {/* Retry can't help once the daily cap is hit — hide it in that case. */}
-          {errorCode !== 'meal_cap_reached' && (
-            <TouchableOpacity style={styles.retryBtn} onPress={() => { animatedRef.current = false; retry() }}>
-              <Text style={styles.retryText}>Try again</Text>
-            </TouchableOpacity>
-          )}
         </View>
       ) : (
         <View style={styles.body}>
@@ -176,6 +232,24 @@ export default function CookReveal() {
             </Animated.View>
 
             <View style={styles.deckArea}>
+              {/* The peak's visual: a soft green bloom behind the hero card. Chosen over confetti —
+                  restraint reads premium, particles read cheap on a black-and-white brand. */}
+              <Animated.View pointerEvents="none" style={[styles.glowWrap, { opacity: glowAnim }]}>
+                <Svg width={GLOW_W} height={GLOW_H}>
+                  <Defs>
+                    <RadialGradient id="cookGlow" cx="50%" cy="50%" rx="50%" ry="50%">
+                      <Stop offset="0" stopColor="#4ADE80" stopOpacity={0.5} />
+                      <Stop offset="1" stopColor="#4ADE80" stopOpacity={0} />
+                    </RadialGradient>
+                  </Defs>
+                  <Rect x={0} y={0} width={GLOW_W} height={GLOW_H} fill="url(#cookGlow)" />
+                </Svg>
+              </Animated.View>
+
+              <Animated.View style={{
+                opacity: revealAnim,
+                transform: [{ scale: revealAnim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) }],
+              }}>
             <Animated.ScrollView
               ref={scrollRef as any}
               horizontal
@@ -202,7 +276,7 @@ export default function CookReveal() {
                       {meal.image ? (
                         <MealImage uri={meal.image} style={styles.cardImage} recyclingKey={String(meal.id ?? i)} priority="high" />
                       ) : (
-                        <Shimmer style={styles.cardImage} />
+                        <Shimmer style={styles.cardImage} durationMs={1600} />
                       )}
                       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.97)']} locations={[0, 0.5, 1]} style={styles.cardGradient} />
                       {!meal.image && (
@@ -243,11 +317,12 @@ export default function CookReveal() {
                 )
               })}
             </Animated.ScrollView>
+              </Animated.View>
             </View>
 
             {/* Bottom bar: tappable progress dots + the tap-to-cook hint. No Done button — the
                 top-left X is the single dismiss (Done did the exact same thing, a redundant CTA). */}
-            <View style={styles.bottomBar}>
+            <Animated.View style={[styles.bottomBar, { opacity: headerAnim }]}>
             {revealed.length > 1 && (
               <View style={styles.dotsRow}>
                 {revealed.map((_, i) => (
@@ -262,7 +337,7 @@ export default function CookReveal() {
               </View>
             )}
             <Text style={styles.hint}>Tap a meal to start cooking</Text>
-            </View>
+            </Animated.View>
         </View>
       )}
     </SafeAreaView>
@@ -280,6 +355,7 @@ const styles = StyleSheet.create({
   centerRegion: { flex: 1, justifyContent: 'center' },
   body: { flex: 1 },
   deckArea: { flex: 1, justifyContent: 'center' },
+  glowWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
 
   loaderWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 18 },
   loaderTitle: { fontSize: 22, fontWeight: '800', color: COLORS.textWhite, textAlign: 'center', letterSpacing: -0.3, lineHeight: 28 },
