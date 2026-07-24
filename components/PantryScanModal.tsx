@@ -15,6 +15,8 @@ import {
   Image,
   Alert,
   Dimensions,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -651,10 +653,22 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       .map(s => s.trim())
       .filter(Boolean)
     if (names.length === 0) return
+    // Same dedup key as the pantry insert (lib/pantryInsert.ts): lowercased+trimmed name. Drops
+    // anything already in the list AND repeats within this batch, so you can't type an item the
+    // scan already found. The list is filtered by this same text, so the existing row is visible
+    // right above the input — the duplicate is prevented and explained at once.
+    const seen = new Set(detectedItems.map(d => d.name.toLowerCase().trim()))
+    const fresh = names.filter(n => {
+      const key = n.toLowerCase().trim()
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (fresh.length === 0) { setMissedInput(''); return }
     setAddingMissed(true)
     try {
       const newItems: DetectedItem[] = await Promise.all(
-        names.map(async (name, i) => ({
+        fresh.map(async (name, i) => ({
           id: `manual-${Date.now()}-${i}`,
           name,
           category: await categorizeItem(name),
@@ -1115,8 +1129,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           const nPhotos = photos.length
           const cols = nPhotos <= 2 ? Math.max(1, nPhotos) : nPhotos <= 4 ? 2 : 3
           const tile = Math.round(Math.min((CONTENT_W - (cols - 1) * 8) / cols, 200))
+          // The add-input doubles as a SEARCH box: typing filters the list live, so checking
+          // "did it catch my eggs?" doesn't mean scrolling 50 rows. If nothing matches, the same
+          // input adds it — search and add are the same gesture.
+          const query = missedInput.trim().toLowerCase()
+          const visibleItems = query
+            ? detectedItems.filter(d => d.name.toLowerCase().includes(query))
+            : detectedItems
+          const exactExists = !!query && detectedItems.some(d => d.name.toLowerCase().trim() === query)
           return (
-            <View style={stepWithSafeTop}>
+            <KeyboardAvoidingView
+              style={stepWithSafeTop}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
               {(() => {
                 // ONE unified, de-duplicated list — no per-photo split, no shelf grouping. Where an
                 // item sat (top shelf / drawer) is noise for a quick confirm; the user just wants to
@@ -1131,6 +1156,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                           style={styles.reviewRowInput}
                           value={editingText}
                           onChangeText={setEditingText}
+                          selectionColor={COLORS.accent} // caret is invisible on the dark row without this
                           autoFocus
                           selectTextOnFocus
                           returnKeyType="done"
@@ -1185,14 +1211,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         <Text style={styles.reviewCountHero}>
                           {detectedItems.length === 0 ? 'Nothing found' : `${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} found`}
                         </Text>
-                        <Text style={styles.reviewInstruction}>Tap a name to fix it  ·  ✕ to remove</Text>
+                        <Text style={styles.reviewInstruction}>
+                          {query
+                            ? `${visibleItems.length} match${visibleItems.length === 1 ? '' : 'es'} for "${missedInput.trim()}"`
+                            : 'Tap a name to fix it  ·  ✕ to remove'}
+                        </Text>
                       </View>
                     </View>
 
                     {/* One flat, ungrouped list of everything found (deduped across photos). Uniform
                         rows scan far better than a cloud of ragged-width pills at 20+ items. */}
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                      {detectedItems.map(renderRow)}
+                      {visibleItems.map(renderRow)}
+                      {/* Searching for something that isn't there IS the answer — say so, and the
+                          + button below adds it. */}
+                      {query.length > 0 && visibleItems.length === 0 && (
+                        <Text style={styles.reviewNoMatch}>Not in the list — tap + to add it</Text>
+                      )}
                     </ScrollView>
                   </>
                 )
@@ -1206,20 +1241,30 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={styles.missedBar}>
                 <TextInput
                   style={styles.missedBarInput}
-                  placeholder="Add anything we missed — e.g. chicken, spinach"
+                  placeholder="Search or add an item"
                   placeholderTextColor={COLORS.textMuted}
+                  // Caret + selection are invisible against the dark field without this.
+                  selectionColor={COLORS.accent}
                   value={missedInput}
                   onChangeText={setMissedInput}
+                  autoCorrect={false}
+                  autoCapitalize="none"
                   returnKeyType="done"
                   onSubmitEditing={addMissedItems}
                 />
                 <TouchableOpacity
-                  style={[styles.missedBarBtn, (!missedInput.trim() || addingMissed) && { opacity: 0.5 }]}
+                  // Disabled when the typed name is already in the list — the matching row is
+                  // showing right above, so a duplicate can't be added by accident.
+                  style={[styles.missedBarBtn, (!missedInput.trim() || addingMissed || exactExists) && { opacity: 0.5 }]}
                   onPress={addMissedItems}
-                  disabled={!missedInput.trim() || addingMissed}
+                  disabled={!missedInput.trim() || addingMissed || exactExists}
                   activeOpacity={0.7}
                 >
-                  {addingMissed ? <ActivityIndicator color="#000" size="small" /> : <Plus size={20} stroke="#000" strokeWidth={2.5} />}
+                  {addingMissed
+                    ? <ActivityIndicator color="#000" size="small" />
+                    : exactExists
+                      ? <Check size={20} stroke="#000" strokeWidth={2.5} />
+                      : <Plus size={20} stroke="#000" strokeWidth={2.5} />}
                 </TouchableOpacity>
               </View>
 
@@ -1271,7 +1316,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   }
                 </TouchableOpacity>
               </View>
-            </View>
+            </KeyboardAvoidingView>
           )
         })()}
 
@@ -1475,6 +1520,7 @@ const styles = StyleSheet.create({
   staplesChipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20 },
   stapleChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(74,222,128,0.1)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)', borderRadius: 30, paddingVertical: 7, paddingLeft: 10, paddingRight: 13 },
   stapleChipText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  reviewNoMatch: { color: COLORS.textMuted, fontSize: 14, textAlign: 'center', paddingVertical: 22 },
   missedBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingVertical: 10 },
   missedBarInput: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: '#FFFFFF', fontSize: 14 },
   missedBarBtn: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
