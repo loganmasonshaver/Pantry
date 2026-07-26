@@ -13,7 +13,6 @@ import {
   Image,
   Modal,
   TextInput,
-  ActivityIndicator,
   Alert,
   AppState,
   RefreshControl,
@@ -67,6 +66,16 @@ const { width } = Dimensions.get('window')
 // edge function remain intact behind this flag; flip to true post-launch
 // once we have demand signal + budget for accuracy iteration.
 const ENABLE_AI_PHOTO_LOG = false
+
+// Narrates the daily meal generation instead of a static "Finding a meal…". Honest to what the
+// backend is actually doing, in order, so the wait reads as work rather than lag.
+const DAILY_STATUS = [
+  'Checking what\'s in your pantry…',
+  'Matching recipes to your goals…',
+  'Plating today\'s picks…',
+]
+// Local-date stamp of the last daily batch the user actually saw — gates the NEW TODAY badge.
+const DAILY_BATCH_SEEN_KEY = 'home_daily_batch_seen_v1'
 
 type LogEntry = {
   id: string
@@ -383,6 +392,38 @@ export default function HomeScreen() {
   // without duplicating the Pantry tab's compact list. Pantry tab still owns the
   // "Got everything / Need: X" detail view.
   const { meals, loading } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+
+  // Rotating status while today's batch generates — narrating real steps beats a static line,
+  // and beats a bare spinner by a mile.
+  const [dailyStatusIdx, setDailyStatusIdx] = useState(0)
+  useEffect(() => {
+    if (!loading) { setDailyStatusIdx(0); return }
+    const id = setInterval(() => setDailyStatusIdx(i => (i + 1) % DAILY_STATUS.length), 2200)
+    return () => clearInterval(id)
+  }, [loading])
+
+  // "NEW TODAY" — shown once, on the first view of a new day's batch. Keyed by local date so it
+  // can't re-fire on every foreground; writing the date immediately means one badge per day even
+  // if the screen remounts.
+  const [isNewBatch, setIsNewBatch] = useState(false)
+  const newBatchAnim = useRef(new RNAnimated.Value(0)).current
+  useEffect(() => {
+    if (loading || meals.length === 0 || isNewBatch) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const d = new Date()
+        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        const seen = await AsyncStorage.getItem(DAILY_BATCH_SEEN_KEY)
+        if (seen === today || cancelled) return
+        await AsyncStorage.setItem(DAILY_BATCH_SEEN_KEY, today)
+        if (cancelled) return
+        setIsNewBatch(true)
+        RNAnimated.spring(newBatchAnim, { toValue: 1, damping: 12, stiffness: 220, useNativeDriver: true }).start()
+      } catch {}
+    })()
+    return () => { cancelled = true }
+  }, [loading, meals.length, isNewBatch])
   const HERO_CYCLE_MS = 5000
   const HERO_FADE_MS = 450
   const [heroIdx, setHeroIdx] = useState(0)
@@ -1208,7 +1249,19 @@ export default function HomeScreen() {
         {pantryFetched && pantryNames.size > 0 && (
           <View style={{ marginBottom: 36 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
-              <Text style={styles.sectionTitle}>Cook from your pantry</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={styles.sectionTitle}>Cook from your pantry</Text>
+                {/* Fires only on the FIRST view of a genuinely new day's batch — a badge that
+                    appeared every launch would be wallpaper within a week. */}
+                {isNewBatch && (
+                  <RNAnimated.View style={[styles.newBatchPill, {
+                    opacity: newBatchAnim,
+                    transform: [{ scale: newBatchAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
+                  }]}>
+                    <Text style={styles.newBatchPillText}>NEW TODAY</Text>
+                  </RNAnimated.View>
+                )}
+              </View>
               {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
                   navigator on top of itself and renders a black screen. navigate switches tabs. */}
               <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
@@ -1217,9 +1270,24 @@ export default function HomeScreen() {
             </View>
 
             {loading ? (
-              <RNAnimated.View style={[styles.heroMealCard, { marginHorizontal: 20, height: heroHeight, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' }]}>
-                <ActivityIndicator color="#4ADE80" />
-                <Text style={[styles.loadingText, { marginTop: 12 }]}>Finding a meal from your pantry…</Text>
+              // Card-shaped skeleton, not a bare spinner: a populated placeholder reads as "almost
+              // ready" while a spinner on an empty card reads as stuck. The status line narrates
+              // real work so the ~6s of generation feels like effort on the user's behalf.
+              <RNAnimated.View style={[styles.heroMealCard, { marginHorizontal: 20, height: heroHeight, overflow: 'hidden' }]}>
+                <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                  locations={[0.3, 0.6, 1]}
+                  style={styles.heroMealGradient}
+                />
+                <View style={styles.heroMealContent}>
+                  <Text style={styles.heroMealSkeletonStatus}>{DAILY_STATUS[dailyStatusIdx]}</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10 }}>
+                    {[54, 62, 40].map((w, i) => (
+                      <View key={i} style={[styles.heroMealPill, styles.heroMealPillSkeleton, { width: w }]} />
+                    ))}
+                  </View>
+                </View>
               </RNAnimated.View>
             ) : heroMeal ? (
               <>
@@ -1680,7 +1748,6 @@ const styles = StyleSheet.create({
   mealMacroText: { fontSize: 13, color: COLORS.textDim, fontWeight: '400' },
   mealMacroBold: { fontWeight: '700', color: COLORS.textWhite },
   macroDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: COLORS.textMuted },
-  loadingText: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center' },
   staplesCard: {
     marginHorizontal: 20,
     marginTop: 20,
@@ -1851,6 +1918,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  heroMealSkeletonStatus: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
+  heroMealPillSkeleton: { height: 22, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.14)' },
+  newBatchPill: { backgroundColor: 'rgba(74,222,128,0.16)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.4)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
+  newBatchPillText: { fontSize: 10, fontWeight: '800', color: '#4ADE80', letterSpacing: 0.8 },
   heroMealPillText: {
     fontSize: 9,
     fontWeight: '800',
