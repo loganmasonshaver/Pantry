@@ -169,12 +169,15 @@ const SCAN_HARD_TIMEOUT_MS = 180000 // 3 minutes
 
 // Shown one-at-a-time under the camera, rotating to the next on each photo taken.
 // Replaces the old standalone pre-scan tips screen — same guidance, less friction.
+// Short on purpose — these sit inline next to "More tips ›" on the camera, and a full sentence
+// truncated mid-word reads like a bug. The reasoning behind each one lives in the prep guide the
+// pill opens ("A quick prep = a better scan"), so nothing is lost by keeping these punchy.
 const CAMERA_TIPS = [
-  'Pull items forward so nothing hides behind taller things',
-  'Light it up — open the door fully or use flash in dim spots',
-  'Stand 3-4 ft back to fit the whole shelf and keep labels sharp',
-  'Tap the screen to focus before you shoot',
-  'One photo per zone — pantry, fridge, and freezer separately',
+  'Pull items to the front',
+  'Open the door all the way',
+  'Stand back 3–4 feet',
+  'Tap the screen to focus',
+  'One photo per area',
 ]
 
 const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
@@ -934,8 +937,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
                 </View>
                 {/* The "?" lived here and opened the same guide as the tips pill above the shutter —
-                    two controls, one destination. Removed; the pill is the single, visible entry. */}
-                <View style={styles.cameraCloseBtn} />
+                    two controls, one destination. Removed; the pill is the single, visible entry.
+                    Invisible spacer (NOT cameraCloseBtn, whose background rendered as a grey blob)
+                    keeps the photo count centered between it and the ✕. */}
+                <View style={{ width: 36 }} />
               </View>
 
               {/* Hero beat: the instruction opens large and centered, then settles above the shutter. */}
@@ -973,8 +978,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   >
                     <Lightbulb size={13} stroke="#4ADE80" strokeWidth={2} />
                     <Text style={styles.cameraTip} numberOfLines={1}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
+                    <View style={styles.cameraTipDivider} />
                     <Text style={styles.cameraTipMore}>More tips</Text>
-                    <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} />
+                    <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} style={{ marginLeft: -2 }} />
                   </TouchableOpacity>
                 </View>
 
@@ -2073,6 +2079,8 @@ const styles = StyleSheet.create({
     borderRadius: 20, borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)', backgroundColor: 'rgba(74,222,128,0.10)',
   },
   cameraTipMore: { fontSize: 12, fontWeight: '800', color: '#4ADE80', letterSpacing: 0.2 },
+  // Hairline between the hint and the action so the pill reads as two parts, not one run-on line.
+  cameraTipDivider: { width: 1, height: 12, backgroundColor: 'rgba(74,222,128,0.35)', marginHorizontal: 2 },
   cameraTip: {
     flexShrink: 1,
     fontSize: 12,
