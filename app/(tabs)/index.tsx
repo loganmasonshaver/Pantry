@@ -398,7 +398,13 @@ export default function HomeScreen() {
   const [dailyStatusIdx, setDailyStatusIdx] = useState(0)
   useEffect(() => {
     if (!loading) { setDailyStatusIdx(0); return }
-    const id = setInterval(() => setDailyStatusIdx(i => (i + 1) % DAILY_STATUS.length), 2200)
+    const id = setInterval(() => setDailyStatusIdx(i => {
+      // Clamp on the last line rather than cycling. A slow generation used to loop back to
+      // "Checking what's in your pantry…" 15s in — false by then, and a repeating list reads as
+      // stuck. Holding the final line just reads as "still plating".
+      if (i >= DAILY_STATUS.length - 1) { clearInterval(id); return i }
+      return i + 1
+    }), 2200)
     return () => clearInterval(id)
   }, [loading])
 
@@ -407,23 +413,27 @@ export default function HomeScreen() {
   // if the screen remounts.
   const [isNewBatch, setIsNewBatch] = useState(false)
   const newBatchAnim = useRef(new RNAnimated.Value(0)).current
-  useEffect(() => {
+  // Runs on FOCUS, not just mount: Home stays mounted in the tab navigator, so a mount-only check
+  // could burn the day's badge while the user was sitting on another tab and never saw it.
+  useFocusEffect(useCallback(() => {
     if (loading || meals.length === 0 || isNewBatch) return
     let cancelled = false
+    let stampTimer: ReturnType<typeof setTimeout> | undefined
     ;(async () => {
       try {
         const d = new Date()
         const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
         const seen = await AsyncStorage.getItem(DAILY_BATCH_SEEN_KEY)
         if (seen === today || cancelled) return
-        await AsyncStorage.setItem(DAILY_BATCH_SEEN_KEY, today)
-        if (cancelled) return
         setIsNewBatch(true)
         RNAnimated.spring(newBatchAnim, { toValue: 1, damping: 12, stiffness: 220, useNativeDriver: true }).start()
+        // Only mark the day as spent once it's actually been on a focused screen for a beat —
+        // writing the stamp up front meant a badge could be consumed without ever being seen.
+        stampTimer = setTimeout(() => { AsyncStorage.setItem(DAILY_BATCH_SEEN_KEY, today).catch(() => {}) }, 2000)
       } catch {}
     })()
-    return () => { cancelled = true }
-  }, [loading, meals.length, isNewBatch])
+    return () => { cancelled = true; if (stampTimer) clearTimeout(stampTimer) }
+  }, [loading, meals.length, isNewBatch]))
   const HERO_CYCLE_MS = 5000
   const HERO_FADE_MS = 450
   const [heroIdx, setHeroIdx] = useState(0)
