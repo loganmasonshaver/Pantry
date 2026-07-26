@@ -5,6 +5,11 @@ import { edgeErrorInfo } from './edgeError'
 export type GeneratedMeal = {
   id: string
   name: string
+  // Eating occasion the dish suits. Meals are generated ONCE a day and shown all day, so the
+  // generator spreads them across occasions and the UI surfaces the time-appropriate ones first —
+  // generating "breakfast" at 8am would strand the user with oats at dinner. Optional: older
+  // cached meals predate the field.
+  slot?: 'breakfast' | 'lunch' | 'dinner' | 'any'
   prepTime: number
   calories: number
   protein: number

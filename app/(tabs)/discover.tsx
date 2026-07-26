@@ -115,12 +115,29 @@ type DiscoverMeal = {
 }
 
 // Filter chips narrow the trending pool against derived signals. "All" is a no-op.
-const FILTERS = ['All', 'High Protein', 'Quick', 'Desserts', 'Vegetarian'] as const
+const FILTERS = ['All', 'Breakfast', 'Lunch', 'Dinner', 'High Protein', 'Quick', 'Desserts', 'Vegetarian'] as const
 type FilterKey = typeof FILTERS[number]
 
 // Keyword heuristics — fast, no extra columns required. Dessert reclassification is
 // the same fix flagged in the handoff (LLM mis-tags "Cottage Cheese Brownie Bake" as
 // meal). Vegetarian uses a deny-list because the trending pool doesn't carry a tag.
+// Meal-time classification. Trending meals carry no `slot` (unlike generated cook-now meals), so
+// it's derived from the name — same approach as Desserts/Vegetarian below.
+//
+// Breakfast has strong, unambiguous keywords. Lunch vs dinner genuinely does not: a chicken bowl or
+// a salad is legitimately either. So DINNER_ONLY covers dishes nobody eats at 8am, and anything
+// that's neither breakfast nor dessert stays eligible for BOTH lunch and dinner — showing a
+// reasonable meal in both beats hiding it from the one the user picked.
+const BREAKFAST_KEYWORDS = [
+  'oat', 'oatmeal', 'overnight oats', 'pancake', 'waffle', 'french toast', 'omelet', 'omelette',
+  'scramble', 'frittata', 'benedict', 'breakfast', 'granola', 'cereal', 'parfait', 'yogurt bowl',
+  'smoothie', 'bagel', 'english muffin', 'hash brown', 'chia pudding', 'avocado toast', 'porridge',
+]
+const DINNER_ONLY_KEYWORDS = [
+  'roast', 'steak', 'casserole', 'lasagna', 'stew', 'braise', 'chili', 'curry', 'pot pie',
+  'meatloaf', 'sheet pan', 'ribs', 'brisket', 'risotto', 'shepherd', 'pot roast',
+]
+
 const DESSERT_KEYWORDS = [
   'brownie', 'cake', 'cheesecake', 'cookie', 'donut', 'doughnut', 'muffin',
   'pudding', 'pie', 'ice cream', 'mousse', 'parfait', 'tart', 'scone',
@@ -172,6 +189,17 @@ function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
     return meal.calories > 0 && (meal.protein * 4) / meal.calories >= 0.25
   }
   if (filter === 'Desserts') return DESSERT_KEYWORDS.some(k => nameLower.includes(k))
+  if (filter === 'Breakfast' || filter === 'Lunch' || filter === 'Dinner') {
+    const isDessert = DESSERT_KEYWORDS.some(k => nameLower.includes(k))
+    const isBreakfast = BREAKFAST_KEYWORDS.some(k => nameLower.includes(k))
+    // Breakfast wins on overlap: "parfait" is in both lists, and a Greek yogurt parfait is
+    // breakfast to most people even if a chocolate one isn't.
+    if (filter === 'Breakfast') return isBreakfast
+    // Lunch/dinner: exclude breakfast dishes and desserts; dinner-only mains are hidden from lunch.
+    if (isBreakfast || isDessert) return false
+    if (filter === 'Lunch') return !DINNER_ONLY_KEYWORDS.some(k => nameLower.includes(k))
+    return true
+  }
   if (filter === 'Vegetarian') {
     if (MEAT_KEYWORDS.some(k => nameLower.includes(k))) return false
     const ingredientNames = (meal.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())

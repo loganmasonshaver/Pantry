@@ -297,6 +297,9 @@ Deno.serve(async (req: Request) => {
     - NEVER missing: the protein, the main carb/base (rice, pasta, bread, potato), the primary fat/dairy, or anything named in or implied by the dish title. A "cheesy" dish with no cheese in the pantry, or a rice bowl with no rice, is FORBIDDEN — that is a different dish the user cannot make, not a stretch.
     - NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins).
 - Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the assumed basics above. Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".
+- QUANTITY REALISM: the pantry list records WHAT the user has, never HOW MUCH. Assume ordinary household amounts and never build a meal that hinges on a large quantity of one non-staple item (a dozen eggs, a whole block of cheese, 400g of a single protein). If a dish only works at that scale, choose a different dish. Portions should serve one person.
+- EQUIPMENT: assume ONLY a stove, oven, microwave, and basic blender. A recipe must never REQUIRE an air fryer, instant pot, slow cooker, sous vide, stand mixer, food processor, or grill — the user may not own one. You may mention one as an optional alternative ("or air-fry"), never as the only path.
+- SPREAD ACROSS EATING OCCASIONS: these suggestions are generated ONCE and shown all day, so do not make them all the same kind of meal. Across the displayed meals include a mix — something light/fast (breakfast or snack character) and something substantial (lunch/dinner character) — so the set is still useful whether it's 8am or 8pm. Tag each meal with "slot": one of "breakfast", "lunch", "dinner", or "any".
 - RESPECT THE CUT/FORM — it dictates the cooking method, and the wrong pairing makes the recipe impossible:
   - Ground meat -> tacos, bolognese, burgers, chili, meatballs. Never "sliced" or "seared whole".
   - Tough/collagen cuts (chuck, brisket, shank, pork shoulder, short rib) need LOW AND SLOW (braise, stew, 2h+). NEVER put one in a fast weeknight dish or claim a prep time it cannot meet.
@@ -377,6 +380,7 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
   {
     "id": "1",
     "name": "meal name",
+    "slot": "dinner",
     "prepTime": 25,
     "calories": 500,
     "protein": 45,

@@ -581,6 +581,19 @@ export default function PantryScreen() {
   const inStockCount = categories.reduce((s, c) => s + c.ingredients.filter(i => i.inStock).length, 0)
   const pantryIsThin = inStockCount > 0 && (!hasInStockProtein || inStockCount < 8)
 
+  // Meals are generated ONCE a day and shown all day, so the time-of-day decision belongs HERE, at
+  // display, not at generation — generating "breakfast" because the user opened the app at 8am
+  // would strand them with oats at dinner. The generator spreads meals across occasions; this just
+  // floats the ones that fit right now.
+  const currentSlot = (() => {
+    const h = new Date().getHours()
+    if (h < 11) return 'breakfast'
+    if (h < 16) return 'lunch'
+    return 'dinner'
+  })()
+  // 0 = matches now, 1 = anytime dish (or a meal cached before `slot` existed), 2 = wrong occasion.
+  const slotScore = (m: { slot?: string }) => (m.slot === currentSlot ? 0 : (!m.slot || m.slot === 'any') ? 1 : 2)
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header (fixed) ── */}
@@ -846,7 +859,10 @@ export default function PantryScreen() {
                     <Reanimated.View entering={FadeIn.duration(300)} style={{ gap: 10 }}>
                       {/* Ready-to-cook meals first (fewest missing items) so the list leads with what
                           the user can make right now — matches the "N ready now" subtitle top-down. */}
-                      {[...meals].sort((a, b) => missingFor(a.ingredients).length - missingFor(b.ingredients).length).slice(0, 3).map((meal, idx) => {
+                      {[...meals].sort((a, b) =>
+                        (missingFor(a.ingredients).length - missingFor(b.ingredients).length) ||
+                        (slotScore(a) - slotScore(b)) // ready-to-cook still wins; time-of-day breaks the tie
+                      ).slice(0, 3).map((meal, idx) => {
                         // Compute against the LIVE pantry (the same check the meal-detail screen uses)
                         // so the card and the detail always agree. The old code trusted the server's
                         // self-reported missing_ingredients, but GPT returns [] even when the pantry is
