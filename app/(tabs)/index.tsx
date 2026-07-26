@@ -74,8 +74,6 @@ const DAILY_STATUS = [
   'Matching recipes to your goals…',
   'Plating today\'s picks…',
 ]
-// Local-date stamp of the last daily batch the user actually saw — gates the NEW TODAY badge.
-const DAILY_BATCH_SEEN_KEY = 'home_daily_batch_seen_v1'
 
 type LogEntry = {
   id: string
@@ -408,32 +406,6 @@ export default function HomeScreen() {
     return () => clearInterval(id)
   }, [loading])
 
-  // "NEW TODAY" — shown once, on the first view of a new day's batch. Keyed by local date so it
-  // can't re-fire on every foreground; writing the date immediately means one badge per day even
-  // if the screen remounts.
-  const [isNewBatch, setIsNewBatch] = useState(false)
-  const newBatchAnim = useRef(new RNAnimated.Value(0)).current
-  // Runs on FOCUS, not just mount: Home stays mounted in the tab navigator, so a mount-only check
-  // could burn the day's badge while the user was sitting on another tab and never saw it.
-  useFocusEffect(useCallback(() => {
-    if (loading || meals.length === 0 || isNewBatch) return
-    let cancelled = false
-    let stampTimer: ReturnType<typeof setTimeout> | undefined
-    ;(async () => {
-      try {
-        const d = new Date()
-        const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-        const seen = await AsyncStorage.getItem(DAILY_BATCH_SEEN_KEY)
-        if (seen === today || cancelled) return
-        setIsNewBatch(true)
-        RNAnimated.spring(newBatchAnim, { toValue: 1, damping: 12, stiffness: 220, useNativeDriver: true }).start()
-        // Only mark the day as spent once it's actually been on a focused screen for a beat —
-        // writing the stamp up front meant a badge could be consumed without ever being seen.
-        stampTimer = setTimeout(() => { AsyncStorage.setItem(DAILY_BATCH_SEEN_KEY, today).catch(() => {}) }, 2000)
-      } catch {}
-    })()
-    return () => { cancelled = true; if (stampTimer) clearTimeout(stampTimer) }
-  }, [loading, meals.length, isNewBatch]))
   const HERO_CYCLE_MS = 5000
   const HERO_FADE_MS = 450
   const [heroIdx, setHeroIdx] = useState(0)
@@ -1259,19 +1231,7 @@ export default function HomeScreen() {
         {pantryFetched && pantryNames.size > 0 && (
           <View style={{ marginBottom: 36 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text style={styles.sectionTitle}>Cook from your pantry</Text>
-                {/* Fires only on the FIRST view of a genuinely new day's batch — a badge that
-                    appeared every launch would be wallpaper within a week. */}
-                {isNewBatch && (
-                  <RNAnimated.View style={[styles.newBatchPill, {
-                    opacity: newBatchAnim,
-                    transform: [{ scale: newBatchAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }],
-                  }]}>
-                    <Text style={styles.newBatchPillText}>NEW TODAY</Text>
-                  </RNAnimated.View>
-                )}
-              </View>
+              <Text style={styles.sectionTitle}>Cook from your pantry</Text>
               {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
                   navigator on top of itself and renders a black screen. navigate switches tabs. */}
               <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
@@ -1930,8 +1890,6 @@ const styles = StyleSheet.create({
   },
   heroMealSkeletonStatus: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
   heroMealPillSkeleton: { height: 22, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.14)' },
-  newBatchPill: { backgroundColor: 'rgba(74,222,128,0.16)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.4)', borderRadius: 20, paddingHorizontal: 8, paddingVertical: 3 },
-  newBatchPillText: { fontSize: 10, fontWeight: '800', color: '#4ADE80', letterSpacing: 0.8 },
   heroMealPillText: {
     fontSize: 9,
     fontWeight: '800',
