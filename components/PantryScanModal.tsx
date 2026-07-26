@@ -1022,7 +1022,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         })()}
 
         {/* ── Step 4: Add More ── */}
-        {step === 4 && (
+        {step === 4 && (() => {
+          // How many photos exist per area, so the tiles double as a checklist. Counting (not just
+          // a boolean) is what makes multiple fridges/counters work: a captured tile stays tappable
+          // and shows "· 2" — no special "Second Fridge" case needed.
+          const capturedCounts = photos.reduce((m, p) => {
+            const k = (p.label || '').trim().toLowerCase()
+            if (k) m[k] = (m[k] ?? 0) + 1
+            return m
+          }, {} as Record<string, number>)
+          // The three that actually drive meal generation. Counter is a bonus, not a gap.
+          const missingCore = ['Fridge', 'Freezer', 'Pantry'].filter(a => !capturedCounts[a.toLowerCase()])
+          return (
           <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
               {/* X first, flex spacer after — keeps the close affordance in the
@@ -1034,7 +1045,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             </View>
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
               <Text style={styles.hubTitle}>More areas, <Text style={styles.hubTitleAccent}>better meals</Text></Text>
-              <Text style={styles.hubSubtitle}>One photo's plenty — scan now, or add more below.</Text>
+              {/* Names what's still missing instead of "one photo's plenty" — which told people to
+                  stop right when more coverage is what makes the meal generation good. Still no
+                  nagging: the scan button is always live, this is just an honest status line. */}
+              <Text style={styles.hubSubtitle}>
+                {missingCore.length > 0
+                  ? `Pantry only sees what you photograph. Still to add: ${missingCore.join(' · ')}`
+                  : 'Fridge, freezer and pantry all covered — that\'s the good stuff.'}
+              </Text>
 
               {/* Captured so far — tangible progress, so the screen reads as a collection you're building. */}
               {photos.length > 0 && (
@@ -1116,17 +1134,30 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       </View>
                     )
                   }
+                  // Captured tiles stay tappable — that's how a second fridge / another counter gets
+                  // added, and the count makes it obvious it worked.
+                  const taken = capturedCounts[opt.label.toLowerCase()] ?? 0
                   return (
                     <View key={opt.id} style={styles.areaCardWrap}>
                       <TouchableOpacity
-                        style={styles.areaCard}
+                        style={[styles.areaCard, taken > 0 && styles.areaCardTaken]}
                         onPress={() => { setPendingLabel(opt.label); setStep(1) }}
                         activeOpacity={0.85}
                       >
-                        <View style={styles.areaIconWrap}>
+                        <View style={[styles.areaIconWrap, taken > 0 && styles.areaIconWrapTaken]}>
                           <Icon size={22} stroke="#4ADE80" strokeWidth={1.8} />
                         </View>
                         <Text style={styles.areaCardText}>{opt.label}</Text>
+                        {taken > 0 && (
+                          <>
+                            <View style={styles.areaDoneBadge}>
+                              <Check size={11} stroke="#000" strokeWidth={3.5} />
+                            </View>
+                            <Text style={styles.areaDoneText}>
+                              {taken} photo{taken !== 1 ? 's' : ''} · tap to add more
+                            </Text>
+                          </>
+                        )}
                       </TouchableOpacity>
                     </View>
                   )
@@ -1140,7 +1171,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               </TouchableOpacity>
             </View>
           </View>
-        )}
+          )
+        })()}
 
         {/* ── Step 5: Loading ── */}
         {step === 5 && (
@@ -1660,6 +1692,8 @@ const styles = StyleSheet.create({
   areaCardWrap: { width: '48%' },
   areaCard: { backgroundColor: '#141414', borderRadius: 16, minHeight: 120, paddingVertical: 16, paddingHorizontal: 14, alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
   areaCardTaken: { borderColor: 'rgba(74,222,128,0.4)', backgroundColor: 'rgba(74,222,128,0.06)' },
+  areaDoneBadge: { position: 'absolute', top: 10, right: 10, width: 18, height: 18, borderRadius: 9, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
+  areaDoneText: { fontSize: 10, fontWeight: '600', color: 'rgba(74,222,128,0.85)', marginTop: -4 },
   areaIconWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.10)', alignItems: 'center', justifyContent: 'center' },
   areaIconWrapTaken: { backgroundColor: 'rgba(74,222,128,0.14)' },
   areaCardText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
