@@ -930,9 +930,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               {/* Top scrim keeps the X / help / count legible over a bright frame */}
               <LinearGradient colors={['rgba(0,0,0,0.55)', 'transparent']} style={styles.cameraTopScrim} pointerEvents="none" />
               <View style={[styles.cameraTopBar, { top: insets.top + 12 }]}>
-                <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
-                  <X size={20} stroke="#FFFFFF" strokeWidth={2} />
-                </TouchableOpacity>
+                {/* Once a photo exists, this camera was opened FROM the areas hub — so the top-left
+                    control is Back (to the hub), not Close. It used to be ✕ = kill the whole scan,
+                    so tapping into "Fridge" by mistake and backing out threw the scan away. ✕ only
+                    survives on the very first shot, where there's nothing to go back to. */}
+                {photos.length > 0 ? (
+                  <TouchableOpacity
+                    style={styles.cameraCloseBtn}
+                    onPress={() => { setPendingLabel(null); setStep(4) }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <ChevronLeft size={22} stroke="#FFFFFF" strokeWidth={2} />
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                    <X size={20} stroke="#FFFFFF" strokeWidth={2} />
+                  </TouchableOpacity>
+                )}
                 <View style={styles.cameraTopCenter}>
                   {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
                 </View>
