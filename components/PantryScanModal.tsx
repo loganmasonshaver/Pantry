@@ -25,7 +25,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, HelpCircle, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { ScanTheater } from './ScanTheater'
 import { supabase } from '@/lib/supabase'
@@ -332,6 +332,21 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
   const [showPrep, setShowPrep] = useState(false) // first-run "how scanning works" overlay (sets expectations + coaches better photos)
+
+  // The capture instruction opens BIG in the middle of the frame so it can't be missed, holds, then
+  // settles into its spot above the shutter. 0 = hero (centered/large), 1 = settled (bottom/small).
+  // Purely a cross-fade of two copies — the hero is pointerEvents:none, so the shutter is live the
+  // whole time and an impatient user can shoot immediately.
+  const HERO_HOLD_MS = 5000
+  const titleAnim = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    if (step !== 1) { titleAnim.setValue(1); return } // only the first shot gets the hero beat
+    titleAnim.setValue(0)
+    const t = setTimeout(() => {
+      Animated.timing(titleAnim, { toValue: 1, duration: 550, easing: Easing.out(Easing.quad), useNativeDriver: true }).start()
+    }, HERO_HOLD_MS)
+    return () => clearTimeout(t)
+  }, [step])
   // Per-photo review carousel state
   const [currentPhoto, setCurrentPhoto] = useState(0)
   // Natural pixel dims per photo uri (from Image onLoad) → render the review photo at its TRUE
@@ -918,10 +933,21 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <View style={styles.cameraTopCenter}>
                   {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
                 </View>
-                <TouchableOpacity style={styles.cameraCloseBtn} onPress={() => setShowPrep(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                  <HelpCircle size={20} stroke="#FFFFFF" strokeWidth={2} />
-                </TouchableOpacity>
+                {/* The "?" lived here and opened the same guide as the tips pill above the shutter —
+                    two controls, one destination. Removed; the pill is the single, visible entry. */}
+                <View style={styles.cameraCloseBtn} />
               </View>
+
+              {/* Hero beat: the instruction opens large and centered, then settles above the shutter. */}
+              <Animated.View
+                pointerEvents="none"
+                style={[styles.cameraHeroWrap, {
+                  opacity: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+                  transform: [{ scale: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.82] }) }],
+                }]}
+              >
+                <Text style={styles.cameraHeroTitle}>{captureTitle}</Text>
+              </Animated.View>
 
               {/* Captured thumbnails — top-left under the bar, out of the shutter's way */}
               {photos.length > 0 && (
@@ -933,7 +959,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               {/* Bottom scrim carries the copy + shutter so text is always readable over the camera */}
               <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)']} style={[styles.cameraBottomOverlay, { paddingBottom: insets.bottom + 14 }]}>
                 <View style={styles.stepTextCompact}>
-                  <Text style={styles.cameraTitle}>{captureTitle}</Text>
+                  {/* Fades in as the centered hero fades out — same words, one continuous beat. */}
+                  <Animated.Text style={[styles.cameraTitle, { opacity: titleAnim }]}>{captureTitle}</Animated.Text>
                   <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
                   {/* The tip was a dead line of text. It's now the entry point to the full
                       best-scan guide — bordered pill + chevron so it reads as "there's more here",
@@ -1672,7 +1699,10 @@ const styles = StyleSheet.create({
   cameraPermFallback: { backgroundColor: '#111111', alignItems: 'center', justifyContent: 'center' },
   cameraTopScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 130 },
   cameraBottomOverlay: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingTop: 44, paddingHorizontal: 24, gap: 14, alignItems: 'center' },
-  cameraTitle: { fontSize: 24, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 },
+  // Settled size — a touch smaller than before (24) since the hero beat already delivered the words.
+  cameraTitle: { fontSize: 21, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 },
+  cameraHeroWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  cameraHeroTitle: { fontSize: 38, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.8, lineHeight: 44, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.85)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 14 },
   cameraSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.9)', lineHeight: 20, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 6 },
   cameraDoneText: { fontSize: 14, color: '#4ADE80', fontWeight: '700' },
   cameraTopBar: {
