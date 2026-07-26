@@ -293,8 +293,13 @@ Deno.serve(async (req: Request) => {
       ? `- HYBRID COOK NOW MODE — generate exactly ${genCount} meals split as follows:
   • ASSUMED BASICS: assume the kitchen always stocks these — you may ALWAYS use them and must NEVER put them in "missing_ingredients": ${ASSUMED.join(', ')}, and water.${excludedClause} Do NOT assume anything a meal is BUILT from — eggs, milk, cheese, yogurt, rice, pasta, bread, fresh produce (onion, garlic, lemon, tomato), or any protein — those must be in the pantry list to be used.
   • The first ${genCount - 1} meals (STRICT): besides the assumed basics above, use ONLY ingredients from the pantry list. Set "missing_ingredients": [] for each. These prove "you can cook tonight with what you have."
-  • The last meal (STRETCH): may include 1-2 additional COMMON staples not in the pantry (allowed extras: fresh garlic, soy sauce, lemon, rice, pasta, eggs). NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins). This is "with a quick stop you could make this."
-- Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the assumed basics above. Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".`
+  • The last meal (NEAR-STRICT): may be missing at most 1-2 OPTIONAL FINISHING items only — a garnish, a fresh herb, a seasoning, a squeeze of citrus, a drizzle. THE TEST: the user must be able to cook this dish TONIGHT, in full, and have it still be good, without ever leaving the house. If the missing item changes what the dish IS, it is NOT allowed.
+    - NEVER missing: the protein, the main carb/base (rice, pasta, bread, potato), the primary fat/dairy, or anything named in or implied by the dish title. A "cheesy" dish with no cheese in the pantry, or a rice bowl with no rice, is FORBIDDEN — that is a different dish the user cannot make, not a stretch.
+    - NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins).
+- Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the assumed basics above. Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".
+- NAME THE SPECIFIC VARIETY, never the generic category. "Pasta", "cheese", "rice", "vinegar", "oil", "bread" are too vague — the right variety changes the dish, the cook time, and the photo (rice noodles suit a Thai dish; penne does not).
+  - If the pantry HAS one, name that exact item: pantry "penne" -> the recipe says "penne", not "pasta".
+  - If it is genuinely absent, name the variety the dish actually calls for ("rice noodles", "sharp cheddar", "jasmine rice") so the shopping line is actionable — subject to the missing-item rules above.`
       : `- Use ingredients primarily from the pantry list, but you may include 1-3 extra ingredients per meal that the user would need to buy.`
 
     const prompt = `You are a nutrition-focused meal planner. Generate exactly ${genCount} high-protein meal suggestions.

@@ -875,8 +875,12 @@ export default function PantryScreen() {
                                   <Text style={styles.cookTonightHaveText}>Ready to cook</Text>
                                 </View>
                               ) : (
+                                // Anything still listed here is now an OPTIONAL finishing item — the
+                                // generator can't leave out a defining ingredient (protein, main carb,
+                                // the cheese in a cheesy dish). So this reads as an upgrade, not a
+                                // blocker: "Need:" made a cookable meal look impossible.
                                 <Text style={styles.cookTonightNeedText} numberOfLines={1}>
-                                  Need: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}
+                                  Better with: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}
                                 </Text>
                               )}
                             </View>
