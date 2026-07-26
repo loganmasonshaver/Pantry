@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -332,7 +333,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         {step === 'detail' && (
           <View style={styles.step}>
             <View style={[styles.topBar, { paddingTop: insets.top - 4 }]}>
-              <TouchableOpacity style={styles.backBtn} onPress={() => { setStep('browse'); setSelectedFood(null) }} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.backBtn} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } setStep('browse'); setSelectedFood(null) }} activeOpacity={0.7}>
                 <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
               <Text style={styles.topTitle} numberOfLines={1}>

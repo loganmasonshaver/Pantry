@@ -10,6 +10,7 @@ import {
   PanResponder,
   Alert,
   LayoutAnimation,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
@@ -531,7 +532,7 @@ export default function GroceryScreen() {
             <>
               <TouchableOpacity
                 style={[styles.iconBtn, !checkedCount && styles.iconBtnDisabled]}
-                onPress={clearChecked}
+                onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } clearChecked() }}
                 activeOpacity={0.7}
                 disabled={checkedCount === 0}
               >

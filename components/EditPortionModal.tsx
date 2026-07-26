@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight } from 'lucide-react-native'
@@ -36,6 +37,9 @@ export default function EditPortionModal({
   currentCalories, currentProtein,
   onUpdated,
 }: Props) {
+  // Keyboard up → this closes the KEYBOARD, not the form (people tap the nearest ✕/Cancel
+  // just to dismiss it, and that used to discard everything typed). Second tap closes.
+  const closeOrDismiss = () => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } onClose() }
   const [food, setFood] = useState<FoodDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [selectedServing, setSelectedServing] = useState<FoodServing | null>(null)
@@ -117,7 +121,7 @@ export default function EditPortionModal({
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         {/* Header */}
         <View style={styles.topBar}>
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.closeBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
             <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
           <Text style={styles.topTitle} numberOfLines={1}>{logName}</Text>

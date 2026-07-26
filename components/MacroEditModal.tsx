@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
+  Keyboard,
 } from 'react-native'
 import { X } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
@@ -33,6 +34,9 @@ export default function MacroEditModal({
   originalCalories, originalProtein, originalCarbs, originalFat,
   onSaved,
 }: Props) {
+  // Keyboard up → this closes the KEYBOARD, not the form (people tap the nearest ✕/Cancel
+  // just to dismiss it, and that used to discard everything typed). Second tap closes.
+  const closeOrDismiss = () => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } onClose() }
   const [calories, setCalories] = useState(String(originalCalories))
   const [protein, setProtein] = useState(String(originalProtein))
   const [carbs, setCarbs] = useState(String(originalCarbs))
@@ -122,7 +126,7 @@ export default function MacroEditModal({
               <Text style={styles.title}>Fix Nutrition Data</Text>
               <Text style={styles.subtitle} numberOfLines={1}>{foodName}</Text>
             </View>
-            <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.closeBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
           </View>
@@ -181,7 +185,7 @@ export default function MacroEditModal({
                 </TouchableOpacity>
               )}
 
-              <TouchableOpacity style={styles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
             </>

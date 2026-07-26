@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   Alert,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
@@ -153,7 +154,7 @@ export default function SignInScreen() {
         onError={() => { setCaptchaToken(null); setTurnstileKey(k => k + 1) }}
       />
       <View style={s.topBarRow}>
-        <TouchableOpacity style={s.backArrowBtn} onPress={() => router.back()} activeOpacity={0.7}>
+        <TouchableOpacity style={s.backArrowBtn} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } router.back() }} activeOpacity={0.7}>
           <ArrowLeft size={18} stroke="#FFFFFF" strokeWidth={2.5} />
         </TouchableOpacity>
       </View>

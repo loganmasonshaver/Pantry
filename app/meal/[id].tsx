@@ -12,6 +12,7 @@ import {
   Image,
   Animated,
   Linking,
+  Keyboard,
 } from 'react-native'
 let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
@@ -1217,7 +1218,7 @@ export default function MealDetailScreen() {
 
       {/* ── Slot picker modal ── */}
       <Modal visible={showSlotPicker} transparent animationType="slide" onRequestClose={() => setShowSlotPicker(false)}>
-        <TouchableOpacity style={styles.slotOverlay} activeOpacity={1} onPress={() => setShowSlotPicker(false)}>
+        <TouchableOpacity style={styles.slotOverlay} activeOpacity={1} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } setShowSlotPicker(false) }}>
           <View style={styles.slotCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.slotTitle}>Log to which meal?</Text>
 

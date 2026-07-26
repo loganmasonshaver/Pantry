@@ -16,6 +16,7 @@ import {
   Easing,
   Alert,
   LayoutAnimation,
+  Keyboard,
 } from 'react-native'
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -1002,7 +1003,7 @@ export default function PantryScreen() {
                 <View style={styles.modalActions}>
                   <TouchableOpacity
                     style={styles.cancelBtn}
-                    onPress={() => { setNewIngredientName(''); setDisambigChoices([]); setShowAddModal(false) }}
+                    onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } setNewIngredientName(''); setDisambigChoices([]); setShowAddModal(false) }}
                     activeOpacity={0.7}
                   >
                     <Text style={styles.cancelBtnText}>Cancel</Text>

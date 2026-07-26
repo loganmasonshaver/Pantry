@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   Modal, View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, KeyboardAvoidingView, Platform, Alert, ActivityIndicator, Image, Linking,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight, Camera, Plus, Pencil, Clock, Instagram, Youtube } from 'lucide-react-native'
@@ -69,6 +70,9 @@ function parseList(text: string): string[] {
 }
 
 export default function CreatorRecipeModal({ visible, onClose, onSubmitted, mealToEdit }: Props) {
+  // Keyboard up → this closes the KEYBOARD, not the form (people tap the nearest ✕/Cancel
+  // just to dismiss it, and that used to discard everything typed). Second tap closes.
+  const closeOrDismiss = () => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } onClose() }
   const { user } = useAuth()
   const isEditMode = !!mealToEdit
   const [step, setStep] = useState<'profile' | 'recipe'>('profile')
@@ -415,7 +419,7 @@ export default function CreatorRecipeModal({ visible, onClose, onSubmitted, meal
             <Text style={s.headerTitle}>
               {step === 'profile' ? 'Creator Profile' : isEditMode ? 'Edit Recipe' : 'New Recipe'}
             </Text>
-            <TouchableOpacity onPress={onClose} hitSlop={12}><X size={22} color="#888" /></TouchableOpacity>
+            <TouchableOpacity onPress={closeOrDismiss} hitSlop={12}><X size={22} color="#888" /></TouchableOpacity>
           </View>
 
           {step === 'profile' ? (

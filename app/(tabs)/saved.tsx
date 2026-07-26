@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   LayoutAnimation,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Reanimated, { FadeIn } from 'react-native-reanimated'
@@ -500,7 +501,7 @@ export default function SavedScreen() {
                 <Text style={styles.importBtnText}>Extract Recipe</Text>
               )}
             </PressableScale>
-            <PressableScale style={styles.importCancel} onPress={() => { setShowImportModal(false); setImportUrl('') }}>
+            <PressableScale style={styles.importCancel} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } setShowImportModal(false); setImportUrl('') }}>
               <Text style={styles.importCancelText}>Cancel</Text>
             </PressableScale>
           </View>
