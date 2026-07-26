@@ -1214,7 +1214,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <>
                     {/* Close on its own row so the thumbnails below get the FULL width to fill. */}
                     <View style={styles.reviewCloseRow}>
-                      <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+                      {/* With the keyboard up, ✕ closes the KEYBOARD, not the scan. It's the nearest
+                          "get me out of this" target when the keyboard covers the screen, and hitting
+                          it used to discard every detected item — unrecoverable (the vision call is
+                          already spent). A second tap, keyboard down, closes the scan as normal. */}
+                      <TouchableOpacity
+                        style={styles.closeBtn}
+                        onPress={() => { if (keyboardUp) { Keyboard.dismiss(); return } handleClose() }}
+                      >
                         <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
                     </View>
