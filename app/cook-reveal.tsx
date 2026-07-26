@@ -30,6 +30,11 @@ const MIN_BUILD_MS = 1400       // anticipation floor before the reveal is allow
 const HERO_IMG_GRACE_MS = 2600  // extra hold for the hero photo (capped — never stalls)
 const DWELL_MS = 3000           // auto-advance dwell when the next photo is ready
 const IMG_GRACE_MS = 2000       // extra dwell when the next photo hasn't landed yet
+const CHUNK_STEP_MS = 200       // gap between headline chunks landing (each fires a haptic tick)
+// The headline assembles in these pieces. Rendered as separate Texts (not one string) so each can
+// animate independently, and all slots hold their layout from the start — the sentence fades in
+// place instead of reflowing as words arrive. Slot 0 is the count and gets the pop.
+const CHUNK_SLOTS = ['count', 'meals you', 'can make', 'right now'] as const
 
 // Animated count-up — the dopamine beat. Rolls 0→value the FIRST time its card becomes active,
 // then holds forever — it must NOT re-roll when the user swipes back to a card they've already seen
@@ -50,6 +55,32 @@ function CountUp({ value, active, reduceMotion, style }: { value: number; active
     return () => anim.removeListener(id)
   }, [active, value, reduceMotion])
   return <Text style={style}>{display}</Text>
+}
+
+// The headline, rendered as independently-animatable pieces so it can assemble one chunk at a time.
+// Every chunk is mounted from the start (opacity 0) so the line never reflows as words arrive — it
+// fades into place. The count is the only piece that gets an overshoot pop: research is explicit
+// that spring overshoot on a whole line of text reads cheap, but on one small accent it reads good.
+function HeadlineChunks({ count, anims }: { count: number; anims: Animated.Value[] }) {
+  const pieces = [String(count), 'meals you', 'can make', 'right now']
+  return (
+    <View style={styles.headlineRow}>
+      {pieces.map((piece, i) => (
+        <Animated.Text
+          key={i}
+          style={[styles.title, {
+            opacity: anims[i],
+            transform: [
+              { translateY: anims[i].interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
+              { scale: i === 0 ? anims[i].interpolate({ inputRange: [0, 1], outputRange: [1.35, 1] }) : 1 },
+            ],
+          }]}
+        >
+          {piece}{i < pieces.length - 1 ? ' ' : ''}
+        </Animated.Text>
+      ))}
+    </View>
+  )
 }
 
 // Post-scan payoff screen: reveals the cook-now meals generated from the just-scanned pantry as a
@@ -94,16 +125,46 @@ export default function CookReveal() {
   const glowAnim = useRef(new Animated.Value(0)).current
   const animatedRef = useRef(false)
 
-  // Rising haptic ramp through the build-up (Soft → Light → Medium). This is what makes the
-  // Success notification at the peak land as a THUD you felt coming, instead of a lone buzz.
+  // The headline lands one chunk at a time, each with a haptic tick — this IS the build-up ramp
+  // (it replaced a blind Soft→Light→Medium buzz on a shimmer skeleton). You feel the sentence
+  // assemble, so the Success notification at the peak lands as a thud you felt coming. It also
+  // buys cards 2-3 another second of image-warm time.
+  const chunkAnims = useRef(CHUNK_SLOTS.map(() => new Animated.Value(0))).current
+  const validationAnim = useRef(new Animated.Value(0)).current
+  const chunksStartedRef = useRef(false)
   useEffect(() => {
-    const ts = [
-      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Soft).catch(() => {}), 140),
-      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}), 540),
-      setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}), 960),
-    ]
-    return () => ts.forEach(clearTimeout)
-  }, [])
+    if (revealed.length === 0 || chunksStartedRef.current) return
+    chunksStartedRef.current = true
+    if (reduceMotion) {
+      chunkAnims.forEach(a => a.setValue(1))
+      validationAnim.setValue(1)
+      return
+    }
+    let i = 0
+    const id = setInterval(() => {
+      Animated.spring(chunkAnims[i], { toValue: 1, damping: 14, stiffness: 210, mass: 0.9, useNativeDriver: true }).start()
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+      i += 1
+      if (i >= chunkAnims.length) {
+        clearInterval(id)
+        Animated.timing(validationAnim, { toValue: 1, duration: 420, delay: 120, useNativeDriver: true }).start()
+      }
+    }, CHUNK_STEP_MS)
+    return () => clearInterval(id)
+  }, [revealed.length, reduceMotion])
+
+  // What the scan actually bought them: distinct ingredients across the revealed meals that they
+  // already own (missing_ingredients excluded). Closes the loop between the effort of photographing
+  // areas and the payoff, and restates the promise — no shopping.
+  const ownedIngredientCount = (() => {
+    const missing = new Set(revealed.flatMap(m => (m.missing_ingredients ?? []).map((s: string) => s.toLowerCase().trim())))
+    const owned = new Set<string>()
+    revealed.forEach(m => (m.ingredients ?? []).forEach((ing: any) => {
+      const n = String(ing?.name ?? '').toLowerCase().trim()
+      if (n && !missing.has(n)) owned.add(n)
+    }))
+    return owned.size
+  })()
 
   // The gate: hold the reveal until (a) the anticipation floor has elapsed AND (b) the hero photo
   // is in hand — so the peak lands on a real image, not a skeleton. The photo wait is capped, so a
@@ -157,14 +218,20 @@ export default function CookReveal() {
     return () => clearTimeout(t)
   }, [activeIndex, revealed.length, reduceMotion, gateOpen, nextImageReady])
 
-  // Light tap as each NEW card lands — deliberately quieter than the peak's Success notification,
-  // so the secondary beats don't compete with the moment they're following.
+  // Each NEW card gets its own small reward: a light tap plus a glow swell that settles back to
+  // ambient. Deliberately quieter than the peak's Success notification + full bloom, so cards 2-3
+  // feel like beats of the same moment rather than competing with it — but they're no longer
+  // anticlimactic after card 1.
   useEffect(() => {
-    if (activeIndex !== prevActive.current) {
-      prevActive.current = activeIndex
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
-    }
-  }, [activeIndex])
+    if (activeIndex === prevActive.current) return
+    prevActive.current = activeIndex
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    if (!gateOpen || reduceMotion) return
+    Animated.sequence([
+      Animated.timing(glowAnim, { toValue: 0.75, duration: 220, useNativeDriver: true }),
+      Animated.timing(glowAnim, { toValue: 0.4, duration: 420, useNativeDriver: true }),
+    ]).start()
+  }, [activeIndex, gateOpen, reduceMotion])
 
   const onScroll = Animated.event([{ nativeEvent: { contentOffset: { x: scrollX } } }], { useNativeDriver: true })
   const onMomentumEnd = (e: any) => {
@@ -200,11 +267,14 @@ export default function CookReveal() {
         </View>
       ) : !gateOpen ? (
         <View style={styles.centerRegion}>
-          {/* The build-up. A populated skeleton + a line that narrates real work reads as
-              "working for you"; a bare spinner reads as lag. The haptic ramp runs underneath. */}
+          {/* Build-up. Once the meals land the headline starts assembling chunk by chunk (with
+              haptic ticks) right here — so the anticipation beat is the sentence itself, and it
+              carries straight through into the revealed state below without re-animating. */}
           <View style={styles.header}>
             <Text style={styles.eyebrow}>FROM YOUR PANTRY</Text>
-            <Text style={styles.title}>Plating your meals…</Text>
+            {revealed.length > 0
+              ? <HeadlineChunks count={revealed.length} anims={chunkAnims} />
+              : <Text style={styles.title}>Plating your meals…</Text>}
           </View>
           <ScrollView
             horizontal
@@ -223,13 +293,20 @@ export default function CookReveal() {
         </View>
       ) : (
         <View style={styles.body}>
-            <Animated.View style={[styles.header, {
-              opacity: headerAnim,
-              transform: [{ translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
-            }]}>
+            {/* Same headline instance as the build-up — it already assembled, so it just persists
+                here rather than replaying. Under it, the validation line: what the scan bought. */}
+            <View style={styles.header}>
               <Text style={styles.eyebrow}>FROM YOUR PANTRY</Text>
-              <Text style={styles.title}>{revealed.length} meals you{'\n'}can make right now</Text>
-            </Animated.View>
+              <HeadlineChunks count={revealed.length} anims={chunkAnims} />
+              {ownedIngredientCount > 0 && (
+                <Animated.Text style={[styles.validation, {
+                  opacity: validationAnim,
+                  transform: [{ translateY: validationAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
+                }]}>
+                  From {ownedIngredientCount} things you already have · no shopping
+                </Animated.Text>
+              )}
+            </View>
 
             <View style={styles.deckArea}>
               {/* The peak's visual: a soft green bloom behind the hero card. Chosen over confetti —
@@ -336,6 +413,8 @@ export default function CookReveal() {
                 ))}
               </View>
             )}
+            {/* The END matters as much as the peak (peak-end rule) — this used to trail off on
+                muted grey instruction text. Now it's a firm, white close to the sequence. */}
             <Text style={styles.hint}>Tap a meal to start cooking</Text>
             </Animated.View>
         </View>
@@ -364,7 +443,9 @@ const styles = StyleSheet.create({
 
   header: { paddingHorizontal: 24, paddingTop: 6, paddingBottom: 20, alignItems: 'center' },
   eyebrow: { fontSize: 12, fontWeight: '800', color: '#4ADE80', letterSpacing: 1.5, marginBottom: 8 },
-  title: { fontSize: 30, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.6, lineHeight: 34, textAlign: 'center' },
+  title: { fontSize: 30, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.6, lineHeight: 36, textAlign: 'center' },
+  headlineRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'flex-end' },
+  validation: { marginTop: 10, fontSize: 13, fontWeight: '600', color: '#4ADE80', textAlign: 'center' },
 
   deck: { flexGrow: 0 },
   cardWrap: { width: CARD_W, marginRight: SPACING },
@@ -396,5 +477,5 @@ const styles = StyleSheet.create({
 
   // Dots + tap-to-cook hint, pinned near the bottom. No Done button — the X is the only dismiss.
   bottomBar: { alignItems: 'center', paddingBottom: 16, gap: 12 },
-  hint: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center' },
+  hint: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.92)', textAlign: 'center' },
 })

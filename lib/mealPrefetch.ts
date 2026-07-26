@@ -16,6 +16,8 @@ import { fetchMealImage } from './mealImages'
 
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
 const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'
+// How many meals cook-reveal shows (meals.slice(0, 3) there) — i.e. how many images are worth warming.
+const REVEAL_CARDS = 3
 
 function todayStr() {
   const d = new Date()
@@ -104,15 +106,26 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
       await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
     } catch {}
 
-    // Warm the HERO image only (fire-and-forget). Images are the slow half — they used to start
-    // only when cook-reveal mounted (~10s of skeletons while the deck out-ran them). Warming the
-    // first one now, during the review window, means the reveal's first card lands with a photo.
-    // Hero ONLY: an abandoned scan costs at most one image, keeping the text-only cost intent.
+    // Warm the reveal's images NOW, during the user's review window — images are the slow half
+    // (~5-10s each) and starting them at cook-reveal mount meant the deck out-ran them.
+    //
+    // Hero first and alone, so card 1 is never at risk; the rest only after it resolves. That
+    // ordering matters twice: it avoids a 3-way burst (see the throttle note in mealImages.ts), and
+    // it means a scan abandoned in the first second still costs just the one image.
+    //
     // NOTE: must not call warmMealImages() here — it awaits the in-flight prefetch, which is this
-    // very promise, and would deadlock.
-    const hero = generated[0]
-    if (hero?.name) {
-      fetchMealImage(hero.name, hero.ingredients?.map((ing: any) => ing.name) ?? [], hero.steps ?? []).catch(() => {})
+    // very promise, and would deadlock. Hence the direct fetchMealImage calls.
+    const warmable = generated.slice(0, REVEAL_CARDS).filter(m => m?.name)
+    if (warmable.length > 0) {
+      ;(async () => {
+        const [hero, ...rest] = warmable
+        await fetchMealImage(hero.name, hero.ingredients?.map((ing: any) => ing.name) ?? [], hero.steps ?? []).catch(() => null)
+        // Cards 2-3 get the remainder of the review window as runway instead of the ~2s between
+        // "Add all to Pantry" and the reveal mounting, which is what made them lag behind card 1.
+        await Promise.all(rest.map(m =>
+          fetchMealImage(m.name, m.ingredients?.map((ing: any) => ing.name) ?? [], m.steps ?? []).catch(() => null)
+        ))
+      })()
     }
 
     return generated
