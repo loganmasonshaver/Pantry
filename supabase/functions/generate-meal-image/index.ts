@@ -17,8 +17,57 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const db = createClient(supabaseUrl, supabaseServiceKey)
 
-function normalizeKey(name: string): string {
+// The key the cache used before it was tightened. Kept so the existing library still resolves —
+// without it, tightening the key would orphan every stored image and we'd re-pay to rebuild it.
+function legacyNormalizeKey(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+}
+
+// Multi-word phrases are stripped as phrases, BEFORE word-level filtering — otherwise "one pot"
+// would leave "pot" in the filler list and quietly turn "Pot Roast" into "Roast".
+const KEY_PHRASES: RegExp[] = [
+  /\bone (?:pan|pot)\b/g,
+  /\bsheet pan\b/g,
+  /\bslow cooker\b/g,
+  /\binstant pot\b/g,
+  /\bmeal prep\b/g,
+  /\bhigh protein\b/g,
+  /\bprotein packed\b/g,
+  /\blow carb\b/g,
+  /\b\d+\s*(?:minute|min|ingredient)s?\b/g,
+]
+
+// Words describing effort or vibe, not the finished plate — "Easy Chicken Parmesan", "Classic
+// Chicken Parmesan" and "Chicken Parmesan" should all share one image.
+//
+// Cooking METHODS are deliberately absent (grilled / fried / baked / roasted / air fried): those
+// genuinely change how the dish looks, so collapsing them would serve a wrong photo — which is a
+// worse outcome than paying for a second image.
+const KEY_FILLER = new Set([
+  'easy', 'quick', 'simple', 'best', 'ultimate', 'perfect', 'classic', 'traditional', 'authentic',
+  'homemade', 'healthy', 'delicious', 'tasty', 'hearty', 'amazing', 'favorite', 'super', 'weeknight',
+  'style', 'recipe', 'my', 'your', 'the', 'a', 'an', 'with', 'and', 'of', 'in', 'on', 'for',
+])
+
+// Fold plurals so "Tacos"/"Taco" and "Noodles"/"Noodle" don't buy two images. Guarded against the
+// words that merely end in s (hummus, couscous, swiss) rather than being plural.
+function singularize(w: string): string {
+  // NOT guarding on -os: tacos/burritos are real plurals. Only ss/us/is are the false friends.
+  if (w.length < 4 || /(?:ss|us|is)$/.test(w)) return w
+  if (/ies$/.test(w)) return w.slice(0, -3) + 'y'
+  if (/oes$/.test(w)) return w.slice(0, -2)          // potatoes -> potato
+  if (/(?:ch|sh|x|z|s)es$/.test(w)) return w.slice(0, -2)
+  return w.endsWith('s') ? w.slice(0, -1) : w
+}
+
+// Cache key for a meal name. Deliberately lossy: every variant that plates the same should collapse
+// to one paid image, since cost scales with UNIQUE KEYS, not users.
+function normalizeKey(name: string): string {
+  let s = legacyNormalizeKey(name)
+  for (const re of KEY_PHRASES) s = s.replace(re, ' ')
+  const words = s.split(' ').map(singularize).filter(w => w && !KEY_FILLER.has(w))
+  const key = words.join(' ').trim()
+  return key || legacyNormalizeKey(name) // never return empty (e.g. a name that was all filler)
 }
 
 // Stage 1 of the two-stage Flux pipeline: ask an LLM to describe how the FINISHED dish
@@ -102,13 +151,24 @@ Deno.serve(async (req: Request) => {
       : []
 
     const cacheKey = normalizeKey(mealName)
+    const legacyKey = legacyNormalizeKey(mealName)
 
     // Check DB cache FIRST (free, no auth) — globally-cached images are shared across all
     // users, so serving a hit costs nothing and preserves pre-auth use (e.g. onboarding).
     // Always cache-first: no client bypass, so a user can't force credit spend to drain quota.
-    const { data: cached } = await db.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
-    if (cached?.image_url) {
-      return new Response(JSON.stringify({ image: cached.image_url }), { headers: jsonHeaders })
+    //
+    // Two keys are checked: the tightened one, plus the pre-tightening key so images stored under
+    // the old scheme still resolve. A legacy hit is backfilled under the new key, so each old entry
+    // costs one extra lookup exactly once and the library migrates itself instead of being re-paid for.
+    const lookupKeys = legacyKey && legacyKey !== cacheKey ? [cacheKey, legacyKey] : [cacheKey]
+    const { data: cachedRows } = await db.from('image_cache').select('meal_key, image_url').in('meal_key', lookupKeys)
+    const hit = cachedRows?.find((r: any) => r.meal_key === cacheKey) ?? cachedRows?.[0]
+    if (hit?.image_url) {
+      if (hit.meal_key !== cacheKey) {
+        const { error: backfillErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: hit.image_url }, { onConflict: 'meal_key' })
+        if (backfillErr) console.log('Backfill FAILED:', cacheKey, backfillErr.message)
+      }
+      return new Response(JSON.stringify({ image: hit.image_url }), { headers: jsonHeaders })
     }
 
     // Cache MISS = we're about to spend FAL/LLM credits. Require a logged-in user so
