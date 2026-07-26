@@ -297,6 +297,13 @@ Deno.serve(async (req: Request) => {
     - NEVER missing: the protein, the main carb/base (rice, pasta, bread, potato), the primary fat/dairy, or anything named in or implied by the dish title. A "cheesy" dish with no cheese in the pantry, or a rice bowl with no rice, is FORBIDDEN — that is a different dish the user cannot make, not a stretch.
     - NEVER suggest unusual/expensive items (saffron, truffle oil, specialty cheeses, rare proteins).
 - Every ingredient in STRICT meals MUST appear in the pantry list OR be one of the assumed basics above. Matching is case-insensitive, allowing plural/singular and substring matches — pantry "chicken breast" covers meal "chicken".
+- RESPECT THE CUT/FORM — it dictates the cooking method, and the wrong pairing makes the recipe impossible:
+  - Ground meat -> tacos, bolognese, burgers, chili, meatballs. Never "sliced" or "seared whole".
+  - Tough/collagen cuts (chuck, brisket, shank, pork shoulder, short rib) need LOW AND SLOW (braise, stew, 2h+). NEVER put one in a fast weeknight dish or claim a prep time it cannot meet.
+  - Tender steak cuts (ribeye, sirloin, strip, flank, skirt) -> sear/grill/stir-fry, sliced against the grain. Never braised for hours.
+  - Chicken breast -> quick cook, dries out easily; thighs -> forgiving, better braised/roasted/grilled.
+  - The same applies to any ingredient whose form drives technique (arborio rice -> risotto, not a side; mozzarella melts, feta crumbles and does not).
+  - If the pantry item is generic ("beef", "chicken"), pick the technique that suits the most common form of it and stay consistent with the stated prep time.
 - NAME THE SPECIFIC VARIETY, never the generic category. "Pasta", "cheese", "rice", "vinegar", "oil", "bread" are too vague — the right variety changes the dish, the cook time, and the photo (rice noodles suit a Thai dish; penne does not).
   - If the pantry HAS one, name that exact item: pantry "penne" -> the recipe says "penne", not "pasta".
   - If it is genuinely absent, name the variety the dish actually calls for ("rice noodles", "sharp cheddar", "jasmine rice") so the shopping line is actionable — subject to the missing-item rules above.`

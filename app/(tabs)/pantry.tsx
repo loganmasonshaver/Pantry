@@ -571,6 +571,16 @@ export default function PantryScreen() {
 
   const totalItems = categories.reduce((s, c) => s + c.ingredients.length, 0)
 
+  // A thin pantry still returns 3 meals — the generator just reuses the same protein and reaches
+  // for simpler dishes, so quality quietly degrades with nothing telling the user why. Client-side
+  // heuristic (an LLM can't reliably self-report "I couldn't do better"): flag when there's no
+  // in-stock protein at all, or very little to work with.
+  const hasInStockProtein = categories.some(c =>
+    /protein|meat|fish|egg/i.test(c.name) && c.ingredients.some(i => i.inStock)
+  )
+  const inStockCount = categories.reduce((s, c) => s + c.ingredients.filter(i => i.inStock).length, 0)
+  const pantryIsThin = inStockCount > 0 && (!hasInStockProtein || inStockCount < 8)
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header (fixed) ── */}
@@ -888,7 +898,17 @@ export default function PantryScreen() {
                         )
                       })}
                     </Reanimated.View>
-                  ) : (
+                  ) : null}
+                  {/* Meals came back, but from a thin pantry — say what would unlock better ones
+                      instead of letting quality degrade silently. */}
+                  {!mealsLoading && !mealsError && meals.length > 0 && pantryIsThin && (
+                    <Text style={styles.cookTonightThinHint}>
+                      {hasInStockProtein
+                        ? 'Scan your freezer or pantry — more ingredients means better meals.'
+                        : 'Add a protein and we can suggest a lot more.'}
+                    </Text>
+                  )}
+                  {!mealsLoading && !mealsError && meals.length === 0 && (
                     // Zero meals came back (pantry too sparse) — nudge instead of rendering nothing.
                     <View style={styles.cookTonightLoading}>
                       <Text style={styles.cookTonightLoadingText}>Scan a few more items and we'll suggest meals you can make right now.</Text>
@@ -1585,6 +1605,7 @@ const styles = StyleSheet.create({
     paddingVertical: 28,
     gap: 10,
   },
+  cookTonightThinHint: { fontSize: 12, color: '#888888', textAlign: 'center', paddingHorizontal: 20, paddingTop: 12, lineHeight: 17 },
   cookTonightLoadingText: { fontSize: 13, color: COLORS.textMuted },
   cookTonightErrorText: { fontSize: 13, color: '#EF4444' },
   cookTonightRetryText: { fontSize: 13, color: '#4ADE80', fontWeight: '700' },
