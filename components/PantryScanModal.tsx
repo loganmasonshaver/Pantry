@@ -1031,8 +1031,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             if (k) m[k] = (m[k] ?? 0) + 1
             return m
           }, {} as Record<string, number>)
-          // The three that actually drive meal generation. Counter is a bonus, not a gap.
-          const missingCore = ['Fridge', 'Freezer', 'Pantry'].filter(a => !capturedCounts[a.toLowerCase()])
           return (
           <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
@@ -1044,17 +1042,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={{ flex: 1 }} />
             </View>
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
-              {/* The headline IS the instruction — it names exactly which areas are still missing,
-                  in the one spot people actually read. It replaced a slogan ("More areas, better
-                  meals") plus a grey status line nobody read. No nagging: the scan button stays
-                  live at any count. */}
-              <Text style={styles.hubTitle}>
-                {missingCore.length > 0 ? (
-                  <>Now add your <Text style={styles.hubTitleAccent}>{missingCore.join(' & ').toLowerCase()}</Text></>
-                ) : (
-                  <>Your kitchen is <Text style={styles.hubTitleAccent}>covered</Text></>
-                )}
-              </Text>
+              {/* States the actual payoff of adding areas: the AI cooks from what it can see, so
+                  more ingredients = food worth eating. ("More areas, better meals" described the
+                  mechanic; this describes what the user gets.) The grey status line under it is
+                  gone — the tile checkmarks below ARE the coverage state, and they get read. */}
+              <Text style={styles.hubTitle}>More ingredients, <Text style={styles.hubTitleAccent}>tastier meals</Text></Text>
 
               {/* Captured so far — tangible progress, so the screen reads as a collection you're building. */}
               {photos.length > 0 && (
