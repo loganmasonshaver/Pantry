@@ -1044,14 +1044,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <View style={{ flex: 1 }} />
             </View>
             <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
-              <Text style={styles.hubTitle}>More areas, <Text style={styles.hubTitleAccent}>better meals</Text></Text>
-              {/* Names what's still missing instead of "one photo's plenty" — which told people to
-                  stop right when more coverage is what makes the meal generation good. Still no
-                  nagging: the scan button is always live, this is just an honest status line. */}
-              <Text style={styles.hubSubtitle}>
-                {missingCore.length > 0
-                  ? `Pantry only sees what you photograph. Still to add: ${missingCore.join(' · ')}`
-                  : 'Fridge, freezer and pantry all covered — that\'s the good stuff.'}
+              {/* The headline IS the instruction — it names exactly which areas are still missing,
+                  in the one spot people actually read. It replaced a slogan ("More areas, better
+                  meals") plus a grey status line nobody read. No nagging: the scan button stays
+                  live at any count. */}
+              <Text style={styles.hubTitle}>
+                {missingCore.length > 0 ? (
+                  <>Now add your <Text style={styles.hubTitleAccent}>{missingCore.join(' & ').toLowerCase()}</Text></>
+                ) : (
+                  <>Your kitchen is <Text style={styles.hubTitleAccent}>covered</Text></>
+                )}
               </Text>
 
               {/* Captured so far — tangible progress, so the screen reads as a collection you're building. */}
@@ -1675,9 +1677,8 @@ const styles = StyleSheet.create({
   },
 
   // ── Step-4 "add more" hub (redesigned) ──
-  hubTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 6 },
+  hubTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 24 },
   hubTitleAccent: { color: '#4ADE80' },
-  hubSubtitle: { fontSize: 14, color: '#888888', lineHeight: 20, marginBottom: 24 },
   sectionEyebrow: { fontSize: 11, fontWeight: '700', color: '#666666', letterSpacing: 1.2, marginBottom: 12 },
   capturedSection: { marginBottom: 4 },
   capturedRow: { gap: 12, paddingRight: 24 },
