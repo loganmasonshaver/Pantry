@@ -876,7 +876,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           const stepConfig = {
             // Single-photo-first: the first capture lands straight on the review/scan hub (step 4) —
             // no forced pantry→fridge→counter march. Extra areas are added optionally from the hub.
-            1: { dotIndex: 0, label: 'Kitchen', title: 'Scan your kitchen', subtitle: 'Snap your fridge, pantry, or freezer to start', next: 4 },
+            // ONE clear first action. "Snap your fridge, pantry, or freezer" offered three choices at
+            // the moment the user just needs to point and shoot — so name the shot: the fridge. Other
+            // areas are offered right after, on the hub (step 4).
+            1: { dotIndex: 0, label: 'Fridge', title: 'Start with your fridge', subtitle: 'Open it up and capture the whole inside', next: 4 },
             2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 4 },
             3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
           }[step]!
@@ -932,10 +935,20 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <View style={styles.stepTextCompact}>
                   <Text style={styles.cameraTitle}>{captureTitle}</Text>
                   <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
-                  <View style={styles.cameraTipRow}>
-                    <Lightbulb size={13} stroke="rgba(255,255,255,0.75)" strokeWidth={2} />
-                    <Text style={styles.cameraTip}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
-                  </View>
+                  {/* The tip was a dead line of text. It's now the entry point to the full
+                      best-scan guide — bordered pill + chevron so it reads as "there's more here",
+                      which a bare lightbulb + sentence did not. */}
+                  <TouchableOpacity
+                    style={styles.cameraTipRow}
+                    onPress={() => setShowPrep(true)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Lightbulb size={13} stroke="#4ADE80" strokeWidth={2} />
+                    <Text style={styles.cameraTip} numberOfLines={1}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
+                    <Text style={styles.cameraTipMore}>More tips</Text>
+                    <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} />
+                  </TouchableOpacity>
                 </View>
 
                 <View style={styles.shutterRow}>
@@ -1707,11 +1720,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.6)',
     borderWidth: 3,
   },
-  bracketTL: { top: '24%', left: '10%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
-  bracketTR: { top: '24%', right: '10%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  bracketTL: { top: '13%', left: '4%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  bracketTR: { top: '13%', right: '4%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
   // Bottom brackets sit well above the copy/shutter scrim (was 20% → collided with the title).
-  bracketBL: { bottom: '34%', left: '10%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
-  bracketBR: { bottom: '34%', right: '10%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  bracketBL: { bottom: '27%', left: '4%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '27%', right: '4%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
   cameraBottom: {
     paddingTop: 12,
     paddingBottom: 4,
@@ -2023,7 +2036,13 @@ const styles = StyleSheet.create({
   },
 
   // Camera capture hint
-  cameraTipRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4, paddingHorizontal: 12 },
+  // Bordered pill = "this is tappable"; the bare row read as static caption text.
+  cameraTipRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10,
+    alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 20, borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)', backgroundColor: 'rgba(74,222,128,0.10)',
+  },
+  cameraTipMore: { fontSize: 12, fontWeight: '800', color: '#4ADE80', letterSpacing: 0.2 },
   cameraTip: {
     flexShrink: 1,
     fontSize: 12,
