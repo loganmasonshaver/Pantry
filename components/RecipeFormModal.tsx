@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, Plus, ChevronLeft } from 'lucide-react-native'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { trackAIError } from '@/lib/analytics'
 import { edgeErrorInfo } from '@/lib/edgeError'
@@ -65,6 +66,7 @@ function parseIngredients(raw: any[]): Ingredient[] {
 export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }: Props) {
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
+  const keyboardUp = useKeyboardVisible()
   const isEdit = !!editMeal?.id
 
   // AI auto-fill
@@ -236,9 +238,12 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
         <SafeAreaView style={s.safe} edges={['bottom']}>
           {/* Header */}
           <View style={s.header}>
+            {/* Keyboard up → Back closes the KEYBOARD, not the form. This form holds 15+ fields and
+                possibly an AI-generated recipe (a paid, rate-limited call) with no draft saved, so a
+                stray tap while typing used to destroy all of it. Second tap leaves as normal. */}
             <Text
               style={s.backText}
-              onPress={() => onClose()}
+              onPress={() => { if (keyboardUp) { Keyboard.dismiss(); return } onClose() }}
             >
               ← Back
             </Text>

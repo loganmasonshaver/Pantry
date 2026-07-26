@@ -17,6 +17,7 @@ import {
   Alert,
   AppState,
   RefreshControl,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -28,6 +29,7 @@ import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as Svg
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { MealImage } from '@/components/MealImage'
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
 import { useAIConsent } from '../../context/AIConsentContext'
@@ -362,6 +364,11 @@ function SlotCard({
 export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
+  // Backdrop-tap-to-close is the SAME gesture as tap-outside-to-dismiss-the-keyboard, so with a
+  // keyboard up it silently discarded a half-filled meal form. Keyboard up → the backdrop and ✕
+  // just close the keyboard; a second tap closes the modal.
+  const keyboardUp = useKeyboardVisible()
+  const dismissOr = (close: () => void) => () => { if (keyboardUp) { Keyboard.dismiss(); return } close() }
   const { isPremium, promoActive } = usePremium()
   const { requestConsent } = useAIConsent()
   // Gate AI consent BEFORE opening the scan modal — two native iOS modals can't stack, so a
@@ -1348,11 +1355,11 @@ export default function HomeScreen() {
       </ScrollView>
 
       <Modal visible={showAddModal} transparent animationType="fade">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowAddModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={dismissOr(() => setShowAddModal(false))}>
           <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>New Meal Slot</Text>
-              <TouchableOpacity onPress={() => setShowAddModal(false)} activeOpacity={0.7}>
+              <TouchableOpacity onPress={dismissOr(() => setShowAddModal(false))} activeOpacity={0.7}>
                 <X size={18} stroke={COLORS.textMuted} strokeWidth={2} />
               </TouchableOpacity>
             </View>
@@ -1374,11 +1381,11 @@ export default function HomeScreen() {
 
       {/* ── Manual Log Modal ── */}
       <Modal visible={showLogModal} transparent animationType="slide">
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowLogModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={dismissOr(() => setShowLogModal(false))}>
           <View style={styles.modalCard} onStartShouldSetResponder={() => true}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Log a Meal</Text>
-              <TouchableOpacity onPress={() => setShowLogModal(false)} activeOpacity={0.7}>
+              <TouchableOpacity onPress={dismissOr(() => setShowLogModal(false))} activeOpacity={0.7}>
                 <X size={18} stroke={COLORS.textMuted} strokeWidth={2} />
               </TouchableOpacity>
             </View>

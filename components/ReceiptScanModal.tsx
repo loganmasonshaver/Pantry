@@ -14,6 +14,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -24,6 +25,7 @@ import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { useAuth } from '@/context/AuthContext'
+import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackAIError } from '@/lib/analytics'
@@ -188,6 +190,12 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
       requestPermission()
     }
   }, [visible])
+
+  // With the keyboard up, ✕ / Cancel close the KEYBOARD instead of discarding the parsed receipt —
+  // the "Cancel" button sits directly above the keyboard next to the add-item field, and the AI
+  // parse is already spent. Second tap, keyboard down, closes for real.
+  const keyboardUp = useKeyboardVisible()
+  const closeOrDismissKeyboard = () => { if (keyboardUp) { Keyboard.dismiss(); return } handleClose() }
 
   const handleClose = () => {
     setStep('pick')
@@ -403,7 +411,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
           <KeyboardAvoidingView style={styles.step} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={styles.topBar}>
               <Text style={styles.topTitle}>Items Found</Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+              <TouchableOpacity style={styles.closeBtn} onPress={closeOrDismissKeyboard}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
             </View>
@@ -474,7 +482,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
                   : <Text style={styles.primaryBtnText}>Add {items.length} Item{items.length !== 1 ? 's' : ''} to Pantry</Text>
                 }
               </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryBtn} onPress={handleClose} activeOpacity={0.85}>
+              <TouchableOpacity style={styles.secondaryBtn} onPress={closeOrDismissKeyboard} activeOpacity={0.85}>
                 <Text style={styles.secondaryBtnText}>Cancel</Text>
               </TouchableOpacity>
             </View>

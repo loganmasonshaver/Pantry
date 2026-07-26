@@ -1201,8 +1201,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                           <Text style={styles.reviewRowText}>{item.name}</Text>
                         </TouchableOpacity>
                       )}
+                      {/* While THIS row is being renamed, its ✕ sits a thumb-width from the caret, so
+                          the first tap just ends the edit (the rename is already committed on blur)
+                          instead of silently deleting the row. Not guarded on other rows — filtering
+                          and then removing a wrong item is a real, intentional flow. */}
                       <TouchableOpacity
-                        onPress={() => setDetectedItems(prev => prev.filter(d => d.id !== item.id))}
+                        onPress={() => {
+                          if (editing) { Keyboard.dismiss(); return }
+                          setDetectedItems(prev => prev.filter(d => d.id !== item.id))
+                        }}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                       >
                         <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
