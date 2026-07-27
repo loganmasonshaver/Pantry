@@ -1735,9 +1735,9 @@ function SReferralCode({
   )
 }
 
-function SGeneratingIntro({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
+function SGeneratingIntro({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
   const fadeIn = useRef(new Animated.Value(0)).current
-  const scale = useRef(new Animated.Value(0.92)).current
+  const scale = useRef(new Animated.Value(0.96)).current
 
   useEffect(() => {
     Animated.parallel([
@@ -1746,29 +1746,48 @@ function SGeneratingIntro({ onNext, onBack }: { onNext: () => void; onBack: () =
     ]).start()
   }, [])
 
+  // Replaced a decorative sparkle with the user's OWN answers. A generic AI-sparkle says "we made
+  // something"; reading their goal and diet back proves the plan is actually built on what they
+  // told us — evidence beats garnish, and it earns the empty space the icon was floating in.
+  const mealsPerDay = parseInt(data.meals) || 3
+  const summary = [
+    { label: 'Goal', value: GOALS.find(g => g.id === data.goal)?.label ?? 'Body Recomp' },
+    { label: 'Diet', value: data.dietStyle || 'Classic' },
+    { label: 'Meals a day', value: String(mealsPerDay) },
+    { label: 'Time to cook', value: data.prep || '30 min' },
+  ]
+
   return (
     <SafeAreaView style={s.safe}>
       <TopBar onBack={onBack} pct={PROGRESS[17]} />
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
-        <Animated.View style={{ alignItems: 'center', opacity: fadeIn, transform: [{ scale }] }}>
-          <View style={{
-            width: 140, height: 140, borderRadius: 70, backgroundColor: '#111',
-            alignItems: 'center', justifyContent: 'center', marginBottom: 36,
-            borderWidth: 2, borderColor: 'rgba(74,222,128,0.2)',
-          }}>
-            <Sparkles size={56} stroke={TEAL} strokeWidth={1.6} fill={TEAL} fillOpacity={0.15 as any} />
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#F59E0B', alignItems: 'center', justifyContent: 'center' }}>
-              <Check size={12} stroke="#000" strokeWidth={3} />
-            </View>
-            <Text style={{ fontSize: 15, fontWeight: '600', color: '#F59E0B' }}>All done!</Text>
-          </View>
-          <Text style={{ fontSize: 30, fontWeight: '800', color: '#FFF', textAlign: 'center', letterSpacing: -0.5, lineHeight: 38 }}>
+      <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 28 }}>
+        <Animated.View style={{ opacity: fadeIn, transform: [{ scale }] }}>
+          <Text style={{ fontSize: 12, fontWeight: '800', color: TEAL, letterSpacing: 1.5, marginBottom: 10 }}>
+            HERE'S WHAT YOU TOLD US
+          </Text>
+          <Text style={{ fontSize: 30, fontWeight: '800', color: '#FFF', letterSpacing: -0.5, lineHeight: 38 }}>
             Time to generate{'\n'}your custom plan
           </Text>
-          <Text style={{ fontSize: 15, color: MUTED, textAlign: 'center', marginTop: 14, lineHeight: 22 }}>
-            We'll tailor everything to your goals, diet, and schedule.
+
+          <View style={{ backgroundColor: '#111', borderRadius: 16, marginTop: 28, paddingHorizontal: 18, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
+            {summary.map((row, i) => (
+              <View
+                key={row.label}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                  paddingVertical: 15,
+                  borderBottomWidth: i < summary.length - 1 ? 1 : 0,
+                  borderBottomColor: 'rgba(255,255,255,0.06)',
+                }}
+              >
+                <Text style={{ fontSize: 15, color: MUTED }}>{row.label}</Text>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>{row.value}</Text>
+              </View>
+            ))}
+          </View>
+
+          <Text style={{ fontSize: 14, color: MUTED, marginTop: 16, lineHeight: 20 }}>
+            Every meal we suggest is built around exactly this.
           </Text>
         </Animated.View>
       </View>
@@ -3997,7 +4016,7 @@ export default function Onboarding() {
     14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={pick('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
     15: <SNotificationPermission onNext={next} onBack={back} />,
     16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onGrantsPromo={update('grantsPromo')} onNext={next} onBack={back} />,
-    17: <SGeneratingIntro onNext={next} onBack={back} />,
+    17: <SGeneratingIntro data={data} onNext={next} onBack={back} />,
     18: <SPlanLoading data={data} onDone={next} />,
     19: <SPlanReveal data={data} onNext={() => user ? navigate(20) : router.push('/onboarding/createaccount')} onBack={() => navigate(17)} />,
     20: <STryFree onNext={next} onBack={back} />,
