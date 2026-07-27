@@ -26,7 +26,7 @@ import Svg, { Path, Line, Circle as SvgCircle, Text as SvgText } from 'react-nat
 import PressableScale from '../../components/PressableScale'
 import OnboardingTrailer from '../../components/OnboardingTrailer'
 import { haptic } from '../../lib/haptics'
-import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
+import { Check, X, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, ShoppingCart, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
 
 const AnimatedPath = Animated.createAnimatedComponent(Path)
 const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle)
@@ -50,10 +50,23 @@ const CARD = '#1A1A1A'
 // Keep `false` for initial submission — Apple has flagged this pattern as review risk.
 const ABANDONMENT_PAYWALL_ENABLED = false
 
+// Plan-reveal pain block. Deliberately about FOOD DECISIONS, not calorie tracking — a "logging is
+// tedious" framing would argue for a macro tracker, which is the category Pantry has to beat, not join.
+const WITHOUT_PANTRY = [
+  'Ordering out because deciding is harder than cooking',
+  'Groceries you forgot you bought, thrown away',
+  'The same three meals on repeat',
+]
+const WITH_PANTRY = [
+  'Dinner decided from one photo',
+  'Food gets used before it goes bad',
+  'New meals that still hit your numbers',
+]
+
 // Progress percentages keyed by step number. Keep monotonic — values must increase as step increases.
 const PROGRESS: Record<number, number> = {
   2: 5, 3: 9, 4: 14, 5: 18, 6: 23, 7: 27, 8: 32, 9: 39,
-  10: 48, 11: 52, 12: 57, 13: 61, 14: 65, 15: 69, 16: 73, 17: 78,
+  10: 48, 11: 52, 12: 57, 13: 61, 14: 65, 15: 69, 16: 73,
   19: 87, 20: 92, 21: 96, 22: 100,
 }
 
@@ -1014,6 +1027,17 @@ function calculateGoals(age: number, gender: string, heightCm: number, weightKg:
   return { calories, protein }
 }
 
+// Carb/fat split derived from the calorie target. Split: 27% of calories from fat (within the
+// ISSN range), remainder after protein → carbs. Energy density: fat 9 cal/g, protein/carb 4 cal/g.
+// SHARED ON PURPOSE: the Plan Reveal shows these numbers and finish() writes them to the profile.
+// Computing them in two places means the screen can promise a split the app doesn't enforce.
+function deriveMacros(calories: number, protein: number) {
+  const fatCals = calories * 0.27
+  const fat = Math.round(fatCals / 9)
+  const carbs = Math.round(Math.max(0, calories - protein * 4 - fatCals) / 4)
+  return { carbs, fat }
+}
+
 const FT_OPTIONS = ['3 ft', '4 ft', '5 ft', '6 ft', '7 ft']
 const IN_OPTIONS = Array.from({ length: 12 }, (_, i) => `${i} in`)
 const LB_OPTIONS = Array.from({ length: 321 }, (_, i) => `${80 + i} lb`) // 80 to 400 lbs
@@ -1735,69 +1759,6 @@ function SReferralCode({
   )
 }
 
-function SGeneratingIntro({ data, onNext, onBack }: { data: OnboardingData; onNext: () => void; onBack: () => void }) {
-  const fadeIn = useRef(new Animated.Value(0)).current
-  const scale = useRef(new Animated.Value(0.96)).current
-
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeIn, { toValue: 1, duration: 500, useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, friction: 6, tension: 80, useNativeDriver: true }),
-    ]).start()
-  }, [])
-
-  // Replaced a decorative sparkle with the user's OWN answers. A generic AI-sparkle says "we made
-  // something"; reading their goal and diet back proves the plan is actually built on what they
-  // told us — evidence beats garnish, and it earns the empty space the icon was floating in.
-  const mealsPerDay = parseInt(data.meals) || 3
-  const summary = [
-    { label: 'Goal', value: GOALS.find(g => g.id === data.goal)?.label ?? 'Body Recomp' },
-    { label: 'Diet', value: data.dietStyle || 'Classic' },
-    { label: 'Meals a day', value: String(mealsPerDay) },
-    { label: 'Time to cook', value: data.prep || '30 min' },
-  ]
-
-  return (
-    <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[17]} />
-      <View style={{ flex: 1, justifyContent: 'center', paddingHorizontal: 28 }}>
-        <Animated.View style={{ opacity: fadeIn, transform: [{ scale }] }}>
-          <Text style={{ fontSize: 12, fontWeight: '800', color: TEAL, letterSpacing: 1.5, marginBottom: 10 }}>
-            HERE'S WHAT YOU TOLD US
-          </Text>
-          <Text style={{ fontSize: 30, fontWeight: '800', color: '#FFF', letterSpacing: -0.5, lineHeight: 38 }}>
-            Time to generate{'\n'}your custom plan
-          </Text>
-
-          <View style={{ backgroundColor: '#111', borderRadius: 16, marginTop: 28, paddingHorizontal: 18, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
-            {summary.map((row, i) => (
-              <View
-                key={row.label}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  paddingVertical: 15,
-                  borderBottomWidth: i < summary.length - 1 ? 1 : 0,
-                  borderBottomColor: 'rgba(255,255,255,0.06)',
-                }}
-              >
-                <Text style={{ fontSize: 15, color: MUTED }}>{row.label}</Text>
-                <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>{row.value}</Text>
-              </View>
-            ))}
-          </View>
-
-          <Text style={{ fontSize: 14, color: MUTED, marginTop: 16, lineHeight: 20 }}>
-            Every meal we suggest is built around exactly this.
-          </Text>
-        </Animated.View>
-      </View>
-      <View style={s.bottomActions}>
-        <PillButton label="Continue" onPress={onNext} />
-      </View>
-    </SafeAreaView>
-  )
-}
-
 function SPlanLoading({ data, onDone }: { data: OnboardingData; onDone: () => void }) {
   const progress = useRef(new Animated.Value(0)).current
   const [pct, setPct] = useState(0)
@@ -2046,54 +2007,15 @@ function TrajectoryGraph({
   )
 }
 
-function PlanRing({ value, unit, label, color, delay = 0 }: { value: number; unit?: string; label: string; color: string; delay?: number }) {
-  const size = 72
-  const strokeWidth = 6
-  const radius = (size - strokeWidth) / 2
-  const circumference = 2 * Math.PI * radius
-  const progress = useRef(new Animated.Value(0)).current
-  const [offset, setOffset] = useState(circumference)
-
-  useEffect(() => {
-    progress.setValue(0)
-    const listener = progress.addListener(({ value: v }) => setOffset(circumference * (1 - v)))
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: 2400,
-      delay,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start()
-    return () => progress.removeListener(listener)
-  }, [])
-
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', width: size, height: size }}>
-      <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
-        <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.10)" strokeWidth={strokeWidth} fill="transparent" />
-        <SvgCircle
-          cx={size / 2} cy={size / 2} r={radius}
-          stroke={color} strokeWidth={strokeWidth} fill="transparent"
-          strokeDasharray={`${circumference}`} strokeDashoffset={offset} strokeLinecap="round"
-        />
-      </Svg>
-      <View style={{ position: 'absolute', alignItems: 'center' }}>
-        <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5 }}>
-          {value.toLocaleString()}{unit ?? ''}
-        </Text>
-        <Text style={{ fontSize: 8, fontWeight: '700', color, textTransform: 'uppercase', letterSpacing: 1.0, marginTop: 1 }}>
-          {label}
-        </Text>
-      </View>
-    </View>
-  )
-}
-
 function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: OnboardingData; onNext: () => void; onBack: () => void; isPrefetchOnly?: boolean }) {
-  // 4 sections reveal top-to-bottom: heading, trajectory card (includes macros), meal card, disclaimer
-  const sectionAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current
-  // Per-meal-card stagger anims (6 slots — more than any plan will ever show)
-  const mealCardAnims = useRef([0,1,2,3,4,5].map(() => new Animated.Value(0))).current
+  // 7 sections reveal top-to-bottom: headline, trajectory, daily targets, recap, how-it-works,
+  // without/with, credibility. Each block is a DIFFERENT kind of evidence — that's what earns the
+  // scroll length. A long screen of one repeated argument just reads as padding.
+  const sectionAnims = useRef([0, 1, 2, 3, 4, 5, 6].map(() => new Animated.Value(0))).current
+  const reveal = (i: number) => ({
+    opacity: sectionAnims[i],
+    transform: [{ translateY: sectionAnims[i].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+  })
 
   const { cals, prot } = useMemo(() => {
     // Use sensible defaults for any missing onboarding field so Plan Reveal always shows useful numbers
@@ -2111,18 +2033,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   useEffect(() => {
     if (isPrefetchOnly) return  // hidden prefetch instance — skip animations
-    // Slow top-to-bottom page reveal: 500ms between each section.
-    // Meal card (index 3) appears at ~1500ms — enough time for cached images to resolve.
-    Animated.stagger(500, sectionAnims.map(anim =>
-      Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true, easing: Easing.out(Easing.quad) })
+    // 220ms stagger, not the old 500ms: at 7 sections that would be 3.5s before the last block
+    // exists. Everything below the fold finishes animating while the user is still reading the
+    // headline, so scrolling never waits on the reveal.
+    Animated.stagger(220, sectionAnims.map(anim =>
+      Animated.timing(anim, { toValue: 1, duration: 400, useNativeDriver: true, easing: Easing.out(Easing.quad) })
     )).start()
-    // Stagger individual meal cards starting when section 2 appears (~1100ms in)
-    Animated.sequence([
-      Animated.delay(1100),
-      Animated.stagger(90, mealCardAnims.map(anim =>
-        Animated.timing(anim, { toValue: 1, duration: 350, useNativeDriver: true, easing: Easing.out(Easing.quad) })
-      )),
-    ]).start()
   }, [isPrefetchOnly])
 
   const calPerMeal = Math.round(cals / mealsPerDay)
@@ -2159,6 +2075,23 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   const targetDate = new Date()
   targetDate.setDate(targetDate.getDate() + weeksToGoal * 7)
   const targetDateStr = targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  // Headline date drops the year for near targets — "October 12" reads as a real date on a
+  // calendar, "Oct 12, 2026" reads as a database field. Year returns for far-out goals.
+  const targetDateHeadline = targetDate.toLocaleDateString('en-US',
+    weeksToGoal > 40 ? { month: 'long', day: 'numeric', year: 'numeric' } : { month: 'long', day: 'numeric' })
+
+  // The headline is the commitment device. "Lose 10 lbs" is a wish; "10 lbs by October 12" is a
+  // date the user can picture missing — that's what makes the plan feel like it's already theirs.
+  const headline = hasValidTarget
+    ? `Goal: ${isGainDirection ? 'gain' : 'lose'} ${weightDelta} lbs by ${targetDateHeadline}`
+    : 'Goal: same weight,\nbetter composition'
+
+  // Carbs/fat come from the SAME helper finish() writes to the profile — see deriveMacros.
+  const { carbs, fat } = deriveMacros(cals, prot)
+
+  // Graph spans the full card now that the rings live in their own block below.
+  // width - 48 (screen padding 24×2) - 36 (card padding 18×2).
+  const GRAPH_W = width - 84
 
   // Cooking skill lookup (used in meal header + tailored card)
   const skillOpt = SKILL_OPTIONS.find(o => o.id === data.cookingSkill)
@@ -2168,6 +2101,27 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     ? data.foodDislikesText.split(',').map(s => s.trim()).filter(Boolean)
     : []
   const allAvoids = [...(data.foodDislikes || []), ...customDislikes]
+
+  // Their answers, read back verbatim. "Avoiding" only appears when they actually named something —
+  // an empty row would advertise that we ignored the question.
+  const recapRows = [
+    { label: 'Goal',         value: goalLabel },
+    { label: 'Diet',         value: data.dietStyle || 'Classic' },
+    { label: 'Meals a day',  value: String(mealsPerDay) },
+    { label: 'Time to cook', value: data.prep || '30 min' },
+    { label: 'Cooking',      value: skillOpt?.label ?? 'Comfortable' },
+    ...(allAvoids.length > 0
+      ? [{ label: 'Avoiding', value: allAvoids.slice(0, 3).join(', ') + (allAvoids.length > 3 ? ` +${allAvoids.length - 3}` : '') }]
+      : []),
+  ]
+
+  // Numbers interpolated from their own answers so the steps read as THEIR plan, not a feature tour.
+  const behaviors = [
+    { Icon: Camera,          tint: TEAL,      bg: 'rgba(74,222,128,0.12)',  title: 'Scan your kitchen',        body: "One photo. We'll know what you have." },
+    { Icon: UtensilsCrossed, tint: '#F59E0B', bg: 'rgba(245,158,11,0.12)',  title: "Get tonight's dinner",     body: `Built from what's already in there — ${prepMin} min or less.` },
+    { Icon: ShoppingCart,    tint: '#60A5FA', bg: 'rgba(96,165,250,0.12)',  title: 'Only buy what’s missing',  body: 'Your grocery list writes itself.' },
+    { Icon: Target,          tint: '#A78BFA', bg: 'rgba(167,139,250,0.12)', title: `Hit ${cals.toLocaleString()} kcal without counting`, body: 'Every meal already fits your targets.' },
+  ]
 
   // Sample meals — curated bank of 44 meals across 4 diets.
   // Each recipe is tagged with allergens, actual prep time, and skill level.
@@ -2668,122 +2622,160 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   return (
     <SafeAreaView style={s.safe}>
       <TopBar onBack={onBack} pct={PROGRESS[19]} />
-      <ScrollView contentContainerStyle={[s.scrollBody, { gap: 20, paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
-        {/* Section 0 — Badge + heading */}
-        <Animated.View style={{ opacity: sectionAnims[0], transform: [{ translateY: sectionAnims[0].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-            <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center' }}>
-              <Check size={13} stroke="#000" strokeWidth={3} />
+      <ScrollView contentContainerStyle={[s.scrollBody, { gap: 16, paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
+        {/* Block 0 — Headline. Centered on purpose: this is the payoff moment, and the date is
+            what turns a number into a commitment. */}
+        <Animated.View style={reveal(0)}>
+          <View style={{ alignItems: 'center' }}>
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+              <Check size={22} stroke="#000" strokeWidth={3} />
             </View>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: TEAL, letterSpacing: 0.5 }}>YOUR PLAN IS READY</Text>
-          </View>
-          <Text style={{ fontSize: 30, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6, lineHeight: 36 }}>
-            Here's how you'll{'\n'}
-            <Text style={{ color: TEAL }}>
-              {data.goal === 'lose' ? 'burn fat' : data.goal === 'build' ? 'build muscle' : 'recomp your body'}
+            <Text style={{ fontSize: 27, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6, lineHeight: 34, textAlign: 'center' }}>
+              {headline}
             </Text>
-          </Text>
-          {/* Stat strip — 4-column icon+label, no borders. Inputs only; kcal/protein live in the plan card. */}
-          {(() => {
-            const skillOpt = SKILL_OPTIONS.find(o => o.id === (data.cookingSkill || 'moderate')) ?? SKILL_OPTIONS[1]
-            const SkillIcon = skillOpt.Icon
-            const dietStyle = data.dietStyle || 'Classic'
-            const DietIcon = dietStyle === 'Pescatarian' ? Fish : dietStyle === 'Vegetarian' ? Sprout : dietStyle === 'Vegan' ? Sprout : Drumstick
-            const cols = [
-              { Icon: DietIcon,        color: '#F59E0B',           label: dietStyle },
-              { Icon: Clock,           color: '#60A5FA',           label: `${prepMin} min` },
-              { Icon: UtensilsCrossed, color: TEAL,                label: `${mealsPerDay} meals` },
-              { Icon: SkillIcon,       color: '#A78BFA',           label: skillOpt.label },
-            ]
-            return (
-              <View style={{ flexDirection: 'row', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#1E1E1E' }}>
-                {cols.map((col, i) => (
-                  <View key={i} style={{ flex: 1, alignItems: 'center', gap: 6 }}>
-                    <col.Icon size={18} stroke={col.color} strokeWidth={2} />
-                    <Text style={{ fontSize: 12, fontWeight: '600', color: col.color, textAlign: 'center' }}>{col.label}</Text>
-                  </View>
-                ))}
-              </View>
-            )
-          })()}
+          </View>
         </Animated.View>
 
-        {/* Section 1 — Trajectory card */}
-        <Animated.View style={{ opacity: sectionAnims[1], transform: [{ translateY: sectionAnims[1].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Target size={20} stroke={TEAL} strokeWidth={2} />
-              <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>
-                {weightDelta > 0
-                  ? (isGainDirection ? `Gaining ${weightDelta} lbs` : `Losing ${weightDelta} lbs`)
-                  : data.goal === 'maintain'
-                    ? 'Body recomposition'
-                    : data.goal === 'build'
-                      ? 'Building muscle'
-                      : data.goal === 'lose'
-                        ? 'Losing weight'
-                        : `Your Goal: ${goalLabel}`}
-              </Text>
-            </View>
-            {/* Graph left, rings stacked right — saves ~80px vs stacked layout */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <View style={{ flex: 1 }}>
-                {hasValidTarget ? (
-                  <>
-                    <TrajectoryGraph currentLb={currentLb} targetLb={targetLb} endLabel={targetDateStr} w={width - 36 - 8 - 88} />
-                    {timelineStr !== '' && (
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
-                        {timelineStr}
-                      </Text>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <MaintainGraph w={width - 36 - 8 - 88} />
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
-                      Same weight · better composition
-                    </Text>
-                  </>
+        {/* Block 1 — Estimated progress. Full-width now that the target rings moved into their own
+            card; this graph used to be squeezed into roughly half the screen beside them. */}
+        <Animated.View style={reveal(1)}>
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 }}>Estimated progress</Text>
+            {hasValidTarget ? (
+              <>
+                <TrajectoryGraph currentLb={currentLb} targetLb={targetLb} endLabel={targetDateStr} w={GRAPH_W} />
+                {timelineStr !== '' && (
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>{timelineStr}</Text>
                 )}
+              </>
+            ) : (
+              <>
+                <MaintainGraph w={GRAPH_W} />
+                <Text style={{ fontSize: 11, fontWeight: '600', color: MUTED, textAlign: 'center', letterSpacing: 0.3 }}>
+                  Same weight · better composition
+                </Text>
+              </>
+            )}
+          </View>
+        </Animated.View>
+
+        {/* Block 2 — Daily targets. "Adjust anytime" defuses the single biggest objection to a
+            computed number: "that's not right for me." Profile really does edit calories + protein,
+            so the line is honest — carbs/fat follow from the calorie target. */}
+        <Animated.View style={reveal(2)}>
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 14 }}>
+            <View>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Your daily targets</Text>
+              <Text style={{ fontSize: 13, color: MUTED, marginTop: 2 }}>Adjust these anytime in your profile</Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#111111', borderRadius: 12, padding: 16 }}>
+              <View style={{ width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center' }}>
+                <Flame size={22} stroke={TEAL} strokeWidth={2} />
               </View>
-              <View style={{ gap: 12, alignItems: 'center', paddingLeft: 4 }}>
-                <PlanRing value={cals} label="KCAL/DAY" color={TEAL} delay={400} />
-                <PlanRing value={prot} unit="g" label="PROTEIN" color="#4ADE80" delay={600} />
+              <View>
+                <Text style={{ fontSize: 32, fontWeight: '800', color: '#FFFFFF', letterSpacing: -1 }}>{cals.toLocaleString()}</Text>
+                <Text style={{ fontSize: 13, color: MUTED, fontWeight: '600' }}>Calories</Text>
               </View>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {[
+                { value: `${prot}g`,  label: 'Protein', color: TEAL },
+                { value: `${carbs}g`, label: 'Carbs',   color: '#F59E0B' },
+                { value: `${fat}g`,   label: 'Fat',     color: '#60A5FA' },
+              ].map(m => (
+                <View key={m.label} style={{ flex: 1, backgroundColor: '#111111', borderRadius: 12, paddingVertical: 14, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: m.color }}>{m.value}</Text>
+                  <Text style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>{m.label}</Text>
+                </View>
+              ))}
             </View>
           </View>
         </Animated.View>
 
-        {/* Section 2 — What happens next.
-            This was a list of sample meals under "Meals from your kitchen" — a claim the app can't
-            back, because the user hasn't scanned anything yet. Invented meals presented as theirs is
-            the same dishonesty the breakfast/lunch/dinner slots had, relabelled. Replaced with the
-            honest version: name the next action. Deliberately text-only — the meal thumbnails made
-            the card look half-finished, and the plan card above is the payoff this screen should
-            end on. (sampleMeals still computes below; it seeds saved_meals in finish().) */}
-        <Animated.View style={{ opacity: sectionAnims[2], transform: [{ translateY: sectionAnims[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(74,222,128,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-              <Camera size={20} stroke={TEAL} strokeWidth={2} />
+        {/* Block 3 — Their own answers, read back. Was a standalone screen (SGeneratingIntro) before
+            the loading bar; it does more work here as evidence inside the reveal than as a screen
+            the user taps past. */}
+        <Animated.View style={reveal(3)}>
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Built from what you told us</Text>
+            <View style={{ marginTop: 6 }}>
+              {recapRows.map((row, i) => (
+                <View
+                  key={row.label}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    paddingVertical: 12,
+                    borderBottomWidth: i < recapRows.length - 1 ? 1 : 0,
+                    borderBottomColor: 'rgba(255,255,255,0.06)',
+                  }}
+                >
+                  <Text style={{ fontSize: 14, color: MUTED }}>{row.label}</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>
+                    {row.value}
+                  </Text>
+                </View>
+              ))}
             </View>
+          </View>
+        </Animated.View>
+
+        {/* Block 4 — Behaviors, not features. Sells what the user will DO, which is what makes a
+            plan feel usable. Every line describes something the app actually does — no claims about
+            meals they haven't scanned for yet. */}
+        <Animated.View style={reveal(4)}>
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 16 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>How this works</Text>
+            {behaviors.map(b => (
+              <View key={b.title} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: b.bg, alignItems: 'center', justifyContent: 'center' }}>
+                  <b.Icon size={18} stroke={b.tint} strokeWidth={2} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF', lineHeight: 20 }}>{b.title}</Text>
+                  <Text style={{ fontSize: 13, color: MUTED, marginTop: 2, lineHeight: 18 }}>{b.body}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </Animated.View>
+
+        {/* Block 5 — The pain block. Onboarding asks fifteen questions and never once makes the user
+            confront the problem Pantry solves; twelve of them are calorie-calculator inputs. This
+            states it for them, right before the CTA. */}
+        <Animated.View style={reveal(5)}>
+          <View style={{ gap: 10 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Why Pantry</Text>
+            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 12 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: MUTED }}>Without Pantry</Text>
+              {WITHOUT_PANTRY.map(line => (
+                <View key={line} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                  <X size={17} stroke="#EF4444" strokeWidth={3} style={{ marginTop: 1 }} />
+                  <Text style={{ fontSize: 14, color: '#CCCCCC', flex: 1, lineHeight: 20 }}>{line}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 12, borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)' }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: TEAL }}>With Pantry</Text>
+              {WITH_PANTRY.map(line => (
+                <View key={line} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                  <Check size={17} stroke={TEAL} strokeWidth={3} style={{ marginTop: 1 }} />
+                  <Text style={{ fontSize: 14, color: '#FFFFFF', flex: 1, lineHeight: 20 }}>{line}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </Animated.View>
+
+        {/* Block 6 — Credibility. This slot is where Cal AI puts "10M+ users · 4.8★". We have zero
+            users, and inventing that number is both dishonest and App Review risk — so the slot
+            carries the one credential we can actually back. Real ratings replace this post-launch. */}
+        <Animated.View style={reveal(6)}>
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+            <ShieldCheck size={18} stroke={TEAL} strokeWidth={2} style={{ marginTop: 1 }} />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.2 }}>
-                Next: scan your kitchen
-              </Text>
-              <Text style={{ fontSize: 13, color: MUTED, marginTop: 3, lineHeight: 18 }}>
-                {`We'll turn what you already have into ${data.dietStyle || 'Classic'} meals that hit these numbers.`}
-              </Text>
-            </View>
-          </View>
-        </Animated.View>
-
-        {/* Section 3 — Disclaimer */}
-        <Animated.View style={{ opacity: sectionAnims[3], transform: [{ translateY: sectionAnims[3].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <View style={{ borderTopWidth: 1, borderTopColor: '#1A1A1A', paddingTop: 16, marginTop: 4 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
-              <ShieldCheck size={14} stroke={MUTED} strokeWidth={2} style={{ marginTop: 2 }} />
-              <Text style={{ fontSize: 12, color: MUTED, flex: 1, lineHeight: 18 }}>
-                Macros calculated using the Mifflin-St Jeor equation — the formula used by registered dietitians and referenced in peer-reviewed nutrition research.
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF' }}>How we calculated this</Text>
+              <Text style={{ fontSize: 12, color: MUTED, marginTop: 4, lineHeight: 18 }}>
+                Your targets use the Mifflin-St Jeor equation — the formula registered dietitians use, referenced in peer-reviewed nutrition research.
               </Text>
             </View>
           </View>
@@ -3694,7 +3686,9 @@ export default function Onboarding() {
       if (saved) {
         const savedStep = parseInt(saved, 10)
         if (!isNaN(savedStep)) {
-          const target = (savedStep === 15 || savedStep === 16) ? 17 : savedStep === 13 ? 14 : savedStep
+          // 15/16 → 18 resumes into the plan loading bar (17, the standalone recap screen, was
+          // folded into the reveal). 13 → 14 skips the now-removed cuisine swipe step.
+          const target = (savedStep === 15 || savedStep === 16) ? 18 : savedStep === 13 ? 14 : savedStep
           setStep(target)
         }
       }
@@ -3765,6 +3759,9 @@ export default function Onboarding() {
     // - lose/build users committed via SGoalDelta wheel
     // - maintain (recomp) users have no target weight — it equals current weight
     if (step === 9) return navigate(11)
+    // Skip step 17 — the standalone "here's what you told us" recap now lives inside the
+    // Plan Reveal as its own block, so showing it twice would just cost a tap.
+    if (step === 16) return navigate(18)
     navigate(step + 1)
   }
   const back = () => {
@@ -3819,17 +3816,14 @@ export default function Onboarding() {
         if (!computedProt) computedProt = 150
         // Derive carbs/fat from the calorie target. Without this, Home falls back to
         // hardcoded 250g carbs / 80g fat defaults that have nothing to do with the
-        // user's actual goal. Split: 27% of calories from fat (within ISSN range),
-        // remainder after protein → carbs. Energy density constants: fat 9 cal/g,
-        // protein/carb 4 cal/g.
+        // user's actual goal. Same helper the Plan Reveal renders from — the numbers the
+        // user was shown and the numbers the app enforces are the same math by construction.
         let computedCarbs: number | null = null
         let computedFat: number | null = null
         if (computedCals && computedProt) {
-          const fatCals = computedCals * 0.27
-          computedFat = Math.round(fatCals / 9)
-          const proteinCals = computedProt * 4
-          const carbCals = Math.max(0, computedCals - proteinCals - fatCals)
-          computedCarbs = Math.round(carbCals / 4)
+          const derived = deriveMacros(computedCals, computedProt)
+          computedCarbs = derived.carbs
+          computedFat = derived.fat
         }
 
         // Derive age from birthday (field never set during onboarding)
@@ -3981,9 +3975,8 @@ export default function Onboarding() {
     14: <SAllergies foodDislikes={data.foodDislikes} foodDislikesText={data.foodDislikesText} onFoodDislikes={pick('foodDislikes')} onFoodDislikesText={update('foodDislikesText')} onNext={next} onBack={back} />,
     15: <SNotificationPermission onNext={next} onBack={back} />,
     16: <SReferralCode value={data.referralCode} onChange={update('referralCode')} onGrantsPromo={update('grantsPromo')} onNext={next} onBack={back} />,
-    17: <SGeneratingIntro data={data} onNext={next} onBack={back} />,
     18: <SPlanLoading data={data} onDone={next} />,
-    19: <SPlanReveal data={data} onNext={() => user ? navigate(20) : router.push('/onboarding/createaccount')} onBack={() => navigate(17)} />,
+    19: <SPlanReveal data={data} onNext={() => user ? navigate(20) : router.push('/onboarding/createaccount')} onBack={() => navigate(16)} />,
     20: <STryFree onNext={next} onBack={back} />,
     21: <STrialReminder data={data} onNext={next} onBack={back} />,
     22: <S7Paywall data={data} onNext={finish} onBack={back} />,
@@ -3994,9 +3987,11 @@ export default function Onboarding() {
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
         {stepLoaded && screens[step]}
       </Animated.View>
-      {/* Pre-mount SPlanReveal during the loading screen so image fetches start 4s early.
+      {/* Pre-mount SPlanReveal during the loading screen so image fetches start early. The reveal
+          itself no longer renders meal thumbnails — this warms IMAGE_URL_CACHE_KEY, which the HOME
+          screen reads after onboarding. Moved from step 17 to 18 when the recap screen was folded in.
           Positioned off-screen — component is mounted + effects run, but user sees nothing. */}
-      {stepLoaded && step === 17 && (
+      {stepLoaded && step === 18 && (
         <View style={{ position: 'absolute', left: -9999, top: -9999, width: 1, height: 1, overflow: 'hidden' }}>
           <SPlanReveal data={data} isPrefetchOnly onNext={() => {}} onBack={() => {}} />
         </View>
