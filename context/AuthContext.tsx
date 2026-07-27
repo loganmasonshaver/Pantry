@@ -214,8 +214,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // different account on a shared device regenerates instead of seeing the prior user's meals.
     // Image URLs + recent-name lists are still cleared: they're a shared/global cache and a tiny
     // dedupe list, not the user's meals, so clearing them costs nothing and avoids cross-user bleed.
+    // 'onboarding_complete' MUST be cleared too: it's device-scoped, so leaving it set meant the
+    // NEXT account created on this device was routed straight to /(tabs) — skipping onboarding and,
+    // critically, the paywall. Safe to clear because _layout.tsx falls back to the server profile
+    // (onboarding_completed / calorie_goal) and re-sets the flag, so a returning user is never sent
+    // back through onboarding over their own data.
     await AsyncStorage.multiRemove([
       'otp_verified',
+      'onboarding_complete',
       'pantry_image_urls_v1',
       'pantry_recent_meal_names_cookNow',
       'pantry_recent_meal_names_mealPlan',
