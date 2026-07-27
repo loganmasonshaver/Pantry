@@ -1,166 +1,201 @@
-# Handoff — Pantry — 2026-07-22 (meal-card UX, meal-gen quality, personalized pantry insight)
+# Handoff — Pantry — 2026-07-27 (meal-gen quality, keyboard-trap sweep, onboarding reveal)
 
 ## TL;DR
-Big session: **28 commits, all pushed to `main`** (`999b3c2..92da706`). Two `generate-meals`
-**edge-function deploys to prod** (fat ceiling + real-dishes + form/state, then a fat-floor fix).
-Built a **goal- & diet-personalized "what to stock next" pantry insight** (new feature, replaces
-the item-count banner), tested to ~85k fuzz scenarios.
+**18 commits, all pushed to `main`** (`6c8ce52..71f71ae`). TS baseline held at **197** every single
+commit. Big themes: meal-generation honesty rules, an app-wide keyboard-trap sweep, image cost
+control, and a lot of onboarding-reveal iteration that **ended unresolved — Logan is still not happy
+with how that screen looks.**
 
-⚠️ **Almost nothing this session is device-verified by you.** I test nothing on your phone. The
-lists below mark what needs YOUR eyes. TS baseline held at **197** the whole session.
+⚠️ **Two edge functions have committed changes that are NOT deployed** (see below). Nothing from the
+meal-quality or image work is live until they are.
 
----
-
-## ✅ SHIPPED (committed + pushed)
-
-### Meal-detail screen UX (a long, iterated cleanup)
-- **Ingredient rows: one clear tap = add to grocery** (`35d9e37`). Killed the old whole-row tap
-  that silently wrote to `pantry_items` (a real footgun). Rows: NEED taps → grocery; HAVE = read-only;
-  BASICS = the "assumed" opt-out only.
-- **Cart icon for "Added"** (not a check — check = "in pantry") (`942afda`).
-- **Removed the "+" vs bulk-pill redundancy**; then **removed the bulk "Add all to grocery" pill
-  entirely** — per-row "Add" is the only mechanism now (`1a77486`, `81a970a`).
-- **Merged "Pantry Basics (assumed)" into IN YOUR PANTRY** with a marker (`206fd7a`), which then
-  iterated: pill → asterisk → teal → **neutral-grey `*` on a subtle round button** (tappable via
-  shape, distinct from the green "have it" check) (`af438d2`,`3517e96`,`22fe24d`). Only the `*` is
-  the opt-out target; there's an **undo toast** for accidental opt-outs (`57d013a`).
-- **Cooking-oil staples bug**: pantry Cook-Tonight used a stale local staples list → "cooking oil"
-  leaked into NEED. Deduped to canonical `isAssumedStaple` + honored `staples_excluded`/diet
-  exclusions (`192f063`, `083701e`).
-
-### Macro colors unified app-wide (`b09495d`, `82249c5`)
-Canonical tokens in `constants/colors.ts`: **protein green, carbs blue (#60A5FA), fat purple
-(#A78BFA), cals white, prep amber (#F59E0B)**. Fixed everywhere (home dashboard, meal detail, all
-macro modals) — carbs was wrongly orange (colliding with prep), fat wrongly blue.
-
-### Meal generation quality — DEPLOYED TO PROD ⚠️ verify in real output
-- **Fat ceiling** (`5f40681`): there was NO fat constraint (only protein/calorie). Added a per-meal
-  fat cap; **fat-floor fix** (`95d59e2`) so a fatty pantry doesn't collapse to 1 meal.
-- **Real established dishes only** — no invented "Power Bowl" fusions; named after the real dish.
-- **Correct ingredient form AND state** (`03e959e`): shredded/melted cheese not cold slices; raw
-  vs ready-to-eat protein; bread ≠ tortilla; non-dairy milk not a savory dairy swap; egg whites ≠
-  whole eggs; condiments are finishers.
-
-### Bug fixes
-- **Sign-out wiped the user's daily meals** → forced regen → burned the 3/day server cap → "Couldn't
-  generate meals" (`1e447d3`). Fix: cache stamped with `userId`, ownership checked on read; sign-out
-  no longer wipes meals. **Same user re-login restores meals; other account on shared device
-  regenerates (no leak).**
-- **Error messaging** (`6412348`, `9f9fd2a`): the real reason (esp. daily-cap) was hidden behind an
-  opaque "non-2xx" error. New `lib/edgeError.ts` unwraps the server body → user-facing message +
-  code. Cook-Tonight/cook-reveal show the real reason and hide a pointless "Try again" on cap.
-  Applied to meals, AI-log, recipe-gen, URL-import.
-
-### Onboarding trailer (⚠️ SUPERSEDED — see NEEDS ACTION)
-Iterated a native composed trailer (Cal-AI form → hero → full-bleed stories → one continuous
-cinematic shot, `6db6f91`) + a **first-time Grocery-toggle "peek"** (`2efe108`). **You then decided
-the whole composed approach is wrong** — it can't be accurate to the real app. **The plan is now a
-real screen recording** (see NEEDS ACTION #1).
-
-### NEW FEATURE: personalized pantry insight (`lib/pantryProfile.ts` + pantry hero banner)
-Replaces the shallow item-**count** "Stock Level" with a goal- & diet-aware **"what to stock next"**
-line + one-tap "Add to grocery". Pure, heavily-tested rule engine.
-- **v1** (`9cbd249`, hardened `e163fa7`): reads `fitness_goal`, `diet_type`, `dietary_restrictions`,
-  `food_dislikes`. Rule tiers: protein-absence → produce/fiber → goal tuning → diet nudges →
-  positive affirmation. Four filters (diet → allergies → dislikes → already-have) guarantee **no
-  forbidden food is ever suggested**. Uses the item's real store `category` (robust), biases toward
-  silence when ambiguous. Food suggestions only (no micronutrient/supplement claims), stocking-not-
-  intake language, positive non-shaming tone. Research-grounded (fiber is the #1 real gap; most
-  people have enough protein → no protein nag).
-- **Step A — cuisine-tailored** (`88e0550`): ranks suggestions toward `cuisine_preferences`
-  (Asian/Mexican/Italian/Mediterranean/American), after the safety filter.
-- **Step B — cooking-skill/prep-tailored** (`92da706`): low-effort cooks (`cooking_skill`
-  'minimal' or `max_prep_minutes` ≤ 15) get ready-to-eat picks ranked ahead of raw ones.
-- **Spec:** `PLAN.md` (full design + §13 adversarial review of 9 cracks).
+⚠️ Almost nothing here is device-verified. I don't test on the phone.
 
 ---
 
-## 🔴 NEEDS YOUR ACTION (only you can do these)
-
-1. **REDO the onboarding preview trailer as a REAL screen recording.** We agreed the composed native
-   trailer can't be accurate to the app → bad-review risk. Capture ~7s on device: (0–2s) pantry
-   scan → (2–4s) items populate → (4–5.5s) Cook Now meal cards w/ real photos → (5.5–7s) tap a meal
-   → macros + "you already have everything". Record slightly slow, good lighting, best meals loaded.
-   Then I trim/compress it, wire it in as a video, and delete `components/OnboardingTrailer.tsx`.
-2. **Update the App Store screenshots.** (You flagged this.) Real AI-generated per your rule; the
-   Pesto Chicken / meal-detail shots are strong candidates. Needs the real meal photos (FAL, #3).
-3. **App Store preview VIDEO** (separate asset, Apple 2.3.4: real capture, NO device frame). Not
-   started; the in-app trailer can't be reused there.
-4. **FAL account cleanup** (carryover): pick the permanent account, set `FAL_KEY` in Supabase Edge
-   secrets, verify meal IMAGES render, revoke the old `9eaf` key.
-5. **Paywall + pricing mismatch** (carryover): paywall NOT live; memory/marketing say $7.99/$30 but
-   handoff notes moved to ~$9.99/$29.99. Reconcile every price surface before submission.
-
----
-
-## 🟡 IN PROGRESS — personalized pantry insight (continue here)
-
-Order agreed: **A ✅ → B ✅ → C → D → E** (F=freshness was explicitly SKIPPED). Doing one step at a
-time, tested + self-reviewed before each push.
-
-- **Step C — "Pantry Check" coverage scorecard (NEXT, not started).** Add `coverage: {label,ok}[]`
-  to the `Insight` return (Protein / Produce / Carbs / Fats → good/⚠, weighted to goal), render a
-  chip strip in the card. I was about to refactor `buildInsight` to compute coverage once and append
-  to every return. **No code written yet.**
-- **Step D — rotation.** Cycle the top 2–3 gaps (or gap→tip→affirm) so the banner isn't the same
-  line every visit (crack H — no dismissal yet).
-- **Step E — `meal_logs` analysis.** Weekly averages vs goals (e.g. "averaged 110g protein vs your
-  160g goal → keep protein on hand"). Columns: `calories, protein, carbs, fat, logged_at`. Powerful
-  but edges toward coaching — **non-judgmental framing, sensitive for cutters**. Bigger build.
-- **THEN: presentation pass** (you flagged separately): the hero banner may be too cramped for
-  headline + detail + coverage strip + CTA → **may need to restructure/replace the hero card**, plus
-  wording polish. Do this after the logic steps.
-
-**buildInsight signature:** `(items, fitnessGoal, dietType, restrictions[], dislikes[],
-cuisinePrefs[], cookingSkill, maxPrepMinutes)`.
-
----
-
-## ⚠️ NEEDS DEVICE VERIFICATION (built + tested, NOT confirmed by you)
-
-- **Meal-gen quality (DEPLOYED):** reset your cap (SQL below), regenerate → confirm 3 meals (not 1),
-  leaner (no ~75g-fat bombs), **real dish names** (not "Power Bowl"), **melted/shredded cheese** in
-  steps. This is the highest-value check.
-- **Sign-out meal persistence:** generate meals → sign out → back in → same meals return, no loader,
-  no cap burn.
-- **Pantry insight banner:** no-veg pantry → "Add fruits & veg"; no-protein → "Add a protein source"
-  (diet-appropriate); well-stocked → affirmation; tap "Add … to grocery" lands items. Cuisine/skill
-  tailoring surfaces sensible picks.
-- **Meal-detail UX:** NEED tap adds to grocery (doesn't jump to pantry); assumed `*` reads tappable
-  & opts out w/ undo; macro colors correct (carbs blue, fat purple).
-- **Error messages:** hitting the cap shows "Daily meal limit reached (3/day)" not a generic red line.
-- **Grocery-toggle peek** (still in code): first Pantry visit pulses the "Grocery" pill once.
-
-**Reset your daily meal-gen cap to test (Supabase → SQL):**
-```sql
-delete from public.scan_usage where scan_type = 'meal_gen' and day = current_date
-  and user_id = (select id from auth.users where email = 'YOUR_APP_LOGIN_EMAIL');
+## 🔴 DEPLOY FIRST — committed but NOT live
+```bash
+npx supabase functions deploy generate-meals
+npx supabase functions deploy generate-meal-image   # if not already done
 ```
+`generate-meals` carries: defining-ingredient rule, cut/form awareness, quantity + equipment
+realism, meal-slot tagging, and the dish-naming rules. **None of it is live yet.**
+(Logan confirmed deploying `generate-meal-image` earlier for the cache-key change; re-check.)
 
 ---
 
-## 🧪 TESTS (pantry insight)
-Standalone Node scripts in the **scratchpad** (NOT committed — no test runner in repo):
-`fuzz.js` (~85k scenarios, 0 forbidden-food leaks), `behavior.js`, `edge.js`, `cuisine.js`,
-`effort.js`. To run: compile `lib/pantryProfile.ts` to a dir with tsc, then `node <script>.js`.
-The fuzz uses an independent oracle that also flags any NEW catalog item that wasn't vetted. If you
-want this permanent/CI, ask me to wire jest.
+## ⛔ THE ACTUAL LAUNCH BLOCKERS (Aug 1 target = ~5 days)
+Everything below this line in "SHIPPED" is quality work. **None of it gates submission.** These do:
 
-## 🔵 CARRYOVER / LANDMINES (from prior handoff, status unknown)
-- **Revert `SCAN_CAP_WEEK`** if still lifted for testing (`supabase secrets unset SCAN_CAP_WEEK`).
-- Onboarding profile upsert is the #1 bug source — stayed out of the data path; re-run a full
-  onboarding + verify the row survives if you touch it.
-- Meal images are globally cached — don't do per-user "optimizations".
+1. **Paywall products are "Incomplete" in Superwall.** Root cause found: **Review Information →
+   Screenshot is empty** in App Store Connect on both products. Localization IS done. Fix: upload a
+   screenshot of the paywall to `Pantry Monthly` AND `Pantry Annual` → Save → **Add for Review**.
+   - Expect Superwall to keep saying "Incomplete" until Apple approves the app — a first
+     auto-renewable subscription can't be approved standalone (ASC says so in a banner). **Sandbox
+     purchases still work**, so test the paywall on device regardless.
+   - Still unverified: the **Pantry Premium subscription GROUP** has its own localization.
+2. **FAL account cleanup** — pick the permanent account, set `FAL_KEY` in Supabase secrets, verify
+   images render, revoke the old `9eaf` key. **This gates screenshots.**
+3. **App Store screenshots** — hard requirement, can't submit without them. Needs #2.
+4. **Onboarding preview video** — real screen recording to replace `OnboardingTrailer.tsx`. Optional
+   for submission (screenshots aren't). Drop this first if time runs out.
+
+**Pricing changed to $9.99/mo** (was $7.99). Updated in 6 places incl. the App Review Notes text and
+`~/founder-research/GOALS.md` unit economics. Annual is now 75% off vs 69%, which strengthens the
+annual-default play.
+
+---
+
+## 🟡 OPEN / UNRESOLVED — the onboarding plan reveal
+**Logan is still not happy with this screen.** Six commits today, net effect below. Do NOT just
+iterate on it again without a plan.
+
+What changed today (all shipped):
+- Slot tags (BREAKFAST/LUNCH/DINNER) removed earlier — they were the "meal-planner" tell.
+- Generate-plan step: AI sparkle + orange "All done!" replaced with a recap of the user's own
+  answers (goal / diet / meals a day / cook time) — `1a2edf0`.
+- Sample-meals card → replaced with an honest next-step card ("Next: scan your kitchen") — `71f71ae`.
+  Reason: "Meals from your kitchen" was a claim the app can't back (they haven't scanned yet), and
+  the 3-row list looked half-finished.
+
+**Failed attempt, fully reverted (`572f0b3`)** — a "scan teaser" animation in that card. Three
+versions, each worse:
+1. Reused the pantry tab's SVG fridge → that art is drawn for a 160×70 thumbnail and degrades into
+   crude green boxes at full width.
+2. Diet-aware chips + bounded loop → fixed real flaws, didn't fix the visual.
+3. Real fridge photo → portrait image in a 168px letterbox with `cover`, cropped to a slice of blur.
+
+**Lesson written into global `~/.claude/CLAUDE.md`:** never drop an image or borrowed art into a
+container without checking source-vs-target aspect ratio; if the art doesn't fit the slot, the answer
+is different art *made for that slot*, not a different `resizeMode`. And: when I can't see the
+result, say so rather than iterating on visuals more than once.
+
+**If picking this up next session:** the screen's real payoff is the trajectory/macros card. The
+open question is whether anything should sit below it at all, or whether the reveal should end there
+and go straight to the CTA. Get a design decision before writing code.
+
+---
+
+## ✅ SHIPPED (all pushed)
+
+### Meal generation — honesty + realism (prompt work, NEEDS DEPLOY)
+- **Cook Now can only miss OPTIONAL finishing items** (`01c1951`). The "stretch" meal used to allow
+  1-2 missing staples with no notion of what's load-bearing — it produced *Thai Peanut Chicken
+  Noodles* for a pantry with no chicken AND no pasta, while ignoring the ground beef sitting there.
+  New test: does the missing thing change what the dish IS? Never missing: protein, main carb,
+  primary fat/dairy, anything in the title.
+- **Name the specific variety** — "pasta" is vague; rice noodles suit Thai, penne doesn't. Prefer the
+  exact pantry item when there is one.
+- **Respect the cut/form** (`d22da13`) — chuck/brisket need low-and-slow and can't appear in a
+  25-minute dish; ground meat → tacos/bolognese; tender cuts → sear, not braise.
+- **Quantity + equipment realism** (`a9eae96`) — the pantry records WHAT, never HOW MUCH, so meals
+  can't hinge on a dozen eggs. Recipes may only REQUIRE stove/oven/microwave/basic blender.
+- **Meal-slot tagging + time-of-day display** (`a9eae96`) — generation spreads meals across eating
+  occasions and tags a `slot`; the **pantry list sorts by time of day at display**. Split
+  deliberately: meals generate once a day, so generating "breakfast" at 8am would strand the user
+  with oats at dinner.
+- **The name must describe what the steps do** (`90350d5`) — real output was "Garlic Butter
+  Pan-Seared Chicken" whose steps were *plate the chicken salad alongside sautéed potatoes*. Nothing
+  seared, no chicken cooked. Also: pre-prepared items (chicken salad, hummus, rotisserie chicken) are
+  already cooked — use as-is, never name as if cooked from raw. And if the honest name is
+  unappealing, the MEAL is wrong, not the name.
+- Client: `Need: X` → **`Better with: X`** — anything listed is optional by construction now.
+- Client: **thin-pantry hint** on the Pantry tab (no in-stock protein, or <8 items).
+
+### Images — cost + accuracy
+- **Tightened `normalizeKey`** (`ec9d544`) — image cost scales with UNIQUE KEYS, and "Easy Chicken
+  Parmesan" / "Classic Chicken Parmesan" / "Chicken Parmesan" were three paid images of one dish.
+  Strips effort/vibe words, framing phrases, folds plurals. **Deliberately does NOT collapse cooking
+  methods** (grilled ≠ fried ≠ baked — those plate differently). Checks BOTH the new and legacy key
+  and backfills, so the existing library isn't orphaned.
+- **Processed ingredients render as their finished form** (`a8a6aab`) — granola came out as raw oats.
+  Now: granola = golden baked clusters, tortilla chips ≠ tortillas, peanut butter ≠ peanuts.
+
+### Keyboard traps — app-wide sweep
+Logan hit the ✕ on the scan-review screen to dismiss the keyboard and it discarded **57 detected
+items** (unrecoverable — the vision call was already spent). Audited every screen with a TextInput
+and guarded **15 sites**:
+- HIGH: `ReceiptScanModal` (✕ + Cancel), `RecipeFormModal` (← Back), Home "Log a Meal" backdrop,
+  `PantryScanModal` row ✕ during rename.
+- MEDIUM/LOW: food-preferences, createaccount, signin back arrows; meal slot-picker backdrop; pantry
+  add-ingredient Cancel; grocery clear-checked; saved import Cancel; FoodSearchModal back;
+  MacroEditModal; EditPortionModal; CreatorRecipeModal.
+- New `hooks/useKeyboardVisible.ts` for sites needing render state; `Keyboard.isVisible()` for
+  handler-only guards.
+- **Rule saved to global `~/.claude/CLAUDE.md` + `~/founder-research/PLAYBOOK.md`** (★ HARD).
+
+### Auth — real bug
+- **`onboarding_complete` now cleared on sign-out** (`b56d67e`). It's device-scoped, so after any
+  sign-out the NEXT account created on that device was routed straight to `/(tabs)` — **skipping
+  onboarding and the paywall**. On a premium-only app that's a revenue bug. Safe because `_layout`
+  already falls back to the server profile and re-sets the flag.
+
+### Home screen
+- Daily meal generation: bare `ActivityIndicator` → **card-shaped skeleton with narrated status**
+  ("Checking what's in your pantry" → "Matching recipes to your goals" → "Plating today's picks"),
+  clamped on the last line so a slow gen doesn't loop (`6c8ce52`, `8975146`).
+- Hero keeps narrating while the photo loads ("Plating your dish…" + utensils mark) instead of going
+  silent behind a black rectangle (`a59ba0a`).
+- **`MIN_SPLASH_MS` 2000 → 1200** — 2s of brand made no sense when the screen behind it needs ~15s.
+- **NEW TODAY badge was built then pulled** (`3203b4b`) — badging a batch as "new" only holds up if
+  the meals are visibly different, and name-suppression only covers the last 12. Over-promising costs
+  more trust than the badge buys.
+
+### Scan flow
+- Camera: **"Start with your fridge"** (was three options at once); hero title opens large/centered
+  for 5s then settles; tips pill replaces a dead tip line; brackets pushed toward the edges;
+  redundant "?" removed.
+- Hub: **area tiles are now a coverage checklist** (green check + photo count + "tap to add more").
+  Counting rather than a boolean is what makes multiple fridges/counters work. Headline is
+  **"More ingredients, tastier meals"**.
+- Review: **search-or-add field** (typing filters the list), duplicate prevention mirroring
+  `lib/pantryInsert.ts`, KeyboardAvoidingView, visible caret, tap-out to dismiss.
+- Tap a captured thumbnail to view it full-screen.
+- Camera **Back returns to the areas hub** instead of killing the whole scan.
+
+### Docs
+- **`PLAN-meal-reuse.md`** (`2b7e464`) — post-launch plan to serve pantry-cookable meals from
+  `trending_meals` (images already cached) instead of generating new ones. Kills both the photo wait
+  and most image spend. Sequenced: measure pool hit rate → extract ONE shared pantry matcher →
+  serve a capped share. **The landmine is called out**: a second divergent copy of the cookability
+  check is exactly how "Cook Now showed a meal you can't cook" shipped once already.
+
+---
+
+## ⚠️ NEEDS DEVICE VERIFICATION (built, typechecks, NOT confirmed)
+- **Image warm — never confirmed end-to-end.** Do a genuinely FRESH scan with Metro running and check
+  whether **cards 2 and 3 arrive with photos** when swiping at a normal pace. This is the one I most
+  want verified; it's the difference between the reveal feeling instant or not.
+- After deploying `generate-meals`: does it **use your ground beef**? Do dish names match their steps?
+- **Onboarding → profile write-back test** (CLAUDE.md rule after ANY onboarding change). Today's
+  onboarding edits were rendering-only, but verify every field survives anyway.
+- Sandbox-purchase both tiers once the ASC products go green.
+- Scan-review: search filters, no duplicates, ✕ dismisses keyboard before closing.
+
+---
+
+## 🧨 LANDMINES / CARRYOVER
+- **TS baseline = 197.** Held all session. Don't claim to have introduced/fixed those.
+- **Onboarding profile upsert is the #1 bug source.** Today's changes were display-only; anything
+  touching the data path needs a full write-back test.
+- **`app/(tabs)/index.tsx` and the meal cache are date-keyed** — cache changes need day-boundary
+  verification, not same-day.
+- **No way to bust a bad image in production.** Four cache layers (meal cache → device image cache →
+  `image_cache` table → Storage) and the storage filename is deterministic, so a regeneration reuses
+  the same URL. Post-launch: add a hash/version suffix so regeneration mints a new URL.
+- **`~/my-briefing/todos/active.md` keeps regenerating** and dropped my in-session edits twice. Git
+  history is the reliable record.
+- Empty pantry falls back to FAKE ingredients (`chicken breast, rice, eggs, broccoli`) in
+  `useMealSuggestions` — gated by `pantryNames.size > 0` today, but it's a trapdoor.
 
 ## KEY FILES THIS SESSION
-- `lib/pantryProfile.ts` — NEW pure classifier + rule engine (the insight brain).
-- `lib/edgeError.ts` — NEW shared server-error unwrapper.
-- `PLAN.md` — NEW full spec for the pantry insight + adversarial review.
-- `app/(tabs)/pantry.tsx` — insight banner + CTA, staples/diet fetch.
-- `app/meal/[id].tsx` — the ingredient-row UX rework, macro colors, assumed `*`.
-- `constants/colors.ts` — macro color tokens.
-- `supabase/functions/generate-meals/index.ts` — fat ceiling/floor, real-dishes, form/state (DEPLOYED).
-- `components/OnboardingTrailer.tsx` — composed trailer (TO BE DELETED once the recording replaces it).
+- `supabase/functions/generate-meals/index.ts` — all the honesty/realism rules (NEEDS DEPLOY)
+- `supabase/functions/generate-meal-image/index.ts` — cache key + processed-ingredient rules
+- `app/onboarding/index.tsx` — generate-plan recap, reveal next-step card
+- `components/PantryScanModal.tsx` — camera copy, hub checklist, review search, keyboard guards
+- `hooks/useKeyboardVisible.ts` — NEW
+- `context/AuthContext.tsx` — the sign-out flag fix
+- `app/(tabs)/index.tsx`, `app/(tabs)/pantry.tsx` — loading states, thin-pantry hint, slot sorting
 
 ## COMMIT RANGE
-`999b3c2..92da706` on `main`, all pushed (28 commits). `generate-meals` deployed to prod twice.
+`6c8ce52..71f71ae` on `main`, all pushed (18 commits). TS 197 throughout.
