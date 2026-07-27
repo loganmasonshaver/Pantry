@@ -12,28 +12,40 @@ const GREEN = '#4ADE80'
 // Vector fridge, not a photo: it reads as an illustration, so nobody mistakes it for a faked
 // screenshot of their own kitchen. Geometry adapted from the pantry tab's scan card so the two
 // surfaces share a visual language.
-export function ScanTeaser({ items = ['Eggs', 'Chicken', 'Rice', 'Spinach'] }: { items?: string[] }) {
+// Detected items must match the diet the user just chose — showing "Chicken" being found in a
+// vegan's fridge, on the screen right before the paywall, reads as "this app wasn't listening".
+const DIET_ITEMS: Record<string, string[]> = {
+  Vegan: ['Tofu', 'Black Beans', 'Rice', 'Spinach'],
+  Vegetarian: ['Eggs', 'Greek Yogurt', 'Rice', 'Spinach'],
+  Pescatarian: ['Eggs', 'Salmon', 'Rice', 'Spinach'],
+  Classic: ['Eggs', 'Chicken', 'Rice', 'Spinach'],
+}
+
+export function ScanTeaser({ diet }: { diet?: string }) {
+  const items = DIET_ITEMS[diet ?? 'Classic'] ?? DIET_ITEMS.Classic
   const beam = useRef(new Animated.Value(0)).current
   const chips = useRef(items.map(() => new Animated.Value(0))).current
 
   useEffect(() => {
-    // Sweep and detect together, hold so the result is readable, then reset and loop. The chips
-    // land while the beam is still travelling, which is what sells "it's finding things".
+    // Two passes, then it rests on the finished state. An indefinite loop stops reading as delight
+    // and becomes noise beside a screen the user is trying to read — so the reset happens at the
+    // START of each cycle, letting the last one end with the items still on screen.
     const loop = Animated.loop(
       Animated.sequence([
         Animated.parallel([
+          Animated.timing(beam, { toValue: 0, duration: 0, useNativeDriver: true }),
+          ...chips.map(a => Animated.timing(a, { toValue: 0, duration: 0, useNativeDriver: true })),
+        ]),
+        Animated.parallel([
           Animated.timing(beam, { toValue: 1, duration: 2200, easing: Easing.linear, useNativeDriver: true }),
+          // Chips land while the beam is still travelling — that's what sells "it's finding things".
           Animated.stagger(400, chips.map(a =>
             Animated.spring(a, { toValue: 1, friction: 7, tension: 90, useNativeDriver: true })
           )),
         ]),
-        Animated.delay(1200),
-        Animated.parallel([
-          Animated.timing(beam, { toValue: 0, duration: 0, useNativeDriver: true }),
-          ...chips.map(a => Animated.timing(a, { toValue: 0, duration: 240, useNativeDriver: true })),
-        ]),
-        Animated.delay(200),
-      ])
+        Animated.delay(1400),
+      ]),
+      { iterations: 2 },
     )
     loop.start()
     return () => loop.stop()

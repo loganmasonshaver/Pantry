@@ -2779,7 +2779,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                 meals weren't from their pantry anyway (they haven't scanned yet), so it promised
                 personalisation it couldn't back. The data behind those meals is still computed
                 below; only the rendering changed. */}
-            <ScanTeaser />
+            <ScanTeaser diet={data.dietStyle} />
           </View>
         </Animated.View>
 
