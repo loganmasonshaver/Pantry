@@ -2754,61 +2754,26 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           </View>
         </Animated.View>
 
-        {/* Section 2 — Meal plan card (images should be ready by now) */}
+        {/* Section 2 — What happens next.
+            This was a list of sample meals under "Meals from your kitchen" — a claim the app can't
+            back, because the user hasn't scanned anything yet. Invented meals presented as theirs is
+            the same dishonesty the breakfast/lunch/dinner slots had, relabelled. Replaced with the
+            honest version: name the next action. Deliberately text-only — the meal thumbnails made
+            the card look half-finished, and the plan card above is the payoff this screen should
+            end on. (sampleMeals still computes below; it seeds saved_meals in finish().) */}
         <Animated.View style={{ opacity: sectionAnims[2], transform: [{ translateY: sectionAnims[2].interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }}>
-          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 14 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(74,222,128,0.15)', alignItems: 'center', justifyContent: 'center' }}>
-                <Camera size={20} stroke={TEAL} strokeWidth={2} />
-              </View>
-              <View style={{ flex: 1 }}>
-                {/* Reframed to center the scan — the differentiator people download for. These curated
-                    meals are exactly what Pantry pulls from a scanned kitchen, so the reveal now sells
-                    the magic (scan → meals from what you have), not just the nutrition numbers. */}
-                <Text style={{ fontSize: 17, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.3 }}>
-                  Meals from your kitchen
-                </Text>
-                <Text style={{ fontSize: 12, color: MUTED, marginTop: 3, fontWeight: '500' }}>
-                  {`Scan what you have → ${data.dietStyle || 'Classic'} meals for your goal`}
-                </Text>
-              </View>
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(74,222,128,0.15)', alignItems: 'center', justifyContent: 'center' }}>
+              <Camera size={20} stroke={TEAL} strokeWidth={2} />
             </View>
-            {mealsForDisplay.map((m, i) => {
-              const imageUri = mealImages[m.name]
-              const isSwipedMeal = 'calories' in m
-              const prepDisplay = isSwipedMeal ? (m as any).prepTime : (m as any).prepMin
-              const SlotIcon = !isSwipedMeal ? (m as any).Icon : null
-              const slotTint = !isSwipedMeal ? ((m as any).tint ?? TEAL) : TEAL
-              const cardAnim = mealCardAnims[Math.min(i, mealCardAnims.length - 1)]
-              return (
-                <Animated.View key={i} style={{
-                  opacity: cardAnim,
-                  transform: [{ translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
-                }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 2 }}>
-                  <View style={{ width: 82, height: 82, borderRadius: 12, overflow: 'hidden', backgroundColor: '#242424' }}>
-                    {imageUri
-                      ? <Image source={{ uri: imageUri }} style={{ width: 82, height: 82 }} resizeMode="cover" />
-                      : SlotIcon
-                        ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: `${slotTint}22` }}>
-                            <SlotIcon size={26} stroke={slotTint} strokeWidth={1.8} />
-                          </View>
-                        : null
-                    }
-                  </View>
-                  <View style={{ flex: 1, gap: 4 }}>
-                    {/* Name — single line with ellipsis */}
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
-                    {/* Meta row: prep time only — macros are individualized per user in the main app */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Clock size={11} stroke={MUTED} strokeWidth={1.8} />
-                      <Text style={{ fontSize: 12, color: MUTED }}><Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{prepDisplay}</Text> min</Text>
-                    </View>
-                  </View>
-                </View>
-                </Animated.View>
-              )
-            })}
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.2 }}>
+                Next: scan your kitchen
+              </Text>
+              <Text style={{ fontSize: 13, color: MUTED, marginTop: 3, lineHeight: 18 }}>
+                {`We'll turn what you already have into ${data.dietStyle || 'Classic'} meals that hit these numbers.`}
+              </Text>
+            </View>
           </View>
         </Animated.View>
 
