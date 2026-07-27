@@ -1281,9 +1281,18 @@ export default function HomeScreen() {
                       {heroMeal.image && heroMeal.image.startsWith('http') ? (
                         <MealImage uri={heroMeal.image} style={styles.heroMealImage} priority="high" />
                       ) : (
-                        // Shimmer skeleton while the AI image is still rendering — reads as
-                        // "loading" instead of a static icon. Title/pills stay overlaid on top.
-                        <Shimmer style={styles.heroMealImage} />
+                        // The photo takes ~10s longer than the recipe text, and a bare shimmer on a
+                        // card this large just reads as a broken black rectangle — the screen went
+                        // from narrating ("Matching recipes…") to saying nothing at the exact moment
+                        // it had MORE to show. Keep narrating until the photo lands; the card is
+                        // fully tappable and cookable the whole time.
+                        <View style={styles.heroMealImage}>
+                          <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
+                          <View style={styles.heroMealPlating}>
+                            <Utensils size={26} stroke="#5A5A5A" strokeWidth={1.4} />
+                            <Text style={styles.heroMealPlatingText}>Plating your dish…</Text>
+                          </View>
+                        </View>
                       )}
                     </RNAnimated.View>
                     <LinearGradient
@@ -1855,6 +1864,8 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: '#1A1A1A',
   },
+  heroMealPlating: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  heroMealPlatingText: { fontSize: 13, fontWeight: '600', color: '#7A7A7A' },
   heroMealImage: {
     width: '100%',
     height: '100%',

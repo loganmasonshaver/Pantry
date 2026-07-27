@@ -7,8 +7,9 @@ import SplashOverlay from '../components/SplashOverlay'
 // short branded moment; also buys buffer time so AsyncStorage cache lookups +
 // in-flight requests can settle before the home screen renders. Returning users
 // with valid sessions resolve auth in <500ms — without a minimum, the splash
-// would barely flicker.
-const MIN_SPLASH_MS = 2000
+// would barely flicker. Cut 2000 -> 1200: the home screen behind it still needs ~15s to finish
+// generating the day's meals, so spending 2s of brand up front just delayed the wait.
+const MIN_SPLASH_MS = 1200
 
 // Known 3rd-party noise — library hasn't migrated yet. Our code is clean.
 // Remove these when upstream updates.
