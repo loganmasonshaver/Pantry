@@ -25,6 +25,7 @@ import { VideoView, useVideoPlayer } from 'expo-video'
 import Svg, { Path, Line, Circle as SvgCircle, Text as SvgText } from 'react-native-svg'
 import PressableScale from '../../components/PressableScale'
 import OnboardingTrailer from '../../components/OnboardingTrailer'
+import { ScanTeaser } from '../../components/ScanTeaser'
 import { haptic } from '../../lib/haptics'
 import { Check, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
 
@@ -2773,42 +2774,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
                 </Text>
               </View>
             </View>
-            {mealsForDisplay.map((m, i) => {
-              const imageUri = mealImages[m.name]
-              const isSwipedMeal = 'calories' in m
-              const prepDisplay = isSwipedMeal ? (m as any).prepTime : (m as any).prepMin
-              const SlotIcon = !isSwipedMeal ? (m as any).Icon : null
-              const slotTint = !isSwipedMeal ? ((m as any).tint ?? TEAL) : TEAL
-              const cardAnim = mealCardAnims[Math.min(i, mealCardAnims.length - 1)]
-              return (
-                <Animated.View key={i} style={{
-                  opacity: cardAnim,
-                  transform: [{ translateY: cardAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }],
-                }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 2 }}>
-                  <View style={{ width: 82, height: 82, borderRadius: 12, overflow: 'hidden', backgroundColor: '#242424' }}>
-                    {imageUri
-                      ? <Image source={{ uri: imageUri }} style={{ width: 82, height: 82 }} resizeMode="cover" />
-                      : SlotIcon
-                        ? <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: `${slotTint}22` }}>
-                            <SlotIcon size={26} stroke={slotTint} strokeWidth={1.8} />
-                          </View>
-                        : null
-                    }
-                  </View>
-                  <View style={{ flex: 1, gap: 4 }}>
-                    {/* Name — single line with ellipsis */}
-                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.2 }}>{m.name}</Text>
-                    {/* Meta row: prep time only — macros are individualized per user in the main app */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Clock size={11} stroke={MUTED} strokeWidth={1.8} />
-                      <Text style={{ fontSize: 12, color: MUTED }}><Text style={{ fontWeight: '700', color: '#FFFFFF' }}>{prepDisplay}</Text> min</Text>
-                    </View>
-                  </View>
-                </View>
-                </Animated.View>
-              )
-            })}
+            {/* Shows the scan instead of listing sample meals. The old list read as a generic
+                meal-planner and competed with the very feature this screen exists to sell — and the
+                meals weren't from their pantry anyway (they haven't scanned yet), so it promised
+                personalisation it couldn't back. The data behind those meals is still computed
+                below; only the rendering changed. */}
+            <ScanTeaser />
           </View>
         </Animated.View>
 
