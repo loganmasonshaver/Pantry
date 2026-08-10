@@ -26,7 +26,7 @@ import Svg, { Path, Line, Circle as SvgCircle, Text as SvgText } from 'react-nat
 import PressableScale from '../../components/PressableScale'
 import OnboardingTrailer from '../../components/OnboardingTrailer'
 import { haptic } from '../../lib/haptics'
-import { Check, X, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, Camera, ShoppingCart, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
+import { Check, X, TrendingDown, Dumbbell, Scale, Zap, ChefHat, Flame, Sparkles, Target, UtensilsCrossed, Clock, Bell, ArrowLeft, BarChart3, ShieldCheck, User, UserRound, Users, Venus, Mars, Drumstick, Fish, Salad, Sprout, Facebook, Instagram, Youtube, Apple, Music2, Globe } from 'lucide-react-native'
 
 const AnimatedPath = Animated.createAnimatedComponent(Path)
 const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle)
@@ -50,17 +50,26 @@ const CARD = '#1A1A1A'
 // Keep `false` for initial submission — Apple has flagged this pattern as review risk.
 const ABANDONMENT_PAYWALL_ENABLED = false
 
-// Plan-reveal pain block. Deliberately about FOOD DECISIONS, not calorie tracking — a "logging is
-// tedious" framing would argue for a macro tracker, which is the category Pantry has to beat, not join.
+// Plan-reveal pain block. Paired 1:1 by position — each ✗ is answered by the ✓ on the same row.
+//
+// Every line maps to a mechanic the user can SEE working: the photo scan, daily generation with
+// name-suppression, and Cook Now's pantry-only constraint. An earlier draft led with food waste
+// ("groceries you forgot you bought, thrown away") — the app has no expiry tracking at all, and its
+// entire waste capability is one sentence in the generate-meals prompt asking GPT to favour
+// oldest-listed items. Invisible to the user, so it can't carry a promise. Don't put it back.
+//
+// Row 2 is the ICP-specific one: people tracking macros eat the same few meals BECAUSE they've
+// already solved the macros for those. Variety carries a tax normal eaters don't pay — and pre-fitted
+// macros is exactly the tax Pantry removes.
 const WITHOUT_PANTRY = [
-  'Ordering out because deciding is harder than cooking',
-  'Groceries you forgot you bought, thrown away',
-  'The same three meals on repeat',
+  "The fridge is full and you're still ordering out",
+  'The same four meals, because you already know their macros',
+  "Every recipe needs five things you don't have",
 ]
 const WITH_PANTRY = [
-  'Dinner decided from one photo',
-  'Food gets used before it goes bad',
-  'New meals that still hit your numbers',
+  "One photo, and dinner's decided",
+  'Something new every day that still hits your numbers',
+  'Meals your kitchen already covers',
 ]
 
 // Progress percentages keyed by step number. Keep monotonic — values must increase as step increases.
@@ -2082,9 +2091,11 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   // The headline is the commitment device. "Lose 10 lbs" is a wish; "10 lbs by October 12" is a
   // date the user can picture missing — that's what makes the plan feel like it's already theirs.
+  // "GOAL" is a separate small label rather than an inline "Goal:" prefix so the long months
+  // (September/November/December) get the full line width instead of orphaning the day number.
   const headline = hasValidTarget
-    ? `Goal: ${isGainDirection ? 'gain' : 'lose'} ${weightDelta} lbs by ${targetDateHeadline}`
-    : 'Goal: same weight,\nbetter composition'
+    ? `${isGainDirection ? 'Gain' : 'Lose'} ${weightDelta} lbs by ${targetDateHeadline}`
+    : 'Same weight,\nbetter composition'
 
   // Carbs/fat come from the SAME helper finish() writes to the profile — see deriveMacros.
   const { carbs, fat } = deriveMacros(cals, prot)
@@ -2115,12 +2126,17 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       : []),
   ]
 
-  // Numbers interpolated from their own answers so the steps read as THEIR plan, not a feature tour.
+  // Mechanics, in order — this block owns the HOW; the Without/With block below owns the why.
+  // Numbered rather than iconed on purpose: it's a sequence, and numbers say sequence. The icon
+  // version used four different tinted circles (UtensilsCrossed reads as the "closed" glyph, not
+  // food) and a thin 18px stroke inside a 38px circle just looks unfinished.
+  //
+  // Grocery was a fourth step ("your grocery list writes itself") — cut. Weakest of the four on a
+  // conversion screen, and three tight steps beat four with filler. The feature still exists in-app.
   const behaviors = [
-    { Icon: Camera,          tint: TEAL,      bg: 'rgba(74,222,128,0.12)',  title: 'Scan your kitchen',        body: "One photo. We'll know what you have." },
-    { Icon: UtensilsCrossed, tint: '#F59E0B', bg: 'rgba(245,158,11,0.12)',  title: "Get tonight's dinner",     body: `Built from what's already in there — ${prepMin} min or less.` },
-    { Icon: ShoppingCart,    tint: '#60A5FA', bg: 'rgba(96,165,250,0.12)',  title: 'Only buy what’s missing',  body: 'Your grocery list writes itself.' },
-    { Icon: Target,          tint: '#A78BFA', bg: 'rgba(167,139,250,0.12)', title: `Hit ${cals.toLocaleString()} kcal without counting`, body: 'Every meal already fits your targets.' },
+    { title: 'Photograph your fridge', body: 'We read what’s in it. No typing, no barcodes.' },
+    { title: "Get tonight's dinner",   body: `Recipes your kitchen already covers, in ${prepMin} min or less.` },
+    { title: 'Never do the macro math', body: `Every meal lands on your ${cals.toLocaleString()} kcal and ${prot}g protein.` },
   ]
 
   // Sample meals — curated bank of 44 meals across 4 diets.
@@ -2627,9 +2643,10 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             what turns a number into a commitment. */}
         <Animated.View style={reveal(0)}>
           <View style={{ alignItems: 'center' }}>
-            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+            <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
               <Check size={22} stroke="#000" strokeWidth={3} />
             </View>
+            <Text style={{ fontSize: 12, fontWeight: '800', color: TEAL, letterSpacing: 1.5, marginBottom: 6 }}>GOAL</Text>
             <Text style={{ fontSize: 27, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.6, lineHeight: 34, textAlign: 'center' }}>
               {headline}
             </Text>
@@ -2725,10 +2742,12 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         <Animated.View style={reveal(4)}>
           <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 16 }}>
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>How this works</Text>
-            {behaviors.map(b => (
+            {behaviors.map((b, i) => (
               <View key={b.title} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: b.bg, alignItems: 'center', justifyContent: 'center' }}>
-                  <b.Icon size={18} stroke={b.tint} strokeWidth={2} />
+                {/* Same treatment as the calorie flame above — filled tinted square, one accent
+                    colour. Thin glyphs floating in big circles were what read as clip-art. */}
+                <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Text style={{ fontSize: 17, fontWeight: '800', color: TEAL }}>{i + 1}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF', lineHeight: 20 }}>{b.title}</Text>
@@ -2743,23 +2762,27 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             confront the problem Pantry solves; twelve of them are calorie-calculator inputs. This
             states it for them, right before the CTA. */}
         <Animated.View style={reveal(5)}>
-          <View style={{ gap: 10 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Why Pantry</Text>
-            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 12 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: MUTED }}>Without Pantry</Text>
+          {/* One card, title inside — every other block on this screen titles inside its card, so a
+              bare "Why Pantry" floating above two cards was the odd one out. The two halves are
+              split by an internal divider instead, which also reads as before/after. */}
+          <View style={{ backgroundColor: CARD, borderRadius: 16, overflow: 'hidden' }}>
+            <View style={{ padding: 18, gap: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Why Pantry</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: MUTED, letterSpacing: 0.3 }}>WITHOUT PANTRY</Text>
               {WITHOUT_PANTRY.map(line => (
                 <View key={line} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                   <X size={17} stroke="#EF4444" strokeWidth={3} style={{ marginTop: 1 }} />
-                  <Text style={{ fontSize: 14, color: '#CCCCCC', flex: 1, lineHeight: 20 }}>{line}</Text>
+                  <Text style={{ fontSize: 14, color: '#999999', flex: 1, lineHeight: 20 }}>{line}</Text>
                 </View>
               ))}
             </View>
-            <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, gap: 12, borderWidth: 1, borderColor: 'rgba(74,222,128,0.25)' }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: TEAL }}>With Pantry</Text>
+            {/* Teal-tinted lower half: the contrast does the persuading, not a second card. */}
+            <View style={{ padding: 18, gap: 12, backgroundColor: 'rgba(74,222,128,0.06)', borderTopWidth: 1, borderTopColor: 'rgba(74,222,128,0.20)' }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: TEAL, letterSpacing: 0.3 }}>WITH PANTRY</Text>
               {WITH_PANTRY.map(line => (
                 <View key={line} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                   <Check size={17} stroke={TEAL} strokeWidth={3} style={{ marginTop: 1 }} />
-                  <Text style={{ fontSize: 14, color: '#FFFFFF', flex: 1, lineHeight: 20 }}>{line}</Text>
+                  <Text style={{ fontSize: 14, color: '#FFFFFF', flex: 1, lineHeight: 20, fontWeight: '600' }}>{line}</Text>
                 </View>
               ))}
             </View>
