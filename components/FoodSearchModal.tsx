@@ -26,6 +26,7 @@ import {
   getFoodById,
   findFoodByBarcode,
   parseMacros,
+  pickDefaultServing,
   FoodSearchResult,
   FoodDetail,
   FoodServing,
@@ -145,8 +146,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       .then(food => {
         setSelectedFood(food)
         const serving = initialServingId
-          ? food.servings.find(s => s.serving_id === initialServingId) ?? food.servings[0]
-          : food.servings[0]
+          ? food.servings.find(s => s.serving_id === initialServingId) ?? pickDefaultServing(food.servings)
+          : pickDefaultServing(food.servings)
         setSelectedServing(serving ?? null)
         loadOverride(food.food_id)
       })
@@ -184,16 +185,24 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       const res = await searchFoods(q.trim())
       if (seq !== searchSeq.current) return // a newer search started — drop this stale response
       setResults(res)
-      // Parse cal/protein/serving straight from each result's description (via the local
-      // quickMacros) instead of firing a getFoodById per row — that was N+1 against the
-      // shared FatSecret key. Full detail loads only when a row is tapped (openDetail).
+      // Rows show the SAME serving the detail screen will open on — same picker, same servings
+      // array (v3 search returns them inline, so this is still one API call, not an N+1).
+      // Previously rows parsed food_description, which is "Per 100g" for generic foods: searching
+      // milk showed 3g of protein, then tapping through showed a cup at 8g.
+      // quickMacros stays as the fallback for any food v3 returns without servings.
       const macros: Record<string, { cal: number; prot: number; serving: string }> = {}
       for (const food of res) {
-        const q = quickMacros(food.food_description)
-        macros[food.food_id] = {
-          cal: Math.round(parseFloat(q.cal)) || 0,
-          prot: Math.round(parseFloat(q.prot)) || 0,
-          serving: q.per,
+        const def = pickDefaultServing(food.servings)
+        if (def) {
+          const m = parseMacros(def)
+          macros[food.food_id] = { cal: m.calories, prot: m.protein, serving: def.serving_description }
+        } else {
+          const q = quickMacros(food.food_description)
+          macros[food.food_id] = {
+            cal: Math.round(parseFloat(q.cal)) || 0,
+            prot: Math.round(parseFloat(q.prot)) || 0,
+            serving: q.per,
+          }
         }
       }
       setResultMacros(macros)
@@ -228,7 +237,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     try {
       const food = await getFoodById(foodId)
       setSelectedFood(food)
-      setSelectedServing(food.servings[0] ?? null)
+      setSelectedServing(pickDefaultServing(food.servings))
       await loadOverride(food.food_id)
     } catch {
       Alert.alert('Error', 'Could not load food details.')
@@ -253,7 +262,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         return
       }
       setSelectedFood(food)
-      setSelectedServing(food.servings[0] ?? null)
+      setSelectedServing(pickDefaultServing(food.servings))
       setScannedBarcode(data)
       setStep('detail')
       await loadOverride(food.food_id, data)
@@ -631,7 +640,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                             getFoodById(food.food_id)
                               .then(detail => {
                                 setSelectedFood(detail)
-                                setSelectedServing(detail.servings[0] ?? null)
+                                setSelectedServing(pickDefaultServing(detail.servings))
                                 loadOverride(detail.food_id)
                               })
                               .catch(() => { setStep('browse'); Alert.alert('Error', 'Could not load food') })

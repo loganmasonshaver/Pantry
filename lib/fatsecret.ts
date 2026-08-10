@@ -12,6 +12,7 @@ export type FoodServing = {
   fiber?: string
   metric_serving_amount?: string
   metric_serving_unit?: string
+  is_default?: string // "1" on the serving FatSecret considers default (v3 + flag_default_serving)
 }
 
 export type FoodDetail = {
@@ -26,6 +27,65 @@ export type FoodSearchResult = {
   food_name: string
   brand_name?: string
   food_description: string
+  servings?: FoodServing[] // present on v3 search — lets the results list show a real serving
+}
+
+// ── Default serving selection ────────────────────────────────────────────
+//
+// Why we don't just trust FatSecret's own default: for generic foods it IS the metric entry.
+// Searching "milk" returns food_description "Per 100g - ... Protein: 3.4g", so is_default points at
+// 100 g and the app was showing 3g of protein for a glass of milk. Nobody measures milk in grams.
+// MyFitnessPal overrides the same upstream default with a household measure; so do we. is_default
+// is kept only as a tiebreaker between household servings.
+
+// "100 g", "250ml", "1 g" — a pure metric quantity with no household unit attached.
+const METRIC_ONLY_RE = /^\s*\d+(\.\d+)?\s*(g|gram|grams|ml|milliliter|milliliters)\s*(\(|$)/i
+
+// Ordered by how a person would naturally describe a portion. Index = priority, lower wins, so a
+// food offering both "1 cup" and "1 fl oz" lands on the cup — which is what MFP shows for milk.
+const UNIT_PRIORITY: RegExp[] = [
+  /\bcups?\b/i,
+  /\b(container|bottle|can|jar|pouch|package|packet|carton)\b/i,
+  /\b(breast|fillet|thigh|patty|link|egg|slices?|pieces?|bars?|cookie|muffin|roll|bun|wrap|tortilla|square|stick|clove)\b/i,
+  /\b(small|medium|large|whole|half|item|unit|serving|bowl|plate|glass)\b/i,
+  /\bfl\.?\s?oz\b|\bfluid ounce/i,
+  /\boz\b|\bounces?\b/i,
+  /\btbsp\b|\btablespoons?\b/i,
+  /\btsp\b|\bteaspoons?\b/i,
+]
+
+const householdRank = (desc: string): number => {
+  const i = UNIT_PRIORITY.findIndex(re => re.test(desc))
+  return i === -1 ? Number.MAX_SAFE_INTEGER : i
+}
+
+/**
+ * Pick the serving a person would expect to be selected by default.
+ * Household measures beat metric ones; a single natural unit ("1 cup") beats a fraction
+ * ("0.25 cup"); synthetic gram options are never the default (they stay selectable).
+ */
+export function pickDefaultServing(servings: FoodServing[] | undefined): FoodServing | null {
+  if (!servings || servings.length === 0) return null
+  // '__' prefixed ids are the 100g/1g options we synthesize below for the kitchen-scale workflow.
+  const real = servings.filter(s => !s.serving_id?.startsWith('__'))
+  const pool = real.length > 0 ? real : servings
+
+  const household = pool.filter(s =>
+    !METRIC_ONLY_RE.test(s.serving_description) && householdRank(s.serving_description) !== Number.MAX_SAFE_INTEGER
+  )
+  if (household.length === 0) {
+    // Nothing household-shaped exists (some branded items only carry a gram serving) — the metric
+    // entry is genuinely the only option, so FatSecret's own default is the best signal left.
+    return pool.find(s => s.is_default === '1') ?? pool[0]
+  }
+
+  // "1 cup" over "0.25 cup" — a whole unit is what someone actually pours.
+  const singles = household.filter(s => /^\s*1\s+\D/.test(s.serving_description))
+  const tier = singles.length > 0 ? singles : household
+  const best = [...tier].sort((a, b) => householdRank(a.serving_description) - householdRank(b.serving_description))
+  const topRank = householdRank(best[0].serving_description)
+  const tied = best.filter(s => householdRank(s.serving_description) === topRank)
+  return tied.find(s => s.is_default === '1') ?? tied[0]
 }
 
 // ── API calls via Edge Function ──────────────────────────────────────────
@@ -42,21 +102,59 @@ async function apiFetch<T>(method: string, params: Record<string, string>): Prom
 
 // ── Public API functions ─────────────────────────────────────────────────
 
+// Shared by search and detail so a food's servings are identical in the results list and on the
+// detail screen. Two separate normalizers would let the list promise one serving and the detail
+// screen open on another.
+function normalizeServings(rawServings: any): FoodServing[] {
+  if (!rawServings) return []
+  // FatSecret returns a bare object (not an array) when a food has exactly one serving.
+  const arr = Array.isArray(rawServings) ? rawServings : [rawServings]
+  return arr.map((s: any) => {
+    // Append gram equivalent to description if available and not already a gram serving
+    let desc = s.serving_description ?? ''
+    const metricG = parseFloat(s.metric_serving_amount ?? '0')
+    if (metricG > 0 && s.metric_serving_unit === 'g' && !/^\d+\s*g$/.test(desc)) {
+      desc = `${desc} (${Math.round(metricG)}g)`
+    }
+    return {
+      serving_id: s.serving_id,
+      serving_description: desc,
+      calories: s.calories,
+      protein: s.protein,
+      carbohydrate: s.carbohydrate,
+      fat: s.fat,
+      fiber: s.fiber,
+      metric_serving_amount: s.metric_serving_amount,
+      metric_serving_unit: s.metric_serving_unit,
+      is_default: s.is_default,
+    }
+  })
+}
+
 export async function searchFoods(query: string, page = 0): Promise<FoodSearchResult[]> {
-  const data = await apiFetch<any>('foods.search', {
+  // v3 carries each food's servings inline. v1 returned only a "Per 100g - ..." string, which is
+  // why the results list used to show per-100g macros while the detail screen showed a serving.
+  const data = await apiFetch<any>('foods.search.v3', {
     search_expression: query,
     page_number: String(page),
     max_results: '20',
+    flag_default_serving: 'true',
   })
 
-  const foods = data?.foods?.food
+  // v3 nests results under foods_search.results.food; fall back to the v1 shape so a response-shape
+  // surprise degrades to the old behaviour instead of an empty results list.
+  const foods = data?.foods_search?.results?.food ?? data?.foods?.food
   if (!foods) return []
-  return (Array.isArray(foods) ? foods : [foods] /* FatSecret returns a bare object (not array) when exactly one result comes back */).map((f: any) => ({
-    food_id: f.food_id,
-    food_name: f.food_name,
-    brand_name: f.brand_name,
-    food_description: f.food_description ?? '',
-  }))
+  return (Array.isArray(foods) ? foods : [foods]).map((f: any) => {
+    const servings = normalizeServings(f.servings?.serving)
+    return {
+      food_id: f.food_id,
+      food_name: f.food_name,
+      brand_name: f.brand_name,
+      food_description: f.food_description ?? '',
+      servings: servings.length > 0 ? servings : undefined,
+    }
+  })
 }
 
 export async function getFoodById(foodId: string): Promise<FoodDetail> {
@@ -65,27 +163,7 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
   })
 
   const food = data.food
-  const rawServings = food.servings?.serving
-  const servingsArr: FoodServing[] = rawServings
-    ? (Array.isArray(rawServings) ? rawServings : [rawServings] /* same: single-serving foods come back as an object, not an array */).map((s: any) => {
-        // Append gram equivalent to description if available and not already a gram serving
-        let desc = s.serving_description ?? ''
-        const metricG = parseFloat(s.metric_serving_amount ?? '0')
-        if (metricG > 0 && s.metric_serving_unit === 'g' && !/^\d+\s*g$/.test(desc)) {
-          desc = `${desc} (${Math.round(metricG)}g)`
-        }
-        return {
-        serving_id: s.serving_id,
-        serving_description: desc,
-        calories: s.calories,
-        protein: s.protein,
-        carbohydrate: s.carbohydrate,
-        fat: s.fat,
-        fiber: s.fiber,
-        metric_serving_amount: s.metric_serving_amount,
-        metric_serving_unit: s.metric_serving_unit,
-      }})
-    : []
+  const servingsArr: FoodServing[] = normalizeServings(food.servings?.serving)
 
   // Add synthetic "100g" and "1g" options if metric data is available and no gram serving exists.
   // Users frequently want to log by gram weight (kitchen scale workflow) but FatSecret only

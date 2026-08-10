@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
-import { getFoodById, parseMacros, FoodDetail, FoodServing } from '@/lib/fatsecret'
+import { getFoodById, parseMacros, pickDefaultServing, FoodDetail, FoodServing } from '@/lib/fatsecret'
 
 type Props = {
   visible: boolean
@@ -63,8 +63,8 @@ export default function EditPortionModal({
       .then(f => {
         setFood(f)
         const match = initialServingId
-          ? f.servings.find(s => s.serving_id === initialServingId) ?? f.servings[0]
-          : f.servings[0]
+          ? f.servings.find(s => s.serving_id === initialServingId) ?? pickDefaultServing(f.servings)
+          : pickDefaultServing(f.servings)
         setSelectedServing(match ?? null)
       })
       .catch(() => setFood(null))

@@ -11,7 +11,11 @@ const CONSUMER_SECRET = Deno.env.get("FATSECRET_SECRET") ?? ""
 // ANY method/params and have us sign arbitrary FatSecret API calls on our account.
 // Unknown methods are rejected; unexpected params are stripped before signing.
 const ALLOWED_METHODS: Record<string, Set<string>> = {
-  "foods.search": new Set(["search_expression", "page_number", "max_results"]),
+  // v3 returns each food's full servings array inline, which is the whole point of using it here:
+  // v1 search only returns a "Per 100g - ..." description string, so the results list could never
+  // show a household serving without a food.get per row. flag_default_serving adds is_default.
+  "foods.search.v3": new Set(["search_expression", "page_number", "max_results", "flag_default_serving"]),
+  "foods.search": new Set(["search_expression", "page_number", "max_results"]), // kept as fallback
   "food.get": new Set(["food_id"]),
   "foods.autocomplete": new Set(["expression", "max_results"]),
 }
