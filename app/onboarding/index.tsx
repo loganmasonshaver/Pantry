@@ -61,11 +61,20 @@ const ABANDONMENT_PAYWALL_ENABLED = false
 // Row 2 is the ICP-specific one: people tracking macros eat the same few meals BECAUSE they've
 // already solved the macros for those. Variety carries a tax normal eaters don't pay — and pre-fitted
 // macros is exactly the tax Pantry removes.
-const WITHOUT_PANTRY = [
-  "The fridge is full and you're still ordering out",
-  'The same four meals, because you already know their macros',
-  "Every recipe needs five things you don't have",
-]
+// Row 2 counts THEIR meals-per-day answer (1–6 from MEALS_OPTIONS) rather than a hardcoded "four" —
+// a 2-meal-a-day user reading "the same four meals" is being described as someone else.
+// n=1 needs its own sentence: "the same one meals" / "its macros" both break otherwise.
+const NUM_WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six']
+function withoutPantryLines(mealsPerDay: number) {
+  const n = Math.min(Math.max(mealsPerDay, 1), 6)
+  return [
+    "The fridge is full and you're still ordering out",
+    n === 1
+      ? 'The same meal every day, because you already know its macros'
+      : `The same ${NUM_WORDS[n]} meals, because you already know their macros`,
+    "Every recipe needs five things you don't have",
+  ]
+}
 const WITH_PANTRY = [
   "One photo, and dinner's decided",
   'Something new every day that still hits your numbers',
@@ -118,6 +127,10 @@ const DEFAULT_DATA: OnboardingData = {
   targetWeightDelta: '',
   cuisinePreferences: [],
 }
+
+// topBarRow paddingTop (8) + backArrowBtn height (36). Used by the Plan Reveal, where the bar is
+// absolutely positioned over the scroll content and this becomes the content's top inset.
+const TOPBAR_H = 44
 
 function ProgressBar({ pct }: { pct: number }) {
   return (
@@ -2026,6 +2039,48 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     transform: [{ translateY: sectionAnims[i].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
   })
 
+  // Scroll position drives two things: the collapsing top bar, and the recap card's fill-in.
+  const scrollY = useRef(new Animated.Value(0)).current
+  // Bar is absolutely positioned over the ScrollView (not in flow) so fading it also reclaims the
+  // space — collapsing its height instead would need the JS driver and leave a dead gap mid-animation.
+  const headerOpacity = scrollY.interpolate({ inputRange: [0, 60], outputRange: [1, 0], extrapolate: 'clamp' })
+  const headerShift = scrollY.interpolate({ inputRange: [0, 60], outputRange: [0, -16], extrapolate: 'clamp' })
+  // Invisible views still swallow taps — kill hit-testing once the bar is faded, or a tap near the
+  // top of the scrolled page silently fires Back.
+  const [headerTappable, setHeaderTappable] = useState(true)
+  const headerTappableRef = useRef(true)
+
+  // Recap card fills in row-by-row when it scrolls into view. On mount it's below the fold, so a
+  // mount-time stagger would finish unseen and the user would arrive at a static list.
+  const recapRowAnims = useRef([0, 1, 2, 3, 4, 5].map(() => new Animated.Value(0))).current
+  const recapCardY = useRef<number | null>(null)
+  const recapFired = useRef(false)
+  const fireRecap = () => {
+    if (recapFired.current) return
+    recapFired.current = true
+    Animated.stagger(85, recapRowAnims.map(anim =>
+      Animated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true, easing: Easing.out(Easing.cubic) })
+    )).start()
+  }
+  const maybeFireRecap = (offsetY: number) => {
+    // Trigger a bit before the card's top edge reaches the fold so the fill-in is already running
+    // when it comes into view, rather than starting after the user is looking at it.
+    if (recapCardY.current !== null && recapCardY.current - offsetY < H * 0.88) fireRecap()
+  }
+
+  useEffect(() => {
+    if (isPrefetchOnly) return
+    const id = scrollY.addListener(({ value }) => {
+      const tappable = value < 40
+      if (tappable !== headerTappableRef.current) {
+        headerTappableRef.current = tappable
+        setHeaderTappable(tappable)  // only on threshold crossing — not once per scroll frame
+      }
+      maybeFireRecap(value)
+    })
+    return () => scrollY.removeListener(id)
+  }, [isPrefetchOnly])
+
   const { cals, prot } = useMemo(() => {
     // Use sensible defaults for any missing onboarding field so Plan Reveal always shows useful numbers
     const heightCm = (parseInt(data.ft || '5') * 12 + parseInt(data.inches || '9')) * 2.54
@@ -2637,8 +2692,18 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   return (
     <SafeAreaView style={s.safe}>
-      <TopBar onBack={onBack} pct={PROGRESS[19]} />
-      <ScrollView contentContainerStyle={[s.scrollBody, { gap: 16, paddingBottom: 40 }]} showsVerticalScrollIndicator={false}>
+      <Animated.View
+        pointerEvents={headerTappable ? 'auto' : 'none'}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, opacity: headerOpacity, transform: [{ translateY: headerShift }] }}
+      >
+        <TopBar onBack={onBack} pct={PROGRESS[19]} />
+      </Animated.View>
+      <Animated.ScrollView
+        contentContainerStyle={[s.scrollBody, { gap: 16, paddingTop: TOPBAR_H + 20, paddingBottom: 40 }]}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+      >
         {/* Block 0 — Headline. Centered on purpose: this is the payoff moment, and the date is
             what turns a number into a commitment. */}
         <Animated.View style={reveal(0)}>
@@ -2712,25 +2777,45 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         {/* Block 3 — Their own answers, read back. Was a standalone screen (SGeneratingIntro) before
             the loading bar; it does more work here as evidence inside the reveal than as a screen
             the user taps past. */}
-        <Animated.View style={reveal(3)}>
-          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18 }}>
+        <Animated.View
+          style={reveal(3)}
+          onLayout={e => {
+            recapCardY.current = e.nativeEvent.layout.y
+            maybeFireRecap(0) // covers tall screens where the card is already above the fold at rest
+          }}
+        >
+          <View style={{ backgroundColor: CARD, borderRadius: 16, padding: 18, borderWidth: 1, borderColor: 'rgba(74,222,128,0.18)' }}>
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Built from what you told us</Text>
-            <View style={{ marginTop: 6 }}>
+            <Text style={{ fontSize: 12, fontWeight: '700', color: TEAL, letterSpacing: 0.3, marginTop: 3 }}>
+              {recapRows.length} PREFERENCES APPLIED
+            </Text>
+            <View style={{ marginTop: 8 }}>
               {recapRows.map((row, i) => (
-                <View
+                <Animated.View
                   key={row.label}
                   style={{
                     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                    paddingVertical: 12,
+                    paddingVertical: 10,
                     borderBottomWidth: i < recapRows.length - 1 ? 1 : 0,
                     borderBottomColor: 'rgba(255,255,255,0.06)',
+                    opacity: recapRowAnims[i],
                   }}
                 >
                   <Text style={{ fontSize: 14, color: MUTED }}>{row.label}</Text>
-                  <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>
-                    {row.value}
-                  </Text>
-                </View>
+                  {/* Value as a tinted chip, sliding in from the right: reads as an answer being
+                      filled in rather than a settings row the eye skips. */}
+                  <Animated.View
+                    style={{
+                      backgroundColor: 'rgba(74,222,128,0.10)', borderRadius: 8,
+                      paddingHorizontal: 10, paddingVertical: 5, flexShrink: 1, marginLeft: 12,
+                      transform: [{ translateX: recapRowAnims[i].interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+                    }}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '700', color: TEAL, textAlign: 'right' }} numberOfLines={1}>
+                      {row.value}
+                    </Text>
+                  </Animated.View>
+                </Animated.View>
               ))}
             </View>
           </View>
@@ -2769,7 +2854,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             <View style={{ padding: 18, gap: 12 }}>
               <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>Why Pantry</Text>
               <Text style={{ fontSize: 13, fontWeight: '700', color: MUTED, letterSpacing: 0.3 }}>WITHOUT PANTRY</Text>
-              {WITHOUT_PANTRY.map(line => (
+              {withoutPantryLines(mealsPerDay).map(line => (
                 <View key={line} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
                   <X size={17} stroke="#EF4444" strokeWidth={3} style={{ marginTop: 1 }} />
                   <Text style={{ fontSize: 14, color: '#999999', flex: 1, lineHeight: 20 }}>{line}</Text>
@@ -2803,7 +2888,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             </View>
           </View>
         </Animated.View>
-      </ScrollView>
+      </Animated.ScrollView>
       <View style={s.bottomActions}>
         <PillButton label="Let's get started" onPress={onNext} />
       </View>
