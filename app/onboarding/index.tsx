@@ -17,7 +17,7 @@ import {
   PanResponder,
   Linking,
 } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -2040,16 +2040,20 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   })
 
   // Scroll position drives two things: the collapsing top bar, and the recap card's fill-in.
+  //
+  // The bar stays IN NORMAL FLOW and collapses its own height. Two earlier attempts positioned it
+  // absolutely (once anchored to SafeAreaView, once to a relative wrapper) and both rendered it up
+  // over the status bar with the back arrow half off-screen. Root cause: this app mounts no
+  // SafeAreaProvider, so useSafeAreaInsets() returns 0 and there is no inset value to position
+  // against — SafeAreaView itself works only because it's a self-measuring native view. A flow
+  // child sits inside that padding by construction, so there's nothing to escape.
+  //
+  // Height isn't supported by the native driver, hence useNativeDriver:false on the scroll event
+  // below. Fine here: one interpolation on a 44px view, and no other animation shares this value.
   const scrollY = useRef(new Animated.Value(0)).current
-  // Top inset is applied MANUALLY on this screen (SafeAreaView below uses edges={['bottom']}).
-  // Absolutely-positioned children escape SafeAreaView's padding — twice now the bar rendered up
-  // over the status bar with the back arrow half off-screen. Owning the inset ourselves means one
-  // source of truth: nothing to escape, nothing to double-count.
-  const insets = useSafeAreaInsets()
-  // Bar is absolutely positioned over the ScrollView (not in flow) so fading it also reclaims the
-  // space — collapsing its height instead would need the JS driver and leave a dead gap mid-animation.
-  const headerOpacity = scrollY.interpolate({ inputRange: [0, 60], outputRange: [1, 0], extrapolate: 'clamp' })
-  const headerShift = scrollY.interpolate({ inputRange: [0, 60], outputRange: [0, -16], extrapolate: 'clamp' })
+  const headerHeight = scrollY.interpolate({ inputRange: [0, 60], outputRange: [TOPBAR_H, 0], extrapolate: 'clamp' })
+  // Fades faster than it collapses so it reads as leaving rather than being squashed.
+  const headerOpacity = scrollY.interpolate({ inputRange: [0, 40], outputRange: [1, 0], extrapolate: 'clamp' })
   // Invisible views still swallow taps — kill hit-testing once the bar is faded, or a tap near the
   // top of the scrolled page silently fires Back.
   const [headerTappable, setHeaderTappable] = useState(true)
@@ -2695,21 +2699,19 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     return () => { cancelled = true }
   }, [mealsForDisplay])
 
-  // edges={['bottom']} below: the top inset is applied manually (insets.top on the absolute header
-  // + the ScrollView's paddingTop). Letting SafeAreaView pad the top too would double-count it.
   return (
-    <SafeAreaView style={s.safe} edges={['bottom']}>
+    <SafeAreaView style={s.safe}>
       <Animated.View
         pointerEvents={headerTappable ? 'auto' : 'none'}
-        style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10, opacity: headerOpacity, transform: [{ translateY: headerShift }] }}
+        style={{ height: headerHeight, opacity: headerOpacity, overflow: 'hidden' }}
       >
         <TopBar onBack={onBack} pct={PROGRESS[19]} />
       </Animated.View>
       <Animated.ScrollView
-        contentContainerStyle={[s.scrollBody, { gap: 16, paddingTop: insets.top + TOPBAR_H + 20, paddingBottom: 40 }]}
+        contentContainerStyle={[s.scrollBody, { gap: 16, paddingBottom: 40 }]}
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
       >
         {/* Block 0 — Headline. Centered on purpose: this is the payoff moment, and the date is
             what turns a number into a commitment. */}
