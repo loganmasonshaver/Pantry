@@ -134,14 +134,27 @@ function normalizeServings(rawServings: any): FoodServing[] {
 export async function searchFoods(query: string, page = 0): Promise<FoodSearchResult[]> {
   // v3 carries each food's servings inline. v1 returned only a "Per 100g - ..." string, which is
   // why the results list used to show per-100g macros while the detail screen showed a serving.
-  const data = await apiFetch<any>('foods.search.v3', {
-    search_expression: query,
-    page_number: String(page),
-    max_results: '20',
-    flag_default_serving: 'true',
-  })
+  let data: any
+  try {
+    data = await apiFetch<any>('foods.search.v3', {
+      search_expression: query,
+      page_number: String(page),
+      max_results: '20',
+      flag_default_serving: 'true',
+    })
+  } catch (e) {
+    // The proxy rejects any method missing from its allowlist, so an app build that ships ahead of
+    // the edge function deploy would break search outright. Fall back to v1 instead: rows lose the
+    // household serving (back to the per-100g description) but search keeps working.
+    console.log('[fatsecret] v3 search unavailable, falling back to v1:', (e as Error)?.message)
+    data = await apiFetch<any>('foods.search', {
+      search_expression: query,
+      page_number: String(page),
+      max_results: '20',
+    })
+  }
 
-  // v3 nests results under foods_search.results.food; fall back to the v1 shape so a response-shape
+  // v3 nests results under foods_search.results.food; also accept the v1 shape so a response-shape
   // surprise degrades to the old behaviour instead of an empty results list.
   const foods = data?.foods_search?.results?.food ?? data?.foods?.food
   if (!foods) return []
