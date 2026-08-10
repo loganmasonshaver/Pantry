@@ -258,10 +258,13 @@ Deno.serve(async (req: Request) => {
     const buildCategoryConfigs = (arr: string[]): QueryConfig[] => {
       const a = dayOfYear % arr.length
       const b = (a + Math.floor(arr.length / 2)) % arr.length
-      if (a === b) return [{ query: arr[a], order: 'relevance', windowDays: 7 }]
+      // 90-day window, not 7. A 7-day window plus the 100k view floor below is nearly empty by
+      // construction — almost nothing clears 100k inside a week. Three months lets videos
+      // accumulate views, and the 90-day video_id dedup already prevents a repeat on another day.
+      if (a === b) return [{ query: arr[a], order: 'relevance', windowDays: 90 }]
       return [
-        { query: arr[a], order: 'relevance', windowDays: 7 },
-        { query: arr[b], order: 'viewCount', windowDays: 7 },
+        { query: arr[a], order: 'relevance', windowDays: 90 },
+        { query: arr[b], order: 'viewCount', windowDays: 90 },
       ]
     }
     const queryConfigs: QueryConfig[] = [
@@ -295,7 +298,7 @@ Deno.serve(async (req: Request) => {
 
     stageLog(`dedup history loaded: ${prevNames.length} prev names, ${recentVideoIds.size} prev video_ids`)
 
-    const allVideos: { videoId: string; title: string; thumbnail: string; description: string }[] = []
+    const allVideos: { videoId: string; title: string; thumbnail: string; description: string; viewCount: number }[] = []
     // Used to filter chart=mostPopular results down to food content (the Howto & Style
     // category includes DIY, beauty, fashion, tech tutorials — we only want recipes).
     const isFoodTitle = (t: string) => /\b(recipe|cook|meal|food|dish|breakfast|lunch|dinner|snack|dessert|bake|grill|fry|roast|smoothie|salad|wrap|bowl|pasta|stir fry|pancake|cheesecake|brownie|cottage cheese|protein|anabolic)\b/i.test(t)
@@ -319,7 +322,9 @@ Deno.serve(async (req: Request) => {
         const videoIds = ytData.items.map((item: any) => item.id.videoId).filter(Boolean).join(',')
         if (!videoIds) continue
 
-        const detailUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoIds}&key=${youtubeKey}`
+        // `statistics` is free on a call we're already making, and without it the pipeline has no
+        // idea how many views anything has — which is how a 4-view upload reached Discover.
+        const detailUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${videoIds}&key=${youtubeKey}`
         const detailRes = await fetchWithTimeout(detailUrl)
         const detailData = await detailRes.json()
 
@@ -329,9 +334,10 @@ Deno.serve(async (req: Request) => {
             const title = item.snippet.title
             const description = item.snippet.description || ''
             const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
+            const viewCount = parseInt(item.statistics?.viewCount ?? '0', 10) || 0
             if (!videoId || !title || !thumbnail) continue
             if (isNotRecipeContent(title)) continue
-            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500) })
+            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount })
           }
         }
       } catch (e) {
@@ -345,7 +351,7 @@ Deno.serve(async (req: Request) => {
     // YouTube algorithmic trending in Howto & Style (videoCategoryId=26) — what YouTube's own
     // ranker considers viral RIGHT NOW. Independent of our keyword queries.
     try {
-      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=25&key=${youtubeKey}`
+      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=25&key=${youtubeKey}`
       const trendingRes = await fetchWithTimeout(trendingUrl)
       const trendingData = await trendingRes.json()
       if (trendingData.items) {
@@ -354,9 +360,10 @@ Deno.serve(async (req: Request) => {
           const title = item.snippet.title
           const description = item.snippet.description || ''
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
+          const viewCount = parseInt(item.statistics?.viewCount ?? '0', 10) || 0
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500) })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount })
         }
       }
     } catch (e) {
@@ -376,14 +383,36 @@ Deno.serve(async (req: Request) => {
     // density-skip rule (recipes that don't naturally hit 25% get rejected upstream).
     const seen = new Set<string>()
     console.log(`[funnel] raw YouTube candidates: ${allVideos.length}`)
-    const uniqueVideos = allVideos.filter(v => {
+    const deduped = allVideos.filter(v => {
       if (recentVideoIds.has(v.videoId)) return false
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
       if (seen.has(key)) return false
       seen.add(key)
       return true
-    }).slice(0, 60)
+    })
 
+    // View floor. Target is 100k, but a HARD 100k floor would abort the whole cron on a thin day
+    // (MIN_TRENDING_MEALS keeps the previous run, so Discover would just go stale). Step down
+    // instead: take the highest tier that still yields a workable pool, and log which one ran so a
+    // persistently-degraded floor is visible rather than silent.
+    const VIEW_FLOOR_TIERS = [100_000, 50_000, 25_000, 0]
+    const MIN_POOL = 25  // the LLM needs headroom above STORE_CAP (18) after its own name dedup
+    let uniqueVideos = deduped
+    let usedFloor = 0
+    for (const floor of VIEW_FLOOR_TIERS) {
+      const kept = deduped.filter(v => v.viewCount >= floor)
+      if (kept.length >= MIN_POOL || floor === 0) { uniqueVideos = kept; usedFloor = floor; break }
+    }
+    // Most-viewed first: the LLM picks by index, so ordering the list also ranks what it sees.
+    uniqueVideos = uniqueVideos.sort((a, b) => b.viewCount - a.viewCount).slice(0, 60)
+
+    const medianViews = uniqueVideos.length
+      ? uniqueVideos[Math.floor(uniqueVideos.length / 2)].viewCount
+      : 0
+    console.log(`[funnel] view floor ${usedFloor.toLocaleString()} (of ${VIEW_FLOOR_TIERS[0].toLocaleString()} target) → ${uniqueVideos.length} videos, median ${medianViews.toLocaleString()} views`)
+    if (usedFloor < VIEW_FLOOR_TIERS[0]) {
+      console.log(`[funnel] WARN: fell back below the 100k target — only ${deduped.filter(v => v.viewCount >= VIEW_FLOOR_TIERS[0]).length} candidates cleared it`)
+    }
     console.log(`Found ${uniqueVideos.length} unique YouTube videos (after ${recentVideoIds.size} recent-video-id rejections)`)
     stageLog('youtube fetch + dedup done')
 

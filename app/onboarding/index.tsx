@@ -2692,18 +2692,22 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   return (
     <SafeAreaView style={s.safe}>
-      <Animated.View
-        pointerEvents={headerTappable ? 'auto' : 'none'}
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, opacity: headerOpacity, transform: [{ translateY: headerShift }] }}
-      >
-        <TopBar onBack={onBack} pct={PROGRESS[19]} />
-      </Animated.View>
-      <Animated.ScrollView
-        contentContainerStyle={[s.scrollBody, { gap: 16, paddingTop: TOPBAR_H + 20, paddingBottom: 40 }]}
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
-      >
+      {/* Relative wrapper is load-bearing: an absolutely-positioned child of SafeAreaView ignores
+          its safe-area padding and lands under the status bar (back arrow half off-screen and
+          untappable). Anchoring to a plain flow child instead puts top:0 below the inset. */}
+      <View style={{ flex: 1 }}>
+        <Animated.View
+          pointerEvents={headerTappable ? 'auto' : 'none'}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, opacity: headerOpacity, transform: [{ translateY: headerShift }] }}
+        >
+          <TopBar onBack={onBack} pct={PROGRESS[19]} />
+        </Animated.View>
+        <Animated.ScrollView
+          contentContainerStyle={[s.scrollBody, { gap: 16, paddingTop: TOPBAR_H + 20, paddingBottom: 40 }]}
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+        >
         {/* Block 0 — Headline. Centered on purpose: this is the payoff moment, and the date is
             what turns a number into a commitment. */}
         <Animated.View style={reveal(0)}>
@@ -2888,7 +2892,8 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             </View>
           </View>
         </Animated.View>
-      </Animated.ScrollView>
+        </Animated.ScrollView>
+      </View>
       <View style={s.bottomActions}>
         <PillButton label="Let's get started" onPress={onNext} />
       </View>
