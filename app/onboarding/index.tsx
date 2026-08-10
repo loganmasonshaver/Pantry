@@ -17,7 +17,7 @@ import {
   PanResponder,
   Linking,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter, useLocalSearchParams } from 'expo-router'
 import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -2041,6 +2041,11 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
 
   // Scroll position drives two things: the collapsing top bar, and the recap card's fill-in.
   const scrollY = useRef(new Animated.Value(0)).current
+  // Top inset is applied MANUALLY on this screen (SafeAreaView below uses edges={['bottom']}).
+  // Absolutely-positioned children escape SafeAreaView's padding — twice now the bar rendered up
+  // over the status bar with the back arrow half off-screen. Owning the inset ourselves means one
+  // source of truth: nothing to escape, nothing to double-count.
+  const insets = useSafeAreaInsets()
   // Bar is absolutely positioned over the ScrollView (not in flow) so fading it also reclaims the
   // space — collapsing its height instead would need the JS driver and leave a dead gap mid-animation.
   const headerOpacity = scrollY.interpolate({ inputRange: [0, 60], outputRange: [1, 0], extrapolate: 'clamp' })
@@ -2690,24 +2695,22 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
     return () => { cancelled = true }
   }, [mealsForDisplay])
 
+  // edges={['bottom']} below: the top inset is applied manually (insets.top on the absolute header
+  // + the ScrollView's paddingTop). Letting SafeAreaView pad the top too would double-count it.
   return (
-    <SafeAreaView style={s.safe}>
-      {/* Relative wrapper is load-bearing: an absolutely-positioned child of SafeAreaView ignores
-          its safe-area padding and lands under the status bar (back arrow half off-screen and
-          untappable). Anchoring to a plain flow child instead puts top:0 below the inset. */}
-      <View style={{ flex: 1 }}>
-        <Animated.View
-          pointerEvents={headerTappable ? 'auto' : 'none'}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, opacity: headerOpacity, transform: [{ translateY: headerShift }] }}
-        >
-          <TopBar onBack={onBack} pct={PROGRESS[19]} />
-        </Animated.View>
-        <Animated.ScrollView
-          contentContainerStyle={[s.scrollBody, { gap: 16, paddingTop: TOPBAR_H + 20, paddingBottom: 40 }]}
-          showsVerticalScrollIndicator={false}
-          scrollEventThrottle={16}
-          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
-        >
+    <SafeAreaView style={s.safe} edges={['bottom']}>
+      <Animated.View
+        pointerEvents={headerTappable ? 'auto' : 'none'}
+        style={{ position: 'absolute', top: insets.top, left: 0, right: 0, zIndex: 10, opacity: headerOpacity, transform: [{ translateY: headerShift }] }}
+      >
+        <TopBar onBack={onBack} pct={PROGRESS[19]} />
+      </Animated.View>
+      <Animated.ScrollView
+        contentContainerStyle={[s.scrollBody, { gap: 16, paddingTop: insets.top + TOPBAR_H + 20, paddingBottom: 40 }]}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+      >
         {/* Block 0 — Headline. Centered on purpose: this is the payoff moment, and the date is
             what turns a number into a commitment. */}
         <Animated.View style={reveal(0)}>
@@ -2892,8 +2895,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
             </View>
           </View>
         </Animated.View>
-        </Animated.ScrollView>
-      </View>
+      </Animated.ScrollView>
       <View style={s.bottomActions}>
         <PillButton label="Let's get started" onPress={onNext} />
       </View>
