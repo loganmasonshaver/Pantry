@@ -28,6 +28,21 @@ async function fetchWithTimeout(url: string, ms = 15000): Promise<Response> {
 
 const today = () => new Date().toISOString().split('T')[0]
 
+// How long a YouTube-sourced meal stays in the table AND on screen. Must match
+// isYouTubeRecipeVisible in app/(tabs)/discover.tsx — if they drift, either the feed hides rows
+// that exist or the pipeline deletes rows the feed wanted. 30 days is a deliberate step up from 7:
+// it roughly quadruples the browsable pool at no cost (rows are tiny, images are globally cached)
+// while staying bounded enough to watch near-duplicate accumulation before going further.
+const RETENTION_DAYS = 30
+
+// Jaccard word-overlap above which a candidate counts as a near-duplicate of something already in
+// the table and is REJECTED outright, not merely down-ranked. Only exact normalized-name matches
+// were rejected before; uniqueness was otherwise a soft score, which is fine at 7-day retention and
+// not fine at 30+ — "Chicken Rice Bowl" from four different creators would all survive.
+// 0.7 rejects "Chicken Rice Bowl" vs "Grilled Chicken Rice Bowl" (0.75) and keeps
+// "Chicken Rice Bowl" vs "Beef Rice Bowl" (0.5), which is a genuinely different dish.
+const NEAR_DUP_JACCARD = 0.7
+
 // Likes as a percentage of views. A quality proxy that view count actively can't provide: the
 // most-viewed video in a batch is often the most gimmicky one, since novelty drives the click.
 // Guarded against divide-by-zero on brand-new videos.
@@ -303,12 +318,16 @@ Deno.serve(async (req: Request) => {
     // generated — slow and would eventually false-reject most candidates ("any meal
     // with 'Chicken' as first word" gets rejected). 60 days is enough recency for
     // "feels fresh" while keeping the comparison set bounded.
-    const sixtyDaysAgo = new Date(Date.now() - 60 * 86400000).toISOString().split('T')[0]
+    // Name-comparison window MUST be >= RETENTION_DAYS, or meals still on screen stop being
+    // compared against and near-duplicates creep back in. Kept deliberately wider than retention
+    // so a recipe doesn't reappear the moment its twin ages out.
+    const nameWindowDays = Math.max(60, RETENTION_DAYS * 2)
+    const nameWindowCutoff = new Date(Date.now() - nameWindowDays * 86400000).toISOString().split('T')[0]
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
     const { data: prevMeals } = await db.from('trending_meals')
       .select('name, video_id')
       .neq('generated_at', today())
-      .gte('generated_at', sixtyDaysAgo)
+      .gte('generated_at', nameWindowCutoff)
     const prevNames = (prevMeals || []).map((m: any) => m.name.toLowerCase())
 
     // Recently-used video IDs (90-day window — catches the same viral video resurfacing
@@ -618,7 +637,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -646,11 +665,17 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               },
               0,
             )
+            // Hard reject near-duplicates of anything already in the table. Previously only an
+            // EXACT normalized-name match was rejected and similarity was a soft ranking score —
+            // survivable at 7-day retention, but at 30+ days the same dish from four creators
+            // would accumulate. Applies to both the stored history and today's own batch.
+            const maxJac = Math.max(r._maxJaccardPrev, r._maxJaccardToday)
+            if (maxJac >= NEAR_DUP_JACCARD) { rejNearDup++; return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup})`)
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
@@ -926,7 +951,6 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // meals when ~110 had already been generated and paid for. Deleting them buys nothing: the rows
     // are tiny, and their images are in the global cache whether the row exists or not.
     // If Discover's window ever changes, change this with it.
-    const RETENTION_DAYS = 7
     const retentionCutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString().split('T')[0]
     await db.from('trending_meals').delete().lt('generated_at', retentionCutoff).eq('trend_source', 'YouTube trending')
     // Swap-then-cleanup instead of delete-then-insert: capture the prior run's today-rows,

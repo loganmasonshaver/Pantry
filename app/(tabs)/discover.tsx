@@ -36,6 +36,11 @@ const CREATOR_SHELF_ENABLED = false
 
 const GRID_CELL_W = Math.floor((SCREEN_W - 40 - 14) / 2)
 
+const TRENDING_FETCH_LIMIT = 600
+// Grid renders in pages so a 400-meal pool doesn't mount 400 image cards at once. Scrolling is
+// smooth at today's ~35; this is the guard for when retention fills it out.
+const GRID_PAGE = 30
+
 // Estimated rendered width of a small pill row, used to decide whether the "CAL" suffix fits.
 // Constants match the small-pill style: fontSize 10 bold (~6.2px/char) + letterSpacing 0.4,
 // paddingHorizontal 6 each side, 1px border each side, and a 3px gap between pills.
@@ -58,11 +63,14 @@ function isCreatorRecipeVisible(m: any): boolean {
   if (ageDays <= 30 && ((m.vote_score ?? 0) >= 3 || (m.log_count ?? 0) >= 10)) return true
   return false
 }
-// YouTube-sourced recipes are pure editorial filler — drop them after a week so the
-// feed stays fresh and we don't keep showing stale trending picks.
+// MUST match RETENTION_DAYS in supabase/functions/generate-trending-meals — if they drift, either
+// the feed hides rows that exist or the pipeline deletes rows the feed wanted. Was 7; freshness is
+// now conveyed by the "New today" section rather than by throwing meals away, which is what kept
+// the browsable pool tiny.
+const YOUTUBE_VISIBLE_DAYS = 30
 function isYouTubeRecipeVisible(m: any): boolean {
   const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
-  return ageDays <= 7
+  return ageDays <= YOUTUBE_VISIBLE_DAYS
 }
 function filterTrendingByLifecycle(rows: any[]): any[] {
   return rows.filter(m => {
@@ -84,6 +92,8 @@ const DISCOVER_PROTEIN_KEYWORDS = [
 // Only check first 3 ingredients — GPT lists them in order of prominence, so the
 // "primary" protein is essentially always in the first few. Cheaper than scanning all
 // ingredients and avoids false matches like "splash of cream" being tagged as dairy.
+const titleCase = (s: string) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+
 function detectPrimaryProtein(meal: any): string {
   const ings = (meal.ingredients || []).slice(0, 3).map((i: any) => i.name ?? '').join(' ')
   const haystack = `${meal.name ?? ''} ${ings}`.toLowerCase()
@@ -339,15 +349,18 @@ export default function DiscoverScreen() {
     if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
     // 30-day window is the absolute upper bound (creator lifecycle ceiling).
-    // Lifecycle filtering below further trims YouTube to 7d and creators by engagement.
+    // Lifecycle filtering below trims YouTube to YOUTUBE_VISIBLE_DAYS and creators by engagement.
     // The !creator_id syntax is PostgREST's foreign-key embed — joins one creator per meal.
     const { data } = await supabase.from('trending_meals')
       .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url)')
       .gte('generated_at', thirtyDaysAgo)
       .order('generated_at', { ascending: false })
       .order('id')
-      .limit(300) // newest 300 within the 30d window — lifecycle filter + variety-fill trim
-                  // to a rail of ~6 anyway, so an unbounded fetch only wastes payload
+      // Newest-first, capped. At ~15 meals/day and 30-day retention the pool tops out near 450, so
+      // 600 leaves headroom. This is a CEILING, not pagination: if rows ever comes back equal to
+      // the limit, the tail is silently unreachable and this needs a real generated_at cursor.
+      // The warn below is the tripwire for that day.
+      .limit(TRENDING_FETCH_LIMIT)
 
     if (!data) { setLoading(false); return }
 
@@ -377,6 +390,11 @@ export default function DiscoverScreen() {
     // Store the FULL ranked pool. Variety-fill now runs AFTER the per-user diet
     // filter (in `filtered` below) so a vegetarian's 6 are picked from the
     // diet-compatible pool with backfill — not capped to 6 before filtering.
+    // Tripwire: hitting the ceiling means older meals are silently unreachable and this needs a
+    // real cursor rather than a bigger number.
+    if ((data?.length ?? 0) >= TRENDING_FETCH_LIMIT) {
+      console.warn(`[discover] fetch hit the ${TRENDING_FETCH_LIMIT}-row ceiling — tail unreachable, add generated_at pagination`)
+    }
     setTrending(mapped)
     hasContentRef.current = true
     lastFetchRef.current = Date.now() // mark fresh only on success — a failed fetch retries next focus
@@ -457,6 +475,57 @@ export default function DiscoverScreen() {
     const shown = new Set([featured?.id, ...youtubeRail.map(m => m.id), ...creatorRail.map(m => m.id)])
     return filtered.filter(m => !shown.has(m.id))
   }, [filtered, featured, youtubeRail, creatorRail])
+
+  // Grouped, not one endless scroll. A flat grid of 400 meals is a worse version of a search
+  // results page — it strips out every reason to look at any particular meal. Sections restore
+  // that, using columns that already exist (generated_at, category) plus the protein classifier
+  // the rails already use, so this costs no new data.
+  //
+  // "New today" is exclusive and comes first: it carries the freshness cue that deleting old meals
+  // used to provide, which is what lets retention grow from 7 days to 30 without the feed feeling
+  // stale.
+  const browseSections = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0]
+    const isNew = (m: DiscoverMeal) => m.generated_at?.startsWith(todayStr)
+    const fresh = browseGrid.filter(isNew)
+    const rest = browseGrid.filter(m => !isNew(m))
+
+    // Protein is the axis this audience actually browses on ("show me the chicken"), so it leads
+    // for main meals. Snacks and desserts stay whole — splitting them further would leave
+    // two-item sections that read as broken rather than organised.
+    const mains = rest.filter(m => (m as any).category !== 'snack' && (m as any).category !== 'dessert')
+    const snacks = rest.filter(m => (m as any).category === 'snack')
+    const desserts = rest.filter(m => (m as any).category === 'dessert')
+
+    const byProtein = new Map<string, DiscoverMeal[]>()
+    for (const m of mains) {
+      const key = detectPrimaryProtein(m)
+      if (!byProtein.has(key)) byProtein.set(key, [])
+      byProtein.get(key)!.push(m)
+    }
+    const proteinSections = [...byProtein.entries()]
+      // A section of one isn't a section. Singles fall through to "Everything else" so they're
+      // still reachable rather than dropped.
+      .filter(([, meals]) => meals.length >= 2)
+      .sort((a, b) => b[1].length - a[1].length)
+      .map(([key, meals]) => ({ key: `protein-${key}`, title: titleCase(key), meals }))
+
+    const grouped = new Set(proteinSections.flatMap(sec => sec.meals.map(m => m.id)))
+    const leftovers = mains.filter(m => !grouped.has(m.id))
+
+    return [
+      { key: 'new', title: 'New today', meals: fresh },
+      ...proteinSections,
+      { key: 'snacks', title: 'Snacks', meals: snacks },
+      { key: 'desserts', title: 'Desserts', meals: desserts },
+      { key: 'other', title: 'Everything else', meals: leftovers },
+    ].filter(sec => sec.meals.length > 0)
+  }, [browseGrid])
+
+  // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
+  // mounting 400 image cards at once, and keeps each section's header reachable by scroll.
+  const [expandedSections, setExpandedSections] = useState<Record<string, number>>({})
+  const shownCount = (key: string) => expandedSections[key] ?? GRID_PAGE
 
   const openMeal = (meal: DiscoverMeal) => {
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
@@ -589,27 +658,41 @@ export default function DiscoverScreen() {
             look at"; a grid answers "show me everything", which is the mode someone is in when they
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
-        {!loading && browseGrid.length > 0 && (
-          <View style={{ marginTop: 28 }}>
-            <View style={styles.railHeader}>
-              <Text style={styles.railTitle}>More to explore</Text>
-              <Text style={styles.browseCount}>{browseGrid.length}</Text>
-            </View>
-            <View style={styles.browseGrid}>
-              {browseGrid.map((meal, index) => (
-                <Animated.View
-                  key={meal.id}
-                  style={styles.browseCell}
-                  // Cap the stagger index: past ~12 the delay would make the tail of a 100-item
-                  // grid visibly crawl in long after the user has scrolled to it.
-                  entering={FadeInDown.duration(240).delay(Math.min(index, 12) * 30)}
+        {!loading && browseSections.map(section => {
+          const shown = shownCount(section.key)
+          const visible = section.meals.slice(0, shown)
+          const remaining = section.meals.length - visible.length
+          return (
+            <View key={section.key} style={{ marginTop: 28 }}>
+              <View style={styles.railHeader}>
+                <Text style={styles.railTitle}>{section.title}</Text>
+                <Text style={styles.browseCount}>{section.meals.length}</Text>
+              </View>
+              <View style={styles.browseGrid}>
+                {visible.map((meal, index) => (
+                  <Animated.View
+                    key={meal.id}
+                    style={styles.browseCell}
+                    // Cap the stagger index: past ~12 the delay would make the tail of a long
+                    // section visibly crawl in after the user has already scrolled to it.
+                    entering={FadeInDown.duration(240).delay(Math.min(index, 12) * 30)}
+                  >
+                    <RailCard meal={meal} onPress={() => openMeal(meal)} full />
+                  </Animated.View>
+                ))}
+              </View>
+              {remaining > 0 && (
+                <PressableScale
+                  style={styles.showMoreBtn}
+                  scaleTo={0.98}
+                  onPress={() => setExpandedSections(prev => ({ ...prev, [section.key]: shown + GRID_PAGE }))}
                 >
-                  <RailCard meal={meal} onPress={() => openMeal(meal)} full />
-                </Animated.View>
-              ))}
+                  <Text style={styles.showMoreText}>Show {Math.min(remaining, GRID_PAGE)} more</Text>
+                </PressableScale>
+              )}
             </View>
-          </View>
-        )}
+          )
+        })}
 
         {/* Empty states — distinguish "nothing trending at all" from "filter narrowed to zero" */}
         {!loading && trending.length === 0 && (
@@ -844,6 +927,11 @@ const styles = StyleSheet.create({
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
   browseCell: { width: GRID_CELL_W },
   browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700' },
+  showMoreBtn: {
+    marginHorizontal: 20, marginTop: 14, paddingVertical: 12, borderRadius: 24,
+    borderWidth: 1, borderColor: COLORS.trackDark, alignItems: 'center',
+  },
+  showMoreText: { fontSize: 14, fontWeight: '700', color: COLORS.textWhite },
 
   railHeader: {
     flexDirection: 'row',
