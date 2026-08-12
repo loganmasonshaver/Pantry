@@ -38,9 +38,10 @@ const CREATOR_SHELF_ENABLED = false
 const GRID_CELL_W = Math.floor((SCREEN_W - 40 - 14) / 2)
 
 const TRENDING_FETCH_LIMIT = 600
-// Grid renders in pages so a 400-meal pool doesn't mount 400 image cards at once. Scrolling is
-// smooth at today's ~35; this is the guard for when retention fills it out.
-const GRID_PAGE = 30
+// 6 per section, not 30. This is what makes an all-grid page work at scale: eight sections at 30
+// would be 240 cards of scrolling, while eight at 6 is ~48 with everything one tap from expanding.
+// It buys rail-like compactness without hiding anything behind a sideways gesture nobody performs.
+const GRID_PAGE = 6
 
 // Estimated rendered width of a small pill row, used to decide whether the "CAL" suffix fits.
 // Constants match the small-pill style: fontSize 10 bold (~6.2px/char) + letterSpacing 0.4,
@@ -117,6 +118,39 @@ function missingCount(meal: DiscoverMeal, pantry: Set<string>): number {
     return true
   }).length
 }
+
+// INTENT SHELVES. Protein grouping ("Chicken", "Beef") is a filing system, not a reason to look —
+// the same mistake as a music app shelving by "Rock / Pop / Jazz". Every shelf below is a DESIRE
+// the user already has, expressed in their words, and every rule runs on columns that exist.
+//
+// Order here is the priority order for assignment: a meal lands in the FIRST shelf it matches and
+// nowhere else, so the page never shows the same card three times under different headings.
+const TAKEOUT_RE = /\b(fried rice|teriyaki|burger|pizza|taco|burrito|curry|noodle|ramen|wrap|nugget|kebab|shawarma|pad thai|orange chicken|sushi|quesadilla|gyro|katsu|lo mein|general tso|sweet and sour|hot pocket)\b/i
+const ONE_PAN_RE = /\b(one[- ]pan|sheet pan|skillet|one[- ]pot|traybake|air fryer)\b/i
+
+type IntentShelf = { key: string; title: string; match: (m: DiscoverMeal) => boolean }
+const INTENT_SHELVES: IntentShelf[] = [
+  { key: 'ready20', title: 'Ready in 20',
+    match: m => m.prepTime > 0 && m.prepTime <= 20 },
+  { key: 'takeout', title: 'Takeout, made at home',
+    // Named as the ANSWER, not the food. Onboarding's pain block says "the fridge is full and
+    // you're still ordering out" — this shelf is the payoff of that promise, not a competitor to it.
+    match: m => TAKEOUT_RE.test(m.name) },
+  { key: 'sweet', title: 'Sweet, and it still fits',
+    // Permission is the strongest pull in a diet app.
+    match: m => (m as any).category === 'dessert' && m.protein >= 15 },
+  { key: 'batch', title: 'Cook once, eat all week',
+    // Only possible now that servings is captured.
+    match: m => ((m as any).servings ?? 1) > 1 },
+  { key: 'onepan', title: 'One pan, barely any cleanup',
+    match: m => ONE_PAN_RE.test(m.name) || ONE_PAN_RE.test(
+      ((m.steps || []) as any[]).map(st => typeof st === 'string' ? st : `${st?.title ?? ''} ${st?.detail ?? ''}`).join(' ')) },
+  { key: 'bigplate', title: 'Big plate, small numbers',
+    // Volume eating — a genuine obsession for this audience.
+    match: m => m.calories > 0 && m.calories <= 450 && m.protein >= 25 },
+  { key: 'simple', title: 'Five ingredients or fewer',
+    match: m => (m.ingredients?.length ?? 0) > 0 && (m.ingredients?.length ?? 0) <= 5 },
+]
 
 const titleCase = (s: string) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
@@ -547,13 +581,9 @@ export default function DiscoverScreen() {
   // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
   // unreachable. The rail stays tight (10, protein-varied) and everything else drops into the
   // browse grid below, which is what someone who actually wants to explore is looking for.
-  const RAIL_CAPS = { youtube: 10, creator: 6 }
+  const RAIL_CAPS = { creator: 6 }
   // YouTube rail gets the protein-variety cap (it's the large algorithmic pool). Creators
   // are hand-submitted/curated, so they're just sliced — no protein cap dropping their posts.
-  const youtubeRail = useMemo(
-    () => applyVarietyFill(filtered.filter(m => m.id !== featured?.id && !m.creator), RAIL_CAPS.youtube),
-    [filtered, featured]
-  )
   const creatorRail = useMemo(
     () => filtered.filter(m => m.id !== featured?.id && !!m.creator).slice(0, RAIL_CAPS.creator),
     [filtered, featured]
@@ -562,9 +592,12 @@ export default function DiscoverScreen() {
   // keep a short curated shelf from being all chicken, but on a browse grid it would just hide
   // meals the user came here to find.
   const browseGrid = useMemo(() => {
-    const shown = new Set([featured?.id, ...youtubeRail.map(m => m.id), ...creatorRail.map(m => m.id)])
+    // Only the hero and the (currently disabled) creator rail are rendered outside the grid, so
+    // only those may be withheld from it. The YouTube rail used to sit here too and was removed —
+    // leaving it in the exclusion list would have silently swallowed 10 meals that nothing renders.
+    const shown = new Set([featured?.id, ...creatorRail.map(m => m.id)])
     return filtered.filter(m => !shown.has(m.id))
-  }, [filtered, featured, youtubeRail, creatorRail])
+  }, [filtered, featured, creatorRail])
 
   // Grouped, not one endless scroll. A flat grid of 400 meals is a worse version of a search
   // results page — it strips out every reason to look at any particular meal. Sections restore
@@ -576,129 +609,69 @@ export default function DiscoverScreen() {
   // stale.
   const browseSections = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0]
-    const isNew = (m: DiscoverMeal) => m.generated_at?.startsWith(todayStr)
-    const fresh = browseGrid.filter(isNew)
-    const rest = browseGrid.filter(m => !isNew(m))
-
-    // Protein is the axis this audience actually browses on ("show me the chicken"), so it leads
-    // for main meals. Snacks and desserts stay whole — splitting them further would leave
-    // two-item sections that read as broken rather than organised.
-    const mains = rest.filter(m => (m as any).category !== 'snack' && (m as any).category !== 'dessert')
-    const snacks = rest.filter(m => (m as any).category === 'snack')
-    const desserts = rest.filter(m => (m as any).category === 'dessert')
-
-    const byProtein = new Map<string, DiscoverMeal[]>()
-    for (const m of mains) {
-      const key = detectPrimaryProtein(m)
-      if (!byProtein.has(key)) byProtein.set(key, [])
-      byProtein.get(key)!.push(m)
-    }
-    const proteinSections = [...byProtein.entries()]
-      // A section of one isn't a section. Singles fall through to "Everything else" so they're
-      // still reachable rather than dropped.
-      .filter(([, meals]) => meals.length >= 2)
-      .sort((a, b) => b[1].length - a[1].length)
-      .map(([key, meals]) => ({ key: `protein-${key}`, title: titleCase(key), meals }))
-
-    // Rotate which protein leads, by day. Sorting purely by section size looks sensible and is
-    // actually frozen: chicken is always the biggest group in a high-protein feed, so the page
-    // below "New today" would be byte-identical every day forever — the exact staleness that
-    // sectioning was supposed to fix.
-    //
-    // Day-of-year rotation, not random: the order must be stable for a whole session (reshuffling
-    // under someone mid-scroll is worse than repetition) but different tomorrow. Same trick the
-    // generation pipeline uses to rotate its query set.
-    //
-    // Only sections with enough meals join the rotation — leading with a 2-item section reads as
-    // an empty feed, so thin groups stay pinned after the substantial ones.
-    const ROTATABLE_MIN = 4
     const dayOfYear = Math.floor(
       (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
     )
 
-    // Snacks and Desserts rotate alongside the proteins rather than being pinned to the bottom.
-    // Anchoring them meant someone who mainly wants desserts scrolled past every protein section
-    // every single day — "frozen except the middle" is still mostly frozen, which defeats the
-    // point of rotating at all.
-    const categorySections = [
-      { key: 'snacks', title: 'Snacks', meals: snacks },
-      { key: 'desserts', title: 'Desserts', meals: desserts },
-    ].filter(sec => sec.meals.length > 0)
+    // FIRST SHELF WINS. Each section claims meals the earlier ones didn't take, so a meal appears
+    // exactly once on the page. Without this a single recipe shows up under "Almost in your
+    // kitchen", "Ready in 20" and "Big plate" within three rows, which reads as a broken feed
+    // rather than as thorough curation. Personalised shelves get first pick because they're the
+    // most specific reason to tap.
+    const taken = new Set<string>()
+    const claim = (meals: DiscoverMeal[], limit: number) => {
+      const out: DiscoverMeal[] = []
+      for (const m of meals) {
+        if (out.length >= limit) break
+        if (taken.has(m.id)) continue
+        taken.add(m.id)
+        out.push(m)
+      }
+      return out
+    }
 
-    // Fits-what's-left. The one section a competitor can't reproduce without also knowing what the
-    // user ate today. Pinned rather than rotated: its whole value is being the answer to "what can
-    // I eat right now", which is worthless three scrolls down.
-    // Only appears once something is logged — see budget.hasLogged.
-    const fitsBudget = budget?.hasLogged
-      ? browseGrid.filter(m =>
-          m.calories > 0 && m.calories <= budget.calLeft &&
-          // 40% of what's left, not all of it: demanding one meal close the whole protein gap
-          // returns nothing on a normal day, and an empty section is worse than no section.
-          (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)
-        ).slice(0, 12)
-      : []
-
-    // Nearly-cookable. The most Pantry-native shelf there is: it's the only one that answers
-    // "what can I make with what I already own", which is the app's actual promise. Ranked by how
-    // few things are missing, so the top of the shelf is the closest to dinner.
-    // Allows up to 2 missing — a strict zero-missing rule almost never matches (every recipe has
-    // some spice or oil the pantry scan didn't catch) and would leave the shelf permanently empty.
-    // No hard cutoff. The old rule (<= 2 missing) sounded reasonable and silently emptied the
-    // shelf: real recipes run 5-7 ingredients, so <= 2 missing demands the pantry cover most of
-    // them, and a shelf that vanishes teaches the user it doesn't work. Instead: rank by
-    // closeness, take the best 12 whatever they are, and label each card with how many are
-    // missing so the claim is never overstated. Same information, no cliff.
+    // ── Personalised: answers to "what should I eat right now" ──
     const nearlyRanked = pantryNames.size > 0
-      ? browseGrid
-          .map(m => ({ m, missing: missingCount(m, pantryNames) }))
+      ? browseGrid.map(m => ({ m, missing: missingCount(m, pantryNames) }))
           .sort((a, b) => a.missing - b.missing)
-          .slice(0, 12)
       : []
-    const nearlyCookable = nearlyRanked.map(x => x.m)
-    const missingById = new Map(nearlyRanked.map(x => [x.m.id, x.missing]))
+    const nearly = claim(nearlyRanked.map(x => x.m), 12)
 
-    // Because you cooked X. Needs only this user's own history, so it activates on their first
-    // cook rather than waiting for a cohort to exist. Similarity is same-primary-protein: crude,
-    // but at this pool size an embedding would be precision theatre over ~450 meals.
     const cookedProtein = lastCooked ? detectPrimaryProtein({ name: lastCooked, ingredients: [] }) : null
-    const becauseYouCooked = cookedProtein && cookedProtein !== 'other'
-      ? browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein).slice(0, 12)
+    const because = cookedProtein && cookedProtein !== 'other'
+      ? claim(browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein), 12)
       : []
 
-    const rotatable = [...proteinSections, ...categorySections]
-    const substantial = rotatable.filter(sec => sec.meals.length >= ROTATABLE_MIN)
-    const thin = rotatable.filter(sec => sec.meals.length < ROTATABLE_MIN)
-    const offset = substantial.length > 0 ? dayOfYear % substantial.length : 0
-    const rotatedSections = [...substantial.slice(offset), ...substantial.slice(0, offset), ...thin]
+    const fits = budget?.hasLogged
+      ? claim(browseGrid.filter(m =>
+          m.calories > 0 && m.calories <= budget.calLeft &&
+          (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)), 12)
+      : []
 
-    // Leftovers are mains that never landed in a protein section (groups of one). Computed from
-    // proteinSections specifically — a main isn't "left over" just because Desserts exists.
-    const grouped = new Set(proteinSections.flatMap(sec => sec.meals.map(m => m.id)))
-    const leftovers = mains.filter(m => !grouped.has(m.id))
+    // ── Today. One section, not a rail plus a leftovers grid: the rail took 10 and today's batch
+    // is 8-15, so "More from today" was empty by construction and the two names described one set.
+    const today = claim(browseGrid.filter(m => m.generated_at?.startsWith(todayStr)), 18)
+
+    // ── Intent shelves, rotated so the page isn't identical tomorrow ──
+    const rotated = [...INTENT_SHELVES.slice(dayOfYear % INTENT_SHELVES.length),
+                     ...INTENT_SHELVES.slice(0, dayOfYear % INTENT_SHELVES.length)]
+    const intent = rotated
+      .map(shelf => ({ key: shelf.key, title: shelf.title, meals: claim(browseGrid.filter(shelf.match), 12) }))
+      // A shelf of one isn't a shelf; those meals fall through to Everything else.
+      .filter(sec => sec.meals.length >= 2)
+      // Only ever show a handful — the value is a few strong reasons, not every rule we can write.
+      .slice(0, 4)
+
+    const leftovers = browseGrid.filter(m => !taken.has(m.id))
 
     return [
-      // "New today" stays pinned: it's the freshness anchor that replaced deleting old meals,
-      // and an anchor that moves isn't an anchor.
-      // Pinned above everything else: both answer "what should I eat right now", which is
-      // worthless below the fold. Empty ones are filtered out, so a new user with no pantry and no
-      // cooks simply never sees them — they switch on by themselves.
-      { key: 'nearly', title: 'Almost in your kitchen', meals: nearlyCookable },
-      { key: 'because', title: `Because you cooked ${lastCooked ?? ''}`.trim(), meals: becauseYouCooked },
-      { key: 'fits', title: `Fits your remaining ${budget?.calLeft ?? 0} kcal`, meals: fitsBudget },
-      { key: 'new', title: 'More from today', meals: fresh },
-      ...rotatedSections,
-      // "Everything else" stays last on purpose — it's the catch-all, and a catch-all that
-      // sometimes appears third would read as a real category rather than the remainder.
-      { key: 'other', title: 'Everything else', meals: leftovers },
-    ]
-      .filter(sec => sec.meals.length > 0)
-      // Rotate the MEALS INSIDE each section too, not just the section order. Without this the
-      // contents are pinned newest-first forever: with 30-day retention and 30-per-page reveal,
-      // the same top meals lead every day and anything deeper is effectively unreachable — the
-      // pool would grow to hundreds while the visible surface stayed identical.
-      //
-      // "New today" is exempt: it's a dated section, so newest-first is the meaning of it.
-      .map(sec => sec.key === 'new' ? sec : { ...sec, meals: rotateByDay(sec.meals, dayOfYear, sec.key, GRID_PAGE) })
+      { key: 'nearly', title: 'Almost in your kitchen', meals: nearly, accent: true },
+      { key: 'because', title: `Because you cooked ${lastCooked ?? ''}`.trim(), meals: because, accent: true },
+      { key: 'fits', title: `Fits your remaining ${budget?.calLeft ?? 0} kcal`, meals: fits, accent: true },
+      { key: 'today', title: "Today's picks", meals: today, accent: false },
+      ...intent.map(sec => ({ ...sec, accent: false })),
+      { key: 'other', title: 'Everything else', meals: leftovers, accent: false },
+    ].filter(sec => sec.meals.length > 0)
   }, [browseGrid, budget, pantryNames, lastCooked])
 
   // Per-meal missing counts for the "Almost in your kitchen" badges. Recomputed with the same
@@ -831,31 +804,11 @@ export default function DiscoverScreen() {
         ) : null}
 
         {/* Trending Now rail — YouTube-sourced editorial-trendy recipes */}
-        {!loading && youtubeRail.length > 0 && (
-          <View style={{ marginTop: 28 }}>
-            <View style={styles.railHeader}>
-              {/* Was "Trending Now" beside a grid section called "New today" — two names for one
-                  set, split by rank. This rail is today's top picks; the grid section below is the
-                  remainder of the same day, so they now read as one idea. */}
-              <Text style={styles.railTitle}>Today's picks</Text>
-            </View>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 20, gap: 14 }}
-            >
-              {youtubeRail.map((meal, index) => (
-                <Animated.View key={meal.id} entering={FadeInDown.duration(260).delay(Math.min(index, 8) * 40)}>
-                  <RailCard meal={meal} onPress={() => openMeal(meal, 'discover_rail', 'trending', index)} />
-                </Animated.View>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {/* From Creators rail — user-submitted recipes. Admin "+" (promo flag) is the
-            entry point for posting new creator content; it lives here in 3b instead of
-            on Home, where it used to sit attached to the now-removed trending row. */}
+        {/* The "Today's picks" rail is gone — it lived here. A 10-item horizontal rail showed ~2.5
+            meals and consumed the entire daily batch (8-15), leaving the grid section beneath it
+            empty by construction. It's now a normal grid section like everything else, so the page
+            has one scroll direction and nothing hides behind a sideways gesture. The hero above
+            remains the single "display" moment. */}
         {!loading && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
@@ -899,7 +852,12 @@ export default function DiscoverScreen() {
               onLayout={e => { const { y, height } = e.nativeEvent.layout; sectionRects.current[section.key] = { y, h: height } }}
             >
               <View style={styles.railHeader}>
-                <Text style={styles.railTitle}>{section.title}</Text>
+                {/* Hierarchy comes from the HEADER, not from switching scroll direction — the
+                    personalised shelves get the accent so "for you" is visible at a glance while
+                    every section still scrolls the same way. */}
+                <Text style={[styles.railTitle, (section as any).accent && styles.railTitleAccent]}>
+                  {section.title}
+                </Text>
                 {/* A bare integer floating at the right edge reads as a glitch. */}
                 <Text style={styles.browseCount}>{section.meals.length} meals</Text>
               </View>
@@ -1174,6 +1132,7 @@ const styles = StyleSheet.create({
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
   browseCell: { width: GRID_CELL_W },
   browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700' },
+  railTitleAccent: { color: COLORS.accent },
   cardBadge: {
     position: 'absolute', top: 8, left: 8, zIndex: 2, borderRadius: 12,
     paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.72)',
