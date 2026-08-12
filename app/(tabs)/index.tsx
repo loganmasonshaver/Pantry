@@ -489,7 +489,7 @@ export default function HomeScreen() {
   // 286/210 -> 300/224: absorbs the 14pt reclaimed from the gap above (heroCard marginBottom
   // 24->14, section header marginBottom 16->12), so page height is unchanged and the extra
   // goes to the photo. Still short of the 373pt that would make the box square and stop the crop.
-  const heroHeight = macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [300, 224] })
+  const heroHeight = macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [288, 212] })
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -1590,7 +1590,9 @@ const styles = StyleSheet.create({
   // permanently underneath it — the hero card's bottom edge and pills were unreachable at full
   // scroll. 80 clears the bar, +20 so the last card doesn't sit flush against it.
   scrollContent: { paddingBottom: 100 },
-  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
+  // paddingBottom 12 -> 8: part of ~34pt trimmed above the meal hero so the whole card clears
+  // the tab bar at rest. It used to sit ~20pt below the fold, so you had to scroll to see it.
+  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   brandText: { fontSize: 18, fontWeight: '800', color: '#4ADE80', letterSpacing: -0.3 },
   headerGreeting: { gap: 4 },
@@ -1832,9 +1834,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 20,
-    paddingVertical: 8,
+    // paddingVertical 8 -> 5, marginBottom 4 -> 0: 10pt toward fitting the meal hero above the fold.
+    paddingVertical: 5,
     marginHorizontal: 20,
-    marginBottom: 4,
+    marginBottom: 0,
   },
   dayNavText: {
     fontSize: 16,
@@ -1852,8 +1855,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F0F0F',
     borderRadius: 24,
     paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
+    // 20 -> 16 top and bottom: 8pt more toward fitting the meal hero above the fold. The gauge
+    // itself is untouched — it's the padding around it that was doing the least work.
+    paddingTop: 16,
+    paddingBottom: 16,
     borderWidth: 1,
     borderColor: 'rgba(74,222,128,0.08)',
     shadowColor: '#4ADE80',

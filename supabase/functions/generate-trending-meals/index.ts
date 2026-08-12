@@ -385,6 +385,7 @@ Deno.serve(async (req: Request) => {
           const description = item.snippet.description || ''
           const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
           const viewCount = parseInt(item.statistics?.viewCount ?? '0', 10) || 0
+          const likeCount = parseInt(item.statistics?.likeCount ?? '0', 10) || 0
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
           allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount })
