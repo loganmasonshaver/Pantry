@@ -8,6 +8,7 @@ import {
   Linking,
   AppState,
   RefreshControl,
+  Dimensions,
 } from 'react-native'
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -22,6 +23,11 @@ import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import PressableScale from '../../components/PressableScale'
+
+// Two-column browse grid. Cell width is computed rather than a percentage so the cards land on the
+// same ~170pt as the rail cards — the pill row was measured against that width and wraps below it.
+const { width: SCREEN_W } = Dimensions.get('window')
+const GRID_CELL_W = Math.floor((SCREEN_W - 40 - 14) / 2)
 
 // Lifecycle filters mirror the home-tab logic so Discover shows the same trending
 // pool. They live here as a temporary duplicate; Phase 3b moves Trending out of
@@ -411,11 +417,11 @@ export default function DiscoverScreen() {
     [trending, activeFilter, foodDislikes, dietaryRestrictions, dietType, mealTime]
   )
   const featured = filtered[0]
-  // Rail caps keep the editorial density right (Spotify/NYT-ish ~6-8 per shelf) and
-  // prevent the rails from feeling like a long random scroll once the trending pool
-  // grows past a dozen items. Overflow goes to the future v2 vertical "Discover more"
-  // grid below the rails.
-  const RAIL_CAPS = { youtube: 8, creator: 6 }
+  // The rail is a CURATED shelf, not the whole browsing surface — that distinction is why the tab
+  // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
+  // unreachable. The rail stays tight (10, protein-varied) and everything else drops into the
+  // browse grid below, which is what someone who actually wants to explore is looking for.
+  const RAIL_CAPS = { youtube: 10, creator: 6 }
   // YouTube rail gets the protein-variety cap (it's the large algorithmic pool). Creators
   // are hand-submitted/curated, so they're just sliced — no protein cap dropping their posts.
   const youtubeRail = useMemo(
@@ -426,6 +432,13 @@ export default function DiscoverScreen() {
     () => filtered.filter(m => m.id !== featured?.id && !!m.creator).slice(0, RAIL_CAPS.creator),
     [filtered, featured]
   )
+  // Everything the rails didn't show. Deliberately NOT variety-capped: the protein cap exists to
+  // keep a short curated shelf from being all chicken, but on a browse grid it would just hide
+  // meals the user came here to find.
+  const browseGrid = useMemo(() => {
+    const shown = new Set([featured?.id, ...youtubeRail.map(m => m.id), ...creatorRail.map(m => m.id)])
+    return filtered.filter(m => !shown.has(m.id))
+  }, [filtered, featured, youtubeRail, creatorRail])
 
   const openMeal = (meal: DiscoverMeal) => {
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
@@ -554,6 +567,32 @@ export default function DiscoverScreen() {
           </View>
         )}
 
+        {/* Browse grid — everything the curated rails didn't surface. Rails answer "what should I
+            look at"; a grid answers "show me everything", which is the mode someone is in when they
+            open Discover to explore rather than to be told. Two columns so the image still carries
+            the card, unlike a dense list. */}
+        {!loading && browseGrid.length > 0 && (
+          <View style={{ marginTop: 28 }}>
+            <View style={styles.railHeader}>
+              <Text style={styles.railTitle}>More to explore</Text>
+              <Text style={styles.browseCount}>{browseGrid.length}</Text>
+            </View>
+            <View style={styles.browseGrid}>
+              {browseGrid.map((meal, index) => (
+                <Animated.View
+                  key={meal.id}
+                  style={styles.browseCell}
+                  // Cap the stagger index: past ~12 the delay would make the tail of a 100-item
+                  // grid visibly crawl in long after the user has scrolled to it.
+                  entering={FadeInDown.duration(240).delay(Math.min(index, 12) * 30)}
+                >
+                  <RailCard meal={meal} onPress={() => openMeal(meal)} full />
+                </Animated.View>
+              ))}
+            </View>
+          </View>
+        )}
+
         {/* Empty states — distinguish "nothing trending at all" from "filter narrowed to zero" */}
         {!loading && trending.length === 0 && (
           <View style={styles.emptyState}>
@@ -599,9 +638,10 @@ function safeOpenSocialUrl(url: string) {
 
 // Reusable rail card — same dimensions for both Trending Now and From Creators
 // rails so the two shelves visually rhyme.
-function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }) {
+function RailCard({ meal, onPress, full }: { meal: DiscoverMeal; onPress: () => void; full?: boolean }) {
   return (
-    <PressableScale style={styles.railCard} scaleTo={0.98} onPress={onPress}>
+    // `full` lets the browse grid drive the width from its cell instead of the rail's fixed 175.
+    <PressableScale style={[styles.railCard, full && { width: '100%' }]} scaleTo={0.98} onPress={onPress}>
       {meal.image && meal.image.startsWith('http') ? (
         <MealImage uri={meal.image} style={styles.railImage} recyclingKey={String(meal.id)} />
       ) : (
@@ -771,6 +811,10 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     letterSpacing: -0.4,
   },
+
+  browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
+  browseCell: { width: GRID_CELL_W },
+  browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700' },
 
   railHeader: {
     flexDirection: 'row',

@@ -920,10 +920,15 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       }
     })
 
-    // Keep the last 3 days of trending meals as fallback if today generates few survivors.
-    // Previously we wiped every run which left zero-meal days when filters rejected recipes.
-    const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString().split('T')[0]
-    await db.from('trending_meals').delete().lt('generated_at', threeDaysAgo).eq('trend_source', 'YouTube trending')
+    // Retention MUST match Discover's display lifecycle, which shows YouTube meals for 7 days
+    // (isYouTubeRecipeVisible in app/(tabs)/discover.tsx). This was 3 days, so the feed was willing
+    // to show a week and the pipeline destroyed four days of it — the browsable pool sat at ~45
+    // meals when ~110 had already been generated and paid for. Deleting them buys nothing: the rows
+    // are tiny, and their images are in the global cache whether the row exists or not.
+    // If Discover's window ever changes, change this with it.
+    const RETENTION_DAYS = 7
+    const retentionCutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString().split('T')[0]
+    await db.from('trending_meals').delete().lt('generated_at', retentionCutoff).eq('trend_source', 'YouTube trending')
     // Swap-then-cleanup instead of delete-then-insert: capture the prior run's today-rows,
     // insert the new ones FIRST, then delete the old ones by id. Avoids the empty-feed
     // window a reader would hit between a plain delete and the multi-second insert. Scoped
