@@ -43,6 +43,11 @@ const RETENTION_DAYS = 30
 // "Chicken Rice Bowl" vs "Beef Rice Bowl" (0.5), which is a genuinely different dish.
 const NEAR_DUP_JACCARD = 0.7
 
+// Fixed shelf vocabulary. Mixed cuisine + format on purpose: cuisine alone covers only 43% of the
+// catalog because half of it is fitness-food constructs with no cuisine, and format alone loses the
+// evocative pull of "Indian night" over "Chicken".
+const SHELF_TAGS = ['mexican', 'indian', 'asian', 'italian', 'mediterranean', 'american-comfort', 'sweet-treat', 'high-protein-snack', 'breakfast']
+
 // Pull the creator's OWN ingredient list out of the description, mechanically.
 //
 // Measured against 10 source descriptions, the model kept only 50% of listed ingredients and 7 of
@@ -577,6 +582,7 @@ For each video you select, output the recipe AS THE CREATOR PRESENTED IT.
 CORE FIDELITY RULES — do not violate these:
 - READ macros from the video description first. Most fitness creators list calories/protein/carbs/fat directly. If they listed numbers, USE THEM VERBATIM. Do not recalculate.
 - READ ingredients and quantities from the description verbatim. Preserve the creator's portions exactly. Do not scale, round, or substitute.
+- SHELF_TAG — exactly one, from this list ONLY: mexican, indian, asian, italian, mediterranean, american-comfort, sweet-treat, high-protein-snack, breakfast. Pick the one a hungry person would use to describe the dish, not the most technically defensible. A cuisine wins when the dish clearly belongs to one (paneer masala = indian, teriyaki bowl = asian, gnocchi = italian). When it has no cuisine — protein bowls, cottage cheese pancakes, yogurt bites, cloud bread — use sweet-treat, high-protein-snack or breakfast instead. Never invent a value outside the list.
 - ALLERGENS — answer for the dish AS COOKED, including anything hidden inside a prepared component. Pesto contains parmesan (dairy) and pine nuts. Gnocchi, teriyaki, hoisin and most soy sauce contain wheat. Caesar dressing contains dairy and anchovy. Naan and brioche contain dairy. If a component's usual recipe contains the allergen, say true — do not assume a special-diet version. When unsure, say TRUE. A false "contains" costs one meal a filter tag; a false "does not contain" sends an allergen to someone avoiding it, and those are not equivalent mistakes.
 - SERVINGS AND SCALE — read this before touching any quantity. Creators list INGREDIENTS for the whole batch and MACROS per serving. Do not reconcile those by shrinking the ingredients.
   * "servings" = how many servings the creator's ingredient list makes. If they say "makes 8", use 8. If they give per-serving macros and a batch of ingredients, work out how many servings that batch is. If it's a single-portion dish, 1.
@@ -648,6 +654,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "name": "The actual dish name (cleaned up)",
     "category": "meal",
     "servings": 1,
+    "shelf_tag": "american-comfort",
     "contains_dairy": false,
     "contains_gluten": false,
     "contains_nuts": false,
@@ -1068,6 +1075,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         carbs: toInt(r.carbs),
         fat: toInt(r.fat),
         prep_time: toInt(r.prepTime),
+        // Unknown or invented values fall back to null rather than being coerced into a shelf the
+        // model didn't mean — a wrong shelf is worse than no shelf, since the meal still reaches
+        // the user via the catch-all.
+        shelf_tag: SHELF_TAGS.includes(String(r.shelf_tag)) ? String(r.shelf_tag) : null,
         // Ingredients are stored at the creator's full-batch scale, so servings is what makes the
         // per-serving macros interpretable. Defaults to 1 rather than null: an unknown serving
         // count is far more likely to be a single portion than a missing batch.

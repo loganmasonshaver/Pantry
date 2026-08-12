@@ -119,44 +119,36 @@ function missingCount(meal: DiscoverMeal, pantry: Set<string>): number {
   }).length
 }
 
-// INTENT SHELVES. Protein grouping ("Chicken", "Beef") is a filing system, not a reason to look —
-// the same mistake as a music app shelving by "Rock / Pop / Jazz". Every shelf below is a DESIRE
-// the user already has, expressed in their words, and every rule runs on columns that exist.
+// SHELF TAGS. One per meal, assigned by the model at extraction (trending_meals.shelf_tag).
 //
-// Order here is the priority order for assignment: a meal lands in the FIRST shelf it matches and
-// nowhere else, so the page never shows the same card three times under different headings.
-const TAKEOUT_RE = /\b(fried rice|teriyaki|burger|pizza|taco|burrito|curry|noodle|ramen|wrap|nugget|kebab|shawarma|pad thai|orange chicken|sushi|quesadilla|gyro|katsu|lo mein|general tso|sweet and sour|hot pocket)\b/i
-const ONE_PAN_RE = /\b(one[- ]pan|sheet pan|skillet|one[- ]pot|traybake|air fryer)\b/i
-
-type IntentShelf = { key: string; title: string; match: (m: DiscoverMeal) => boolean }
-const INTENT_SHELVES: IntentShelf[] = [
-  { key: 'ready20', title: 'Ready in 20',
-    match: m => m.prepTime > 0 && m.prepTime <= 20 },
-  { key: 'takeout', title: 'Takeout, made at home',
-    // Named as the ANSWER, not the food. Onboarding's pain block says "the fridge is full and
-    // you're still ordering out" — this shelf is the payoff of that promise, not a competitor to it.
-    match: m => TAKEOUT_RE.test(m.name) },
-  { key: 'sweet', title: 'Sweet, and it still fits',
-    // Permission is the strongest pull in a diet app.
-    match: m => (m as any).category === 'dessert' && m.protein >= 15 },
-  { key: 'batch', title: 'Cook once, eat all week',
-    // Only possible now that servings is captured.
-    match: m => ((m as any).servings ?? 1) > 1 },
-  { key: 'onepan', title: 'One pan, barely any cleanup',
-    match: m => ONE_PAN_RE.test(m.name) || ONE_PAN_RE.test(
-      ((m.steps || []) as any[]).map(st => typeof st === 'string' ? st : `${st?.title ?? ''} ${st?.detail ?? ''}`).join(' ')) },
-  { key: 'bigplate', title: 'Big plate, small numbers',
-    // Volume eating — a genuine obsession for this audience.
-    match: m => m.calories > 0 && m.calories <= 450 && m.protein >= 25 },
-]
-
-// Kept OUT of the rotation and always considered last. It matches more meals than any other rule
-// while being the least desirable reason to tap, so wherever it landed in the rotation it acted as
-// a vacuum — on the live pool it swallowed 12 meals and starved the shelves after it.
-const CATCH_ALL_SHELF: IntentShelf = {
-  key: 'simple', title: 'Five ingredients or fewer',
-  match: m => (m.ingredients?.length ?? 0) > 0 && (m.ingredients?.length ?? 0) <= 5,
+// This replaced regex-over-names, which failed structurally: it matched PROPERTIES, and properties
+// overlap. On the live pool most meals satisfied 3-5 rules at once ("Burger Bowl" matched five), so
+// membership was decided by the daily rotation — effectively random, and different every day.
+// Character doesn't overlap that way: a dish is one thing.
+//
+// Titles are written as an invitation, not a label. "Indian night" is a plan; "Indian" is a filter.
+const SHELF_TITLES: Record<string, string> = {
+  'mexican': 'Mexican night',
+  'indian': 'Indian night',
+  'asian': 'Asian-inspired',
+  'italian': 'Italian comfort',
+  'mediterranean': 'Mediterranean table',
+  'american-comfort': 'Comfort food, minus the guilt',
+  'sweet-treat': 'Sweet, and it still fits',
+  'high-protein-snack': 'Protein snacks',
+  'breakfast': 'Breakfast, sorted',
 }
+
+// Kept as regex because these are genuinely FACTS about a meal, not interpretations — the thing a
+// regex is actually good at. "Five ingredients or fewer" was deleted rather than kept: it matched
+// 24 of 38 meals only because the extractor was dropping ingredients, so it measured our own bug.
+type FactShelf = { key: string; title: string; match: (m: DiscoverMeal) => boolean }
+const FACT_SHELVES: FactShelf[] = [
+  // 15, not 20 — at 20 it matched over half the catalog, and a shelf holding most things is not a
+  // reason to tap.
+  { key: 'quick', title: 'Ready in 15', match: m => m.prepTime > 0 && m.prepTime <= 15 },
+  { key: 'batch', title: 'Cook once, eat all week', match: m => ((m as any).servings ?? 1) > 1 },
+]
 
 const titleCase = (s: string) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
@@ -183,6 +175,7 @@ type DiscoverMeal = {
   fat: number
   prepTime: number
   servings: number
+  shelf_tag: string | null
   ingredients: any[]
   steps: any[]
   image: string | null
@@ -463,7 +456,7 @@ export default function DiscoverScreen() {
     const mapped = filterTrendingByLifecycle(data)
       .map(m => ({
         id: m.id, name: m.name, calories: m.calories, protein: m.protein,
-        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1,
+        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1, shelf_tag: m.shelf_tag ?? null,
         ingredients: m.ingredients, steps: m.steps, image: m.image,
         trend_source: m.trend_source,
         creator: (m as any).creators ?? null,
@@ -648,12 +641,17 @@ export default function DiscoverScreen() {
     // Shelf COUNT scales with the pool. Four shelves over 35 meals leaves two-item sections that
     // read as a broken feed; the same four over 450 leaves everything in the catch-all. 2 / 4 / 6.
     const shelfBudget = browseGrid.length >= 200 ? 6 : browseGrid.length >= 60 ? 4 : 2
-    const rot = dayOfYear % INTENT_SHELVES.length
-    const rotatedOrder = [...INTENT_SHELVES.slice(rot), ...INTENT_SHELVES.slice(0, rot), CATCH_ALL_SHELF]
 
-    // Claims happen ONLY for shelves that actually render. Claiming first and slicing afterwards
-    // would mark meals as taken for a shelf nobody sees, and they'd disappear from Everything else
-    // too — silently orphaned. A shelf that comes up short releases its meals back.
+    // Tag shelves first (they're the identity of the dish), then the factual ones. Rotated so the
+    // page differs tomorrow; claims happen ONLY for shelves that render, and a shelf that comes up
+    // short releases its meals back — claiming for a shelf nobody sees would orphan those meals
+    // out of Everything else too.
+    const tagShelves = Object.keys(SHELF_TITLES)
+      .map(tag => ({ key: `tag-${tag}`, title: SHELF_TITLES[tag], match: (m: DiscoverMeal) => (m as any).shelf_tag === tag }))
+    const allShelves = [...tagShelves, ...FACT_SHELVES]
+    const rot = dayOfYear % allShelves.length
+    const rotatedOrder = [...allShelves.slice(rot), ...allShelves.slice(0, rot)]
+
     const intent: { key: string; title: string; meals: DiscoverMeal[] }[] = []
     for (const shelf of rotatedOrder) {
       if (intent.length >= shelfBudget) break
