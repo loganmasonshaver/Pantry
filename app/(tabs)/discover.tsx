@@ -148,9 +148,15 @@ const INTENT_SHELVES: IntentShelf[] = [
   { key: 'bigplate', title: 'Big plate, small numbers',
     // Volume eating — a genuine obsession for this audience.
     match: m => m.calories > 0 && m.calories <= 450 && m.protein >= 25 },
-  { key: 'simple', title: 'Five ingredients or fewer',
-    match: m => (m.ingredients?.length ?? 0) > 0 && (m.ingredients?.length ?? 0) <= 5 },
 ]
+
+// Kept OUT of the rotation and always considered last. It matches more meals than any other rule
+// while being the least desirable reason to tap, so wherever it landed in the rotation it acted as
+// a vacuum — on the live pool it swallowed 12 meals and starved the shelves after it.
+const CATCH_ALL_SHELF: IntentShelf = {
+  key: 'simple', title: 'Five ingredients or fewer',
+  match: m => (m.ingredients?.length ?? 0) > 0 && (m.ingredients?.length ?? 0) <= 5,
+}
 
 const titleCase = (s: string) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
@@ -163,28 +169,10 @@ function detectPrimaryProtein(meal: any): string {
   return 'other'
 }
 
-// Variety-fill: prefer newest meals first, but cap each primary protein source at
-// MAX_PER_PROTEIN to keep the feed varied. Solves the "today only produced 2 meals
-// and they're both chicken-adjacent" problem by backfilling from prior days with
-// other proteins, while preventing any single source from dominating.
-const MAX_PER_PROTEIN = 2
-// Variety-fill a single rail's pool: newest-first, capping each primary protein at
-// MAX_PER_PROTEIN so one source can't dominate, up to `limit`. Applied PER RAIL — the old
-// version capped the combined pool to 6 BEFORE the per-rail caps (8/6), so the rails were
-// permanently starved and could never reach their intended density.
-function applyVarietyFill(meals: any[], limit: number): any[] {
-  const result: any[] = []
-  const proteinCounts = new Map<string, number>()
-  for (const m of meals) {
-    if (result.length >= limit) break
-    const protein = detectPrimaryProtein(m)
-    const count = proteinCounts.get(protein) ?? 0
-    if (count >= MAX_PER_PROTEIN) continue
-    result.push(m)
-    proteinCounts.set(protein, count + 1)
-  }
-  return result
-}
+// NOTE: applyVarietyFill and MAX_PER_PROTEIN lived here and were removed with the horizontal rail
+// — they capped each protein source within a short curated shelf, which the grid doesn't need.
+// detectPrimaryProtein above is still used, but only for "Because you cooked X" similarity now,
+// not for grouping.
 
 type DiscoverMeal = {
   id: string
@@ -635,32 +623,44 @@ export default function DiscoverScreen() {
       ? browseGrid.map(m => ({ m, missing: missingCount(m, pantryNames) }))
           .sort((a, b) => a.missing - b.missing)
       : []
-    const nearly = claim(nearlyRanked.map(x => x.m), 12)
+    // 8, not 12. Three personalised shelves at 12 claim 36 meals before any intent shelf runs —
+    // on a 35-meal pool a user with a full pantry would pull almost everything into "Almost in
+    // your kitchen" and leave the rest of the page bare.
+    const PERSONAL_CAP = 8
+    const nearly = claim(nearlyRanked.map(x => x.m), PERSONAL_CAP)
 
     const cookedProtein = lastCooked ? detectPrimaryProtein({ name: lastCooked, ingredients: [] }) : null
     const because = cookedProtein && cookedProtein !== 'other'
-      ? claim(browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein), 12)
+      ? claim(browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein), PERSONAL_CAP)
       : []
 
     const fits = budget?.hasLogged
       ? claim(browseGrid.filter(m =>
           m.calories > 0 && m.calories <= budget.calLeft &&
-          (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)), 12)
+          (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)), PERSONAL_CAP)
       : []
 
     // ── Today. One section, not a rail plus a leftovers grid: the rail took 10 and today's batch
     // is 8-15, so "More from today" was empty by construction and the two names described one set.
     const today = claim(browseGrid.filter(m => m.generated_at?.startsWith(todayStr)), 18)
 
-    // ── Intent shelves, rotated so the page isn't identical tomorrow ──
-    const rotated = [...INTENT_SHELVES.slice(dayOfYear % INTENT_SHELVES.length),
-                     ...INTENT_SHELVES.slice(0, dayOfYear % INTENT_SHELVES.length)]
-    const intent = rotated
-      .map(shelf => ({ key: shelf.key, title: shelf.title, meals: claim(browseGrid.filter(shelf.match), 12) }))
-      // A shelf of one isn't a shelf; those meals fall through to Everything else.
-      .filter(sec => sec.meals.length >= 2)
-      // Only ever show a handful — the value is a few strong reasons, not every rule we can write.
-      .slice(0, 4)
+    // ── Intent shelves ──
+    // Shelf COUNT scales with the pool. Four shelves over 35 meals leaves two-item sections that
+    // read as a broken feed; the same four over 450 leaves everything in the catch-all. 2 / 4 / 6.
+    const shelfBudget = browseGrid.length >= 200 ? 6 : browseGrid.length >= 60 ? 4 : 2
+    const rot = dayOfYear % INTENT_SHELVES.length
+    const rotatedOrder = [...INTENT_SHELVES.slice(rot), ...INTENT_SHELVES.slice(0, rot), CATCH_ALL_SHELF]
+
+    // Claims happen ONLY for shelves that actually render. Claiming first and slicing afterwards
+    // would mark meals as taken for a shelf nobody sees, and they'd disappear from Everything else
+    // too — silently orphaned. A shelf that comes up short releases its meals back.
+    const intent: { key: string; title: string; meals: DiscoverMeal[] }[] = []
+    for (const shelf of rotatedOrder) {
+      if (intent.length >= shelfBudget) break
+      const meals = claim(browseGrid.filter(shelf.match), 12)
+      if (meals.length >= 2) intent.push({ key: shelf.key, title: shelf.title, meals })
+      else meals.forEach(m => taken.delete(m.id))
+    }
 
     const leftovers = browseGrid.filter(m => !taken.has(m.id))
 
@@ -684,7 +684,11 @@ export default function DiscoverScreen() {
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
   // mounting 400 image cards at once, and keeps each section's header reachable by scroll.
   const [expandedSections, setExpandedSections] = useState<Record<string, number>>({})
-  const shownCount = (key: string) => expandedSections[key] ?? GRID_PAGE
+  // "Everything else" is the browse-everything bucket, not a curated shelf — at a mature pool it
+  // holds hundreds, and revealing 6 at a time would be ~66 taps to reach the end. Curated shelves
+  // stay at 6 so the page remains scannable; only the remainder pages in big chunks.
+  const pageSizeFor = (key: string) => (key === 'other' ? 24 : GRID_PAGE)
+  const shownCount = (key: string) => expandedSections[key] ?? pageSizeFor(key)
 
   // Impression tracking. Fired on VIEWPORT ENTRY, not on render — the grid renders sections far
   // below the fold, so counting a render as a view would inflate the denominator and make every
@@ -885,9 +889,9 @@ export default function DiscoverScreen() {
                 <PressableScale
                   style={styles.showMoreBtn}
                   scaleTo={0.98}
-                  onPress={() => setExpandedSections(prev => ({ ...prev, [section.key]: shown + GRID_PAGE }))}
+                  onPress={() => setExpandedSections(prev => ({ ...prev, [section.key]: shown + pageSizeFor(section.key) }))}
                 >
-                  <Text style={styles.showMoreText}>Show {Math.min(remaining, GRID_PAGE)} more</Text>
+                  <Text style={styles.showMoreText}>Show {Math.min(remaining, pageSizeFor(section.key))} more</Text>
                 </PressableScale>
               )}
             </View>
