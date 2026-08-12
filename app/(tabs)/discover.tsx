@@ -510,12 +510,34 @@ export default function DiscoverScreen() {
       .sort((a, b) => b[1].length - a[1].length)
       .map(([key, meals]) => ({ key: `protein-${key}`, title: titleCase(key), meals }))
 
-    const grouped = new Set(proteinSections.flatMap(sec => sec.meals.map(m => m.id)))
+    // Rotate which protein leads, by day. Sorting purely by section size looks sensible and is
+    // actually frozen: chicken is always the biggest group in a high-protein feed, so the page
+    // below "New today" would be byte-identical every day forever — the exact staleness that
+    // sectioning was supposed to fix.
+    //
+    // Day-of-year rotation, not random: the order must be stable for a whole session (reshuffling
+    // under someone mid-scroll is worse than repetition) but different tomorrow. Same trick the
+    // generation pipeline uses to rotate its query set.
+    //
+    // Only sections with enough meals join the rotation — leading with a 2-item section reads as
+    // an empty feed, so thin groups stay pinned after the substantial ones.
+    const ROTATABLE_MIN = 4
+    const substantial = proteinSections.filter(sec => sec.meals.length >= ROTATABLE_MIN)
+    const thin = proteinSections.filter(sec => sec.meals.length < ROTATABLE_MIN)
+    const dayOfYear = Math.floor(
+      (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+    )
+    const offset = substantial.length > 0 ? dayOfYear % substantial.length : 0
+    const rotatedProteins = [...substantial.slice(offset), ...substantial.slice(0, offset), ...thin]
+
+    const grouped = new Set(rotatedProteins.flatMap(sec => sec.meals.map(m => m.id)))
     const leftovers = mains.filter(m => !grouped.has(m.id))
 
     return [
+      // "New today" stays pinned: it's the freshness anchor that replaced deleting old meals,
+      // and an anchor that moves isn't an anchor.
       { key: 'new', title: 'New today', meals: fresh },
-      ...proteinSections,
+      ...rotatedProteins,
       { key: 'snacks', title: 'Snacks', meals: snacks },
       { key: 'desserts', title: 'Desserts', meals: desserts },
       { key: 'other', title: 'Everything else', meals: leftovers },
