@@ -314,6 +314,11 @@ export default function DiscoverScreen() {
   const hasContentRef = useRef(false) // once meals are shown (cache or fetch), refocus refetches silently
   const [activeFilter, setActiveFilter] = useState<FilterKey>('All')
   const [showCreatorModal, setShowCreatorModal] = useState(false)
+  // Today's remaining budget. Powers both the context line above the hero and the "Fits what's
+  // left today" section — one fetch, two surfaces. Null until loaded so neither renders a
+  // placeholder number.
+  const [budget, setBudget] = useState<{ calLeft: number; proLeft: number; hasLogged: boolean } | null>(null)
+  const [maxPrep, setMaxPrep] = useState<number | null>(null)
   const [foodDislikes, setFoodDislikes] = useState<string[]>([])
   const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
   const [dietType, setDietType] = useState<string>('Classic')
@@ -324,15 +329,32 @@ export default function DiscoverScreen() {
   useEffect(() => {
     if (!user) return
     supabase.from('profiles')
-      .select('food_dislikes, dietary_restrictions, diet_type')
+      .select('food_dislikes, dietary_restrictions, diet_type, calorie_goal, protein_goal, max_prep_minutes')
       .eq('id', user.id)
       .single()
-      .then(({ data }) => {
+      .then(async ({ data }) => {
         if (data?.food_dislikes) setFoodDislikes(data.food_dislikes ?? [])
         if (data?.dietary_restrictions) {
           setDietaryRestrictions((data.dietary_restrictions ?? []).filter((r: string) => r !== 'None'))
         }
         if (data?.diet_type) setDietType(data.diet_type)
+        if (data?.max_prep_minutes) setMaxPrep(data.max_prep_minutes)
+
+        const goalCal = data?.calorie_goal ?? 0
+        const goalPro = data?.protein_goal ?? 0
+        if (!goalCal && !goalPro) return
+        const todayStr = new Date().toISOString().split('T')[0]
+        const { data: logs } = await supabase.from('meal_logs')
+          .select('calories, protein').eq('user_id', user.id).eq('logged_at', todayStr)
+        const eatenCal = (logs ?? []).reduce((sum, l: any) => sum + (l.calories ?? 0), 0)
+        const eatenPro = (logs ?? []).reduce((sum, l: any) => sum + (l.protein ?? 0), 0)
+        setBudget({
+          calLeft: Math.max(0, goalCal - eatenCal),
+          proLeft: Math.max(0, goalPro - eatenPro),
+          // Before anything is logged, "remaining" is just the full goal and every meal trivially
+          // fits — the section would be noise pretending to be personalisation. Gate on it.
+          hasLogged: (logs ?? []).length > 0,
+        })
       })
   }, [user])
 
@@ -454,6 +476,19 @@ export default function DiscoverScreen() {
   // Recomputed on each focus/resume (fetchTrending re-runs), so the ordering follows the clock
   // across a session rather than freezing at whatever time the app was first opened.
   const mealTime = currentMealTime(new Date().getHours())
+
+  // The feed has been sorting by time of day silently since the ordering work — this says it out
+  // loud. Perceived personalisation comes from the label as much as the algorithm: the same meals
+  // under "Tuesday evening - under 30 min - 48g protein to go" read as chosen rather than listed.
+  // Every part is dropped when unknown rather than faked, so it never states something untrue.
+  const contextLine = useMemo(() => {
+    const day = new Date().toLocaleDateString('en-US', { weekday: 'long' })
+    const partOfDay = mealTime === 'Breakfast' ? 'morning' : mealTime === 'Lunch' ? 'afternoon' : 'evening'
+    const bits = [`${day} ${partOfDay}`]
+    if (maxPrep) bits.push(`under ${maxPrep} min`)
+    if (budget?.hasLogged && budget.proLeft > 0) bits.push(`${budget.proLeft}g protein to go`)
+    return bits.join(' · ')
+  }, [mealTime, maxPrep, budget])
   const filtered = useMemo(
     () => trending
       .filter(m => passesDietTags(m, dietType, dietaryRestrictions))
@@ -549,6 +584,19 @@ export default function DiscoverScreen() {
       { key: 'desserts', title: 'Desserts', meals: desserts },
     ].filter(sec => sec.meals.length > 0)
 
+    // Fits-what's-left. The one section a competitor can't reproduce without also knowing what the
+    // user ate today. Pinned rather than rotated: its whole value is being the answer to "what can
+    // I eat right now", which is worthless three scrolls down.
+    // Only appears once something is logged — see budget.hasLogged.
+    const fitsBudget = budget?.hasLogged
+      ? browseGrid.filter(m =>
+          m.calories > 0 && m.calories <= budget.calLeft &&
+          // 40% of what's left, not all of it: demanding one meal close the whole protein gap
+          // returns nothing on a normal day, and an empty section is worse than no section.
+          (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)
+        ).slice(0, 12)
+      : []
+
     const rotatable = [...proteinSections, ...categorySections]
     const substantial = rotatable.filter(sec => sec.meals.length >= ROTATABLE_MIN)
     const thin = rotatable.filter(sec => sec.meals.length < ROTATABLE_MIN)
@@ -563,6 +611,7 @@ export default function DiscoverScreen() {
     return [
       // "New today" stays pinned: it's the freshness anchor that replaced deleting old meals,
       // and an anchor that moves isn't an anchor.
+      { key: 'fits', title: `Fits your remaining ${budget?.calLeft ?? 0} kcal`, meals: fitsBudget },
       { key: 'new', title: 'New today', meals: fresh },
       ...rotatedSections,
       // "Everything else" stays last on purpose — it's the catch-all, and a catch-all that
@@ -577,7 +626,7 @@ export default function DiscoverScreen() {
       //
       // "New today" is exempt: it's a dated section, so newest-first is the meaning of it.
       .map(sec => sec.key === 'new' ? sec : { ...sec, meals: rotateByDay(sec.meals, dayOfYear, sec.key, GRID_PAGE) })
-  }, [browseGrid])
+  }, [browseGrid, budget])
 
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
   // mounting 400 image cards at once, and keeps each section's header reachable by scroll.
@@ -638,6 +687,7 @@ export default function DiscoverScreen() {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Discover</Text>
+          <Text style={styles.contextLine}>{contextLine}</Text>
         </View>
 
         {/* Filter chips */}
@@ -1028,6 +1078,7 @@ const styles = StyleSheet.create({
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
   browseCell: { width: GRID_CELL_W },
   browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700' },
+  contextLine: { fontSize: 13, color: COLORS.accent, fontWeight: '600', marginTop: 2, letterSpacing: 0.2 },
   showMoreBtn: {
     marginHorizontal: 20, marginTop: 14, paddingVertical: 12, borderRadius: 24,
     borderWidth: 1, borderColor: COLORS.trackDark, alignItems: 'center',
