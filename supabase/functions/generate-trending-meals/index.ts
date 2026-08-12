@@ -186,8 +186,31 @@ const TAG_SEAFOOD = ['salmon', 'tuna', 'shrimp', 'prawn', 'crab', 'lobster', 'co
 const TAG_DAIRY = ['milk', 'cheese', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein']
 const TAG_GLUTEN = ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'noodle', 'ramen', 'udon', 'couscous', 'cracker', 'bun', 'pita', 'bagel', 'wrap', 'seitan']
 const TAG_NUTS = ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter']
-function classifyDietTags(ingredients: any[]): { compatible_diets: string[]; is_dairy_free: boolean; is_gluten_free: boolean; is_nut_free: boolean } {
-  const hay = (ingredients || []).map((i: any) => (i?.name ?? '').toLowerCase()).join(' | ')
+// SAFETY: scans the NAME and STEPS as well as the ingredient list.
+//
+// Scanning ingredients alone made these tags only as trustworthy as the extractor's completeness,
+// and the extractor drops things. Three live rows proved it: "Parmesan-Crusted Chicken Sheet Pan"
+// was tagged DAIRY-FREE because parmesan never made it into the ingredients array — despite being
+// in the dish's own name — and "Stuffed Chicken Caesar Sourdough" was tagged GLUTEN-FREE the same
+// way. passesDietTags treats is_dairy_free === true as safe, so those were being served to users
+// who had asked to avoid exactly that.
+//
+// Widening the haystack fails SAFE: a stray mention costs one meal its "free" tag, while a missed
+// one hands an allergen to someone avoiding it. Those errors are not equivalent, so the false
+// positives are the correct trade.
+function classifyDietTags(
+  ingredients: any[],
+  name = '',
+  steps: any[] = [],
+): { compatible_diets: string[]; is_dairy_free: boolean; is_gluten_free: boolean; is_nut_free: boolean } {
+  const stepText = (steps || [])
+    .map((st: any) => typeof st === 'string' ? st : `${st?.title ?? ''} ${st?.detail ?? ''}`)
+    .join(' | ')
+  const hay = [
+    (ingredients || []).map((i: any) => (i?.name ?? '')).join(' | '),
+    name,
+    stepText,
+  ].join(' | ').toLowerCase()
   const has = (arr: string[]) => arr.some(k => hay.includes(k))
   const hasMeat = has(TAG_MEAT) || /\bham\b/.test(hay)   // \bham\b avoids "graham"
   const hasSeafood = has(TAG_SEAFOOD)
@@ -951,7 +974,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // Normalize category — LLM should output 'meal' / 'snack' / 'dessert', but guard against typos/missing
       const rawCat = (r.category || '').toLowerCase().trim()
       const category = rawCat === 'snack' ? 'snack' : rawCat === 'dessert' ? 'dessert' : 'meal'
-      const tags = classifyDietTags(r.ingredients)
+      const tags = classifyDietTags(r.ingredients, r.name, r.steps)
       return {
         name: r.name,
         category,
