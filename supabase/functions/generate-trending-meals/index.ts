@@ -43,6 +43,32 @@ const RETENTION_DAYS = 30
 // "Chicken Rice Bowl" vs "Beef Rice Bowl" (0.5), which is a genuinely different dish.
 const NEAR_DUP_JACCARD = 0.7
 
+// Pull the creator's OWN ingredient list out of the description, mechanically.
+//
+// Measured against 10 source descriptions, the model kept only 50% of listed ingredients and 7 of
+// 10 recipes lost 3 or more. It wasn't just seasonings: a Soya Potato Masala arrived without ghee,
+// onion, green chilli or cumin (14 -> 4), and a pesto gnocchi lost two bags of spinach and two cups
+// of mozzarella. That destroys the taste of the dish, understates calories, and silently breaks the
+// allergen tags derived from the ingredient array.
+//
+// The fix is to stop leaving inclusion to the model's discretion. Where the description contains a
+// real list, it is parsed here and handed over as a checklist to COPY rather than a text to
+// summarise. Summarising is where things get dropped.
+const BULLET_LINE = /^\s*(?:[•\-\*●▪]|\d+[.)])\s*(.+)$/gm
+function parseIngredientBlock(desc: string): string[] {
+  const m = desc.match(/ingredients?\s*:?\s*\n([\s\S]*?)(?:\n\s*\n|directions|instructions|method|steps|macros|nutrition)/i)
+  if (!m) return []
+  const out: string[] = []
+  let hit: RegExpExecArray | null
+  const re = new RegExp(BULLET_LINE)
+  while ((hit = re.exec(m[1])) !== null) {
+    const line = hit[1].trim().replace(/[:\s]+$/, '')
+    // Skip headings and prose that slip into the block.
+    if (line.length > 2 && line.length < 90) out.push(line)
+  }
+  return out
+}
+
 // Items that cannot be fractional. A fraction here is proof the recipe was scaled down from a
 // batch, which is what produced a stored cheesecake calling for "0.5 large eggs" and "0.25 scoop".
 // Deliberately excludes onion, clove and scoop — a quarter onion, half a clove and half a scoop are
@@ -530,7 +556,14 @@ Deno.serve(async (req: Request) => {
     // Step 2: Send video titles + descriptions to Groq to generate accurate recipes
     const videoList = uniqueVideos.map((v, i) => {
       const desc = v.description ? `\n   Description: ${v.description}` : ''
-      return `${i + 1}. "${v.title}"${desc}`
+      // When the creator published an explicit list, restate it as a checklist with its exact
+      // count. "Return all 14" is a far harder instruction to quietly ignore than "keep every
+      // ingredient", which was already in the prompt and was being ignored half the time.
+      const parsed = parseIngredientBlock(v.description || '')
+      const checklist = parsed.length >= 3
+        ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
+        : ''
+      return `${i + 1}. "${v.title}"${desc}${checklist}`
     }).join('\n\n')
 
     const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
@@ -551,6 +584,7 @@ CORE FIDELITY RULES — do not violate these:
   * calories/protein/carbs/fat = PER SERVING, as the creator stated them.
   * NEVER divide ingredient quantities to match per-serving macros. A real failure this rule exists to stop: a cheesecake made with 16oz cream cheese, 4 eggs and 2 scoops of protein powder was stored as 2oz, "0.5 large eggs" and "0.25 scoop". Half an egg is not a recipe.
   * NEVER output a fractional count of a discrete item — eggs, scoops, slices, cloves, cans, bars, tortillas. If a number comes out fractional, you have scaled something you shouldn't have.
+- If a video shows a SOURCE INGREDIENT LIST, that list is the specification, not a suggestion. Output one ingredients entry per line, in order, same count. Seasonings, oils and "to taste" items are ingredients — a masala without its ghee, cumin and chilli is a different, worse dish. Never merge two lines into one entry and never drop a line for brevity.
 - KEEP EVERY INGREDIENT THE CREATOR LISTS — including toppings, garnishes and sauce components. Do NOT reduce a recipe to its "main" 3-4 ingredients. A bowl or plate dish IS its toppings: strip the diced tomato, pickles and lettuce off a burger bowl and you have described a different, barer dish than the one the creator made. If the creator groups ingredients under headings (Burger / Toppings / Sauce), keep the items from EVERY heading.
 - A multi-ingredient sauce or dressing stays intact: list its components as ingredients, and describe it in the steps as one mixed sauce (e.g. "whisk the yogurt, ketchup, mustard and relish into a burger sauce") so downstream knows it is combined rather than served as separate dollops.
 - PRESERVE THE PREPARATION METHOD exactly as described. If the creator cuts the potato into fries, the step says fries — not "dice", not "cube", not "roast". The cut and cooking method determine what the finished dish physically looks like, so changing it silently misrepresents the recipe.
@@ -704,7 +738,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -741,13 +775,24 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // Enforced in CODE, not just the prompt. "Do not scale" was already an explicit
             // instruction and was ignored anyway — same lesson as the format cap. A recipe that
             // asks for half an egg cannot be cooked, so it's rejected outright rather than ranked.
+            // Retention check against the creator's own list. Logged for every recipe and rejected
+            // only below 50%, deliberately: the pre-fix average WAS 50%, so a stricter gate would
+            // starve the pool before the prompt change has a chance to work. Tighten once the logs
+            // show what the new baseline actually is — don't guess it.
+            const srcVideo = uniqueVideos[(r.video_index || 1) - 1]
+            const srcList = srcVideo ? parseIngredientBlock(srcVideo.description || '') : []
+            if (srcList.length >= 3) {
+              const kept = (r.ingredients?.length ?? 0) / srcList.length
+              console.log(`[funnel] ingredient retention "${name}": ${r.ingredients?.length ?? 0}/${srcList.length} (${Math.round(kept * 100)}%)`)
+              if (kept < 0.5) { rejDropped++; console.log(`[funnel] rejected "${name}" — dropped more than half the creator's ingredients`); return false }
+            }
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dropped ${rejDropped})`)
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
