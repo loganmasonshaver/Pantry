@@ -28,6 +28,19 @@ async function fetchWithTimeout(url: string, ms = 15000): Promise<Response> {
 
 const today = () => new Date().toISOString().split('T')[0]
 
+// Likes as a percentage of views. A quality proxy that view count actively can't provide: the
+// most-viewed video in a batch is often the most gimmicky one, since novelty drives the click.
+// Guarded against divide-by-zero on brand-new videos.
+function likeRate(v: { viewCount: number; likeCount: number }): number {
+  return v.viewCount > 0 ? (v.likeCount / v.viewCount) * 100 : 0
+}
+
+// Novelty-substitution formats — "X made from not-X". These go viral on disbelief rather than
+// taste. Deliberately a small PENALTY and never a filter: tested against a real batch, this
+// flagged 3 videos and 2 of them ("Cloud Bread" at 4.52%, "Rice Paper Bagel" at 3.17%) were
+// above the median like rate. The pattern is a weak signal; like rate is the strong one.
+const GIMMICK_TITLE_RE = /\b(\d+[- ]ingredient|cloud bread|rice paper|chaffle|no[- ](bake|flour|egg|knead)|viral|tiktok made me|i tried|hack)\b/i
+
 // Coerce an LLM-reported number to the int4 the trending_meals columns expect. Handles decimals
 // ("44.5"), stringified numbers, and units the model sometimes appends ("25 min", "180g").
 // Returns null rather than 0 on garbage — a null macro reads as "unknown" downstream, whereas a
@@ -308,7 +321,7 @@ Deno.serve(async (req: Request) => {
 
     stageLog(`dedup history loaded: ${prevNames.length} prev names, ${recentVideoIds.size} prev video_ids`)
 
-    const allVideos: { videoId: string; title: string; thumbnail: string; description: string; viewCount: number }[] = []
+    const allVideos: { videoId: string; title: string; thumbnail: string; description: string; viewCount: number; likeCount: number }[] = []
     // Used to filter chart=mostPopular results down to food content (the Howto & Style
     // category includes DIY, beauty, fashion, tech tutorials — we only want recipes).
     const isFoodTitle = (t: string) => /\b(recipe|cook|meal|food|dish|breakfast|lunch|dinner|snack|dessert|bake|grill|fry|roast|smoothie|salad|wrap|bowl|pasta|stir fry|pancake|cheesecake|brownie|cottage cheese|protein|anabolic)\b/i.test(t)
@@ -345,9 +358,10 @@ Deno.serve(async (req: Request) => {
             const description = item.snippet.description || ''
             const thumbnail = item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url
             const viewCount = parseInt(item.statistics?.viewCount ?? '0', 10) || 0
+            const likeCount = parseInt(item.statistics?.likeCount ?? '0', 10) || 0
             if (!videoId || !title || !thumbnail) continue
             if (isNotRecipeContent(title)) continue
-            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount })
+            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount })
           }
         }
       } catch (e) {
@@ -373,7 +387,7 @@ Deno.serve(async (req: Request) => {
           const viewCount = parseInt(item.statistics?.viewCount ?? '0', 10) || 0
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount })
         }
       }
     } catch (e) {
@@ -413,13 +427,24 @@ Deno.serve(async (req: Request) => {
       const kept = deduped.filter(v => v.viewCount >= floor)
       if (kept.length >= MIN_POOL || floor === 0) { uniqueVideos = kept; usedFloor = floor; break }
     }
-    // Most-viewed first: the LLM picks by index, so ordering the list also ranks what it sees.
-    uniqueVideos = uniqueVideos.sort((a, b) => b.viewCount - a.viewCount).slice(0, 60)
+    // Best-LIKED first, not most-viewed. Measured on a real batch: the highest-viewed video
+    // (7.2M, "2-Ingredient Chia Pita") had the WORST like rate in the pool at 1.17% against a
+    // 2.96% median, and it's a recipe trusted reviewers call inedible. Views measure curiosity —
+    // a title that sounds impossible earns the click whether or not the food is good. Likes come
+    // from people who watched it through, so like RATE separates "went viral" from "was liked".
+    // The view floor above still gates entry; this decides the order within it.
+    uniqueVideos = uniqueVideos
+      .sort((a, b) => likeRate(b) - likeRate(a))
+      .slice(0, 60)
 
     const medianViews = uniqueVideos.length
       ? uniqueVideos[Math.floor(uniqueVideos.length / 2)].viewCount
       : 0
-    console.log(`[funnel] view floor ${usedFloor.toLocaleString()} (of ${VIEW_FLOOR_TIERS[0].toLocaleString()} target) → ${uniqueVideos.length} videos, median ${medianViews.toLocaleString()} views`)
+    const rates = uniqueVideos.map(likeRate).filter(r => r > 0).sort((a, b) => a - b)
+    const medianLike = rates.length ? rates[Math.floor(rates.length / 2)] : 0
+    console.log(`[funnel] view floor ${usedFloor.toLocaleString()} (of ${VIEW_FLOOR_TIERS[0].toLocaleString()} target) → ${uniqueVideos.length} videos, median ${medianViews.toLocaleString()} views, median like-rate ${medianLike.toFixed(2)}%`)
+    const gimmicky = uniqueVideos.filter(v => GIMMICK_TITLE_RE.test(v.title))
+    if (gimmicky.length) console.log(`[funnel] gimmick-pattern titles in pool (penalised, not dropped): ${gimmicky.length}`)
     if (usedFloor < VIEW_FLOOR_TIERS[0]) {
       console.log(`[funnel] WARN: fell back below the 100k target — only ${deduped.filter(v => v.viewCount >= VIEW_FLOOR_TIERS[0]).length} candidates cleared it`)
     }
@@ -740,14 +765,31 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       const diff = Math.abs(fsP - llmP) / llmP
       return Math.max(0, 1.0 - diff)
     }
+    // How well-liked the SOURCE video was, normalised to 0-1. Measured range across a real batch
+    // was 1.17%-6.39%, so 1% floors and 6% saturates — anything at or above 6% is simply "loved".
+    // This is the only term in baseScore about whether the food is any GOOD; density, uniqueness
+    // and macro agreement all measure whether it fits, not whether anyone enjoyed it.
+    function likeQualityScore(r: any): number {
+      const video = uniqueVideos[(r.video_index || 1) - 1] ?? uniqueVideos[0]
+      if (!video) return 0.5 // unknown source — stay neutral rather than punish
+      const rate = likeRate(video)
+      if (rate <= 0) return 0.5 // likes hidden or brand-new video; absence of data isn't evidence
+      const normalised = Math.min(1, Math.max(0, (rate - 1) / 5))
+      // Small penalty, not a veto — see GIMMICK_TITLE_RE for why this stays weak.
+      const gimmick = GIMMICK_TITLE_RE.test(video.title) || GIMMICK_TITLE_RE.test(r.name ?? '')
+      return Math.max(0, normalised - (gimmick ? 0.15 : 0))
+    }
+
     function baseScore(r: any): number {
       const dens = densityScore(r._densityRatio || 0, r.category)
       const maxJac = Math.max(r._maxJaccardPrev || 0, r._maxJaccardToday || 0)
       const uniq = nameUniquenessScore(maxJac)
       const macro = macroAgreementScore(r._llmProtein || 0, r._fsProtein || 0)
-      // Weights chosen so density dominates (it's the core value prop), uniqueness
-      // is meaningful, and macro agreement breaks ties without killing recipes.
-      return dens * 0.45 + uniq * 0.30 + macro * 0.25
+      const liked = likeQualityScore(r)
+      // Density still leads (it's the core value prop), but 20% now goes to whether the source
+      // video was actually liked. Taken proportionally from density and macro agreement rather
+      // than uniqueness, which is what stops the feed repeating itself.
+      return dens * 0.35 + uniq * 0.30 + macro * 0.15 + liked * 0.20
     }
 
     // Store the full quality-ranked pool (not just 6). Discover now builds a
