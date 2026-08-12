@@ -486,7 +486,10 @@ export default function HomeScreen() {
   }, [])
   // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
   // macros card eats ~76px, so the photo + title + pills stay framed above the tab bar either way).
-  const heroHeight = macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [286, 210] })
+  // 286/210 -> 300/224: absorbs the 14pt reclaimed from the gap above (heroCard marginBottom
+  // 24->14, section header marginBottom 16->12), so page height is unchanged and the extra
+  // goes to the photo. Still short of the 373pt that would make the box square and stop the crop.
+  const heroHeight = macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [300, 224] })
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -1230,7 +1233,8 @@ export default function HomeScreen() {
             show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
         {pantryFetched && pantryNames.size > 0 && (
           <View style={{ marginBottom: 36 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 16 }}>
+            {/* marginBottom 16 -> 12; the 4pt goes to heroHeight so the photo gains what the gap loses. */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}>
               <Text style={styles.sectionTitle}>Cook from your pantry</Text>
               {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
                   navigator on top of itself and renders a black screen. navigate switches tabs. */}
@@ -1841,7 +1845,10 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     marginHorizontal: 20,
-    marginBottom: 24,
+    // 24 -> 14: the reclaimed 10pt is handed to heroHeight below rather than shortening the page,
+    // so the meal photo gets it back. Flux renders square (1:1) and the hero box is ~1.24:1 even
+    // after this, so `cover` still crops vertically — this reduces it, it doesn't remove it.
+    marginBottom: 14,
     backgroundColor: '#0F0F0F',
     borderRadius: 24,
     paddingHorizontal: 20,
