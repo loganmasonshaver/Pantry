@@ -535,24 +535,37 @@ export default function DiscoverScreen() {
     // Only sections with enough meals join the rotation — leading with a 2-item section reads as
     // an empty feed, so thin groups stay pinned after the substantial ones.
     const ROTATABLE_MIN = 4
-    const substantial = proteinSections.filter(sec => sec.meals.length >= ROTATABLE_MIN)
-    const thin = proteinSections.filter(sec => sec.meals.length < ROTATABLE_MIN)
     const dayOfYear = Math.floor(
       (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
     )
-    const offset = substantial.length > 0 ? dayOfYear % substantial.length : 0
-    const rotatedProteins = [...substantial.slice(offset), ...substantial.slice(0, offset), ...thin]
 
-    const grouped = new Set(rotatedProteins.flatMap(sec => sec.meals.map(m => m.id)))
+    // Snacks and Desserts rotate alongside the proteins rather than being pinned to the bottom.
+    // Anchoring them meant someone who mainly wants desserts scrolled past every protein section
+    // every single day — "frozen except the middle" is still mostly frozen, which defeats the
+    // point of rotating at all.
+    const categorySections = [
+      { key: 'snacks', title: 'Snacks', meals: snacks },
+      { key: 'desserts', title: 'Desserts', meals: desserts },
+    ].filter(sec => sec.meals.length > 0)
+
+    const rotatable = [...proteinSections, ...categorySections]
+    const substantial = rotatable.filter(sec => sec.meals.length >= ROTATABLE_MIN)
+    const thin = rotatable.filter(sec => sec.meals.length < ROTATABLE_MIN)
+    const offset = substantial.length > 0 ? dayOfYear % substantial.length : 0
+    const rotatedSections = [...substantial.slice(offset), ...substantial.slice(0, offset), ...thin]
+
+    // Leftovers are mains that never landed in a protein section (groups of one). Computed from
+    // proteinSections specifically — a main isn't "left over" just because Desserts exists.
+    const grouped = new Set(proteinSections.flatMap(sec => sec.meals.map(m => m.id)))
     const leftovers = mains.filter(m => !grouped.has(m.id))
 
     return [
       // "New today" stays pinned: it's the freshness anchor that replaced deleting old meals,
       // and an anchor that moves isn't an anchor.
       { key: 'new', title: 'New today', meals: fresh },
-      ...rotatedProteins,
-      { key: 'snacks', title: 'Snacks', meals: snacks },
-      { key: 'desserts', title: 'Desserts', meals: desserts },
+      ...rotatedSections,
+      // "Everything else" stays last on purpose — it's the catch-all, and a catch-all that
+      // sometimes appears third would read as a real category rather than the remainder.
       { key: 'other', title: 'Everything else', meals: leftovers },
     ]
       .filter(sec => sec.meals.length > 0)
