@@ -341,6 +341,22 @@ export default function DiscoverScreen() {
   const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
   const [dietType, setDietType] = useState<string>('Classic')
 
+  // Pantry + last-cooked, fetched independently of the profile/budget call above. in_stock is
+  // filtered here to match every other pantry reader in the app — an item marked out of stock is
+  // not "in your kitchen", and counting it would overstate how cookable a recipe is.
+  useEffect(() => {
+    if (!user) return
+    ;(async () => {
+      const [{ data: pantry }, { data: recent }] = await Promise.all([
+        supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true).limit(500),
+        supabase.from('meal_logs').select('meal_name, logged_at')
+          .eq('user_id', user.id).order('logged_at', { ascending: false }).limit(1),
+      ])
+      setPantryNames(new Set((pantry ?? []).map((p: any) => String(p.name ?? '').toLowerCase().trim()).filter(Boolean)))
+      if (recent?.[0]?.meal_name) setLastCooked(recent[0].meal_name)
+    })()
+  }, [user])
+
   // Profile-based dietary filters apply to every Discover view (always-on safety
   // filter — users with nut allergies should never see almond recipes regardless
   // of which chip they have selected). Chip filter narrows further on top.
@@ -360,20 +376,16 @@ export default function DiscoverScreen() {
 
         const goalCal = data?.calorie_goal ?? 0
         const goalPro = data?.protein_goal ?? 0
+        // Everything past here is the calorie BUDGET, which genuinely needs goals. Pantry and
+        // last-cooked are fetched separately below — they were originally inside this block, so a
+        // profile without macro goals silently lost the pantry shelf too. Unrelated data should
+        // never share an early return.
         if (!goalCal && !goalPro) return
         const todayStr = new Date().toISOString().split('T')[0]
         const { data: logs } = await supabase.from('meal_logs')
           .select('calories, protein').eq('user_id', user.id).eq('logged_at', todayStr)
         const eatenCal = (logs ?? []).reduce((sum, l: any) => sum + (l.calories ?? 0), 0)
         const eatenPro = (logs ?? []).reduce((sum, l: any) => sum + (l.protein ?? 0), 0)
-        const [{ data: pantry }, { data: recent }] = await Promise.all([
-          supabase.from('pantry_items').select('name').eq('user_id', user.id),
-          supabase.from('meal_logs').select('meal_name, logged_at')
-            .eq('user_id', user.id).order('logged_at', { ascending: false }).limit(1),
-        ])
-        setPantryNames(new Set((pantry ?? []).map((p: any) => String(p.name ?? '').toLowerCase().trim()).filter(Boolean)))
-        if (recent?.[0]?.meal_name) setLastCooked(recent[0].meal_name)
-
         setBudget({
           calLeft: Math.max(0, goalCal - eatenCal),
           proLeft: Math.max(0, goalPro - eatenPro),
@@ -631,14 +643,19 @@ export default function DiscoverScreen() {
     // few things are missing, so the top of the shelf is the closest to dinner.
     // Allows up to 2 missing — a strict zero-missing rule almost never matches (every recipe has
     // some spice or oil the pantry scan didn't catch) and would leave the shelf permanently empty.
-    const nearlyCookable = pantryNames.size > 0
+    // No hard cutoff. The old rule (<= 2 missing) sounded reasonable and silently emptied the
+    // shelf: real recipes run 5-7 ingredients, so <= 2 missing demands the pantry cover most of
+    // them, and a shelf that vanishes teaches the user it doesn't work. Instead: rank by
+    // closeness, take the best 12 whatever they are, and label each card with how many are
+    // missing so the claim is never overstated. Same information, no cliff.
+    const nearlyRanked = pantryNames.size > 0
       ? browseGrid
           .map(m => ({ m, missing: missingCount(m, pantryNames) }))
-          .filter(x => x.missing <= 2)
           .sort((a, b) => a.missing - b.missing)
           .slice(0, 12)
-          .map(x => x.m)
       : []
+    const nearlyCookable = nearlyRanked.map(x => x.m)
+    const missingById = new Map(nearlyRanked.map(x => [x.m.id, x.missing]))
 
     // Because you cooked X. Needs only this user's own history, so it activates on their first
     // cook rather than waiting for a cohort to exist. Similarity is same-primary-protein: crude,
@@ -683,6 +700,13 @@ export default function DiscoverScreen() {
       // "New today" is exempt: it's a dated section, so newest-first is the meaning of it.
       .map(sec => sec.key === 'new' ? sec : { ...sec, meals: rotateByDay(sec.meals, dayOfYear, sec.key, GRID_PAGE) })
   }, [browseGrid, budget, pantryNames, lastCooked])
+
+  // Per-meal missing counts for the "Almost in your kitchen" badges. Recomputed with the same
+  // inputs as the section itself so the two can't disagree.
+  const missingByMeal = useMemo(() => {
+    if (pantryNames.size === 0) return new Map<string, number>()
+    return new Map(browseGrid.map(m => [m.id, missingCount(m, pantryNames)]))
+  }, [browseGrid, pantryNames])
 
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
   // mounting 400 image cards at once, and keeps each section's header reachable by scroll.
@@ -888,7 +912,14 @@ export default function DiscoverScreen() {
                     // section visibly crawl in after the user has already scrolled to it.
                     entering={FadeInDown.duration(240).delay(Math.min(index, 12) * 30)}
                   >
-                    <RailCard meal={meal} onPress={() => openMeal(meal, 'discover_grid', section.key, index)} full />
+                    <RailCard
+                      meal={meal}
+                      onPress={() => openMeal(meal, 'discover_grid', section.key, index)}
+                      full
+                      badge={section.key === 'nearly'
+                        ? (missingByMeal.get(meal.id) === 0 ? 'Have it all' : `Missing ${missingByMeal.get(meal.id)}`)
+                        : undefined}
+                    />
                   </Animated.View>
                 ))}
               </View>
@@ -950,7 +981,7 @@ function safeOpenSocialUrl(url: string) {
 
 // Reusable rail card — same dimensions for both Trending Now and From Creators
 // rails so the two shelves visually rhyme.
-function RailCard({ meal, onPress, full }: { meal: DiscoverMeal; onPress: () => void; full?: boolean }) {
+function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress: () => void; full?: boolean; badge?: string }) {
   return (
     // `full` lets the browse grid drive the width from its cell instead of the rail's fixed 175.
     <PressableScale style={[styles.railCard, full && { width: '100%' }]} scaleTo={0.98} onPress={onPress}>
@@ -962,6 +993,11 @@ function RailCard({ meal, onPress, full }: { meal: DiscoverMeal; onPress: () => 
         </View>
       )}
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} locations={[0.3, 1]} style={styles.railGradient} />
+      {/* Top-left badge — used by "Almost in your kitchen" to state how many ingredients are
+          missing, so a card ranked 5th isn't implying you can cook it right now. */}
+      {badge && (
+        <View style={styles.cardBadge}><Text style={styles.cardBadgeText}>{badge}</Text></View>
+      )}
       {meal.creator && (() => {
         const socialUrl = meal.creator.instagram_url || meal.creator.tiktok_url || meal.creator.youtube_url
         const badge = (
@@ -1138,6 +1174,12 @@ const styles = StyleSheet.create({
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
   browseCell: { width: GRID_CELL_W },
   browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700' },
+  cardBadge: {
+    position: 'absolute', top: 8, left: 8, zIndex: 2, borderRadius: 12,
+    paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.72)',
+    borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)',
+  },
+  cardBadgeText: { fontSize: 10, fontWeight: '800', color: COLORS.accent, letterSpacing: 0.3 },
   contextLine: { fontSize: 13, color: COLORS.accent, fontWeight: '600', marginTop: 2, letterSpacing: 0.2 },
   showMoreBtn: {
     marginHorizontal: 20, marginTop: 14, paddingVertical: 12, borderRadius: 24,
