@@ -9,6 +9,11 @@
 This repo uses a single main-branch workflow. No feature branches, no PRs for solo work. Every session:
 1. **At start:** `cd /Users/loganshaver/pantry && git pull origin main` — sync before any work. If the session was launched inside a `.claude/worktrees/*` path, still `cd` to `/Users/loganshaver/pantry` and do all work there. The worktree is dead weight; ignore it.
 2. **During:** commit + push to `main` directly after each meaningful change (no branching).
+   **The commit body carries the WHY** — what was tried and rejected, what the non-obvious
+   constraint was, what's still unproven. `git log` is the project's real memory: handoff files
+   deliberately skip anything recoverable from it, so a "fix stuff" commit doesn't just lose
+   reasoning, it silently shifts that burden onto a file that gets deleted. One-line subject,
+   then prose for anything a reader would otherwise have to re-derive.
 3. **Metro lives in main too:** the Expo dev server should always be running from `/Users/loganshaver/pantry`, never from a worktree path — otherwise edits won't hot-reload.
 4. **One writer at a time.** Logan sometimes runs two chats against this repo. Only one may edit
    files; the other is read-only. Two writers on one working tree means `git add -A` in either

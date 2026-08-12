@@ -7,11 +7,15 @@ has verified. Delete lines as they stop being true.
 ## Run this first
 
 ```bash
-bash scripts/preflight.sh && npx tsc --noEmit 2>&1 | grep -c "error TS"
+bash scripts/preflight.sh && npx tsc --noEmit 2>&1 | grep "error TS" | grep -c "^app/\|^lib/\|^components/\|^hooks/\|^context/"
 ```
 
-Expect **no blocking issues** and **207** (50 app-code, 157 Deno noise — see `CLAUDE.md`).
-Anything else — investigate before trusting a word below.
+Expect **no blocking issues** and **50**. Anything else — investigate before trusting a word below.
+
+This counts app code only, deliberately. The all-in total (207 today) moves by +1 every time any
+edge function gains a `_shared` import — noise that has already broken this assertion once and
+would have had the next session distrusting a correct file. 50 only moves when real code breaks.
+
 Everything that landed is in `git log --oneline 9cfcb95..HEAD` (reasoning is in the commit bodies,
 `git show <sha>` for any of them).
 
@@ -31,6 +35,18 @@ Then read the Edge Function logs:
 | `ingredient-list gate: N/150` | ~40+ | parser precision, not a looser gate |
 | `ingredient retention "X": N/N` | all equal | model isn't honouring the contract → prompt |
 | `pool ranked + capped: storing N` | ≥6 | aborts again, keeps yesterday's feed |
+
+## Verify tomorrow — needs a day boundary, can't be rushed
+
+Two deployed changes are unprovable today. Both are logs-only; neither is visible in the app, so
+they will look fine whether or not they work.
+
+1. **Cook-Now repeat suppression.** Generate meals today, then again tomorrow, and read the
+   `generate-meals` logs for `Repeat filter: N/M candidates matched a recent dish`. **N > 0 on day
+   two is the proof** — N always 0 means either the window isn't persisting or the model isn't
+   producing repeats to catch, and those need telling apart before calling it done.
+2. **Trending retention gate**, once the re-run above succeeds — the allergen cross-check and the
+   `servings` fix have both only ever been exercised by a single batch.
 
 ## In flight
 
