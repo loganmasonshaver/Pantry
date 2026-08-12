@@ -180,6 +180,46 @@ function passesDietTags(meal: DiscoverMeal, dietType: string, restrictions: stri
   return true
 }
 
+// Whole-word keyword match. Plain `includes` produced real misclassifications, because these
+// lists contain short words that live inside unrelated ones: 'cake' matches "panCAKE" (so every
+// pancake was tagged a dessert) and 'oat' matches "gOAT" (so Goat Cheese Salad was breakfast).
+//
+// The (s|es)? suffix is required, not cosmetic: the keyword lists are singular but real dish names
+// are plural ("Skyr Pancakes", "Protein Brownies"), and a bare \b would match neither list — worse
+// than the substring bug it replaces. Multi-word keys like 'ice cream' work unchanged.
+const matchesKeyword = (nameLower: string, keywords: string[]): boolean =>
+  keywords.some(k => new RegExp(`\\b${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(s|es)?\\b`, 'i').test(nameLower))
+
+// Which eating occasion is it right now. Drives ORDERING of the "All" feed, not filtering —
+// see timeOfDayRank. Dinner covers the evening through the small hours; nobody browsing at 1am
+// wants pancakes surfaced first.
+function currentMealTime(hour: number): 'Breakfast' | 'Lunch' | 'Dinner' {
+  if (hour >= 4 && hour < 11) return 'Breakfast'
+  if (hour >= 11 && hour < 16) return 'Lunch'
+  return 'Dinner'
+}
+
+// Lower sorts first. Deliberately a SORT and not a filter: auto-switching the chip to Breakfast
+// at 7am would show an empty feed on any day the pool happens to have no breakfast dishes,
+// whereas demoting the mismatches can't ever empty it. The chips stay as explicit overrides.
+function timeOfDayRank(meal: DiscoverMeal, mealTime: 'Breakfast' | 'Lunch' | 'Dinner'): number {
+  const nameLower = meal.name.toLowerCase()
+  const isBreakfast = matchesKeyword(nameLower, BREAKFAST_KEYWORDS)
+  // Breakfast wins on genuine overlap ('parfait' is in both lists), same rule passesFilter uses.
+  const isDessert = !isBreakfast && matchesKeyword(nameLower, DESSERT_KEYWORDS)
+  const isDinnerOnly = matchesKeyword(nameLower, DINNER_ONLY_KEYWORDS)
+  if (mealTime === 'Breakfast') {
+    if (isBreakfast) return 0
+    // Desserts are never wrong for the time of day, but they shouldn't lead the feed either.
+    return isDessert || isDinnerOnly ? 2 : 1
+  }
+  // Lunch/dinner: a breakfast dish at 6pm is the mismatch worth demoting.
+  if (isBreakfast) return 2
+  if (isDessert) return 1
+  if (mealTime === 'Lunch') return isDinnerOnly ? 1 : 0
+  return 0
+}
+
 function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
   if (filter === 'All') return true
   const nameLower = meal.name.toLowerCase()
@@ -188,19 +228,23 @@ function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
     // Protein density ≥ 25% of calories — same bar the trending pipeline uses.
     return meal.calories > 0 && (meal.protein * 4) / meal.calories >= 0.25
   }
-  if (filter === 'Desserts') return DESSERT_KEYWORDS.some(k => nameLower.includes(k))
+  if (filter === 'Desserts') return matchesKeyword(nameLower, DESSERT_KEYWORDS)
   if (filter === 'Breakfast' || filter === 'Lunch' || filter === 'Dinner') {
-    const isDessert = DESSERT_KEYWORDS.some(k => nameLower.includes(k))
-    const isBreakfast = BREAKFAST_KEYWORDS.some(k => nameLower.includes(k))
+    const isDessert = matchesKeyword(nameLower, DESSERT_KEYWORDS)
+    const isBreakfast = matchesKeyword(nameLower, BREAKFAST_KEYWORDS)
     // Breakfast wins on overlap: "parfait" is in both lists, and a Greek yogurt parfait is
     // breakfast to most people even if a chocolate one isn't.
     if (filter === 'Breakfast') return isBreakfast
     // Lunch/dinner: exclude breakfast dishes and desserts; dinner-only mains are hidden from lunch.
     if (isBreakfast || isDessert) return false
-    if (filter === 'Lunch') return !DINNER_ONLY_KEYWORDS.some(k => nameLower.includes(k))
+    if (filter === 'Lunch') return !matchesKeyword(nameLower, DINNER_ONLY_KEYWORDS)
     return true
   }
   if (filter === 'Vegetarian') {
+    // Deliberately substring, not whole-word, unlike the lists above. This one is a dietary
+    // filter, so the two error directions aren't equal: over-matching hides a safe meal
+    // (harmless), under-matching shows meat to a vegetarian. \bmeat\b would stop matching
+    // "Meatballs" — exactly the miss that matters most.
     if (MEAT_KEYWORDS.some(k => nameLower.includes(k))) return false
     const ingredientNames = (meal.ingredients || []).map((i: any) => (i.name ?? '').toLowerCase())
     return !ingredientNames.some(n => MEAT_KEYWORDS.some(k => n.includes(k)))
@@ -351,12 +395,20 @@ export default function DiscoverScreen() {
   // was wired in 3c but removed pre-launch — see v2 todo for restoration trigger.
   // Full diet/chip-filtered pool (NOT variety-capped here — variety-fill is applied per
   // rail below so the global cap can't starve the rails).
+  // Recomputed on each focus/resume (fetchTrending re-runs), so the ordering follows the clock
+  // across a session rather than freezing at whatever time the app was first opened.
+  const mealTime = currentMealTime(new Date().getHours())
   const filtered = useMemo(
     () => trending
       .filter(m => passesDietTags(m, dietType, dietaryRestrictions))
       .filter(m => passesDietary(m, foodDislikes))
-      .filter(m => passesFilter(m, activeFilter)),
-    [trending, activeFilter, foodDislikes, dietaryRestrictions, dietType]
+      .filter(m => passesFilter(m, activeFilter))
+      // Time-of-day ordering applies only to "All". Once the user picks a chip they've stated
+      // the occasion explicitly, and re-sorting under them would fight that choice.
+      .sort((a, b) => activeFilter === 'All'
+        ? timeOfDayRank(a, mealTime) - timeOfDayRank(b, mealTime)
+        : 0),
+    [trending, activeFilter, foodDislikes, dietaryRestrictions, dietType, mealTime]
   )
   const featured = filtered[0]
   // Rail caps keep the editorial density right (Spotify/NYT-ish ~6-8 per shelf) and

@@ -433,6 +433,9 @@ For each video you select, output the recipe AS THE CREATOR PRESENTED IT.
 CORE FIDELITY RULES — do not violate these:
 - READ macros from the video description first. Most fitness creators list calories/protein/carbs/fat directly. If they listed numbers, USE THEM VERBATIM. Do not recalculate.
 - READ ingredients and quantities from the description verbatim. Preserve the creator's portions exactly. Do not scale, round, or substitute.
+- KEEP EVERY INGREDIENT THE CREATOR LISTS — including toppings, garnishes and sauce components. Do NOT reduce a recipe to its "main" 3-4 ingredients. A bowl or plate dish IS its toppings: strip the diced tomato, pickles and lettuce off a burger bowl and you have described a different, barer dish than the one the creator made. If the creator groups ingredients under headings (Burger / Toppings / Sauce), keep the items from EVERY heading.
+- A multi-ingredient sauce or dressing stays intact: list its components as ingredients, and describe it in the steps as one mixed sauce (e.g. "whisk the yogurt, ketchup, mustard and relish into a burger sauce") so downstream knows it is combined rather than served as separate dollops.
+- PRESERVE THE PREPARATION METHOD exactly as described. If the creator cuts the potato into fries, the step says fries — not "dice", not "cube", not "roast". The cut and cooking method determine what the finished dish physically looks like, so changing it silently misrepresents the recipe.
 - NEVER add ingredients (protein powder, cottage cheese, Greek yogurt, egg whites, etc.) to engineer a recipe into a higher protein density. The recipe is what the creator made — period.
 - If the description doesn't list explicit macros, calculate ONLY from the ingredients exactly as the creator listed them — don't invent quantities.
 
@@ -743,7 +746,64 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // moved client-side. We keep baseScore for ranking and cap at STORE_CAP to
     // bound the daily image-generation cost.
     const STORE_CAP = 18
-    recipes = [...recipes].sort((a, b) => baseScore(b) - baseScore(a)).slice(0, STORE_CAP)
+
+    // Base-dish format cap. The LLM prompt already says "don't return two pancake recipes" and it
+    // gets ignored — one day's pool came back with FIVE pancake variants out of fifteen, two of
+    // them in the featured and first trending slots. A prompt rule the model can silently skip is
+    // not a constraint, so this is enforced deterministically after ranking.
+    //
+    // Deliberately NOT matching "bowl" or "plate": a Burger Bowl and a Poke Bowl are genuinely
+    // different dishes, whereas two pancake recipes read as the same thing twice.
+    const DISH_FORMATS: [string, RegExp][] = [
+      ['pancake',   /\bpancakes?\b/i],
+      ['waffle',    /\bwaffles?\b/i],
+      ['smoothie',  /\bsmoothies?\b|\bshake\b/i],
+      ['oats',      /\boats?\b|\boatmeal\b|\bporridge\b/i],
+      ['chia',      /\bchia\b/i],
+      ['flatbread', /\bflatbreads?\b|\bpizza\b|\bnaan\b/i],
+      ['wrap',      /\bwraps?\b|\bburritos?\b|\bquesadillas?\b/i],
+      ['taco',      /\btacos?\b/i],
+      ['salad',     /\bsalads?\b/i],
+      ['soup',      /\bsoups?\b|\bstew\b|\bchili\b/i],
+      ['bites',     /\bbites?\b|\bballs?\b|\bclusters?\b|\btruffles?\b/i],
+      ['brownie',   /\bbrownies?\b|\bblondies?\b/i],
+      ['mugcake',   /\bmug cake\b|\bcheesecakes?\b|\bcakes?\b/i],
+      ['cookie',    /\bcookies?\b/i],
+      ['parfait',   /\bparfaits?\b|\byogurt bowl\b/i],
+      ['icecream',  /\bice cream\b|\bnice cream\b|\bfroyo\b/i],
+      ['toast',     /\btoasts?\b|\bbagels?\b|\bsandwich\b/i],
+      ['pasta',     /\bpastas?\b|\bnoodles?\b|\bgnocchi\b|\bmac and cheese\b/i],
+    ]
+    const dishFormat = (name: string): string | null =>
+      DISH_FORMATS.find(([, re]) => re.test(name))?.[0] ?? null
+
+    const FORMAT_CAP = 2
+    const ranked = [...recipes].sort((a, b) => baseScore(b) - baseScore(a))
+    const formatCounts = new Map<string, number>()
+    const kept: any[] = []
+    const overflow: any[] = []
+    for (const r of ranked) {
+      const fmt = dishFormat(r.name || '')
+      if (!fmt) { kept.push(r); continue }
+      const seen = formatCounts.get(fmt) ?? 0
+      if (seen < FORMAT_CAP) { formatCounts.set(fmt, seen + 1); kept.push(r) }
+      else overflow.push(r)
+    }
+    // Overflow is appended rather than dropped: it only gets stored if the capped set can't fill
+    // STORE_CAP on its own, which beats shipping a short feed to enforce variety.
+    const overCapped = [...formatCounts.entries()].filter(([, n]) => n >= FORMAT_CAP).map(([f]) => f)
+    if (overflow.length > 0) {
+      console.log(`[funnel] format cap: ${overflow.length} deprioritized (${overCapped.join(', ')} hit the cap of ${FORMAT_CAP})`)
+    }
+    recipes = [...kept, ...overflow].slice(0, STORE_CAP)
+
+    // A recipe that survives with 3 or fewer ingredients usually means the extractor collapsed the
+    // creator's list to its "main" items and dropped the toppings/sauce — which is what makes a
+    // dish render bare and wrong downstream. Log it so a systematic regression is visible.
+    const bare = recipes.filter((r: any) => (r.ingredients?.length ?? 0) <= 3)
+    if (bare.length > 0) {
+      console.log(`[funnel] WARN: ${bare.length} recipe(s) stored with <=3 ingredients — possible ingredient drop: ${bare.map((r: any) => `${r.name}(${r.ingredients?.length ?? 0})`).join(', ')}`)
+    }
     stageLog(`pool ranked + capped: storing ${recipes.length} (cap ${STORE_CAP})`)
 
     // HARD MINIMUM GATE: only triggers if the candidate pool itself was under 6
@@ -828,7 +888,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       const IMG_CONCURRENCY = 5
       const genImage = async (meal: any) => {
         try {
-          const ingredientNames = (meal.ingredients || []).map((i: any) => i.name)
+          // Pass the VISUAL hint with the name ("1 slice American cheese", not "American cheese").
+          // Without it the renderer has no idea of scale and draws a whole slab of cheese.
+          // A bare gram weight is skipped — it tells the model nothing about how the item looks.
+          const ingredientNames = (meal.ingredients || []).map((i: any) => {
+            const hint = String(i.visual ?? '').trim()
+            return hint && !/^\d+(\.\d+)?\s*(g|ml|oz)$/i.test(hint) ? `${hint} ${i.name}` : i.name
+          })
           const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
             method: 'POST',
             headers: {
@@ -839,7 +905,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               // same CRON_SECRET-preferred token the cron itself authenticates with.
               'Authorization': `Bearer ${CRON_SECRET || supabaseServiceKey}`,
             },
-            body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames }),
+            // steps are LOAD-BEARING for the image, not decoration. generate-meal-image has a rule
+            // that an ingredient mixed/whisked/blended into something else must NOT be drawn as a
+            // separate dollop — but it can only apply that if it can read the steps. Omitting them
+            // is why a Burger Bowl's greek-yogurt-based burger sauce rendered as a white blob of
+            // sour cream sitting on top instead of a sauce mixed through the dish.
+            body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [] }),
           })
           const imgData = await imgRes.json()
           if (imgData.image) {
