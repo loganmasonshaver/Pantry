@@ -102,8 +102,44 @@ npx expo run:ios   # build and run on iOS simulator
 ### Security invariant
 - Anything granting premium/access (`promo_active`, referral redemption) is written
   server-side via SECURITY DEFINER RPC only. Never trust a client write for entitlements.
+- RLS on public-content tables must be checked, not assumed. `trending_meals` silently
+  accepted anonymous DELETE until 2026-08-12 — the anon key ships in the app bundle, so
+  anyone could have wiped Discover. When adding a table, verify anon can only SELECT.
+
+### There is no SafeAreaProvider in this app
+- `useSafeAreaInsets()` returns **0 everywhere**. `SafeAreaView` still works because it's a
+  self-measuring native view, so nothing looks broken — but any layout maths using insets is
+  silently wrong. Cost three failed attempts at one header. Absolutely-positioned children also
+  escape SafeAreaView's padding; keep chrome in normal flow.
+
+### Recipe fidelity rules (trending pipeline)
+- **100% ingredient retention is a product requirement, not a tuning knob.** A recipe that keeps
+  fewer ingredients than the creator's published list is rejected. Never widen the tolerance to
+  fill a thin day — the levers are candidate volume and parser precision.
+- Ingredients are stored at the creator's FULL BATCH scale with a `servings` count; macros are
+  per serving. Never scale ingredients to match per-serving macros (that produced "0.5 large eggs").
+- Only ~28% of raw YouTube candidates have a parseable ingredient list. Any coverage figure
+  measured against meals already in `trending_meals` is survivorship bias — those are the ones
+  extraction already succeeded on.
+- Allergen tags derive from ingredients, so a dropped ingredient becomes a false "free" tag.
+  `classifyDietTags` scans name + ingredients + steps AND is ANDed with the model's own allergen
+  answer. Fail safe: when in doubt, "contains".
+- Never claim "Dairy-free" in UI. Say "No dairy in the listed ingredients" — true even when the
+  list is incomplete.
+
+### Discover shelving
+- Shelves come from `trending_meals.shelf_tag`, assigned once by the model. Regex/keyword shelving
+  was tried twice and fails structurally: it matches properties, properties overlap (one meal hit
+  5 rules), so membership becomes rotation-dependent and unstable.
+- Pipeline `RETENTION_DAYS` and client `YOUTUBE_VISIBLE_DAYS` must match. They drifted 3 vs 7 once
+  and silently threw away most of the browsable pool.
 
 ## Known baselines
+- **TS baseline ≈ 206.** Watch the DELTA, not the total — ~130 are Deno-global noise from
+  `supabase/functions` being inside the tsconfig. A +1 caught a real ReferenceError once.
+- `bash scripts/preflight.sh` reports the three places state drifts: uncommitted files,
+  unapplied migrations, and functions whose source is newer than their deploy. Run it at session
+  start instead of trusting any written claim about deploy state.
 - Pre-existing TypeScript errors exist in the onboarding flow and several modal files.
   Before editing those areas, run `npx tsc --noEmit` to capture the baseline — don't
   claim to have introduced or fixed errors that were already there.

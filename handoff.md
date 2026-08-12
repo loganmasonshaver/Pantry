@@ -1,148 +1,84 @@
-# Handoff — Pantry — 2026-08-12 (Discover rebuild, recipe fidelity, allergen safety)
+# Handoff — Pantry — 2026-08-12
 
-## TL;DR
-**41 commits, all pushed to `main`** (`9cfcb95..3d775a3`). Working tree clean, all migrations
-applied, every edge function deployed at or after its last source commit — verified with
-`bash scripts/preflight.sh`.
+Durable project rules live in `CLAUDE.md`, not here. This file carries only what a command
+can't tell you: unfinished work, decisions that look wrong from the code, and claims nobody
+has verified. Delete lines as they stop being true.
 
-Three themes: the onboarding plan reveal was rebuilt Cal AI-style, Discover was rebuilt from a
-one-rail feed into a sectioned browse surface, and a chain of **recipe-fidelity and allergen-safety
-bugs** was found and fixed. TS baseline moved 197 → 206 (entirely new edge-function files joining
-the ~15 Deno files tsconfig already errors on; app code added zero).
+## Run this first
 
----
+```bash
+bash scripts/preflight.sh && npx tsc --noEmit 2>&1 | grep -c "error TS"
+```
 
-## 🔴 THE ONE THING TO DO FIRST
+Expect **no blocking issues** and **206**. Anything else — investigate before trusting a word below.
+Everything that landed is in `git log --oneline 9cfcb95..HEAD` (42 commits, reasoning is in the
+commit bodies, `git show <sha>` for any of them).
 
-**Re-run the trending generation.** The last run aborted (correctly) and Discover is serving a stale
-pool. The fix for the abort is deployed but unproven.
+## Next action
+
+**Re-run the trending generation.** The last run aborted correctly at 5 recipes (min 6) and
+Discover is serving a stale pool. The fix is deployed and unproven.
 
 ```sql
 SELECT net.http_post(url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'cron_service_role_key' LIMIT 1)), body := '{}'::jsonb);
 ```
 
-Then read Edge Function logs for:
-- `[funnel] ingredient-list gate: N/150` — should be **~40+**. It was 17/60 before the ordering fix.
-- `[funnel] ingredient retention "<meal>": X/Y` — must be `N/N`. Anything short is rejected.
-- `[stage] pool ranked + capped: storing N` — needs **≥6** or the run aborts again.
+Then read the Edge Function logs:
 
-If it aborts again, the lever is **more candidates or better parser precision — never a looser
-retention threshold.** Logan's requirement is 100% retention, no tolerance band.
-
----
-
-## Recipe fidelity — the big find
-
-Audited stored recipes against their source YouTube descriptions. **Only ~52% of the creator's
-listed ingredients survived extraction.** Not just seasonings:
-
-| Meal | Source → Stored | Lost |
+| Log line | Healthy | Meaning if not |
 |---|---|---|
-| Soya Potato Masala | 14 → 4 | ghee, onion, green chilli, cumin |
-| Gnocchi Chicken Sheet Pan | 12 → 4 | a whole eggplant, garlic, olive oil |
-| Red Pesto Chicken Gnocchi | 13 → 5 | 2 bags spinach, 2 cups mozzarella |
-| Burger Bowl | 22 → 4 | the entire burger sauce, tomato, pickles, lettuce |
+| `ingredient-list gate: N/150` | ~40+ | parser precision, not a looser gate |
+| `ingredient retention "X": N/N` | all equal | model isn't honouring the contract → prompt |
+| `pool ranked + capped: storing N` | ≥6 | aborts again, keeps yesterday's feed |
 
-This is not cosmetic — it damages taste, understates calories (2 cups of mozzarella ≈ 450 kcal),
-and **is the mechanism behind the allergen bug below**.
+## In flight
 
-**Fixed by removing the model's discretion:** the creator's list is parsed mechanically out of the
-description and handed over as a contract. Any recipe returning fewer entries than its source list
-is **rejected outright** (`050744c`). Videos without a readable list never enter the pool.
+- **100% retention gate** — deployed, has **never completed a successful run**. First attempt
+  aborted; cause was the pool being capped to 60 *before* the list gate, so the gate saw 60 and
+  kept 17. Fixed by gating first and raising `maxResults` 20→50. Unproven.
+- **`shelf_tag`** — column live, **zero meals have one** (only populates on generation). Every tag
+  shelf is currently driven by the name-based fallback, which covers 81%. Looks broken; isn't.
+- **Discover Phase 1 ~70%** — context line, 3 personalised shelves, intent shelves, browse grid all
+  shipped. Card density not started. Phase 2 (weekly drop, cook-rate ranking, per-user shelf
+  ordering) not begun. See `PLAN-discover-personalization.md`.
 
-**Cost:** only **28%** of raw candidates have a parseable list, so the gate discards ~72%.
-Compensated by gating *before* the 60-video cap and raising `maxResults` 20 → 50 (`3d775a3`).
+## Open decisions — yours, not mine
 
-⚠️ **I twice reported optimistic parser-coverage numbers that were wrong** — first from mojibake in
-my test cache, then from survivorship bias (measuring descriptions of meals already extracted
-successfully). **28% is the real rate.** Don't trust a coverage figure that wasn't measured on raw
-candidates.
+- [ ] **Nut-free is treated identically to dairy/gluten in the filter UI.** Dairy wrong is
+      unpleasant; nuts wrong is a medical event. Keep as-is, make advisory, or drop pre-launch?
+- [ ] Health-check alert pushes to `OPS_USER_ID`. **Unverified whether that secret was ever set** —
+      if not, the alert is a silent no-op. Check, or accept it.
 
----
+## Do NOT repeat these
 
-## 🔴 Allergen safety — was actively wrong, now fixed
+- **Header/layout via absolute positioning** — failed 3× before I found the cause (no
+  SafeAreaProvider, see `CLAUDE.md`). Keep chrome in normal flow.
+- **Regex or keyword shelving** — tried twice (protein taxonomy, then intent rules). Fails
+  structurally; see `CLAUDE.md`.
+- **Rejecting recipes without a parseable ingredient list, at low parser coverage** — correct idea,
+  but it only became affordable once coverage improved. At 28% it discards ~72% of candidates, so
+  it needs volume compensation, not enthusiasm.
+- **Trusting a parser-coverage number measured on stored meals.** I reported 75% twice from bad
+  evidence — first mojibake in the test cache, then survivorship bias. Real rate is 28%.
 
-`passesDietTags` treats `is_dairy_free === true` as safe, so mis-tagged meals were shown to users
-who had asked to avoid that allergen. Two independent failure modes, both fixed:
+## Why it's built this way
 
-1. **Dropped ingredient** — "Parmesan-Crusted Chicken Sheet Pan" tagged dairy-free because parmesan
-   never made it into the ingredients array, despite being in the dish's name. Fixed: tags now scan
-   **name + ingredients + steps** (`bc32d98`).
-2. **Compound ingredient** — "pesto" contains no dairy keyword, so pesto dishes read as dairy-free
-   *and* nut-free; gnocchi and teriyaki read as gluten-free. Fixed: compound-food keyword list, plus
-   the **LLM answers `contains_dairy/gluten/nuts` directly and is ANDed with the keyword scan** —
-   a meal is "free" only if both agree (`bc31a62`).
+Places where the obvious "fix" is a regression:
 
-**Meal detail now states what was checked, never that it's safe:** *"No dairy in the listed
-ingredients. Always check the full recipe before cooking."* That sentence stays true even when the
-list is incomplete; "Dairy-free" is a promise the data can't keep.
+- `meal_logs.trending_meal_id` has **no foreign key on purpose** — retention deletes the parent row
+  and `ON DELETE SET NULL` would erase the attribution it exists to preserve.
+- **Impressions fire on viewport entry, not render.** The grid renders far below the fold; counting
+  renders would inflate the denominator and make every shelf's CTR look worse than it is.
+- **"Almost in your kitchen" is verified-recipes-only.** An incomplete recipe looks *more* cookable
+  than it is and ranks higher precisely because it's missing ingredients.
+- **`GRID_PAGE` is 6 for shelves but 24 for "Everything else"** — the catch-all holds hundreds at a
+  mature pool; 6 would be ~59 taps to reach the end.
+- **The horizontal rail was deleted deliberately.** It consumed the entire daily batch (10 slots vs
+  8–15 meals/day), starving the section beneath it.
 
-**Still open (Logan's call):** nut-free is treated identically to dairy/gluten in the filter UI.
-Dairy wrong is unpleasant; nuts wrong is a medical event. Worth deciding before launch.
+## Unverified
 
----
-
-## 🔴 Security — trending_meals accepted anon writes
-
-Discovered by accident: a DELETE succeeded using nothing but the **public anon key**, which ships in
-the app bundle. Anyone could have wiped Discover for every user.
-
-Locked down in `20260812030000_trending_meals_rls_lockdown.sql` — **applied and verified** (INSERT
-now returns `42501`, reads still work). Public SELECT; writes limited to authenticated creators on
-their own rows. Cron unaffected (service_role bypasses RLS); voting unaffected (SECURITY DEFINER RPC).
-
-⚠️ I initially reported INSERT and UPDATE as also open. **Only DELETE was confirmed** — the other
-probes were inconclusive (a 204 on a nonexistent id, and a schema error that fires before RLS).
-
----
-
-## Discover — rebuilt
-
-- **Retention 7 → 30 days** on both sides (pipeline `RETENTION_DAYS` and client
-  `YOUTUBE_VISIBLE_DAYS`, each commented to point at the other — they had already silently drifted
-  3 vs 7, which was throwing away most of the pool).
-- **Horizontal rail deleted.** It consumed the entire daily batch (10 slots vs 8-15 meals/day),
-  starving the grid section beneath it. One scroll direction now; the hero is the only display moment.
-- **Shelves are model-assigned** via `trending_meals.shelf_tag`, one per meal, from a fixed
-  vocabulary mixing cuisine and format. Regex shelving failed structurally: it matched *properties*,
-  which overlap (Burger Bowl matched 5 rules), so membership was decided by the daily rotation.
-  Cuisine alone covers only 43% — the catalog is bimodal (real cuisines vs fitness-food constructs).
-- **Name-based fallback tag** covers 81% of existing untagged rows so the page doesn't collapse into
-  the catch-all during the 30 days before old meals age out.
-- **First-shelf-wins**: each section claims only meals earlier ones didn't take, so no duplicates.
-- Personalised shelves (**Almost in your kitchen · Because you cooked X · Fits your remaining kcal**)
-  pinned on top, capped at 8, accent-coloured headers. Each self-activates from that user's own data.
-- `GRID_PAGE` 6 for curated shelves, 24 for the catch-all.
-
----
-
-## Analytics — Phase 0 shipped (`a9af415`)
-
-`meal_logs` gained `source`, `shelf_key`, `shelf_position`, `trending_meal_id`; `meal_ratings`
-gained `trending_meal_id`. Impressions fire on **viewport entry, not render**. Without these, "of
-the meals shown in shelf X, what fraction got cooked?" is unanswerable and all of Phase 2 is
-unbuildable. `trending_meal_id` is deliberately **not** a foreign key — retention deletes
-`trending_meals` rows and `ON DELETE SET NULL` would erase the attribution.
-
-Planning docs: `PLAN-discover-personalization.md`, `PLAN-onboarding-reveal.md`.
-
----
-
-## Other fixes worth knowing
-- **Onboarding plan reveal** rebuilt as a 7-block scrolling argument (`08a75bf`, `37ec90b`). Step 17
-  retired into it. `deriveMacros()` extracted so the reveal and `finish()` can't disagree.
-- **Home hero** now measures its own fit (`fe818b6`) rather than a hand-tuned height.
-- **Food search**: `pickDefaultServing()` — searching "milk" showed 3g protein because the default
-  was FatSecret's 100g entry. Now household servings, in the results list too, via `foods.search.v3`.
-- **Trending quality**: 100k view floor (median went ~5k → 1.1M), like-rate ranking (the 7.2M-view
-  chia pita had the *worst* like rate at 1.17%), format cap, near-duplicate rejection at Jaccard 0.7.
-- **`servings` column** — recipes were being scaled to one portion, producing "0.5 large eggs".
-- **Health-check cron** at 05:20 UTC pushes to `OPS_USER_ID`'s device if a day generates <12 meals.
-  ⚠️ **Unverified whether `OPS_USER_ID` was ever set** — if not, the alert is a silent no-op.
-
-## Landmines
-- **TS baseline = 206.** Watch the *delta*, not the total — ~130 are Deno-global noise from edge
-  functions in the tsconfig. A `+1` caught a real `ReferenceError` this session.
-- **`app/onboarding/index.tsx` is still the #1 bug source.** Any change → full write-back test.
-- **Image cache is immutable** — deterministic filename, so a bad image can't be regenerated away.
-- **Nothing this session is device-verified beyond what Logan checked live.**
+- Nothing this session is device-verified beyond what Logan checked live: the plan reveal, the
+  home hero fit, and the milk serving fix.
+- The `servings` fix has produced exactly one correct batch recipe (`Protein Bars`, servings 8).
+- Allergen cross-check (model + keyword AND) has never run — needs a successful generation.
