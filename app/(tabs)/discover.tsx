@@ -485,10 +485,13 @@ export default function DiscoverScreen() {
     const day = new Date().toLocaleDateString('en-US', { weekday: 'long' })
     const partOfDay = mealTime === 'Breakfast' ? 'morning' : mealTime === 'Lunch' ? 'afternoon' : 'evening'
     const bits = [`${day} ${partOfDay}`]
-    if (maxPrep) bits.push(`under ${maxPrep} min`)
+    // No prep-time clause. It read well but nothing in the default feed is filtered by
+    // max_prep_minutes, so "under 30 min" was asserting a constraint the list doesn't honour —
+    // the same unbacked-claim problem as promising meals from a pantry that hasn't been scanned.
+    // If the feed ever actually filters on prep time, put it back.
     if (budget?.hasLogged && budget.proLeft > 0) bits.push(`${budget.proLeft}g protein to go`)
     return bits.join(' · ')
-  }, [mealTime, maxPrep, budget])
+  }, [mealTime, budget])
   const filtered = useMemo(
     () => trending
       .filter(m => passesDietTags(m, dietType, dietaryRestrictions))
@@ -612,7 +615,7 @@ export default function DiscoverScreen() {
       // "New today" stays pinned: it's the freshness anchor that replaced deleting old meals,
       // and an anchor that moves isn't an anchor.
       { key: 'fits', title: `Fits your remaining ${budget?.calLeft ?? 0} kcal`, meals: fitsBudget },
-      { key: 'new', title: 'New today', meals: fresh },
+      { key: 'new', title: 'More from today', meals: fresh },
       ...rotatedSections,
       // "Everything else" stays last on purpose — it's the catch-all, and a catch-all that
       // sometimes appears third would read as a real category rather than the remainder.
@@ -754,7 +757,10 @@ export default function DiscoverScreen() {
         {!loading && youtubeRail.length > 0 && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
-              <Text style={styles.railTitle}>Trending Now</Text>
+              {/* Was "Trending Now" beside a grid section called "New today" — two names for one
+                  set, split by rank. This rail is today's top picks; the grid section below is the
+                  remainder of the same day, so they now read as one idea. */}
+              <Text style={styles.railTitle}>Today's picks</Text>
             </View>
             <ScrollView
               horizontal
@@ -817,7 +823,8 @@ export default function DiscoverScreen() {
             >
               <View style={styles.railHeader}>
                 <Text style={styles.railTitle}>{section.title}</Text>
-                <Text style={styles.browseCount}>{section.meals.length}</Text>
+                {/* A bare integer floating at the right edge reads as a glitch. */}
+                <Text style={styles.browseCount}>{section.meals.length} meals</Text>
               </View>
               <View style={styles.browseGrid}>
                 {visible.map((meal, index) => (
