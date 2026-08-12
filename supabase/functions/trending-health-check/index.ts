@@ -19,9 +19,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const OPS_USER_ID = Deno.env.get("OPS_USER_ID") ?? ""
-// STORE_CAP is 18 and the LLM's yield varies run to run (16 is normal), so this is set well below
-// the target — it's a "something is broken" line, not a quality bar.
-const MIN_EXPECTED = parseInt(Deno.env.get("TRENDING_MIN_EXPECTED") ?? "10", 10)
+// STORE_CAP is 18 and the LLM yield varies run to run (16 is normal), so 12 leaves room for a
+// slightly thin day while still catching a genuinely degraded batch.
+const MIN_EXPECTED = parseInt(Deno.env.get("TRENDING_MIN_EXPECTED") ?? "12", 10)
 
 const db = createClient(supabaseUrl, supabaseServiceKey)
 const today = () => new Date().toISOString().split('T')[0]

@@ -626,9 +626,17 @@ function RailCard({ meal, onPress }: { meal: DiscoverMeal; onPress: () => void }
       })()}
       <View style={styles.railContent}>
         <Text style={styles.railName} numberOfLines={2}>{meal.name}</Text>
-        <View style={{ flexDirection: 'row', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+        {/* Three full-label pills provably do not fit a 175px card: "15 MIN" + "450 CAL" + "40P"
+            measures ~168px against ~167px of usable width, which is why the row wrapped on some
+            days and not others — it turned on the day's digit count. Two previous passes shaved
+            edge spacing and letter-spacing, which bought a pixel or two and left it on the same
+            knife edge. Dropping the "CAL" suffix (the widest label, and the least differentiating
+            number for a high-protein feed) plus tighter pill padding gives ~28px of real headroom,
+            enough to survive 4-digit calorie counts. The featured card is wide enough to keep the
+            full "CAL" label, which is what teaches the unit. */}
+        <View style={{ flexDirection: 'row', gap: 3, marginTop: 6, flexWrap: 'wrap' }}>
           {meal.prepTime > 0 && <Pill label={`${meal.prepTime} min`} tint="amber" small />}
-          <Pill label={`${meal.calories} CAL`} tint="white" small />
+          <Pill label={`${meal.calories}`} tint="white" small />
           {meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" small />}
           {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
         </View>
@@ -648,13 +656,12 @@ function Pill({ label, tint, small }: { label: string; tint: 'amber' | 'green' |
   return (
     <View style={[
       styles.pill,
+      small && { paddingHorizontal: 6 },
       { backgroundColor: tintMap.bg, borderColor: tintMap.border },
     ]}>
       <Text style={[
         styles.pillText,
-        // Slightly larger text on the rail cards; tighter letter-spacing keeps all three
-        // pills on one line within the reclaimed edge spacing (no wrap even at "20m").
-        small && { fontSize: 10, letterSpacing: 0.4 },
+        small && { letterSpacing: 0.4 },
         { color: tintMap.color },
       ]}>{label}</Text>
     </View>
@@ -812,10 +819,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    // Tight left/right inset gives the pill row max horizontal room so the protein
-    // pill stays on one line even with a 2-digit prep time (e.g. "20m"). Pills keep
-    // their own size; only this edge spacing + the row gap were reduced. Vertical unchanged.
-    paddingHorizontal: 4,
+    // Was 4 — squeezed down in an earlier attempt to stop the pill row wrapping, which ran the
+    // title right to the card edge and still didn't fix the wrap. The pill labels themselves are
+    // what got shortened instead (see RailCard), so this can go back to a normal inset.
+    paddingHorizontal: 10,
     paddingVertical: 14,
   },
   railName: {

@@ -1582,7 +1582,10 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flex: 1, backgroundColor: COLORS.background },
-  scrollContent: { paddingBottom: 40 },
+  // Tab bar is 80pt tall and floats over the scroll view, so 40 left the last 40pt of content
+  // permanently underneath it — the hero card's bottom edge and pills were unreachable at full
+  // scroll. 80 clears the bar, +20 so the last card doesn't sit flush against it.
+  scrollContent: { paddingBottom: 100 },
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 12 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   brandText: { fontSize: 18, fontWeight: '800', color: '#4ADE80', letterSpacing: -0.3 },
@@ -1902,7 +1905,9 @@ const styles = StyleSheet.create({
   heroMealSkeletonStatus: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
   heroMealPillSkeleton: { height: 22, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.14)' },
   heroMealPillText: {
-    fontSize: 9,
+    // Was 9 — the smallest pill text in the app, on its single largest card. Discover's rail
+    // cards run 10 at less than half this width, so the hero read as shrunken next to them.
+    fontSize: 11,
     fontWeight: '800',
     color: COLORS.textWhite,
     textTransform: 'uppercase',

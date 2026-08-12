@@ -9,15 +9,16 @@
 -- one decimal macro failing an int4 insert. It returned 500, stored nothing, and the gap was only
 -- noticed by manually querying the table a day later.
 --
--- Runs at 06:00 UTC = one hour after 'trending-meals-daily' (05:00 UTC). The gap matters: image
--- generation runs after the insert and takes minutes, so checking any earlier would report missing
--- images that are simply still rendering.
+-- Runs at 05:20 UTC = 20 minutes after 'trending-meals-daily' (05:00 UTC). A gap is required because
+-- image generation runs AFTER the insert and takes a couple of minutes at 5-way concurrency —
+-- checking immediately would report missing images that are merely still rendering. 20 minutes
+-- clears that comfortably while still catching a failure the same morning.
 --
 -- SETUP — required before this alerts anything:
 --   1. Set the ops user (whose device receives the push):
 --        Dashboard -> Edge Functions -> Secrets -> OPS_USER_ID = <your profiles.id uuid>
 --      Find it with:  SELECT id, email FROM auth.users ORDER BY created_at LIMIT 5;
---   2. Optional: TRENDING_MIN_EXPECTED (defaults to 10; STORE_CAP is 18 and a normal run yields ~16).
+--   2. Optional: TRENDING_MIN_EXPECTED (defaults to 12; STORE_CAP is 18 and a normal run yields ~16).
 --   3. The device must have registered a push token — profiles.expo_push_token is written by
 --      hooks/useNotifications.ts once notification permission is granted. Verify with:
 --        SELECT expo_push_token FROM profiles WHERE id = '<OPS_USER_ID>';
@@ -38,7 +39,7 @@ END $$;
 
 SELECT cron.schedule(
   'trending-health-check-daily',
-  '0 6 * * *',  -- 06:00 UTC daily, one hour after the generator
+  '20 5 * * *', -- 05:20 UTC daily, 20 minutes after the generator
   $$
   SELECT net.http_post(
     url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/trending-health-check',
