@@ -92,6 +92,19 @@ const DISCOVER_PROTEIN_KEYWORDS = [
 // Only check first 3 ingredients — GPT lists them in order of prominence, so the
 // "primary" protein is essentially always in the first few. Cheaper than scanning all
 // ingredients and avoids false matches like "splash of cream" being tagged as dairy.
+// Deterministic per-key offset so sections don't all rotate in lockstep — without it every
+// section would advance by one together and the page would still feel like a single ordering.
+const hashKey = (k: string) => { let h = 0; for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0; return Math.abs(h) }
+// Advances a full PAGE per day, not one item. Stepping by 1 technically rotates but is invisible:
+// a 96-meal section would surface only ~36 distinct meals on page 1 across a week and take two
+// months to cycle. Stepping by GRID_PAGE gives a genuinely different first page each day and cycles
+// even a large section in a few days.
+const rotateByDay = <T,>(arr: T[], day: number, key: string, stride: number): T[] => {
+  if (arr.length < 2) return arr
+  const n = (day * stride + hashKey(key)) % arr.length
+  return [...arr.slice(n), ...arr.slice(0, n)]
+}
+
 const titleCase = (s: string) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
 function detectPrimaryProtein(meal: any): string {
@@ -541,7 +554,15 @@ export default function DiscoverScreen() {
       { key: 'snacks', title: 'Snacks', meals: snacks },
       { key: 'desserts', title: 'Desserts', meals: desserts },
       { key: 'other', title: 'Everything else', meals: leftovers },
-    ].filter(sec => sec.meals.length > 0)
+    ]
+      .filter(sec => sec.meals.length > 0)
+      // Rotate the MEALS INSIDE each section too, not just the section order. Without this the
+      // contents are pinned newest-first forever: with 30-day retention and 30-per-page reveal,
+      // the same top meals lead every day and anything deeper is effectively unreachable — the
+      // pool would grow to hundreds while the visible surface stayed identical.
+      //
+      // "New today" is exempt: it's a dated section, so newest-first is the meaning of it.
+      .map(sec => sec.key === 'new' ? sec : { ...sec, meals: rotateByDay(sec.meals, dayOfYear, sec.key, GRID_PAGE) })
   }, [browseGrid])
 
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
