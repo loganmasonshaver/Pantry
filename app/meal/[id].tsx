@@ -383,7 +383,11 @@ function renderStepContent(step: string | { title: string; detail: string }) {
 }
 
 export default function MealDetailScreen() {
-  const { id, mealData } = useLocalSearchParams<{ id: string; mealData?: string }>()
+  // Attribution passed in by whichever surface opened this screen (see openMeal in discover.tsx).
+  // Stamped onto meal_logs below so a cook can be traced to the shelf that produced it.
+  const { id, mealData, source, shelfKey, position } = useLocalSearchParams<{
+    id: string; mealData?: string; source?: string; shelfKey?: string; position?: string
+  }>()
   const router = useRouter()
   const { user } = useAuth()
   const { isPremium, triggerUpgrade } = usePremium()
@@ -789,6 +793,14 @@ export default function MealDetailScreen() {
       fat: meal.fat ?? 0,
       slot,
       logged_at: today,
+      // Null rather than a guessed default when the opener didn't pass attribution — an unknown
+      // source must stay unknown, not get misfiled into a bucket it never came from.
+      source: source ?? null,
+      shelf_key: shelfKey ?? null,
+      shelf_position: position !== undefined ? parseInt(position, 10) : null,
+      // trending_meals ids are uuids; the pantry/generated meals use other id shapes, so only
+      // stamp it when this screen was opened from a Discover surface.
+      trending_meal_id: source?.startsWith('discover') ? id : null,
       meal_data: {
         name: meal.name,
         calories: meal.calories,
@@ -807,7 +819,9 @@ export default function MealDetailScreen() {
       Alert.alert('Error', error.message)
     } else {
       setLogged(true)
-      trackMealLogged(slot, meal.calories, meal.protein)
+      trackMealLogged(slot, meal.calories, meal.protein, {
+        source: source as any, shelfKey, position: position !== undefined ? parseInt(position, 10) : undefined,
+      })
       setTimeout(() => router.back(), 800)
     }
   }

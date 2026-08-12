@@ -123,12 +123,46 @@ export function trackMealRegenerated() {
   posthog.capture('meal_regenerated')
 }
 
-export function trackMealViewed(mealName: string) {
-  posthog.capture('meal_viewed', { meal_name: mealName })
+// Where a meal was surfaced. Threaded through view/save/log so the funnel can be read per
+// surface and per shelf — without it a cook is just a cook and no shelf can be evaluated.
+export type MealSource =
+  | 'discover_featured' | 'discover_rail' | 'discover_grid'
+  | 'pantry_hero' | 'search' | 'saved' | 'scan' | 'manual'
+
+export type MealContext = {
+  source?: MealSource
+  /** Shelf/section key, e.g. 'protein-chicken', 'new', 'desserts'. Discover surfaces only. */
+  shelfKey?: string
+  /** 0-based rank within that shelf. Required to tell shelf quality apart from position bias. */
+  position?: number
 }
 
-export function trackMealSaved(mealName: string, calories: number, protein: number) {
-  posthog.capture('meal_saved', { meal_name: mealName, calories, protein })
+export function trackMealViewed(mealName: string, ctx: MealContext = {}) {
+  posthog.capture('meal_viewed', {
+    meal_name: mealName,
+    // ?? null, not undefined — PostHog's typed capture rejects undefined, and an explicit
+    // null distinguishes "surface not recorded" from a key that was never sent.
+    source: ctx.source ?? null, shelf_key: ctx.shelfKey ?? null, position: ctx.position ?? null,
+  })
+}
+
+// Fires when a meal enters the viewport, NOT when it's opened. This is the denominator: without
+// impressions there's no CTR, and "a shelf nobody taps" is indistinguishable from "a shelf nobody
+// scrolled to". Batched per shelf by the caller — one event per meal per scroll would be a firehose.
+export function trackMealImpressions(shelfKey: string, mealIds: string[], source: MealSource) {
+  if (mealIds.length === 0) return
+  posthog.capture('meal_impressions', {
+    shelf_key: shelfKey, source, meal_ids: mealIds, count: mealIds.length,
+  })
+}
+
+export function trackMealSaved(mealName: string, calories: number, protein: number, ctx: MealContext = {}) {
+  posthog.capture('meal_saved', {
+    meal_name: mealName, calories, protein,
+    // ?? null, not undefined — PostHog's typed capture rejects undefined, and an explicit
+    // null distinguishes "surface not recorded" from a key that was never sent.
+    source: ctx.source ?? null, shelf_key: ctx.shelfKey ?? null, position: ctx.position ?? null,
+  })
 }
 
 export function trackMealSaveBlocked() {
@@ -137,8 +171,13 @@ export function trackMealSaveBlocked() {
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 
-export function trackMealLogged(slotLabel: string, calories: number, protein: number) {
-  posthog.capture('meal_logged', { slot: slotLabel, calories, protein })
+export function trackMealLogged(slotLabel: string, calories: number, protein: number, ctx: MealContext = {}) {
+  posthog.capture('meal_logged', {
+    slot: slotLabel, calories, protein,
+    // ?? null, not undefined — PostHog's typed capture rejects undefined, and an explicit
+    // null distinguishes "surface not recorded" from a key that was never sent.
+    source: ctx.source ?? null, shelf_key: ctx.shelfKey ?? null, position: ctx.position ?? null,
+  })
 }
 
 // ── Weight & Profile ──────────────────────────────────────────────────────────

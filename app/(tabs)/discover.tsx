@@ -17,6 +17,7 @@ import { Flame, Compass, Utensils, Plus } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
+import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
 import { supabase } from '@/lib/supabase'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
 import { useAuth } from '@/context/AuthContext'
@@ -583,14 +584,54 @@ export default function DiscoverScreen() {
   const [expandedSections, setExpandedSections] = useState<Record<string, number>>({})
   const shownCount = (key: string) => expandedSections[key] ?? GRID_PAGE
 
-  const openMeal = (meal: DiscoverMeal) => {
-    router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
+  // Impression tracking. Fired on VIEWPORT ENTRY, not on render — the grid renders sections far
+  // below the fold, so counting a render as a view would inflate the denominator and make every
+  // shelf's CTR look worse than it is. A wrong impression count is more damaging than none.
+  // Fires at most once per section per mount; re-entering a section while scrolling isn't a new
+  // impression.
+  const sectionRects = useRef<Record<string, { y: number; h: number }>>({})
+  const firedSections = useRef<Set<string>>(new Set())
+  const scrollViewH = useRef(0)
+  const onDiscoverScroll = useCallback((offsetY: number) => {
+    for (const [key, rect] of Object.entries(sectionRects.current)) {
+      if (firedSections.current.has(key)) continue
+      const visible = rect.y < offsetY + scrollViewH.current && rect.y + rect.h > offsetY
+      if (!visible) continue
+      const sec = browseSectionsRef.current.find(x => x.key === key)
+      if (!sec) continue
+      firedSections.current.add(key)
+      trackMealImpressions(key, sec.meals.slice(0, shownCount(key)).map(m => m.id), 'discover_grid')
+    }
+  }, [expandedSections])
+  // Ref mirror so the scroll handler isn't re-created on every section change.
+  const browseSectionsRef = useRef<typeof browseSections>([])
+
+  // Attribution rides along in the route params so the detail screen can stamp a log with where
+  // the user actually came from. Passing it here rather than reading it on the other side is the
+  // only place that knows the shelf and the rank.
+  useEffect(() => { browseSectionsRef.current = browseSections }, [browseSections])
+
+  const openMeal = (meal: DiscoverMeal, source: MealSource, shelfKey?: string, position?: number) => {
+    trackMealViewed(meal.name, { source, shelfKey, position })
+    router.push({
+      pathname: '/meal/[id]',
+      params: {
+        id: meal.id,
+        mealData: JSON.stringify(meal),
+        source,
+        ...(shelfKey ? { shelfKey } : {}),
+        ...(position !== undefined ? { position: String(position) } : {}),
+      },
+    })
   }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={250}
+        onLayout={e => { scrollViewH.current = e.nativeEvent.layout.height }}
+        onScroll={e => onDiscoverScroll(e.nativeEvent.contentOffset.y)}
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor="#4ADE80" colors={['#4ADE80']} />}
       >
@@ -629,7 +670,7 @@ export default function DiscoverScreen() {
           <PressableScale
             style={styles.featuredHero}
             scaleTo={0.98}
-            onPress={() => openMeal(featured)}
+            onPress={() => openMeal(featured, 'discover_featured')}
           >
             {featured.image && featured.image.startsWith('http') ? (
               <MealImage uri={featured.image} style={styles.featuredImage} recyclingKey={String(featured.id)} priority="high" />
@@ -672,7 +713,7 @@ export default function DiscoverScreen() {
             >
               {youtubeRail.map((meal, index) => (
                 <Animated.View key={meal.id} entering={FadeInDown.duration(260).delay(Math.min(index, 8) * 40)}>
-                  <RailCard meal={meal} onPress={() => openMeal(meal)} />
+                  <RailCard meal={meal} onPress={() => openMeal(meal, 'discover_rail', 'trending', index)} />
                 </Animated.View>
               ))}
             </ScrollView>
@@ -700,7 +741,7 @@ export default function DiscoverScreen() {
               >
                 {creatorRail.map((meal, index) => (
                   <Animated.View key={meal.id} entering={FadeInDown.duration(260).delay(Math.min(index, 8) * 40)}>
-                    <RailCard meal={meal} onPress={() => openMeal(meal)} />
+                    <RailCard meal={meal} onPress={() => openMeal(meal, 'discover_rail', 'creators', index)} />
                   </Animated.View>
                 ))}
               </ScrollView>
@@ -719,7 +760,11 @@ export default function DiscoverScreen() {
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
           return (
-            <View key={section.key} style={{ marginTop: 28 }}>
+            <View
+              key={section.key}
+              style={{ marginTop: 28 }}
+              onLayout={e => { const { y, height } = e.nativeEvent.layout; sectionRects.current[section.key] = { y, h: height } }}
+            >
               <View style={styles.railHeader}>
                 <Text style={styles.railTitle}>{section.title}</Text>
                 <Text style={styles.browseCount}>{section.meals.length}</Text>
@@ -733,7 +778,7 @@ export default function DiscoverScreen() {
                     // section visibly crawl in after the user has already scrolled to it.
                     entering={FadeInDown.duration(240).delay(Math.min(index, 12) * 30)}
                   >
-                    <RailCard meal={meal} onPress={() => openMeal(meal)} full />
+                    <RailCard meal={meal} onPress={() => openMeal(meal, 'discover_grid', section.key, index)} full />
                   </Animated.View>
                 ))}
               </View>
