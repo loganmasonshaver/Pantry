@@ -10,9 +10,10 @@ has verified. Delete lines as they stop being true.
 bash scripts/preflight.sh && npx tsc --noEmit 2>&1 | grep -c "error TS"
 ```
 
-Expect **no blocking issues** and **206**. Anything else — investigate before trusting a word below.
-Everything that landed is in `git log --oneline 9cfcb95..HEAD` (42 commits, reasoning is in the
-commit bodies, `git show <sha>` for any of them).
+Expect **no blocking issues** and **207** (50 app-code, 157 Deno noise — see `CLAUDE.md`).
+Anything else — investigate before trusting a word below.
+Everything that landed is in `git log --oneline 9cfcb95..HEAD` (reasoning is in the commit bodies,
+`git show <sha>` for any of them).
 
 ## Next action
 
@@ -38,6 +39,12 @@ Then read the Edge Function logs:
   kept 17. Fixed by gating first and raising `maxResults` 20→50. Unproven.
 - **`shelf_tag`** — column live, **zero meals have one** (only populates on generation). Every tag
   shelf is currently driven by the name-based fallback, which covers 81%. Looks broken; isn't.
+- **Cook-Now repeat suppression** (separate chat, same night) — `profiles.recent_meal_names` (30-name
+  server window) + a code-enforced drop in `generate-meals` using an order-insensitive dish
+  fingerprint, so "Fried Rice with Chicken" is caught as a repeat of "Chicken Fried Rice". Prompt-only
+  exclusion and a 12-name device list were the old mechanism; a heavy day (1 auto-fire + 3 rerolls)
+  flushed that entire window, which is how a meal carried across a day boundary. Migration applied,
+  function deployed, unit-tested — **but never observed across a real day boundary on device.**
 - **Discover Phase 1 ~70%** — context line, 3 personalised shelves, intent shelves, browse grid all
   shipped. Card density not started. Phase 2 (weekly drop, cook-rate ranking, per-user shelf
   ordering) not begun. See `PLAN-discover-personalization.md`.
@@ -82,3 +89,8 @@ Places where the obvious "fix" is a regression:
   home hero fit, and the milk serving fix.
 - The `servings` fix has produced exactly one correct batch recipe (`Protein Bars`, servings 8).
 - Allergen cross-check (model + keyword AND) has never run — needs a successful generation.
+- Repeat suppression has never been observed across a day boundary. Confirm by generating on two
+  consecutive days and checking the function logs for
+  `Repeat filter: N/M candidates matched a recent dish` — the exclusion is only real if N > 0 on
+  day two. The dish fingerprint is unit-tested (24 cases, incl. deliberate non-matches like
+  Chicken vs Beef Stir Fry) but has never seen live model output.

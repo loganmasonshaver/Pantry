@@ -10,6 +10,15 @@ This repo uses a single main-branch workflow. No feature branches, no PRs for so
 1. **At start:** `cd /Users/loganshaver/pantry && git pull origin main` — sync before any work. If the session was launched inside a `.claude/worktrees/*` path, still `cd` to `/Users/loganshaver/pantry` and do all work there. The worktree is dead weight; ignore it.
 2. **During:** commit + push to `main` directly after each meaningful change (no branching).
 3. **Metro lives in main too:** the Expo dev server should always be running from `/Users/loganshaver/pantry`, never from a worktree path — otherwise edits won't hot-reload.
+4. **One writer at a time.** Logan sometimes runs two chats against this repo. Only one may edit
+   files; the other is read-only. Two writers on one working tree means `git add -A` in either
+   sweeps up the other's in-flight edits, and neither change can be tested — there is one Metro
+   server and one device. Stage by explicit path (`git add <files>`), never `git add -A`.
+5. **Re-`ls supabase/migrations` immediately before `db push`.** Two sessions generate the same
+   `YYYYMMDDHHMMSS` prefix from the same clock-hour. A collision aborts the OTHER migration
+   mid-push and leaves a bogus ledger row — this silently removed `trending_meals.source_verified`
+   from prod on 2026-08-12. Recovery: `npx supabase migration repair --status reverted <version>`,
+   renumber, re-push. Always write `add column if not exists` so a partial apply is re-runnable.
 
 ## On Session Start
 1. `cd /Users/loganshaver/pantry && git pull origin main` (per Git Workflow above)
@@ -135,8 +144,11 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline ≈ 206.** Watch the DELTA, not the total — ~130 are Deno-global noise from
-  `supabase/functions` being inside the tsconfig. A +1 caught a real ReferenceError once.
+- **TS baseline = 207** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **50** in
+  app code (`app/ lib/ components/ hooks/ context/`) and **157** Deno-global noise from
+  `supabase/functions` being inside the tsconfig. Watch the DELTA, not the total — a +1 caught a
+  real ReferenceError once. Adding any `_shared` import to an edge function raises the total by 1
+  (TS5097) without meaning anything; the app-code number is the one that matters.
 - `bash scripts/preflight.sh` reports the three places state drifts: uncommitted files,
   unapplied migrations, and functions whose source is newer than their deploy. Run it at session
   start instead of trusting any written claim about deploy state.
