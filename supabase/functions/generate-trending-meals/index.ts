@@ -460,8 +460,16 @@ Deno.serve(async (req: Request) => {
     for (const config of queryConfigs) {
       try {
         const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
+        // maxResults 50, not 20. search.list costs 100 quota units regardless of how many results
+        // it returns, so a bigger page is free — and the 100%-retention gate needs the volume: only
+        // 28% of raw candidates have a readable ingredient list, so 60 unique videos yielded 17
+        // usable ones and the run aborted below MIN_TRENDING_MEALS.
+        //
+        // (An earlier estimate of 75% was measured on descriptions of meals ALREADY in the table —
+        // i.e. recipes the extractor had already succeeded on, which correlates with having a clean
+        // list. That's survivorship bias; 28% is the real rate on raw candidates.)
         // Step 1a: Search for video IDs with this query/sort/window combo
-        const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=20&publishedAfter=${publishedAfter}&key=${youtubeKey}`
+        const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=50&publishedAfter=${publishedAfter}&key=${youtubeKey}`
         const ytRes = await fetchWithTimeout(ytUrl)
         const ytData = await ytRes.json()
 
@@ -505,7 +513,7 @@ Deno.serve(async (req: Request) => {
     // YouTube algorithmic trending in Howto & Style (videoCategoryId=26) — what YouTube's own
     // ranker considers viral RIGHT NOW. Independent of our keyword queries.
     try {
-      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=25&key=${youtubeKey}`
+      const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=50&key=${youtubeKey}`
       const trendingRes = await fetchWithTimeout(trendingUrl)
       const trendingData = await trendingRes.json()
       if (trendingData.items) {
@@ -564,6 +572,22 @@ Deno.serve(async (req: Request) => {
     // a title that sounds impossible earns the click whether or not the food is good. Likes come
     // from people who watched it through, so like RATE separates "went viral" from "was liked".
     // The view floor above still gates entry; this decides the order within it.
+    // HARD GATE, and it must run BEFORE the cap. A video without a readable ingredient list can't
+    // be verified, so it can't be guaranteed complete. Only 28% of raw candidates qualify.
+    //
+    // Ordering was the bug that aborted the first run: the pool was capped to 60 and THEN gated,
+    // so the gate only ever saw 60 videos and kept 17 — the cap was spending most of its budget on
+    // candidates that were about to be discarded. Gating first means the 60 we keep are 60 usable
+    // ones. Same cap, ~3.5x the usable pool.
+    const beforeGate = uniqueVideos.length
+    uniqueVideos = uniqueVideos.filter(v => parseIngredientBlock(v.description || '').length >= 3)
+    console.log(`[funnel] ingredient-list gate: ${uniqueVideos.length}/${beforeGate} videos have a readable list`)
+
+    // Best-LIKED first, not most-viewed. Measured on a real batch: the highest-viewed video
+    // (7.2M, "2-Ingredient Chia Pita") had the WORST like rate in the pool at 1.17% against a
+    // 2.96% median, and it's a recipe trusted reviewers call inedible. Views measure curiosity —
+    // a title that sounds impossible earns the click whether or not the food is good. Likes come
+    // from people who watched it through, so like RATE separates "went viral" from "was liked".
     uniqueVideos = uniqueVideos
       .sort((a, b) => likeRate(b) - likeRate(a))
       .slice(0, 60)
@@ -571,15 +595,6 @@ Deno.serve(async (req: Request) => {
     const medianViews = uniqueVideos.length
       ? uniqueVideos[Math.floor(uniqueVideos.length / 2)].viewCount
       : 0
-    // HARD GATE: a video without a readable ingredient list cannot be verified, so it cannot be
-    // guaranteed complete — and an incomplete recipe damages taste, macros and allergen tags at
-    // once. Dropped before the LLM call rather than after, which also saves the tokens.
-    //
-    // This is affordable only because the parser now reads 75% of descriptions (it was 35%). At
-    // the old coverage this gate would have discarded two-thirds of every batch.
-    const withList = uniqueVideos.filter(v => parseIngredientBlock(v.description || '').length >= 3)
-    console.log(`[funnel] ingredient-list gate: ${withList.length}/${uniqueVideos.length} videos have a readable list`)
-    uniqueVideos = withList
 
     const rates = uniqueVideos.map(likeRate).filter(r => r > 0).sort((a, b) => a - b)
     const medianLike = rates.length ? rates[Math.floor(rates.length / 2)] : 0
