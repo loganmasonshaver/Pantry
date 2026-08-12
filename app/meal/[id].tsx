@@ -1027,7 +1027,16 @@ export default function MealDetailScreen() {
         {/* ── Ingredients ── */}
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Ingredients</Text>
+            <View>
+              <Text style={styles.sectionTitle}>Ingredients</Text>
+              {/* Quantities are the creator's FULL BATCH, while the macros above are per serving.
+                  Without this line a 4-egg cheesecake next to "278 cal" reads as a lie — it's the
+                  label that makes the two numbers reconcilable. Hidden at 1 serving, where the
+                  distinction doesn't exist. */}
+              {(meal as any)?.servings > 1 && (
+                <Text style={styles.servingsNote}>Makes {(meal as any).servings} servings · macros are per serving</Text>
+              )}
+            </View>
             <View style={styles.pillToggle}>
               {(['Measured', 'Eyeball'] as PortionMode[]).map(mode => (
                 <TouchableOpacity
@@ -1561,6 +1570,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 2 },
   sectionTitle: {
     fontSize: 11,
     fontWeight: '700',

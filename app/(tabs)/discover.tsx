@@ -148,6 +148,7 @@ type DiscoverMeal = {
   carbs: number
   fat: number
   prepTime: number
+  servings: number
   ingredients: any[]
   steps: any[]
   image: string | null
@@ -403,7 +404,7 @@ export default function DiscoverScreen() {
     const mapped = filterTrendingByLifecycle(data)
       .map(m => ({
         id: m.id, name: m.name, calories: m.calories, protein: m.protein,
-        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1,
         ingredients: m.ingredients, steps: m.steps, image: m.image,
         trend_source: m.trend_source,
         creator: (m as any).creators ?? null,

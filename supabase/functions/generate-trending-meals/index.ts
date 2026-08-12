@@ -488,6 +488,12 @@ For each video you select, output the recipe AS THE CREATOR PRESENTED IT.
 CORE FIDELITY RULES — do not violate these:
 - READ macros from the video description first. Most fitness creators list calories/protein/carbs/fat directly. If they listed numbers, USE THEM VERBATIM. Do not recalculate.
 - READ ingredients and quantities from the description verbatim. Preserve the creator's portions exactly. Do not scale, round, or substitute.
+- SERVINGS AND SCALE — read this before touching any quantity. Creators list INGREDIENTS for the whole batch and MACROS per serving. Do not reconcile those by shrinking the ingredients.
+  * "servings" = how many servings the creator's ingredient list makes. If they say "makes 8", use 8. If they give per-serving macros and a batch of ingredients, work out how many servings that batch is. If it's a single-portion dish, 1.
+  * "ingredients" = the creator's quantities EXACTLY as written, for the FULL batch. 16 oz of cream cheese stays 16 oz.
+  * calories/protein/carbs/fat = PER SERVING, as the creator stated them.
+  * NEVER divide ingredient quantities to match per-serving macros. A real failure this rule exists to stop: a cheesecake made with 16oz cream cheese, 4 eggs and 2 scoops of protein powder was stored as 2oz, "0.5 large eggs" and "0.25 scoop". Half an egg is not a recipe.
+  * NEVER output a fractional count of a discrete item — eggs, scoops, slices, cloves, cans, bars, tortillas. If a number comes out fractional, you have scaled something you shouldn't have.
 - KEEP EVERY INGREDIENT THE CREATOR LISTS — including toppings, garnishes and sauce components. Do NOT reduce a recipe to its "main" 3-4 ingredients. A bowl or plate dish IS its toppings: strip the diced tomato, pickles and lettuce off a burger bowl and you have described a different, barer dish than the one the creator made. If the creator groups ingredients under headings (Burger / Toppings / Sauce), keep the items from EVERY heading.
 - A multi-ingredient sauce or dressing stays intact: list its components as ingredients, and describe it in the steps as one mixed sauce (e.g. "whisk the yogurt, ketchup, mustard and relish into a burger sauce") so downstream knows it is combined rather than served as separate dollops.
 - PRESERVE THE PREPARATION METHOD exactly as described. If the creator cuts the potato into fries, the step says fries — not "dice", not "cube", not "roast". The cut and cooking method determine what the finished dish physically looks like, so changing it silently misrepresents the recipe.
@@ -550,6 +556,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "video_index": 1,
     "name": "The actual dish name (cleaned up)",
     "category": "meal",
+    "servings": 1,
     "calories": 550,
     "protein": 45,
     "carbs": 40,
@@ -932,6 +939,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         carbs: toInt(r.carbs),
         fat: toInt(r.fat),
         prep_time: toInt(r.prepTime),
+        // Ingredients are stored at the creator's full-batch scale, so servings is what makes the
+        // per-serving macros interpretable. Defaults to 1 rather than null: an unknown serving
+        // count is far more likely to be a single portion than a missing batch.
+        servings: Math.max(1, toInt(r.servings) ?? 1),
         image: video?.thumbnail || null,
         video_id: video?.videoId || null,
         trend_source: 'YouTube trending',

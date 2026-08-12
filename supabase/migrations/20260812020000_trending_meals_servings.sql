@@ -1,0 +1,12 @@
+-- Ingredients are stored at the creator's FULL BATCH scale; macros are per serving. Without a
+-- servings count those two are irreconcilable, and the model was resolving it the only way it
+-- could — by dividing the ingredients down.
+--
+-- The failure this fixes, from real stored data: a cheesecake the creator makes with 16oz cream
+-- cheese, 4 eggs and 2 scoops of protein powder was stored as 2oz, "0.5 large eggs" and
+-- "0.25 scoop", because the description's macros were per-serving and the batch made 8. Every
+-- quantity was faithful to the macros and useless as a recipe. You cannot bake with half an egg.
+--
+-- Default 1, not null: a recipe with no stated serving count is far more likely to be a single
+-- portion than a batch of unknown size, and 1 keeps existing rows displaying correctly.
+alter table trending_meals add column if not exists servings int not null default 1;
