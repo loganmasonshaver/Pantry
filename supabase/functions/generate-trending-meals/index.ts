@@ -810,6 +810,19 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // A recipe that survives with 3 or fewer ingredients usually means the extractor collapsed the
     // creator's list to its "main" items and dropped the toppings/sauce — which is what makes a
     // dish render bare and wrong downstream. Log it so a systematic regression is visible.
+    // Which recipes arrived with non-integer macros, and in which field. toInt() now rounds these
+    // at insert so they can't abort the batch, but the SOURCE matters: creators rarely publish
+    // decimals, so a decimal usually means the LLM calculated the macro from ingredients instead of
+    // reading the creator's stated numbers — which is a fidelity regression worth catching early.
+    const decimalMacros = recipes.flatMap((r: any) =>
+      ['calories', 'protein', 'carbs', 'fat', 'prepTime']
+        .filter(f => { const n = parseFloat(String(r[f])); return Number.isFinite(n) && !Number.isInteger(n) })
+        .map(f => `${r.name}.${f}=${r[f]}`)
+    )
+    if (decimalMacros.length > 0) {
+      console.log(`[funnel] non-integer macros rounded at insert (${decimalMacros.length}): ${decimalMacros.join(', ')}`)
+    }
+
     const bare = recipes.filter((r: any) => (r.ingredients?.length ?? 0) <= 3)
     if (bare.length > 0) {
       console.log(`[funnel] WARN: ${bare.length} recipe(s) stored with <=3 ingredients — possible ingredient drop: ${bare.map((r: any) => `${r.name}(${r.ingredients?.length ?? 0})`).join(', ')}`)
