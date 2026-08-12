@@ -43,6 +43,26 @@ const RETENTION_DAYS = 30
 // "Chicken Rice Bowl" vs "Beef Rice Bowl" (0.5), which is a genuinely different dish.
 const NEAR_DUP_JACCARD = 0.7
 
+// Items that cannot be fractional. A fraction here is proof the recipe was scaled down from a
+// batch, which is what produced a stored cheesecake calling for "0.5 large eggs" and "0.25 scoop".
+// Deliberately excludes onion, clove and scoop — a quarter onion, half a clove and half a scoop are
+// all things people genuinely measure, and flagging them cost 10+ false positives in the audit.
+const INDIVISIBLE_ITEM = "(egg|slice|can|bar|tortilla|bun|packet|container|bottle|patty|link|cookie|muffin|fillet|breast|thigh)"
+// Leading fraction: 0.5 / .5 / 1/2 / ½, then up to two adjective words, then the item.
+// (?<![\\d/.]) stops "1/2 cup" being read as the "2" in "2 cup" — that exact bug produced 26
+// false positives when auditing stored rows, so it is load-bearing, not defensive noise.
+const FRACTIONAL_INDIVISIBLE = new RegExp(
+  String.raw`(?<![\d/.])(?:0?\.\d+|\d+\.\d+|\d+\s*/\s*\d+|[¼½¾⅓⅔⅛])\s*(?:[a-z-]+\s+){0,2}` + INDIVISIBLE_ITEM + String.raw`s?`,
+  'i',
+)
+function hasFractionalIndivisible(ingredients: any[]): string | null {
+  for (const ing of ingredients ?? []) {
+    const text = typeof ing === 'string' ? ing : `${ing?.visual ?? ''} ${ing?.grams ?? ''} ${ing?.name ?? ''}`
+    if (FRACTIONAL_INDIVISIBLE.test(text)) return text.trim()
+  }
+  return null
+}
+
 // Likes as a percentage of views. A quality proxy that view count actively can't provide: the
 // most-viewed video in a batch is often the most gimmicky one, since novelty drives the click.
 // Guarded against divide-by-zero on brand-new videos.
@@ -644,7 +664,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -678,11 +698,16 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // would accumulate. Applies to both the stored history and today's own batch.
             const maxJac = Math.max(r._maxJaccardPrev, r._maxJaccardToday)
             if (maxJac >= NEAR_DUP_JACCARD) { rejNearDup++; return false }
+            // Enforced in CODE, not just the prompt. "Do not scale" was already an explicit
+            // instruction and was ignored anyway — same lesson as the format cap. A recipe that
+            // asks for half an egg cannot be cooked, so it's rejected outright rather than ranked.
+            const frac = hasFractionalIndivisible(r.ingredients)
+            if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional})`)
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
