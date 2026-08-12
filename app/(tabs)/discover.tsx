@@ -106,6 +106,18 @@ const rotateByDay = <T,>(arr: T[], day: number, key: string, stride: number): T[
   return [...arr.slice(n), ...arr.slice(0, n)]
 }
 
+// How many of a meal's ingredients the user doesn't already have. Substring both ways so
+// "chicken breast" in a recipe matches a pantry entry of "chicken", and vice versa — pantry names
+// are free text and will never match a recipe's phrasing exactly.
+function missingCount(meal: DiscoverMeal, pantry: Set<string>): number {
+  const ings = (meal.ingredients || []).map((i: any) => String(i?.name ?? i ?? '').toLowerCase().trim()).filter(Boolean)
+  if (ings.length === 0) return 99
+  return ings.filter(ing => {
+    for (const have of pantry) if (ing.includes(have) || have.includes(ing)) return false
+    return true
+  }).length
+}
+
 const titleCase = (s: string) => s.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 
 function detectPrimaryProtein(meal: any): string {
@@ -320,6 +332,11 @@ export default function DiscoverScreen() {
   // placeholder number.
   const [budget, setBudget] = useState<{ calLeft: number; proLeft: number; hasLogged: boolean } | null>(null)
   const [maxPrep, setMaxPrep] = useState<number | null>(null)
+  // Lowercased pantry item names, for the missing-ingredient count.
+  const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
+  // Most recently cooked meal. Drives the "Because you cooked X" shelf — needs only THIS user's
+  // history, not a cohort, so it works from their first cook rather than at some future scale.
+  const [lastCooked, setLastCooked] = useState<string | null>(null)
   const [foodDislikes, setFoodDislikes] = useState<string[]>([])
   const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
   const [dietType, setDietType] = useState<string>('Classic')
@@ -349,6 +366,14 @@ export default function DiscoverScreen() {
           .select('calories, protein').eq('user_id', user.id).eq('logged_at', todayStr)
         const eatenCal = (logs ?? []).reduce((sum, l: any) => sum + (l.calories ?? 0), 0)
         const eatenPro = (logs ?? []).reduce((sum, l: any) => sum + (l.protein ?? 0), 0)
+        const [{ data: pantry }, { data: recent }] = await Promise.all([
+          supabase.from('pantry_items').select('name').eq('user_id', user.id),
+          supabase.from('meal_logs').select('meal_name, logged_at')
+            .eq('user_id', user.id).order('logged_at', { ascending: false }).limit(1),
+        ])
+        setPantryNames(new Set((pantry ?? []).map((p: any) => String(p.name ?? '').toLowerCase().trim()).filter(Boolean)))
+        if (recent?.[0]?.meal_name) setLastCooked(recent[0].meal_name)
+
         setBudget({
           calLeft: Math.max(0, goalCal - eatenCal),
           proLeft: Math.max(0, goalPro - eatenPro),
@@ -601,6 +626,28 @@ export default function DiscoverScreen() {
         ).slice(0, 12)
       : []
 
+    // Nearly-cookable. The most Pantry-native shelf there is: it's the only one that answers
+    // "what can I make with what I already own", which is the app's actual promise. Ranked by how
+    // few things are missing, so the top of the shelf is the closest to dinner.
+    // Allows up to 2 missing — a strict zero-missing rule almost never matches (every recipe has
+    // some spice or oil the pantry scan didn't catch) and would leave the shelf permanently empty.
+    const nearlyCookable = pantryNames.size > 0
+      ? browseGrid
+          .map(m => ({ m, missing: missingCount(m, pantryNames) }))
+          .filter(x => x.missing <= 2)
+          .sort((a, b) => a.missing - b.missing)
+          .slice(0, 12)
+          .map(x => x.m)
+      : []
+
+    // Because you cooked X. Needs only this user's own history, so it activates on their first
+    // cook rather than waiting for a cohort to exist. Similarity is same-primary-protein: crude,
+    // but at this pool size an embedding would be precision theatre over ~450 meals.
+    const cookedProtein = lastCooked ? detectPrimaryProtein({ name: lastCooked, ingredients: [] }) : null
+    const becauseYouCooked = cookedProtein && cookedProtein !== 'other'
+      ? browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein).slice(0, 12)
+      : []
+
     const rotatable = [...proteinSections, ...categorySections]
     const substantial = rotatable.filter(sec => sec.meals.length >= ROTATABLE_MIN)
     const thin = rotatable.filter(sec => sec.meals.length < ROTATABLE_MIN)
@@ -615,6 +662,11 @@ export default function DiscoverScreen() {
     return [
       // "New today" stays pinned: it's the freshness anchor that replaced deleting old meals,
       // and an anchor that moves isn't an anchor.
+      // Pinned above everything else: both answer "what should I eat right now", which is
+      // worthless below the fold. Empty ones are filtered out, so a new user with no pantry and no
+      // cooks simply never sees them — they switch on by themselves.
+      { key: 'nearly', title: 'Almost in your kitchen', meals: nearlyCookable },
+      { key: 'because', title: `Because you cooked ${lastCooked ?? ''}`.trim(), meals: becauseYouCooked },
       { key: 'fits', title: `Fits your remaining ${budget?.calLeft ?? 0} kcal`, meals: fitsBudget },
       { key: 'new', title: 'More from today', meals: fresh },
       ...rotatedSections,
@@ -630,7 +682,7 @@ export default function DiscoverScreen() {
       //
       // "New today" is exempt: it's a dated section, so newest-first is the meaning of it.
       .map(sec => sec.key === 'new' ? sec : { ...sec, meals: rotateByDay(sec.meals, dayOfYear, sec.key, GRID_PAGE) })
-  }, [browseGrid, budget])
+  }, [browseGrid, budget, pantryNames, lastCooked])
 
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
   // mounting 400 image cards at once, and keeps each section's header reachable by scroll.
