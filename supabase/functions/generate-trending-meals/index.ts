@@ -28,6 +28,16 @@ async function fetchWithTimeout(url: string, ms = 15000): Promise<Response> {
 
 const today = () => new Date().toISOString().split('T')[0]
 
+// Coerce an LLM-reported number to the int4 the trending_meals columns expect. Handles decimals
+// ("44.5"), stringified numbers, and units the model sometimes appends ("25 min", "180g").
+// Returns null rather than 0 on garbage — a null macro reads as "unknown" downstream, whereas a
+// fabricated 0 would silently misreport the recipe.
+function toInt(v: unknown): number | null {
+  if (v === null || v === undefined) return null
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[^\d.-]/g, ''))
+  return Number.isFinite(n) ? Math.round(n) : null
+}
+
 // ── FatSecret OAuth 1.0 helpers ──
 const FS_URL = "https://platform.fatsecret.com/rest/server.api"
 
@@ -832,11 +842,15 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       return {
         name: r.name,
         category,
-        calories: r.calories,
-        protein: r.protein,
-        carbs: r.carbs,
-        fat: r.fat,
-        prep_time: r.prepTime,
+        // Round before insert — these columns are int4 and the LLM reports macros exactly as the
+        // creator wrote them, which is often a decimal ("44.5g protein"). One such value aborts the
+        // WHOLE batch with `invalid input syntax for type integer`, losing every meal that day, so
+        // this can't be left to chance. Gram-level precision is beyond what the app displays anyway.
+        calories: toInt(r.calories),
+        protein: toInt(r.protein),
+        carbs: toInt(r.carbs),
+        fat: toInt(r.fat),
+        prep_time: toInt(r.prepTime),
         image: video?.thumbnail || null,
         video_id: video?.videoId || null,
         trend_source: 'YouTube trending',
