@@ -101,8 +101,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
       const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
 
-      // Suppress repeats from recent generations — keeps suggestions feeling fresh between regens.
-      // Stored device-local (per-mode), trimmed to last 12 meal names = ~3-4 prior generations.
+      // Suppress repeats from recent generations. This device-local copy is now only a redundancy
+      // layer — the authoritative window lives in profiles.recent_meal_names and is enforced in
+      // code by generate-meals, which is what actually stops a repeat the model tries to return.
       let recentMealNames: string[] = []
       try {
         const recentRaw = await AsyncStorage.getItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`)
@@ -134,11 +135,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const maxPrep = profile?.max_prep_minutes || 30
       await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
 
-      // Append new meal names to the recent-meals list (keep last 12 names, ~3-4 gens) so
-      // future generations can exclude them and feel fresh between regens.
+      // Keep 24 names (~8 gens) rather than 12: a heavy day is 1 auto-fire + 3 rerolls = 12 names,
+      // which flushed the entire old window and let yesterday's dinner come straight back.
       try {
         const newNames = generated.map(m => m.name).filter(Boolean)
-        const merged = [...newNames, ...recentMealNames].slice(0, 12)
+        const merged = [...newNames, ...recentMealNames].slice(0, 24)
         await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
       } catch {}
 

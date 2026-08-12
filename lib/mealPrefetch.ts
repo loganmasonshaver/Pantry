@@ -102,7 +102,8 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     // userId stamps ownership so the cache survives sign-out for this user (see useMealSuggestions).
     await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: 0, userId }))
     try {
-      const merged = [...generated.map(m => m.name).filter(Boolean), ...recentMealNames].slice(0, 12)
+      // 24, matching useMealSuggestions — the prefetch drains the same shared window.
+      const merged = [...generated.map(m => m.name).filter(Boolean), ...recentMealNames].slice(0, 24)
       await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
     } catch {}
 

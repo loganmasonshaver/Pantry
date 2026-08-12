@@ -127,6 +127,27 @@ function missingCount(meal: DiscoverMeal, pantry: Set<string>): number {
 // Character doesn't overlap that way: a dish is one thing.
 //
 // Titles are written as an invitation, not a label. "Indian night" is a plan; "Indian" is a filter.
+// Rows created before shelf_tag existed carry null, and with 30-day retention that's up to a month
+// where every tag shelf would be empty and the whole page would collapse into the catch-all. This
+// derives a tag from the name so old meals still shelve; new ones use the model's judgement.
+const FALLBACK_TAG: [RegExp, string][] = [
+  [/\b(masala|paneer|dal|chana|tikka|curry|chilla|dosa|naan|biryani|peri peri|soya chunk)\b/i, 'indian'],
+  [/\b(taco|fajita|burrito|quesadilla|enchilada|salsa|chipotle)\b/i, 'mexican'],
+  [/\b(gnocchi|pesto|pasta|parmesan|marinara|caprese|risotto|alfredo)\b/i, 'italian'],
+  [/\b(teriyaki|fried rice|stir[- ]fry|ramen|noodle|katsu|poke|hoisin)\b/i, 'asian'],
+  [/\b(mediterranean|kebab|shawarma|falafel|tzatziki|hummus|adana)\b/i, 'mediterranean'],
+  [/\b(burger|buffalo|bbq|hot pocket|mac and cheese|philly|pulled pork)\b/i, 'american-comfort'],
+  [/\b(pancake|toast|bagel|omelet|scramble|granola|oats|breakfast)\b/i, 'breakfast'],
+]
+const shelfTagOf = (m: DiscoverMeal): string | null => {
+  if (m.shelf_tag) return m.shelf_tag
+  const hit = FALLBACK_TAG.find(([re]) => re.test(m.name))
+  if (hit) return hit[1]
+  if ((m as any).category === 'dessert') return 'sweet-treat'
+  if ((m as any).category === 'snack') return 'high-protein-snack'
+  return null
+}
+
 const SHELF_TITLES: Record<string, string> = {
   'mexican': 'Mexican night',
   'indian': 'Indian night',
@@ -176,6 +197,7 @@ type DiscoverMeal = {
   prepTime: number
   servings: number
   shelf_tag: string | null
+  source_verified: boolean
   ingredients: any[]
   steps: any[]
   image: string | null
@@ -456,7 +478,7 @@ export default function DiscoverScreen() {
     const mapped = filterTrendingByLifecycle(data)
       .map(m => ({
         id: m.id, name: m.name, calories: m.calories, protein: m.protein,
-        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1, shelf_tag: m.shelf_tag ?? null,
+        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1, shelf_tag: m.shelf_tag ?? null, source_verified: m.source_verified === true,
         ingredients: m.ingredients, steps: m.steps, image: m.image,
         trend_source: m.trend_source,
         creator: (m as any).creators ?? null,
@@ -612,8 +634,13 @@ export default function DiscoverScreen() {
     }
 
     // ── Personalised: answers to "what should I eat right now" ──
+    // Verified-only. This shelf's entire claim is "you have almost everything for this", and an
+    // unverified recipe is missing ~half its ingredients — so it looks MORE cookable than it is and
+    // ranks higher precisely because it's incomplete. That's the one place the drop bug turns into
+    // an outright lie, so unverified recipes are excluded here even though they ship elsewhere.
     const nearlyRanked = pantryNames.size > 0
-      ? browseGrid.map(m => ({ m, missing: missingCount(m, pantryNames) }))
+      ? browseGrid.filter(m => m.source_verified)
+          .map(m => ({ m, missing: missingCount(m, pantryNames) }))
           .sort((a, b) => a.missing - b.missing)
       : []
     // 8, not 12. Three personalised shelves at 12 claim 36 meals before any intent shelf runs —
@@ -647,7 +674,7 @@ export default function DiscoverScreen() {
     // short releases its meals back — claiming for a shelf nobody sees would orphan those meals
     // out of Everything else too.
     const tagShelves = Object.keys(SHELF_TITLES)
-      .map(tag => ({ key: `tag-${tag}`, title: SHELF_TITLES[tag], match: (m: DiscoverMeal) => (m as any).shelf_tag === tag }))
+      .map(tag => ({ key: `tag-${tag}`, title: SHELF_TITLES[tag], match: (m: DiscoverMeal) => shelfTagOf(m) === tag }))
     const allShelves = [...tagShelves, ...FACT_SHELVES]
     const rot = dayOfYear % allShelves.length
     const rotatedOrder = [...allShelves.slice(rot), ...allShelves.slice(0, rot)]

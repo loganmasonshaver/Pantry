@@ -59,20 +59,44 @@ const SHELF_TAGS = ['mexican', 'indian', 'asian', 'italian', 'mediterranean', 'a
 // The fix is to stop leaving inclusion to the model's discretion. Where the description contains a
 // real list, it is parsed here and handed over as a checklist to COPY rather than a text to
 // summarise. Summarising is where things get dropped.
-const BULLET_LINE = /^\s*(?:[•\-\*●▪]|\d+[.)])\s*(.+)$/gm
-function parseIngredientBlock(desc: string): string[] {
-  const m = desc.match(/ingredients?\s*:?\s*\n([\s\S]*?)(?:\n\s*\n|directions|instructions|method|steps|macros|nutrition)/i)
-  if (!m) return []
-  const out: string[] = []
-  let hit: RegExpExecArray | null
-  const re = new RegExp(BULLET_LINE)
-  while ((hit = re.exec(m[1])) !== null) {
-    const line = hit[1].trim().replace(/[:\s]+$/, '')
-    // Skip headings and prose that slip into the block.
-    if (line.length > 2 && line.length < 90) out.push(line)
-  }
-  return out
+// Measured on 37 real descriptions: the first version required an "Ingredients:" heading AND ascii
+// bullets and found a list in 35%. This finds one in 75%. The two things that mattered were emoji
+// bullets (creators use 🥦🥚🧄 as list markers) and stopping at the method AFTER stripping the
+// bullet — "🍳 Recipe Steps" is emoji-prefixed, so an unstripped ^ anchor never matched it and 21
+// step lines were being swallowed into one recipe's ingredient list.
+const BULLET_CHARS = "[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌🔸🔹🥚🥦🧄🧅🧀🍗🍚🥩🌶🫒🍋🥔🧈🍯🥜🍫🍓🍌🍳🥄🍽🥣🧊🔥]"
+const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy)\b/i
+const NOISE_LINE = /(https?:\/\/|www\.|@[\w.]+|#\w+|comment |subscribe|follow me|link in bio|discount|instagram|tiktok)/i
+const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
+
+function stripBullet(raw: string): string {
+  return raw
+    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS}|\\d+[.)]|\\d+️⃣)+\\s*`), '')
+    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS})+\\s*`), '')
+    .trim()
+    .replace(/[:\s]+$/, '')
 }
+
+function parseIngredientBlock(desc: string): string[] {
+  if (!desc) return []
+  const heading = desc.match(/ingredients?\s*:?\s*\n/i)
+  const body = heading ? desc.slice(heading.index! + heading[0].length) : desc
+  const bulleted: string[] = []
+  const quantified: string[] = []
+  for (const raw of body.split('\n')) {
+    const line = stripBullet(raw)
+    if (STOP_LINE.test(line)) break
+    if (!line || NOISE_LINE.test(line) || line.length <= 2 || line.length >= 90) continue
+    const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|\\d+[.)]|\\d+️⃣)`).test(raw)
+    if (wasBulleted) bulleted.push(line)
+    else if (QTY_START.test(line)) quantified.push(line)
+  }
+  // When the block uses bullets, keep ONLY bulleted lines — the unbulleted lines between them are
+  // group headings ("Potatoes", "Burger Sauce") and counting them would inflate the expected total.
+  const out = bulleted.length >= 3 ? bulleted : quantified
+  return out.length >= 3 ? out : []
+}
+
 
 // Items that cannot be fractional. A fraction here is proof the recipe was scaled down from a
 // batch, which is what produced a stored cheesecake calling for "0.5 large eggs" and "0.25 scoop".
@@ -791,6 +815,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             if (srcList.length >= 3) {
               const kept = (r.ingredients?.length ?? 0) / srcList.length
               console.log(`[funnel] ingredient retention "${name}": ${r.ingredients?.length ?? 0}/${srcList.length} (${Math.round(kept * 100)}%)`)
+              r._sourceVerified = kept >= 0.8
               if (kept < 0.5) { rejDropped++; console.log(`[funnel] rejected "${name}" — dropped more than half the creator's ingredients`); return false }
             }
             const frac = hasFractionalIndivisible(r.ingredients)
@@ -936,10 +961,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       const uniq = nameUniquenessScore(maxJac)
       const macro = macroAgreementScore(r._llmProtein || 0, r._fsProtein || 0)
       const liked = likeQualityScore(r)
+      // Verified against the creator's own published list. Worth a real slice of the score: an
+      // unverified recipe may be missing half its ingredients, which damages taste, macros and the
+      // allergen tags all at once. Not a filter though — see the migration for why.
+      const verified = r._sourceVerified ? 1 : 0
       // Density still leads (it's the core value prop), but 20% now goes to whether the source
       // video was actually liked. Taken proportionally from density and macro agreement rather
       // than uniqueness, which is what stops the feed repeating itself.
-      return dens * 0.35 + uniq * 0.30 + macro * 0.15 + liked * 0.20
+      return dens * 0.30 + uniq * 0.25 + macro * 0.10 + liked * 0.20 + verified * 0.15
     }
 
     // Store the full quality-ranked pool (not just 6). Discover now builds a
@@ -1079,6 +1108,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         // model didn't mean — a wrong shelf is worse than no shelf, since the meal still reaches
         // the user via the catch-all.
         shelf_tag: SHELF_TAGS.includes(String(r.shelf_tag)) ? String(r.shelf_tag) : null,
+        source_verified: r._sourceVerified === true,
         // Ingredients are stored at the creator's full-batch scale, so servings is what makes the
         // per-serving macros interpretable. Defaults to 1 rather than null: an unknown serving
         // count is far more likely to be a single portion than a missing batch.

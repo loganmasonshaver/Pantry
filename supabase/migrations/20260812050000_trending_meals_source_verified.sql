@@ -1,0 +1,12 @@
+-- Whether this recipe's ingredient list was checked against a list the creator actually published.
+--
+-- Measured across 37 source descriptions: only 52% of listed ingredients survive extraction, and a
+-- Burger Bowl the creator writes with 22 ingredients was stored with 4. Where a list can be parsed
+-- we can verify and enforce; where the creator wrote prose there is nothing to check against.
+--
+-- Deliberately a RANKING signal, not a filter. Rejecting unverifiable recipes outright would cut
+-- roughly a quarter of candidates and, worse, would bias against exactly the creators the 100k view
+-- floor selects for — big accounts tend to write "recipe in the comments" or "link in bio" rather
+-- than pasting a list. It would also be rejecting on our parser's limitations rather than on recipe
+-- quality. So unverified recipes still ship; they just lose ties.
+alter table trending_meals add column if not exists source_verified boolean not null default false;

@@ -5,6 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
+import { dishKey, RECENT_MEMORY } from '../_shared/dish-key.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -177,7 +178,22 @@ Deno.serve(async (req: Request) => {
     const dislikedMeals = sanitizeList(rawDislikedMeals)
     const likedMeals = sanitizeList(rawLikedMeals)
     const cuisinePreferences = sanitizeList(rawCuisines)
-    const recentMealNames = sanitizeList(rawRecent, 30)
+    // The client's AsyncStorage list only covers this device and ~4 generations, so the durable
+    // server-side window is the real memory; the client copy is unioned in as redundancy for a
+    // first gen where the profile read fails.
+    const { data: recentRow } = await db
+      .from("profiles")
+      .select("recent_meal_names")
+      .eq("id", user.id)
+      .maybeSingle()
+    const recentMealNames = Array.from(new Set([
+      ...sanitizeList(recentRow?.recent_meal_names ?? [], RECENT_MEMORY),
+      ...sanitizeList(rawRecent, RECENT_MEMORY),
+    ])).slice(0, RECENT_MEMORY)
+    // Fingerprints for the code-level drop below. The prompt line alone was never enough:
+    // this endpoint already assumes the primary model ignores constraints under load (see the
+    // macro-band enforcement), and meal names got no such backstop until now.
+    const recentKeys = new Set(recentMealNames.map(dishKey).filter(Boolean))
 
     // Overgenerate-then-rank: ask the LLM for MORE meals than we'll display, filter against
     // tight bands, then return the top N by macro fit. Compensates for LLM non-compliance
@@ -493,6 +509,25 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedByFat ? `, ${droppedByFat} fat-bombs > ${Math.round(fatDropThreshold)}g` : ''})`)
     }
 
+    // Repeat suppression, code-enforced. Marked rather than hard-dropped: on a thin pantry the
+    // model may only be able to build dishes we've already shown, and an empty deck is worse than
+    // a familiar one. Marked meals sort last in the ranking below, so a repeat only survives when
+    // there aren't enough fresh candidates to fill the deck.
+    const seenThisBatch = new Set<string>()
+    let repeatCount = 0
+    meals = meals.map((m: any) => {
+      const key = dishKey(m?.name)
+      // Two kinds of repeat: shown in a previous generation, or duplicated inside this single
+      // response — the "No repeated meals" prompt line doesn't reliably prevent the latter.
+      const isRepeat = !!key && (recentKeys.has(key) || seenThisBatch.has(key))
+      if (key) seenThisBatch.add(key)
+      if (isRepeat) repeatCount++
+      return { ...m, _repeat: isRepeat }
+    })
+    if (repeatCount > 0) {
+      console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
+    }
+
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
     // displayCount (3). Rank survivors by macro fit — sum of normalized squared distance
     // from per-meal targets — and slice to the top displayCount. Lower score = better fit.
@@ -508,11 +543,15 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
           const fitScore = pDelta * pDelta + cDelta * cDelta + fExcess * fExcess
           return { ...m, _fitScore: fitScore }
         })
-        .sort((a: any, b: any) => a._fitScore - b._fitScore)
+        // Freshness outranks macro fit: a slightly worse-fitting new dish beats a perfect-fitting
+        // repeat, since the repeat is the thing users actually notice and complain about.
+        .sort((a: any, b: any) => (a._repeat === b._repeat ? a._fitScore - b._fitScore : (a._repeat ? 1 : -1)))
         .slice(0, displayCount)
         .map((m: any) => { const { _fitScore, ...rest } = m; return rest })
-      console.log(`Macro rank: kept top ${displayCount}/${beforeRank} meals by per-meal target fit`)
+      console.log(`Macro rank: kept top ${displayCount}/${beforeRank} meals by freshness then per-meal target fit`)
     }
+    // Strip the marker whether or not the ranking above ran — it must never reach the client cache.
+    meals = meals.map((m: any) => { const { _repeat, ...rest } = m; return rest })
 
     // Prep-time validation — drop meals whose claimed prepTime exceeds the user's budget.
     // The LLM occasionally returns a 30-min recipe when the user asked for ≤10 min — usually
@@ -530,6 +569,27 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     if (meals.length === 0) {
       await refundScan(req, 'meal_gen')
       return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } })
+    }
+
+    // Persist what we're actually showing so the NEXT generation can exclude it. Only the final
+    // displayed meals are recorded — candidates dropped by the bands/ranking were never seen, so
+    // they stay eligible. Deduped by fingerprint, not raw string, to keep the window dense with
+    // distinct dishes instead of near-identical spellings of one.
+    try {
+      const nextRecent: string[] = []
+      const seenKeys = new Set<string>()
+      for (const name of [...meals.map((m: any) => String(m?.name ?? "").trim()), ...recentMealNames]) {
+        const key = dishKey(name)
+        if (!key || seenKeys.has(key)) continue
+        seenKeys.add(key)
+        nextRecent.push(name)
+        if (nextRecent.length >= RECENT_MEMORY) break
+      }
+      // Service-role write to the caller's own verified row; no entitlement data involved.
+      // Never allowed to fail the response — the user already paid for this generation.
+      await db.from("profiles").update({ recent_meal_names: nextRecent }).eq("id", user.id)
+    } catch (e) {
+      console.log("recent_meal_names update failed:", (e as Error).message)
     }
 
     // Return meals immediately, images will be fetched by a separate function
