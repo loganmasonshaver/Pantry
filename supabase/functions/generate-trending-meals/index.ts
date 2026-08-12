@@ -183,9 +183,22 @@ async function correctMealMacros(recipe: any): Promise<any> {
 const TAG_MEAT = ['chicken', 'beef', 'steak', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'prosciutto', 'pepperoni', 'salami', 'chorizo', 'carnitas', 'ribeye', 'sirloin', 'brisket', 'pastrami', 'jerky', 'duck', 'venison', 'bison', 'meatball', 'ground meat']
 const TAG_SEAFOOD = ['salmon', 'tuna', 'shrimp', 'prawn', 'crab', 'lobster', 'cod', 'tilapia', 'fish', 'anchovy', 'sardine', 'scallop', 'mussel', 'clam', 'oyster', 'squid']
 // 'butter' handled separately so nut butters don't read as dairy.
-const TAG_DAIRY = ['milk', 'cheese', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein']
-const TAG_GLUTEN = ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'noodle', 'ramen', 'udon', 'couscous', 'cracker', 'bun', 'pita', 'bagel', 'wrap', 'seitan']
-const TAG_NUTS = ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter']
+// COMPOUND FOODS are the second failure mode, and the one that scanning more text cannot fix.
+// The first mode was the extractor dropping an ingredient (parmesan missing from a dish literally
+// named "Parmesan-Crusted Chicken") — solved by widening the haystack. This one is different: the
+// ingredient IS present, but its NAME contains no allergen keyword. "Pesto" is not in a dairy list,
+// so a pesto dish read as dairy-free and nut-free; "gnocchi" and "teriyaki" read as gluten-free.
+// Four live rows were mis-tagged this way, one of them wrong on all three axes.
+//
+// The list below can never be complete — regional dishes, brand products and "house sauce" are
+// unbounded — which is exactly why the LLM's own allergen judgement is ANDed with it downstream.
+const COMPOUND_DAIRY = ['pesto', 'ranch', 'caesar', 'alfredo', 'tzatziki', 'naan', 'brioche', 'croissant', 'carbonara', 'stroganoff', 'au gratin', 'bechamel', 'tiramisu', 'ice cream', 'custard', 'butterscotch', 'milk chocolate']
+const COMPOUND_GLUTEN = ['gnocchi', 'teriyaki', 'hoisin', 'orzo', 'farro', 'bulgur', 'semolina', 'graham', 'pretzel', 'brioche', 'croissant', 'naan', 'roux', 'tempura', 'panzanella', 'miso', 'malt']
+const COMPOUND_NUTS = ['pesto', 'satay', 'marzipan', 'praline', 'nutella', 'baklava', 'romesco', 'gianduja']
+
+const TAG_DAIRY = ['milk', 'cheese', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein', ...COMPOUND_DAIRY]
+const TAG_GLUTEN = ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'noodle', 'ramen', 'udon', 'couscous', 'cracker', 'bun', 'pita', 'bagel', 'wrap', 'seitan', ...COMPOUND_GLUTEN]
+const TAG_NUTS = ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter', ...COMPOUND_NUTS]
 // SAFETY: scans the NAME and STEPS as well as the ingredient list.
 //
 // Scanning ingredients alone made these tags only as trustworthy as the extractor's completeness,
@@ -531,6 +544,7 @@ For each video you select, output the recipe AS THE CREATOR PRESENTED IT.
 CORE FIDELITY RULES — do not violate these:
 - READ macros from the video description first. Most fitness creators list calories/protein/carbs/fat directly. If they listed numbers, USE THEM VERBATIM. Do not recalculate.
 - READ ingredients and quantities from the description verbatim. Preserve the creator's portions exactly. Do not scale, round, or substitute.
+- ALLERGENS — answer for the dish AS COOKED, including anything hidden inside a prepared component. Pesto contains parmesan (dairy) and pine nuts. Gnocchi, teriyaki, hoisin and most soy sauce contain wheat. Caesar dressing contains dairy and anchovy. Naan and brioche contain dairy. If a component's usual recipe contains the allergen, say true — do not assume a special-diet version. When unsure, say TRUE. A false "contains" costs one meal a filter tag; a false "does not contain" sends an allergen to someone avoiding it, and those are not equivalent mistakes.
 - SERVINGS AND SCALE — read this before touching any quantity. Creators list INGREDIENTS for the whole batch and MACROS per serving. Do not reconcile those by shrinking the ingredients.
   * "servings" = how many servings the creator's ingredient list makes. If they say "makes 8", use 8. If they give per-serving macros and a batch of ingredients, work out how many servings that batch is. If it's a single-portion dish, 1.
   * "ingredients" = the creator's quantities EXACTLY as written, for the FULL batch. 16 oz of cream cheese stays 16 oz.
@@ -600,6 +614,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "name": "The actual dish name (cleaned up)",
     "category": "meal",
     "servings": 1,
+    "contains_dairy": false,
+    "contains_gluten": false,
+    "contains_nuts": false,
     "calories": 550,
     "protein": 45,
     "carbs": 40,
@@ -975,6 +992,25 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       const rawCat = (r.category || '').toLowerCase().trim()
       const category = rawCat === 'snack' ? 'snack' : rawCat === 'dessert' ? 'dessert' : 'meal'
       const tags = classifyDietTags(r.ingredients, r.name, r.steps)
+      // Two independent judges, ANDed. The keyword list can't enumerate every compound food, and
+      // the model can misread a description — but for a meal to be tagged "free" BOTH have to say
+      // free. Either one shouting "contains" wins. Fails safe in the only direction that matters:
+      // an over-cautious tag costs a meal one filter, a missed one hands an allergen to someone
+      // who explicitly asked to avoid it.
+      const llmSaysFree = {
+        dairy: r.contains_dairy !== true,
+        gluten: r.contains_gluten !== true,
+        nuts: r.contains_nuts !== true,
+      }
+      const safeTags = {
+        ...tags,
+        is_dairy_free: tags.is_dairy_free && llmSaysFree.dairy,
+        is_gluten_free: tags.is_gluten_free && llmSaysFree.gluten,
+        is_nut_free: tags.is_nut_free && llmSaysFree.nuts,
+      }
+      if (tags.is_dairy_free !== safeTags.is_dairy_free || tags.is_gluten_free !== safeTags.is_gluten_free || tags.is_nut_free !== safeTags.is_nut_free) {
+        console.log(`[funnel] allergen disagreement on "${r.name}" — keyword scan said free, model said contains; taking the cautious side`)
+      }
       return {
         name: r.name,
         category,
@@ -997,10 +1033,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         ingredients: r.ingredients,
         steps: r.steps,
         generated_at: today(),
-        compatible_diets: tags.compatible_diets,
-        is_dairy_free: tags.is_dairy_free,
-        is_gluten_free: tags.is_gluten_free,
-        is_nut_free: tags.is_nut_free,
+        compatible_diets: safeTags.compatible_diets,
+        is_dairy_free: safeTags.is_dairy_free,
+        is_gluten_free: safeTags.is_gluten_free,
+        is_nut_free: safeTags.is_nut_free,
       }
     })
 

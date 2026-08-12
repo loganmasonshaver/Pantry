@@ -434,6 +434,7 @@ export default function MealDetailScreen() {
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
   // Basics the user has opted out of assuming (normalized names). Drives the "we assumed" tier —
   // an excluded staple stops being shown as assumed and moves to "you'll need".
+  const [restrictions, setRestrictions] = useState<string[]>([])
   const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
   // Only the user's MANUAL opt-outs persist back to the profile — diet-derived exclusions are
   // recomputed from dietary_restrictions each load, never written into staples_excluded.
@@ -456,6 +457,7 @@ export default function MealDetailScreen() {
         const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
         manualExcludedRef.current = manual
         setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
+        setRestrictions((data?.dietary_restrictions ?? []).filter((r: string) => r && r !== 'None'))
       })
   }, [user])
 
@@ -1036,6 +1038,26 @@ export default function MealDetailScreen() {
               {(meal as any)?.servings > 1 && (
                 <Text style={styles.servingsNote}>Makes {(meal as any).servings} servings · macros are per serving</Text>
               )}
+              {/* States what was CHECKED, never that the dish is safe. These tags are derived from
+                  an LLM's reading of a video description, and both failure modes have happened in
+                  production: an ingredient dropped during extraction, and a compound ingredient
+                  ("pesto") whose name hides its allergens. "Dairy-free" is a promise we can't keep;
+                  "no dairy in the listed ingredients" is exactly true even when the list is short.
+                  Only shown to users who set the restriction — nobody else needs the caveat. */}
+              {restrictions.length > 0 && (
+                <Text style={styles.allergenNote}>
+                  {restrictions.map(r => {
+                    const k = r.toLowerCase()
+                    const flag = k.includes('dairy') ? (meal as any)?.is_dairy_free
+                      : k.includes('gluten') ? (meal as any)?.is_gluten_free
+                      : k.includes('nut') ? (meal as any)?.is_nut_free : undefined
+                    if (flag === undefined) return null
+                    const word = k.includes('dairy') ? 'dairy' : k.includes('gluten') ? 'gluten' : 'nuts'
+                    return flag ? `No ${word} in the listed ingredients.` : `Contains ${word}.`
+                  }).filter(Boolean).join(' ')}
+                  {' '}Always check the full recipe before cooking.
+                </Text>
+              )}
             </View>
             <View style={styles.pillToggle}>
               {(['Measured', 'Eyeball'] as PortionMode[]).map(mode => (
@@ -1570,6 +1592,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  allergenNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 4, lineHeight: 17 },
   servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 2 },
   sectionTitle: {
     fontSize: 11,
