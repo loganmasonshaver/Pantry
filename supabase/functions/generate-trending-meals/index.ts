@@ -571,6 +571,16 @@ Deno.serve(async (req: Request) => {
     const medianViews = uniqueVideos.length
       ? uniqueVideos[Math.floor(uniqueVideos.length / 2)].viewCount
       : 0
+    // HARD GATE: a video without a readable ingredient list cannot be verified, so it cannot be
+    // guaranteed complete — and an incomplete recipe damages taste, macros and allergen tags at
+    // once. Dropped before the LLM call rather than after, which also saves the tokens.
+    //
+    // This is affordable only because the parser now reads 75% of descriptions (it was 35%). At
+    // the old coverage this gate would have discarded two-thirds of every batch.
+    const withList = uniqueVideos.filter(v => parseIngredientBlock(v.description || '').length >= 3)
+    console.log(`[funnel] ingredient-list gate: ${withList.length}/${uniqueVideos.length} videos have a readable list`)
+    uniqueVideos = withList
+
     const rates = uniqueVideos.map(likeRate).filter(r => r > 0).sort((a, b) => a - b)
     const medianLike = rates.length ? rates[Math.floor(rates.length / 2)] : 0
     console.log(`[funnel] view floor ${usedFloor.toLocaleString()} (of ${VIEW_FLOOR_TIERS[0].toLocaleString()} target) → ${uniqueVideos.length} videos, median ${medianViews.toLocaleString()} views, median like-rate ${medianLike.toFixed(2)}%`)
@@ -614,7 +624,7 @@ CORE FIDELITY RULES — do not violate these:
   * calories/protein/carbs/fat = PER SERVING, as the creator stated them.
   * NEVER divide ingredient quantities to match per-serving macros. A real failure this rule exists to stop: a cheesecake made with 16oz cream cheese, 4 eggs and 2 scoops of protein powder was stored as 2oz, "0.5 large eggs" and "0.25 scoop". Half an egg is not a recipe.
   * NEVER output a fractional count of a discrete item — eggs, scoops, slices, cloves, cans, bars, tortillas. If a number comes out fractional, you have scaled something you shouldn't have.
-- If a video shows a SOURCE INGREDIENT LIST, that list is the specification, not a suggestion. Output one ingredients entry per line, in order, same count. Seasonings, oils and "to taste" items are ingredients — a masala without its ghee, cumin and chilli is a different, worse dish. Never merge two lines into one entry and never drop a line for brevity.
+- Every video below carries a SOURCE INGREDIENT LIST. It is a CONTRACT, not a suggestion: your ingredients array must have EXACTLY as many entries as that list has lines, in the same order, one entry per line. A recipe with fewer entries than its source list is rejected outright and wasted — if a line looks trivial ("Salt to taste", "Oil for cooking"), it is still an entry. Seasonings, oils and "to taste" items are ingredients — a masala without its ghee, cumin and chilli is a different, worse dish. Never merge two lines into one entry and never drop a line for brevity.
 - KEEP EVERY INGREDIENT THE CREATOR LISTS — including toppings, garnishes and sauce components. Do NOT reduce a recipe to its "main" 3-4 ingredients. A bowl or plate dish IS its toppings: strip the diced tomato, pickles and lettuce off a burger bowl and you have described a different, barer dish than the one the creator made. If the creator groups ingredients under headings (Burger / Toppings / Sauce), keep the items from EVERY heading.
 - A multi-ingredient sauce or dressing stays intact: list its components as ingredients, and describe it in the steps as one mixed sauce (e.g. "whisk the yogurt, ketchup, mustard and relish into a burger sauce") so downstream knows it is combined rather than served as separate dollops.
 - PRESERVE THE PREPARATION METHOD exactly as described. If the creator cuts the potato into fries, the step says fries — not "dice", not "cube", not "roast". The cut and cooking method determine what the finished dish physically looks like, so changing it silently misrepresents the recipe.
@@ -806,18 +816,27 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // Enforced in CODE, not just the prompt. "Do not scale" was already an explicit
             // instruction and was ignored anyway — same lesson as the format cap. A recipe that
             // asks for half an egg cannot be cooked, so it's rejected outright rather than ranked.
-            // Retention check against the creator's own list. Logged for every recipe and rejected
-            // only below 50%, deliberately: the pre-fix average WAS 50%, so a stricter gate would
-            // starve the pool before the prompt change has a chance to work. Tighten once the logs
-            // show what the new baseline actually is — don't guess it.
+            // 100% RETENTION OR REJECT. Every candidate now has a readable list, so the creator's
+            // line count is a hard specification rather than a target. Anything short means an
+            // ingredient was dropped, and a dropped ingredient is not a cosmetic loss: a masala
+            // without its ghee and cumin is a different dish, two missing cups of mozzarella is
+            // ~450 uncounted calories, and a dropped dairy item is how a recipe gets falsely
+            // tagged dairy-free.
+            //
+            // The failure mode is deliberately "fewer recipes", never "incomplete recipes". If too
+            // few survive, MIN_TRENDING_MEALS aborts the run and yesterday's feed stays up — stale
+            // beats wrong.
             const srcVideo = uniqueVideos[(r.video_index || 1) - 1]
             const srcList = srcVideo ? parseIngredientBlock(srcVideo.description || '') : []
-            if (srcList.length >= 3) {
-              const kept = (r.ingredients?.length ?? 0) / srcList.length
-              console.log(`[funnel] ingredient retention "${name}": ${r.ingredients?.length ?? 0}/${srcList.length} (${Math.round(kept * 100)}%)`)
-              r._sourceVerified = kept >= 0.8
-              if (kept < 0.5) { rejDropped++; console.log(`[funnel] rejected "${name}" — dropped more than half the creator's ingredients`); return false }
+            const got = r.ingredients?.length ?? 0
+            if (srcList.length < 3) { rejDropped++; return false }
+            console.log(`[funnel] ingredient retention "${name}": ${got}/${srcList.length}`)
+            if (got < srcList.length) {
+              rejDropped++
+              console.log(`[funnel] rejected "${name}" — kept ${got} of ${srcList.length} ingredients`)
+              return false
             }
+            r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
             seenNames.add(key)
