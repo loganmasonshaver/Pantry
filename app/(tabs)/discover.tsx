@@ -27,7 +27,25 @@ import PressableScale from '../../components/PressableScale'
 // Two-column browse grid. Cell width is computed rather than a percentage so the cards land on the
 // same ~170pt as the rail cards — the pill row was measured against that width and wraps below it.
 const { width: SCREEN_W } = Dimensions.get('window')
+
+// Creator recipes aren't being used until after launch, and a shelf reading "No creator recipes
+// yet" makes the tab look broken rather than inviting. It only ever appeared for promo/creator
+// accounts, which is why it was visible in testing and not to normal users. Flip to true to
+// restore the shelf and its "+ post a recipe" entry point.
+const CREATOR_SHELF_ENABLED = false
+
 const GRID_CELL_W = Math.floor((SCREEN_W - 40 - 14) / 2)
+
+// Estimated rendered width of a small pill row, used to decide whether the "CAL" suffix fits.
+// Constants match the small-pill style: fontSize 10 bold (~6.2px/char) + letterSpacing 0.4,
+// paddingHorizontal 6 each side, 1px border each side, and a 3px gap between pills.
+// Measured against the NARROWER of the two surfaces (the 169pt grid cell, not the 175pt rail)
+// so one rule holds on both. The -4 margin on the row itself buys back 8px.
+const PILL_ROW_AVAIL = GRID_CELL_W - 20 + 8
+function fitsPillRow(labels: string[]): boolean {
+  const w = labels.reduce((acc, l) => acc + l.length * 6.6 + 14, 0) + (labels.length - 1) * 3
+  return w <= PILL_ROW_AVAIL
+}
 
 // Lifecycle filters mirror the home-tab logic so Discover shows the same trending
 // pool. They live here as a temporary duplicate; Phase 3b moves Trending out of
@@ -539,7 +557,7 @@ export default function DiscoverScreen() {
         {/* From Creators rail — user-submitted recipes. Admin "+" (promo flag) is the
             entry point for posting new creator content; it lives here in 3b instead of
             on Home, where it used to sit attached to the now-removed trending row. */}
-        {!loading && (creatorRail.length > 0 || promoActive) && (
+        {!loading && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
               <Text style={styles.railTitle}>From Creators</Text>
@@ -666,20 +684,31 @@ function RailCard({ meal, onPress, full }: { meal: DiscoverMeal; onPress: () => 
       })()}
       <View style={styles.railContent}>
         <Text style={styles.railName} numberOfLines={2}>{meal.name}</Text>
-        {/* Three full-label pills provably do not fit a 175px card: "15 MIN" + "450 CAL" + "40P"
-            measures ~168px against ~167px of usable width, which is why the row wrapped on some
-            days and not others — it turned on the day's digit count. Two previous passes shaved
-            edge spacing and letter-spacing, which bought a pixel or two and left it on the same
-            knife edge. Dropping the "CAL" suffix (the widest label, and the least differentiating
-            number for a high-protein feed) plus tighter pill padding gives ~28px of real headroom,
-            enough to survive 4-digit calorie counts. The featured card is wide enough to keep the
-            full "CAL" label, which is what teaches the unit. */}
-        <View style={{ flexDirection: 'row', gap: 3, marginTop: 6, flexWrap: 'wrap' }}>
-          {meal.prepTime > 0 && <Pill label={`${meal.prepTime} min`} tint="amber" small />}
-          <Pill label={`${meal.calories}`} tint="white" small />
-          {meal.protein > 0 && <Pill label={`${meal.protein}P`} tint="green" small />}
-          {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
-        </View>
+        {/* "CAL" is back. Rather than shaving font size (which was already at 10 and is the last
+            thing that should give), the row reclaims 8px with a negative margin — the title keeps
+            its comfortable 10px inset while the pills get the card's full width — and the suffix
+            is dropped ONLY when the actual numbers wouldn't fit. Normal recipes (250-600 kcal,
+            2-digit protein) keep "450 CAL"; a 4-digit calorie count falls back to the bare number
+            instead of wrapping. Deterministic per-recipe, so it can't wrap on an unlucky day. */}
+        {(() => {
+          const timeLabel = `${meal.prepTime} min`
+          const protLabel = `${meal.protein}P`
+          const labels = [
+            ...(meal.prepTime > 0 ? [timeLabel] : []),
+            ...(meal.protein > 0 ? [protLabel] : []),
+          ]
+          const calLabel = fitsPillRow([...labels, `${meal.calories} CAL`])
+            ? `${meal.calories} CAL`
+            : `${meal.calories}`
+          return (
+            <View style={{ flexDirection: 'row', gap: 3, marginTop: 6, marginHorizontal: -4, flexWrap: 'wrap' }}>
+              {meal.prepTime > 0 && <Pill label={timeLabel} tint="amber" small />}
+              <Pill label={calLabel} tint="white" small />
+              {meal.protein > 0 && <Pill label={protLabel} tint="green" small />}
+              {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
+            </View>
+          )
+        })()}
       </View>
     </PressableScale>
   )
