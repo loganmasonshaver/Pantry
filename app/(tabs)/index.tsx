@@ -20,7 +20,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
 import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, Sparkles, BarChart3 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
@@ -486,10 +486,28 @@ export default function HomeScreen() {
   }, [])
   // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
   // macros card eats ~76px, so the photo + title + pills stay framed above the tab bar either way).
-  // 286/210 -> 300/224: absorbs the 14pt reclaimed from the gap above (heroCard marginBottom
-  // 24->14, section header marginBottom 16->12), so page height is unchanged and the extra
-  // goes to the photo. Still short of the 373pt that would make the box square and stop the crop.
-  const heroHeight = macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [288, 212] })
+  // Meal-hero height is MEASURED, not hand-tuned: it's whatever vertical space is left between
+  // the card's top edge and the bottom of the viewport, so the whole card lands above the fold on
+  // any screen size and regardless of what's above it (the plan-ready banner comes and goes).
+  // A fixed value can only ever be right on one device.
+  //
+  // Capped at the card's own width because Flux renders square — past that we'd be pillarboxing
+  // instead of cropping, and there's no image left to reveal.
+  const [viewportH, setViewportH] = useState(0)
+  const [heroSectionY, setHeroSectionY] = useState(0)
+  const [heroHeaderH, setHeroHeaderH] = useState(0)
+  const HERO_MIN = 190
+  const HERO_MAX = width - 40 // square: matches the card's width at marginHorizontal 20
+  const heroFit = useMemo(() => {
+    if (!viewportH || !heroSectionY) return 288 // pre-measure default; replaced on first layout
+    const cardTop = heroSectionY + heroHeaderH
+    return Math.max(HERO_MIN, Math.min(HERO_MAX, viewportH - cardTop - 12))
+  }, [viewportH, heroSectionY, heroHeaderH])
+  // Expanding the macros accordion grows the card above, so the hero gives back the same 76pt.
+  const heroHeight = macrosAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [heroFit, Math.max(HERO_MIN, heroFit - 76)],
+  })
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -890,6 +908,9 @@ export default function HomeScreen() {
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
+        // Viewport height excludes the tab bar (it's laid out, not overlaid), so this is exactly
+        // the space the hero has to fit inside.
+        onLayout={e => { const h = e.nativeEvent.layout.height; if (Math.abs(h - viewportH) > 0.5) setViewportH(h) }}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor="#4ADE80" colors={['#4ADE80']} />}
@@ -1232,9 +1253,15 @@ export default function HomeScreen() {
             Full suggested-meal browse will live in the Pantry tab (Phase 2b). For now we
             show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
         {pantryFetched && pantryNames.size > 0 && (
-          <View style={{ marginBottom: 36 }}>
-            {/* marginBottom 16 -> 12; the 4pt goes to heroHeight so the photo gains what the gap loses. */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}>
+          <View
+            style={{ marginBottom: 36 }}
+            onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
+          >
+            {/* Header height feeds the hero fit calculation — the card starts where this ends. */}
+            <View
+              onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) > 0.5) setHeroHeaderH(h) }}
+              style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}
+            >
               <Text style={styles.sectionTitle}>Cook from your pantry</Text>
               {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
                   navigator on top of itself and renders a black screen. navigate switches tabs. */}
@@ -1586,10 +1613,10 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
   scroll: { flex: 1, backgroundColor: COLORS.background },
-  // Tab bar is 80pt tall and floats over the scroll view, so 40 left the last 40pt of content
-  // permanently underneath it — the hero card's bottom edge and pills were unreachable at full
-  // scroll. 80 clears the bar, +20 so the last card doesn't sit flush against it.
-  scrollContent: { paddingBottom: 100 },
+  // 40, not 100. An earlier pass raised this believing the 80pt tab bar floated over the scroll
+  // view — it doesn't, it's laid out normally, so the viewport already excludes it and the extra
+  // 60 was pure dead space under "+ Add Meal".
+  scrollContent: { paddingBottom: 40 },
   // paddingBottom 12 -> 8: part of ~34pt trimmed above the meal hero so the whole card clears
   // the tab bar at rest. It used to sit ~20pt below the fold, so you had to scroll to see it.
   header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
