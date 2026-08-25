@@ -1053,6 +1053,10 @@ export default function MealDetailScreen() {
                       : k.includes('nut') ? (meal as any)?.is_nut_free : undefined
                     if (flag === undefined) return null
                     const word = k.includes('dairy') ? 'dairy' : k.includes('gluten') ? 'gluten' : 'nuts'
+                    // null is a THIRD state — the classifier never ran on this row. It used to fall
+                    // through to the falsy branch and print "Contains nuts", which is a fabricated
+                    // claim in the other direction. Say what is actually true: we don't know.
+                    if (flag === null) return `We haven't verified ${word} for this recipe.`
                     return flag ? `No ${word} in the listed ingredients.` : `Contains ${word}.`
                   }).filter(Boolean).join(' ')}
                   {' '}Always check the full recipe before cooking.

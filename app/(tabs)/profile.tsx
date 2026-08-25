@@ -464,6 +464,21 @@ function SettingsRow({
 // ── Screen ─────────────────────────────────────────────────────────────
 
 const DIET_OPTIONS = ['None', 'Vegetarian', 'Dairy-free', 'Gluten-free', 'Nut-free']
+// Display label != stored value. The array above IS the value written to
+// profiles.dietary_restrictions and read back by passesDietTags/filterSuggestions, so it must not
+// change. Only what the user reads changes.
+//
+// "Nut-free" is a claim about the food; we can only make a claim about our own check. These tags
+// come from an LLM reading a YouTube description — it cannot know what the creator left out, and
+// "may contain traces" is never written down. A checkbox promising nut-free invites someone with a
+// real allergy to trust a filter that is doing keyword matching. "Avoid nuts" states the intent
+// (mine) rather than a property of the dish (unknowable).
+const RESTRICTION_LABELS: Record<string, string> = {
+  'Dairy-free': 'Avoid dairy',
+  'Gluten-free': 'Avoid gluten',
+  'Nut-free': 'Avoid nuts',
+}
+const restrictionLabel = (v: string) => RESTRICTION_LABELS[v] ?? v
 // Diet TYPE (single-select identity) — distinct from the multi-select restrictions above.
 const DIET_TYPES = ['Classic', 'Pescatarian', 'Vegetarian', 'Vegan']
 
@@ -1049,7 +1064,7 @@ export default function ProfileScreen() {
                       onPress={() => saveDietType(opt)}
                       activeOpacity={0.75}
                     >
-                      <Text style={[styles.dietChipText, active && styles.dietChipTextActive]}>{opt}</Text>
+                      <Text style={[styles.dietChipText, active && styles.dietChipTextActive]}>{restrictionLabel(opt)}</Text>
                     </TouchableOpacity>
                   )
                 })}
@@ -1069,7 +1084,8 @@ export default function ProfileScreen() {
             <View style={styles.modalCard}>
               <Text style={styles.modalTitle}>Dietary Restrictions</Text>
               <Text style={[styles.modalTitle, { fontSize: 13, fontWeight: '400', color: COLORS.textMuted, marginTop: -12, marginBottom: 16 }]}>
-                Select all that apply
+                We'll hide recipes whose ingredients list these. Always check the full recipe — we
+                can't see what a creator left out.
               </Text>
               <View style={styles.dietChipGrid}>
                 {DIET_OPTIONS.map(opt => {

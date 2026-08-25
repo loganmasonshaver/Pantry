@@ -269,11 +269,20 @@ function passesDietTags(meal: DiscoverMeal, dietType: string, restrictions: stri
   if (dietType && dietType !== 'Classic' && meal.compatible_diets) {
     if (!meal.compatible_diets.includes(dietType)) return false
   }
+  // ALLERGENS FAIL SAFE, unlike the diet identity above. `!== true` not `=== false`: the column
+  // has three states, and an untagged meal (null) is "nobody ever checked", not "checked and
+  // clean". The old `=== false` let unknown through, so a row the classifier never saw was served
+  // to someone who explicitly asked to avoid nuts — the one error this filter exists to prevent.
+  //
+  // The permissive fallback was there to stop legacy untagged rows vanishing during rollout. That
+  // rollout is over: all 118 rows in trending_meals carry all three tags (0 null, measured against
+  // prod before this change), so failing safe costs nothing today. If a future migration adds
+  // untagged rows they will correctly hide from restricted users until the classifier runs.
   for (const r of restrictions) {
     const key = r.toLowerCase()
-    if (key === 'dairy-free' && meal.is_dairy_free === false) return false
-    if (key === 'gluten-free' && meal.is_gluten_free === false) return false
-    if (key === 'nut-free' && meal.is_nut_free === false) return false
+    if (key === 'dairy-free' && meal.is_dairy_free !== true) return false
+    if (key === 'gluten-free' && meal.is_gluten_free !== true) return false
+    if (key === 'nut-free' && meal.is_nut_free !== true) return false
   }
   return true
 }
