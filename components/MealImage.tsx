@@ -10,6 +10,7 @@ export function MealImage({
   style,
   recyclingKey,
   priority = 'normal',
+  transition = 200,
 }: {
   uri: string
   style: StyleProp<ImageStyle>
@@ -17,6 +18,11 @@ export function MealImage({
   // previous card's photo before the new one decodes.
   recyclingKey?: string
   priority?: 'low' | 'normal' | 'high'
+  // Fade duration. 200 is right for a photo arriving over the NETWORK — it hides the pop and
+  // makes a slow load look deliberate. On a disk-cache hit it is pure cost: the bytes are already
+  // local, so the fade adds 200ms of visible ramp to something that could have painted instantly.
+  // Pass 0 on surfaces where a cache hit is the overwhelmingly common case (Home).
+  transition?: number
 }) {
   return (
     <Image
@@ -26,7 +32,7 @@ export function MealImage({
       style={[{ backgroundColor: '#1A1A1A' }, style]}
       contentFit="cover"
       cachePolicy="memory-disk"
-      transition={200}
+      transition={transition}
       recyclingKey={recyclingKey}
       priority={priority}
     />

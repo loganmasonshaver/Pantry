@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
 import { perfMark } from './perf'
+import { prefetchMealImages } from '../components/MealImage'
 import { takeCookNowPrefetch } from './mealPrefetch'
 // Shared with the scan-time image warm — one implementation so the global image cache/cost model
 // stays identical no matter who asks for an image.
@@ -48,6 +49,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // Which (user, mode, day) we have already served from cache AND started an image backfill for.
   // Guards the effect against doing that work twice when `enabled` flips.
   const servedFromCacheRef = useRef<string | null>(null)
+  // False until the disk cache has been read once. Home needs this to avoid flashing its
+  // "Get tonight's meals" card for the ~100ms before the cache resolves — without it, every
+  // launch shows the resting card and then yanks it away, which reads worse than a spinner.
+  const [cacheChecked, setCacheChecked] = useState(false)
   useEffect(() => { regensUsedTodayRef.current = regensUsedToday }, [regensUsedToday])
 
   const generate = async () => {
@@ -287,7 +292,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Without this guard the second run would re-enter the image backfill below, and a meal
       // whose photo does not exist yet would get two concurrent fetchImage calls — two cache
       // misses racing into two FAL generations for one meal. That is real money, not just noise.
-      if (servedFromCacheRef.current === runKey) return
+      if (servedFromCacheRef.current === runKey) { setCacheChecked(true); return }
       perfMark(`cache read start (${mode})`)
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       if (raw && !cancelled) {
@@ -305,6 +310,12 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           if (validMeals.length > 0 && !isSeeded) {
             // Real AI meals: show immediately, then fetch any missing images in background
             servedFromCacheRef.current = runKey
+            // Start decoding the photos BEFORE the cards mount. Discover and Saved already do this
+            // ("warm the visible cards' photos"); Home was the only screen that didn't, so its
+            // images did not begin loading until expo-image asked for them at mount — roughly a
+            // second of dead air with the text already on screen.
+            prefetchMealImages(validMeals.map(m => m.image))
+            setCacheChecked(true)
             perfMark(`meals painted from cache (${validMeals.length})`)
             setMeals(validMeals)
             setRegensUsedToday(cached.regenCount ?? 0)
@@ -333,6 +344,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         }
       }
+      setCacheChecked(true)
       // Cache miss. THIS is what needs the pantry — bail until it has loaded and let the
       // `enabled` flip re-run the effect.
       if (!enabled) { perfMark('cache miss — waiting on pantry before generating'); return }
@@ -363,5 +375,5 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // the SAME set the pantry tab serves (fixes the reveal-vs-pantry mismatch) instead of force-
   // generating a second batch — which also kills the wasted generation + the long reveal wait.
   const load = () => fetchAndGenerate(false)
-  return { meals, loading, error, errorCode, regenerate, retry, load, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
+  return { meals, loading, error, errorCode, regenerate, retry, load, cacheChecked, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
 }

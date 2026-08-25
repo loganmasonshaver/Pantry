@@ -70,6 +70,10 @@ const ENABLE_AI_PHOTO_LOG = false
 
 // Narrates the daily meal generation instead of a static "Finding a meal…". Honest to what the
 // backend is actually doing, in order, so the wait reads as work rather than lag.
+// Height of the meal card before there is a real meal in it — used by BOTH the resting card and
+// the loading skeleton so tapping one to reach the other doesn't shift the page.
+const HERO_COMPACT_H = 132
+
 const DAILY_STATUS = [
   'Checking what\'s in your pantry…',
   'Matching recipes to your goals…',
@@ -227,7 +231,7 @@ function MealCard({
       onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
     >
       {meal.image && meal.image.startsWith('http') ? (
-        <MealImage uri={meal.image} style={styles.mealImageReal} recyclingKey={String(meal.id)} />
+        <MealImage uri={meal.image} style={styles.mealImageReal} recyclingKey={String(meal.id)} transition={0} />
       ) : (
         <ShimmerBox style={styles.mealImagePlaceholder} />
       )}
@@ -390,7 +394,12 @@ export default function HomeScreen() {
   // Every HERO_CYCLE_MS the hero crossfades to the next meal so all 3 are surfaced over time
   // without duplicating the Pantry tab's compact list. Pantry tab still owns the
   // "Got everything / Need: X" detail view.
-  const { meals, loading } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  // Generation no longer auto-fires. A cached day still paints on its own (the hook reads disk
+  // regardless of `enabled`), so this only gates the ~6s GPT call on a genuine miss — i.e. the
+  // first open of a new day. Six seconds you asked for reads completely differently from six
+  // seconds the app decided to spend on your behalf.
+  const [wantsGeneration, setWantsGeneration] = useState(false)
+  const { meals, loading, cacheChecked } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0 && wantsGeneration)
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -968,7 +977,7 @@ export default function HomeScreen() {
                   onPress={() => router.push({ pathname: '/meal/[id]', params: { id: m.id } })}
                 >
                   {m.image_url ? (
-                    <MealImage uri={m.image_url} style={styles.planReadyImage} />
+                    <MealImage uri={m.image_url} style={styles.planReadyImage} transition={0} />
                   ) : (
                     <View style={[styles.planReadyImage, { backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' }]}>
                       <Utensils size={20} stroke="#555" strokeWidth={1.5} />
@@ -1277,20 +1286,17 @@ export default function HomeScreen() {
               // Card-shaped skeleton, not a bare spinner: a populated placeholder reads as "almost
               // ready" while a spinner on an empty card reads as stuck. The status line narrates
               // real work so the ~6s of generation feels like effort on the user's behalf.
-              <RNAnimated.View style={[styles.heroMealCard, { marginHorizontal: 20, height: heroHeight, overflow: 'hidden' }]}>
+              // Compact, not full-height. The shimmering block used to be the LARGEST element on
+              // the screen at the exact moment it had the least to say. It now matches the resting
+              // card's height, so tapping "Get tonight's meals" doesn't jump the layout — the card
+              // expands once, when there is finally a photo to expand into.
+              <RNAnimated.View style={[styles.heroMealCard, { marginHorizontal: 20, height: HERO_COMPACT_H, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}>
                 <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
-                  locations={[0.3, 0.6, 1]}
-                  style={styles.heroMealGradient}
-                />
-                <View style={styles.heroMealContent}>
-                  <Text style={styles.heroMealSkeletonStatus}>{DAILY_STATUS[dailyStatusIdx]}</Text>
-                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10 }}>
-                    {[54, 62, 40].map((w, i) => (
-                      <View key={i} style={[styles.heroMealPill, styles.heroMealPillSkeleton, { width: w }]} />
-                    ))}
-                  </View>
+                <Text style={styles.heroMealSkeletonStatus}>{DAILY_STATUS[dailyStatusIdx]}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10 }}>
+                  {[54, 62, 40].map((w, i) => (
+                    <View key={i} style={[styles.heroMealPill, styles.heroMealPillSkeleton, { width: w }]} />
+                  ))}
                 </View>
               </RNAnimated.View>
             ) : heroMeal ? (
@@ -1313,7 +1319,7 @@ export default function HomeScreen() {
                         so the gradient + text stay anchored while only the image scales. */}
                     <RNAnimated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: heroScale }] }]}>
                       {heroMeal.image && heroMeal.image.startsWith('http') ? (
-                        <MealImage uri={heroMeal.image} style={styles.heroMealImage} priority="high" />
+                        <MealImage uri={heroMeal.image} style={styles.heroMealImage} priority="high" transition={0} />
                       ) : (
                         // The photo takes ~10s longer than the recipe text, and a bare shimmer on a
                         // card this large just reads as a broken black rectangle — the screen went
@@ -1355,6 +1361,18 @@ export default function HomeScreen() {
                   </RNAnimated.View>
                 </AnimatedTouchable>
               </>
+            ) : cacheChecked ? (
+              // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
+              // never flashes during the ~100ms disk read on a day that DOES have meals — showing
+              // the resting card and then yanking it away reads worse than showing nothing.
+              <TouchableOpacity
+                style={[styles.heroMealCard, { marginHorizontal: 20, height: HERO_COMPACT_H, alignItems: 'center', justifyContent: 'center' }]}
+                activeOpacity={0.85}
+                onPress={() => setWantsGeneration(true)}
+              >
+                <Text style={styles.heroRestingTitle}>Get tonight's meals</Text>
+                <Text style={styles.heroRestingSub}>Built around what's in your pantry</Text>
+              </TouchableOpacity>
             ) : null}
           </View>
         )}
@@ -1944,6 +1962,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  heroRestingTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
+  heroRestingSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 5 },
   heroMealSkeletonStatus: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
   heroMealPillSkeleton: { height: 22, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.14)' },
   heroMealPillText: {
