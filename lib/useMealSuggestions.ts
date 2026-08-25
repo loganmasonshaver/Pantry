@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
+import { perfMark } from './perf'
 import { takeCookNowPrefetch } from './mealPrefetch'
 // Shared with the scan-time image warm — one implementation so the global image cache/cost model
 // stays identical no matter who asks for an image.
@@ -44,6 +45,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // Mirrored to a ref so generate() can persist the right count without re-renders.
   const [regensUsedToday, setRegensUsedToday] = useState(0)
   const regensUsedTodayRef = useRef(0)
+  // Which (user, mode, day) we have already served from cache AND started an image backfill for.
+  // Guards the effect against doing that work twice when `enabled` flips.
+  const servedFromCacheRef = useRef<string | null>(null)
   useEffect(() => { regensUsedTodayRef.current = regensUsedToday }, [regensUsedToday])
 
   const generate = async () => {
@@ -267,10 +271,24 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // Triggers on mount, mode change, or enabled flip. Cache load is instant; daily cache
   // means the auto-fire generation happens at most once per user per day.
   // Seeded meals (onboarding placeholders) are skipped — they have no recipe data.
+  // Painting cached meals needs the USER and nothing else. It used to also wait on `enabled`
+  // (= pantryFetched && pantryNames.size > 0), which is a Supabase round trip — so the app sat on
+  // a shimmer waiting for the network before it would read meals that were already on disk.
+  //
+  // GENERATION still waits for `enabled`, and must: you cannot generate pantry-aware meals without
+  // the pantry, and firing early would both pick wrong meals and burn a GPT call. So the gate
+  // moved down to the cache MISS branch rather than being removed.
   useEffect(() => {
-    if (!userId || !enabled) return
+    if (!userId) return
     let cancelled = false // prevents setMeals on an unmounted component if the user navigates away
+    const runKey = `${userId}_${mode}_${todayStr()}`
     ;(async () => {
+      // This effect now runs twice on a cold start (once before `enabled` flips, once after).
+      // Without this guard the second run would re-enter the image backfill below, and a meal
+      // whose photo does not exist yet would get two concurrent fetchImage calls — two cache
+      // misses racing into two FAL generations for one meal. That is real money, not just noise.
+      if (servedFromCacheRef.current === runKey) return
+      perfMark(`cache read start (${mode})`)
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
@@ -286,6 +304,8 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           const isSeeded = validMeals.every(m => m.id?.startsWith('seeded_')) // onboarding placeholder meals have no recipe data; clear them before real generation
           if (validMeals.length > 0 && !isSeeded) {
             // Real AI meals: show immediately, then fetch any missing images in background
+            servedFromCacheRef.current = runKey
+            perfMark(`meals painted from cache (${validMeals.length})`)
             setMeals(validMeals)
             setRegensUsedToday(cached.regenCount ?? 0)
             if (cached.meals.some(m => !m.image)) {
@@ -313,7 +333,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         }
       }
-      if (!cancelled) fetchAndGenerate()
+      // Cache miss. THIS is what needs the pantry — bail until it has loaded and let the
+      // `enabled` flip re-run the effect.
+      if (!enabled) { perfMark('cache miss — waiting on pantry before generating'); return }
+      if (!cancelled) { perfMark('generation start'); fetchAndGenerate() }
     })()
     return () => { cancelled = true }
   }, [userId, isPremium, mode, enabled])

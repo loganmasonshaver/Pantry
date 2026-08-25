@@ -44,6 +44,7 @@ import PantryScanModal from '../../components/PantryScanModal'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useFocusEffect } from 'expo-router'
 import { useMealSuggestions } from '../../lib/useMealSuggestions'
+import { perfMark } from '../../lib/perf'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
 
@@ -514,8 +515,10 @@ export default function HomeScreen() {
   // showing the "Unlock recipes" card instead of flipping to the meal carousel.
   const loadPantryNames = useCallback(async () => {
     if (!user) return
+    perfMark('pantry fetch start')
     const { data } = await supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true).limit(500) // in-stock pantry never realistically exceeds this; bounds payload on every focus
     const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
+    perfMark(`pantry fetched (${names.size} items)`)
     setPantryNames(names)
     setPantryFetched(true)
   }, [user])
