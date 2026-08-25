@@ -884,7 +884,10 @@ export default function DiscoverScreen() {
                 {/* Hierarchy comes from the HEADER, not from switching scroll direction — the
                     personalised shelves get the accent so "for you" is visible at a glance while
                     every section still scrolls the same way. */}
-                <Text style={[styles.railTitle, (section as any).accent && styles.railTitleAccent]}>
+                <Text
+                  style={[styles.railTitle, (section as any).accent && styles.railTitleAccent]}
+                  numberOfLines={2}
+                >
                   {section.title}
                 </Text>
                 {/* A bare integer floating at the right edge reads as a glitch. */}
@@ -1160,7 +1163,7 @@ const styles = StyleSheet.create({
 
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
   browseCell: { width: GRID_CELL_W },
-  browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700' },
+  browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700', flexShrink: 0 },
   railTitleAccent: { color: COLORS.accent },
   cardBadge: {
     position: 'absolute', top: 8, left: 8, zIndex: 2, borderRadius: 12,
@@ -1193,8 +1196,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.textMuted,
-    letterSpacing: 2,
+    // Was 2. A personalised title carries a whole dish name ("Because you cooked Beef and Salsa
+    // Power Bowl"), and at 2 the extra ~0.8pt/char pushed it past a second line and stranded a
+    // single word there. 1.2 still reads as a label but buys back ~35pt on a 44-char title.
+    letterSpacing: 1.2,
+    lineHeight: 16,
     textTransform: 'uppercase',
+    // flex + shrink is the actual fix for the clipped count: railHeader is a space-between row,
+    // so an unbounded title claimed the full width and the "N meals" beside it rendered as "N m".
+    flex: 1,
+    marginRight: 12,
   },
   railCard: {
     width: 175,
