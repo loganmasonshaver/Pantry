@@ -850,7 +850,7 @@ export default function DiscoverScreen() {
         {!loading && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
-              <Text style={styles.railTitle}>From Creators</Text>
+              <Text style={styles.sectionTitle}>From Creators</Text>
               {promoActive && (
                 <PressableScale onPress={() => setShowCreatorModal(true)} hitSlop={10}>
                   <Plus size={18} color="#4ADE80" strokeWidth={2.5} />
@@ -889,18 +889,13 @@ export default function DiscoverScreen() {
               style={{ marginTop: 28 }}
               onLayout={e => { const { y, height } = e.nativeEvent.layout; sectionRects.current[section.key] = { y, h: height } }}
             >
-              <View style={styles.railHeader}>
-                {/* Hierarchy comes from the HEADER, not from switching scroll direction — the
-                    personalised shelves get the accent so "for you" is visible at a glance while
-                    every section still scrolls the same way. */}
-                <Text
-                  style={[styles.railTitle, (section as any).accent && styles.railTitleAccent]}
-                  numberOfLines={2}
-                >
-                  {section.title}
-                </Text>
-                {/* A bare integer floating at the right edge reads as a glitch. */}
-                <Text style={styles.browseCount}>{section.meals.length} meals</Text>
+              <View style={styles.sectionHeader}>
+                {/* Hierarchy comes from the HEADER, not from switching scroll direction. The
+                    personalised shelves are marked with a short accent rule rather than by
+                    recolouring the whole title — one small green element per shelf instead of a
+                    full line of green, which is what made three adjacent "for you" shelves shout. */}
+                {(section as any).accent && <View style={styles.sectionAccentRule} />}
+                <Text style={styles.sectionTitle} numberOfLines={2}>{section.title}</Text>
               </View>
               <View style={styles.browseGrid}>
                 {visible.map((meal, index) => (
@@ -1172,8 +1167,14 @@ const styles = StyleSheet.create({
 
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
   browseCell: { width: GRID_CELL_W },
-  browseCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '700', flexShrink: 0 },
-  railTitleAccent: { color: COLORS.accent },
+  // Section headers read as editorial headlines, not as system labels. The previous treatment
+  // (12px, ALL CAPS, letterSpacing 2, accent green) is the standard generated-UI tell: it shouts,
+  // and it fights the food photography for attention. Sentence case at 22 with negative tracking
+  // is how a recipe title is set in print, and it lets the images carry the colour.
+  //
+  // The "N meals" count that used to sit at the right is gone. It kept clipping (the flex fix was
+  // correct in source but still overflowed on device), it duplicated the "Show N more" button
+  // directly below, and a muted integer pinned to the right edge is dashboard furniture.
   cardBadge: {
     position: 'absolute', top: 8, left: 8, zIndex: 2, borderRadius: 12,
     paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(0,0,0,0.72)',
@@ -1201,20 +1202,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
-  railTitle: {
-    fontSize: 12,
+  sectionHeader: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+  },
+  // A 24pt rule, not a recoloured title — marks the shelf as personalised using one small piece of
+  // accent instead of a whole green sentence.
+  sectionAccentRule: {
+    width: 24,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: COLORS.accent,
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 22,
     fontWeight: '700',
-    color: COLORS.textMuted,
-    // Was 2. A personalised title carries a whole dish name ("Because you cooked Beef and Salsa
-    // Power Bowl"), and at 2 the extra ~0.8pt/char pushed it past a second line and stranded a
-    // single word there. 1.2 still reads as a label but buys back ~35pt on a 44-char title.
-    letterSpacing: 1.2,
-    lineHeight: 16,
-    textTransform: 'uppercase',
-    // flex + shrink is the actual fix for the clipped count: railHeader is a space-between row,
-    // so an unbounded title claimed the full width and the "N meals" beside it rendered as "N m".
-    flex: 1,
-    marginRight: 12,
+    color: COLORS.textWhite,
+    letterSpacing: -0.5,
+    lineHeight: 27,
+    // No flex/marginRight needed any more: this is the only child in a column header, so there is
+    // no sibling left for a long dish name to squeeze off the edge.
   },
   railCard: {
     width: 175,
@@ -1250,7 +1258,7 @@ const styles = StyleSheet.create({
   },
   railName: {
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: '700',
     color: COLORS.textWhite,
     letterSpacing: -0.2,
     lineHeight: 18,
