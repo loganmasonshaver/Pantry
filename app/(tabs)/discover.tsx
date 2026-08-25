@@ -722,7 +722,17 @@ export default function DiscoverScreen() {
   // holds hundreds, and revealing 6 at a time would be ~66 taps to reach the end. Curated shelves
   // stay at 6 so the page remains scannable; only the remainder pages in big chunks.
   const pageSizeFor = (key: string) => (key === 'other' ? 24 : GRID_PAGE)
-  const shownCount = (key: string) => expandedSections[key] ?? pageSizeFor(key)
+  // A full-width "Show 1 more" button costs a row of vertical space and a tap to reveal a single
+  // card — more attention than the card is worth, and it makes two shelves of the same size look
+  // inconsistent depending on whether the tail happened to land at 6 or 7. Absorb a tail of <=2
+  // into the first page so the button only ever appears for a meaningful batch.
+  //
+  // Personalised shelves cap at 8 and page at 6, so a 7- or 8-meal shelf hit this on almost every
+  // load; that is the "why does one say Show 1 more and the other doesn't" case.
+  const shownCount = (key: string, total: number) => {
+    const base = expandedSections[key] ?? pageSizeFor(key)
+    return total - base <= 2 ? total : base
+  }
 
   // Impression tracking. Fired on VIEWPORT ENTRY, not on render — the grid renders sections far
   // below the fold, so counting a render as a view would inflate the denominator and make every
@@ -740,7 +750,7 @@ export default function DiscoverScreen() {
       const sec = browseSectionsRef.current.find(x => x.key === key)
       if (!sec) continue
       firedSections.current.add(key)
-      trackMealImpressions(key, sec.meals.slice(0, shownCount(key)).map(m => m.id), 'discover_grid')
+      trackMealImpressions(key, sec.meals.slice(0, shownCount(key, sec.meals.length)).map(m => m.id), 'discover_grid')
     }
   }, [expandedSections])
   // Ref mirror so the scroll handler isn't re-created on every section change.
@@ -880,7 +890,7 @@ export default function DiscoverScreen() {
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
         {!loading && browseSections.map(section => {
-          const shown = shownCount(section.key)
+          const shown = shownCount(section.key, section.meals.length)
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
           return (
