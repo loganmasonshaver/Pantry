@@ -522,16 +522,24 @@ export default function HomeScreen() {
   // grow 1 -> 2 -> 3 as photos arrived and the swipe target would move under your finger. A
   // photo-less page renders the "Plating your dish…" placeholder that already exists below.
   const carouselMeals = meals.slice(0, 3)
-  // Rendered THREE times over. A paged ScrollView has hard ends, so wrapping means physically
-  // having pages to travel into: the middle copy is home, and settling in an outer copy silently
-  // recentres to the identical page in the middle one. The jump is invisible because the page you
-  // land on shows the same meal you just swiped to.
+  // Rendered FIVE times over, not three. A paged ScrollView has hard ends, so wrapping means
+  // physically having pages to travel into, and settling too close to an end teleports you back to
+  // the identical page nearer the middle.
+  //
+  // Three copies gave only ~3 pages of runway, so the teleport fired every third swipe — which is
+  // exactly the cadence of the glitch it caused. Five copies gives ~6, so it fires half as often,
+  // and combined with the drag guard below it should not be visible at all.
+  const LOOP_COPIES = 5
   const loopMeals = carouselMeals.length > 1
-    ? [...carouselMeals, ...carouselMeals, ...carouselMeals]
+    ? Array.from({ length: LOOP_COPIES }, () => carouselMeals).flat()
     : carouselMeals
-  // Where the middle copy starts — also the initial scroll offset, so you can swipe back
-  // immediately on first render instead of hitting a wall.
-  const loopOffset = carouselMeals.length > 1 ? carouselMeals.length : 0
+  // Start in the middle copy, so there is a full run of pages in BOTH directions before any
+  // recentring is needed.
+  const loopOffset = carouselMeals.length > 1 ? carouselMeals.length * 2 : 0
+  // True between onScrollBeginDrag and the momentum settling. Recentring during a live gesture is
+  // what actually produced the visible jump: an unanimated scrollTo issued while the user's finger
+  // (or its momentum) still owns the scroll position fights the gesture instead of replacing it.
+  const heroDragging = useRef(false)
   const heroScrollRef = useRef<ScrollView>(null)
   // Position in the TRIPLED list, which is what auto-advance scrolls against. heroIdx stays the
   // real 0..n-1 index for the dots and Ken Burns.
@@ -561,23 +569,36 @@ export default function HomeScreen() {
   const onHeroSettle = useCallback((e: any) => {
     const len = carouselLenRef.current
     if (len === 0) return
+    // Momentum has ended, so whatever gesture started this is over.
+    heroDragging.current = false
     const raw = Math.round(e.nativeEvent.contentOffset.x / width)
     // Modulo is written the long way because a negative raw (rubber-banding past the left edge)
     // makes plain % return a negative index.
     const real = ((raw % len) + len) % len
     heroRawIdx.current = raw
     setHeroIdx(prev => (prev === real ? prev : real))
-    // Drifted out of the middle copy — teleport back to the same meal's page there, unanimated.
-    // Invisible to the user, and it restores a full copy of runway in both directions.
-    if (len > 1 && (raw < len || raw >= len * 2)) {
-      const recentred = len + real
+
+    // Only recentre once within one copy of an end — with 5 copies that is ~6 swipes of runway
+    // instead of 3, so the teleport happens half as often. No bookkeeping needed for a skipped
+    // one: if we don't move, the next settle sees the same nearEnd condition and retries.
+    if (len <= 1 || !(raw < len || raw >= len * (LOOP_COPIES - 1))) return
+
+    // requestAnimationFrame so the unanimated scroll lands on the frame AFTER momentum has fully
+    // released. Issuing it inline is what let the pre-jump position show for a frame — which is
+    // the glitch, and why it appeared on a fixed cadence rather than at random.
+    const recentred = len * 2 + real
+    requestAnimationFrame(() => {
+      // A new swipe started in the meantime — teleporting now would fight a live gesture, which
+      // is the worse failure. Skip; the next settle will still be near an end and retry.
+      if (heroDragging.current) return
       heroRawIdx.current = recentred
       heroScrollRef.current?.scrollTo({ x: recentred * width, animated: false })
-    }
+    })
   }, [])
   // Any hands-on interaction defers auto-advance, not just swiping — tapping through to a meal
   // counts too, since coming back to a card that has moved on is the same annoyance.
   const deferHeroAutoplay = useCallback(() => {
+    heroDragging.current = true
     heroResumeAt.current = Date.now() + HERO_RESUME_MS
     // Freeze the zoom where it is rather than snapping back to 1 — a reset mid-drag would be a
     // visible pop. The next automatic advance resets it anyway.
