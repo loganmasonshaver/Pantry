@@ -70,6 +70,23 @@ function normalizeKey(name: string): string {
   return key || legacyNormalizeKey(name) // never return empty (e.g. a name that was all filler)
 }
 
+// Word-ORDER-insensitive variant of the cache key, used only as an extra LOOKUP.
+//
+// normalizeKey strips filler and singularises but preserves order, so "paneer chocolate mousse" and
+// "chocolate paneer mousse" are different keys for the same dish — and each one paid for its own
+// Flux generation. Four such exact-reorder pairs exist in the live 994-image library
+// ("sesame tuna steak with bok choy" / "tuna steak with sesame bok choy",
+//  "panseared salmon with asparagus and sweet potato" / "...with sweet potato and asparagus", ...).
+//
+// Deliberately NOT used as the storage key. Sorting the primary key would change all ~1000 existing
+// keys at once, turning the entire library into a cache miss and re-paying for every image — far
+// more expensive than the handful of duplicates it would prevent. As a lookup it costs one extra
+// key in an `in()` that is already running, and the existing backfill aliases the hit forward, so
+// the library converges without a single extra generation.
+function sortedKey(name: string): string {
+  return normalizeKey(name).split(' ').filter(Boolean).sort().join(' ')
+}
+
 // Stage 1 of the two-stage Flux pipeline: ask an LLM to describe how the FINISHED dish
 // looks when plated. Without this, Flux gets a generic "professional food photo of {name}"
 // template and has to guess the visual form — which is why fusion dishes (cottage cheese
@@ -163,7 +180,9 @@ Deno.serve(async (req: Request) => {
     // Two keys are checked: the tightened one, plus the pre-tightening key so images stored under
     // the old scheme still resolve. A legacy hit is backfilled under the new key, so each old entry
     // costs one extra lookup exactly once and the library migrates itself instead of being re-paid for.
-    const lookupKeys = legacyKey && legacyKey !== cacheKey ? [cacheKey, legacyKey] : [cacheKey]
+    // Third variant: same words, any order. Catches the reorder duplicates described at sortedKey().
+    const orderKey = sortedKey(mealName)
+    const lookupKeys = [...new Set([cacheKey, legacyKey, orderKey].filter(Boolean))] as string[]
     const { data: cachedRows } = await db.from('image_cache').select('meal_key, image_url').in('meal_key', lookupKeys)
     const hit = cachedRows?.find((r: any) => r.meal_key === cacheKey) ?? cachedRows?.[0]
     if (hit?.image_url) {
@@ -303,7 +322,11 @@ Deno.serve(async (req: Request) => {
         if (!uploadErr) {
           const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
           const permanentUrl = urlData.publicUrl
-          const { error: cacheErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: permanentUrl }, { onConflict: 'meal_key' })
+          // Store under BOTH the exact key and the order-insensitive one, so the next meal whose
+          // name is these same words in a different order resolves to this image instead of paying
+          // for its own. Two tiny rows against one Flux generation is the right trade.
+          const keyRows = [...new Set([cacheKey, orderKey])].map(k => ({ meal_key: k, image_url: permanentUrl }))
+          const { error: cacheErr } = await db.from('image_cache').upsert(keyRows, { onConflict: 'meal_key' })
           if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
           else console.log('Cached OK:', cacheKey)
           return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
