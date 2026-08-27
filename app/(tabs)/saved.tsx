@@ -73,6 +73,7 @@ function Pill({ label, tint }: { label: string; tint: 'amber' | 'green' | 'white
     green: { bg: 'rgba(74,222,128,0.18)', border: 'rgba(74,222,128,0.3)', color: '#4ADE80' },
     white: { bg: 'rgba(255,255,255,0.12)', border: 'rgba(255,255,255,0.2)', color: COLORS.textWhite },
   }[tint]
+  perfMark('Saved RENDER')
   return (
     <View style={[styles.pill, { backgroundColor: t.bg, borderColor: t.border }]}>
       <Text style={[styles.pillText, { color: t.color }]}>{label}</Text>
@@ -148,6 +149,14 @@ export default function SavedScreen() {
     perfMark('Saved MOUNT')
     return () => perfMark('Saved UNMOUNT')
   }, [])
+  // MOUNT/UNMOUNT alone was not enough: a tab switch does not remount a screen, so the
+  // first trace stayed silent through a whole reproduction and proved only that nothing
+  // is being torn down. FOCUS/BLUR is what actually fires on a switch — and a BLUR with
+  // no following FOCUS, or a FOCUS with no render after it, localises the black frame.
+  useFocusEffect(useCallback(() => {
+    perfMark('Saved FOCUS')
+    return () => perfMark('Saved BLUR')
+  }, []))
 
   const router = useRouter()
   const { user } = useAuth()

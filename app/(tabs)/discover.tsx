@@ -413,6 +413,14 @@ export default function DiscoverScreen() {
     perfMark('Discover MOUNT')
     return () => perfMark('Discover UNMOUNT')
   }, [])
+  // MOUNT/UNMOUNT alone was not enough: a tab switch does not remount a screen, so the
+  // first trace stayed silent through a whole reproduction and proved only that nothing
+  // is being torn down. FOCUS/BLUR is what actually fires on a switch — and a BLUR with
+  // no following FOCUS, or a FOCUS with no render after it, localises the black frame.
+  useFocusEffect(useCallback(() => {
+    perfMark('Discover FOCUS')
+    return () => perfMark('Discover BLUR')
+  }, []))
 
   const router = useRouter()
   const { user } = useAuth()
@@ -913,6 +921,7 @@ export default function DiscoverScreen() {
     })
   }
 
+  perfMark('Discover RENDER')
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView

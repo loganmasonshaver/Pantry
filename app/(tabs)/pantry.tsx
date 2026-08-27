@@ -123,6 +123,7 @@ function IngredientRow({
   onDelete: () => void
   onToggle: () => void
 }) {
+  perfMark('Pantry RENDER')
   return (
     <Swipeable
       renderRightActions={() => (
@@ -220,6 +221,14 @@ export default function PantryScreen() {
     perfMark('Pantry MOUNT')
     return () => perfMark('Pantry UNMOUNT')
   }, [])
+  // MOUNT/UNMOUNT alone was not enough: a tab switch does not remount a screen, so the
+  // first trace stayed silent through a whole reproduction and proved only that nothing
+  // is being torn down. FOCUS/BLUR is what actually fires on a switch — and a BLUR with
+  // no following FOCUS, or a FOCUS with no render after it, localises the black frame.
+  useFocusEffect(useCallback(() => {
+    perfMark('Pantry FOCUS')
+    return () => perfMark('Pantry BLUR')
+  }, []))
 
   const { user } = useAuth()
   const router = useRouter()
