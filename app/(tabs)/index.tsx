@@ -473,7 +473,14 @@ export default function HomeScreen() {
     return () => clearInterval(id)
   }, [loading])
 
-  const HERO_CYCLE_MS = 5000
+  // 5000 -> 6250: a 25% slower dwell. 5s read as a slideshow rushing past rather than a hero
+  // presenting a dish. Also drives the Ken Burns duration, so the zoom slows with it and the two
+  // stay in step.
+  const HERO_CYCLE_MS = 6250
+  // How long the carousel stays hands-off after ANY interaction — swiping it or tapping through
+  // to a meal. 8s was too eager: it resumed while you were still deciding, which is the failure
+  // mode that makes an auto-advancing carousel feel like it is fighting you.
+  const HERO_RESUME_MS = 60000
   const [heroIdx, setHeroIdx] = useState(0)
   // Ken Burns slow-zoom — image scales from 1.0 to 1.12 over the full slide duration,
   // resets on idx change. Gives constant motion even when crossfade is idle.
@@ -487,7 +494,24 @@ export default function HomeScreen() {
   // grow 1 -> 2 -> 3 as photos arrived and the swipe target would move under your finger. A
   // photo-less page renders the "Plating your dish…" placeholder that already exists below.
   const carouselMeals = meals.slice(0, 3)
+  // Rendered THREE times over. A paged ScrollView has hard ends, so wrapping means physically
+  // having pages to travel into: the middle copy is home, and settling in an outer copy silently
+  // recentres to the identical page in the middle one. The jump is invisible because the page you
+  // land on shows the same meal you just swiped to.
+  const loopMeals = carouselMeals.length > 1
+    ? [...carouselMeals, ...carouselMeals, ...carouselMeals]
+    : carouselMeals
+  // Where the middle copy starts — also the initial scroll offset, so you can swipe back
+  // immediately on first render instead of hitting a wall.
+  const loopOffset = carouselMeals.length > 1 ? carouselMeals.length : 0
   const heroScrollRef = useRef<ScrollView>(null)
+  // Position in the TRIPLED list, which is what auto-advance scrolls against. heroIdx stays the
+  // real 0..n-1 index for the dots and Ken Burns.
+  const heroRawIdx = useRef(0)
+  // Ref mirror so the settle handler reads the live length without a stale closure.
+  const carouselLenRef = useRef(0)
+  useEffect(() => { carouselLenRef.current = carouselMeals.length }, [carouselMeals.length])
+  useEffect(() => { heroRawIdx.current = loopOffset }, [loopOffset])
   // Timestamp after which auto-advance may resume. Touching the carousel pushes it forward, so
   // the timer can never yank the card out from under a finger mid-browse.
   const heroResumeAt = useRef(0)
@@ -496,27 +520,39 @@ export default function HomeScreen() {
     if (loading || carouselMeals.length <= 1) return
     const interval = setInterval(() => {
       if (Date.now() < heroResumeAt.current) return // user is driving; stay out of the way
-      const next = (heroIdxRef.current + 1) % carouselMeals.length
-      heroScrollRef.current?.scrollTo({ x: next * width, animated: true })
+      // No modulo — always step forward through the tripled list and let the recentring in
+      // onHeroSettle handle the wrap. That is what makes it loop instead of snapping back.
+      heroScrollRef.current?.scrollTo({ x: (heroRawIdx.current + 1) * width, animated: true })
     }, HERO_CYCLE_MS)
     return () => clearInterval(interval)
   }, [loading, carouselMeals.length])
 
-  // Ref mirror so the interval above reads the live index without being re-created every advance.
-  const heroIdxRef = useRef(0)
-  useEffect(() => { heroIdxRef.current = heroIdx }, [heroIdx])
 
   // Settled page is the single source of truth — it fires for a finger swipe and for the
   // programmatic scrollTo alike, so both paths update the index and restart Ken Burns identically.
   const onHeroSettle = useCallback((e: any) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.x / width)
-    setHeroIdx(prev => (prev === idx ? prev : idx))
+    const len = carouselLenRef.current
+    if (len === 0) return
+    const raw = Math.round(e.nativeEvent.contentOffset.x / width)
+    // Modulo is written the long way because a negative raw (rubber-banding past the left edge)
+    // makes plain % return a negative index.
+    const real = ((raw % len) + len) % len
+    heroRawIdx.current = raw
+    setHeroIdx(prev => (prev === real ? prev : real))
+    // Drifted out of the middle copy — teleport back to the same meal's page there, unanimated.
+    // Invisible to the user, and it restores a full copy of runway in both directions.
+    if (len > 1 && (raw < len || raw >= len * 2)) {
+      const recentred = len + real
+      heroRawIdx.current = recentred
+      heroScrollRef.current?.scrollTo({ x: recentred * width, animated: false })
+    }
   }, [])
-  const onHeroDragStart = useCallback(() => {
-    // 8s of quiet after the last touch. Long enough to read a card, short enough that the
-    // carousel doesn't feel dead if you swipe once and walk away.
-    heroResumeAt.current = Date.now() + 8000
-  }, [])
+  // Any hands-on interaction defers auto-advance, not just swiping — tapping through to a meal
+  // counts too, since coming back to a card that has moved on is the same annoyance.
+  const deferHeroAutoplay = useCallback(() => {
+    heroResumeAt.current = Date.now() + HERO_RESUME_MS
+  }, [HERO_RESUME_MS])
+  const onHeroDragStart = deferHeroAutoplay
   // Ken Burns zoom — restart on every heroIdx change. Linear easing for steady drift.
   useEffect(() => {
     heroScale.setValue(1)
@@ -1381,13 +1417,19 @@ export default function HomeScreen() {
                   onScrollBeginDrag={onHeroDragStart}
                   onMomentumScrollEnd={onHeroSettle}
                   scrollEventThrottle={16}
+                  // Start in the middle copy so the very first swipe can go either way.
+                  contentOffset={{ x: loopOffset * width, y: 0 }}
+                  // Remount if the page count ever changes, so contentOffset is re-applied
+                  // against the right list length instead of pointing into the old geometry.
+                  key={`hero-${carouselMeals.length}`}
                 >
-                  {carouselMeals.map((m, i) => (
+                  {loopMeals.map((m, i) => (
                     <TouchableOpacity
-                      key={m.id ?? `hero-${i}`}
+                      key={`${m.id ?? 'hero'}-${i}`}
                       style={{ width, height: '100%' }}
                       activeOpacity={0.85}
                       onPress={() => {
+                        deferHeroAutoplay()
                         // Guard against missing id (GPT sometimes omits it) — fall back
                         // to a synthetic id so the URL is well-formed. mealData carries
                         // the full meal so meal/[id].tsx renders from URL params either way.
@@ -1400,10 +1442,10 @@ export default function HomeScreen() {
                             Animating an offscreen page is wasted work, and it would be mid-drift
                             when you swiped back to it instead of starting clean. */}
                         <RNAnimated.View
-                          style={[StyleSheet.absoluteFillObject, i === safeHeroIdx ? { transform: [{ scale: heroScale }] } : null]}
+                          style={[StyleSheet.absoluteFillObject, (i % Math.max(carouselMeals.length, 1)) === safeHeroIdx ? { transform: [{ scale: heroScale }] } : null]}
                         >
                           {m.image && m.image.startsWith('http') ? (
-                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === 0 ? 'high' : 'normal'} transition={0} />
+                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === loopOffset ? 'high' : 'normal'} transition={0} />
                           ) : (
                             // A photo-less page is why the pager can hold a stable 3 pages from the
                             // first frame: it narrates instead of going blank, so the page count
