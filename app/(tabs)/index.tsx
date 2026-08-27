@@ -551,11 +551,20 @@ export default function HomeScreen() {
   // counts too, since coming back to a card that has moved on is the same annoyance.
   const deferHeroAutoplay = useCallback(() => {
     heroResumeAt.current = Date.now() + HERO_RESUME_MS
-  }, [HERO_RESUME_MS])
+    // Freeze the zoom where it is rather than snapping back to 1 — a reset mid-drag would be a
+    // visible pop. The next automatic advance resets it anyway.
+    heroScale.stopAnimation()
+  }, [HERO_RESUME_MS, heroScale])
   const onHeroDragStart = deferHeroAutoplay
-  // Ken Burns zoom — restart on every heroIdx change. Linear easing for steady drift.
+  // Ken Burns zoom — linear easing for steady drift, restarted whenever the settled page changes.
+  //
+  // Only runs while the carousel is advancing ITSELF. Ken Burns is a presentation gesture: it
+  // belongs to the slideshow, not to browsing. A photo creeping in scale under your own finger
+  // reads as drift or instability rather than polish, and it fights the horizontal motion you are
+  // making. While you are driving, the photo holds still.
   useEffect(() => {
     heroScale.setValue(1)
+    if (Date.now() < heroResumeAt.current) return
     RNAnimated.timing(heroScale, {
       toValue: 1.12,
       duration: HERO_CYCLE_MS,
