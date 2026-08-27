@@ -570,7 +570,16 @@ export default function HomeScreen() {
   // onMomentumScrollEnd, which sets state, which re-renders Home and restarts the Ken Burns
   // animation. That work lands on the same JS thread that has to mount the tab you just switched
   // TO — which is how a background carousel turns into a black frame on Discover or Saved.
-  const [homeFocused, setHomeFocused] = useState(true)
+  // MUST start false, not true. Home is the initial tab route, so React Navigation MOUNTS it even
+  // when the app opens on another tab — and useFocusEffect then never fires, so a `true` default
+  // was never corrected. Home sat unfocused with its carousel interval running, re-rendering the
+  // whole screen every ~8.9s forever, on the same JS thread every other tab has to transition on.
+  // Caught in a capture showing `Home MOUNT` with no following `Home FOCUS` and eleven renders at
+  // 8753/8824/8895/8898/8896/8908/8884/8932/8884/8931ms.
+  //
+  // false is safe for the normal case too: when Home IS the landing tab, useFocusEffect fires on
+  // mount and flips it true before the interval's first tick.
+  const [homeFocused, setHomeFocused] = useState(false)
   useFocusEffect(useCallback(() => {
     setHomeFocused(true)
     return () => {
