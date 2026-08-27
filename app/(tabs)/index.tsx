@@ -552,8 +552,24 @@ export default function HomeScreen() {
   // the timer can never yank the card out from under a finger mid-browse.
   const heroResumeAt = useRef(0)
 
+  // Expo Router keeps tab screens MOUNTED when you navigate away, so without this the carousel
+  // keeps advancing on a screen nobody is looking at: every HERO_CYCLE_MS it scrolls, which fires
+  // onMomentumScrollEnd, which sets state, which re-renders Home and restarts the Ken Burns
+  // animation. That work lands on the same JS thread that has to mount the tab you just switched
+  // TO — which is how a background carousel turns into a black frame on Discover or Saved.
+  const [homeFocused, setHomeFocused] = useState(true)
+  useFocusEffect(useCallback(() => {
+    setHomeFocused(true)
+    return () => {
+      setHomeFocused(false)
+      // Freeze any zoom mid-flight as well; an Animated.timing left running is the same problem in
+      // miniature — it drives frames for a screen that is no longer visible.
+      heroScale.stopAnimation()
+    }
+  }, [heroScale]))
+
   useEffect(() => {
-    if (loading || carouselMeals.length <= 1) return
+    if (!homeFocused || loading || carouselMeals.length <= 1) return
     const interval = setInterval(() => {
       if (Date.now() < heroResumeAt.current) return // user is driving; stay out of the way
       // No modulo — always step forward through the tripled list and let the recentring in
@@ -561,7 +577,7 @@ export default function HomeScreen() {
       heroScrollRef.current?.scrollTo({ x: (heroRawIdx.current + 1) * width, animated: true })
     }, HERO_CYCLE_MS)
     return () => clearInterval(interval)
-  }, [loading, carouselMeals.length])
+  }, [homeFocused, loading, carouselMeals.length])
 
 
   // Settled page is the single source of truth — it fires for a finger swipe and for the
@@ -613,6 +629,7 @@ export default function HomeScreen() {
   // making. While you are driving, the photo holds still.
   useEffect(() => {
     heroScale.setValue(1)
+    if (!homeFocused) return
     if (Date.now() < heroResumeAt.current) return
     RNAnimated.timing(heroScale, {
       toValue: 1.12,
@@ -620,7 +637,7 @@ export default function HomeScreen() {
       easing: Easing.linear,
       useNativeDriver: true,
     }).start()
-  }, [heroIdx, heroScale])
+  }, [heroIdx, heroScale, homeFocused])
   // Wrapped so a shrinking set never points at an empty slot and leaves the hero blank.
   const safeHeroIdx = carouselMeals.length > 0 ? heroIdx % carouselMeals.length : 0
   const heroMeal = carouselMeals[safeHeroIdx]
