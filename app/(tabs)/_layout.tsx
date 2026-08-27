@@ -44,12 +44,7 @@ export default function TabLayout() {
         tabBarStyle: styles.tabBar,
         tabBarActiveTintColor: '#FFFFFF',
         tabBarInactiveTintColor: '#AAAAAA',
-        // 'shift' (v7) translates screens horizontally by tab-index distance. Black frames were
-        // reported switching between Discover and Saved — tabs 3 and 4, the ADJACENT pair — while
-        // every non-adjacent pair Logan tried was fine. Smallest shift distance is the one that
-        // breaks, which points at the transition rather than at either screen. 'fade' keeps the
-        // polish without the horizontal geometry.
-        animation: 'fade',
+        animation: 'shift', // subtle directional shift+fade between tabs (v7); 'none' was the abrupt default
       }}
     >
       <Tabs.Screen
