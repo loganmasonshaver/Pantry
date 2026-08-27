@@ -819,12 +819,14 @@ export default function HomeScreen() {
   useFocusEffect(useCallback(() => {
     if (!user) return
     let cancelled = false
+    perfMark('Home profile fetch START')
     supabase
       .from('profiles')
       .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
+        perfMark('Home profile fetch DONE')
         if (cancelled) return
         if (!data?.food_prefs_banner_dismissed) setShowPrefBanner(true)
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
@@ -918,12 +920,14 @@ export default function HomeScreen() {
 
   const fetchTodayLogs = useCallback(async () => {
     if (!user) return
+    perfMark('Home logs fetch START')
     const { data } = await supabase
       .from('meal_logs')
       .select('id, meal_name, calories, protein, carbs, fat, slot, created_at, food_id, serving_id, quantity, meal_data')
       .eq('user_id', user.id)
       .eq('logged_at', selectedDate)
       .order('created_at', { ascending: true })
+    perfMark('Home logs fetch DONE')
     if (!data) return
 
     const slotMap = new Map<string, LogEntry[]>()
