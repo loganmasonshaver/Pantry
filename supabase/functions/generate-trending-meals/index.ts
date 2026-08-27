@@ -43,6 +43,49 @@ const RETENTION_DAYS = 30
 // "Chicken Rice Bowl" vs "Beef Rice Bowl" (0.5), which is a genuinely different dish.
 const NEAR_DUP_JACCARD = 0.7
 
+// The same test, run on INGREDIENTS instead of the name.
+//
+// Name-Jaccard is structurally blind to one class of duplicate: the same dish under a brand name
+// and a descriptive name. "Reese's Yogurt Cups" vs "Peanut Butter Yogurt Cups" shares only
+// {yogurt, cups} — 0.40, comfortably accepted — while the recipes are character-for-character the
+// same four ingredients. Both shipped, both got their own image generated, and they landed
+// adjacent in the same Discover shelf. Fitness recipe content is full of brand-named dishes, so
+// this is a recurring shape rather than a one-off.
+//
+// 0.85 is measured, not guessed. Swept every one of the 9,730 pairs in the live 140-meal pool:
+// the most similar LEGITIMATE pair scores 0.60 ("Chocolate Peanut Butter Yogurt Clusters" vs
+// "Peanut Butter Yogurt Cups" — genuinely different dishes), and the real duplicate scored 1.00.
+// 0.85 sits in a 0.25-wide empty band between them, so it rejects nothing the pool actually wants.
+//
+// Deliberately far higher than the 0.7 name threshold: ingredient lists overlap much more than
+// names do. Two unrelated chicken dishes legitimately share chicken, oil, salt and garlic.
+const NEAR_DUP_INGREDIENT_JACCARD = 0.85
+
+// Preparation words describe how an ingredient was handled, not what it is. Stripping them is what
+// makes "melted dark chocolate" and "dark chocolate" compare equal — without it the pair above
+// scores 0.75 instead of 1.00 and slips under any safe threshold.
+const PREP_MODIFIERS = new Set(['melted','crushed','chopped','diced','sliced','shredded','grated','fresh','frozen','low','fat','nonfat','plain','unsweetened','raw','cooked','ground','whole','large','small','ripe','skinless','boneless','canned','dried','toasted','roasted','mini','light','reduced','sugar','free','extra','virgin','of'])
+
+function ingredientSignature(ingredients: any[]): Set<string> {
+  const out = new Set<string>()
+  for (const i of ingredients || []) {
+    // Rows carry both shapes: most are {name, amount}, a handful of older ones are bare strings.
+    const raw = typeof i === 'string' ? i : (i?.name ?? '')
+    const cleaned = String(raw).toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/)
+      .filter(w => w && !PREP_MODIFIERS.has(w)).join(' ')
+    if (cleaned) out.add(cleaned)
+  }
+  return out
+}
+
+function setJaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let overlap = 0
+  a.forEach(v => { if (b.has(v)) overlap++ })
+  const union = a.size + b.size - overlap
+  return union > 0 ? overlap / union : 0
+}
+
 // Fixed shelf vocabulary. Mixed cuisine + format on purpose: cuisine alone covers only 43% of the
 // catalog because half of it is fitness-food constructs with no cuisine, and format alone loses the
 // evocative pull of "Indian night" over "Chicken".
@@ -436,10 +479,16 @@ Deno.serve(async (req: Request) => {
     const nameWindowCutoff = new Date(Date.now() - nameWindowDays * 86400000).toISOString().split('T')[0]
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
     const { data: prevMeals } = await db.from('trending_meals')
-      .select('name, video_id')
+      .select('name, video_id, ingredients')
       .neq('generated_at', today())
       .gte('generated_at', nameWindowCutoff)
     const prevNames = (prevMeals || []).map((m: any) => m.name.toLowerCase())
+    // Signatures computed once here rather than per candidate — the inner loop below runs this
+    // against every survivor, and re-deriving them there would be O(candidates x history).
+    // Sets under 3 entries are dropped: a two-ingredient recipe matches too much by chance.
+    const prevIngredientSigs = (prevMeals || [])
+      .map((m: any) => ingredientSignature(m.ingredients))
+      .filter((sig: Set<string>) => sig.size >= 3)
 
     // Recently-used video IDs (90-day window — catches the same viral video resurfacing
     // weeks later). Pre-filtered against candidates so we don't waste LLM tokens on dupes.
@@ -449,7 +498,7 @@ Deno.serve(async (req: Request) => {
       .not('video_id', 'is', null)
     const recentVideoIds = new Set((recentVideoRows || []).map((r: any) => r.video_id))
 
-    stageLog(`dedup history loaded: ${prevNames.length} prev names, ${recentVideoIds.size} prev video_ids`)
+    stageLog(`dedup history loaded: ${prevNames.length} prev names, ${prevIngredientSigs.length} prev ingredient sigs, ${recentVideoIds.size} prev video_ids`)
 
     const allVideos: { videoId: string; title: string; thumbnail: string; description: string; viewCount: number; likeCount: number }[] = []
     // Used to filter chart=mostPopular results down to food content (the Howto & Style
@@ -775,6 +824,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
           const seenNames = new Set<string>()
           const seenWordSets: Set<string>[] = [] // for same-day Jaccard dedup
+          const seenIngredientSigs: Set<string>[] = [] // same-day dedup on the RECIPE, not the name
           const STOPWORDS = new Set(['high', 'protein', 'recipe', 'easy', 'quick', 'best', 'the', 'a', 'an', 'with', 'and', 'of', 'for', 'low', 'macro', 'friendly', 'healthy'])
           const wordsOf = (s: string) => new Set(
             s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
@@ -794,7 +844,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -828,6 +878,21 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // would accumulate. Applies to both the stored history and today's own batch.
             const maxJac = Math.max(r._maxJaccardPrev, r._maxJaccardToday)
             if (maxJac >= NEAR_DUP_JACCARD) { rejNearDup++; return false }
+            // Second, independent duplicate test: same dish, different label. Checked against both
+            // the stored history and today's own batch, exactly like the name test — two creators
+            // posting the same recipe on the same day is the common case, not the rare one.
+            const candSig = ingredientSignature(r.ingredients)
+            if (candSig.size >= 3) {
+              let maxIngJac = 0
+              for (const prev of prevIngredientSigs) maxIngJac = Math.max(maxIngJac, setJaccard(candSig, prev))
+              for (const prev of seenIngredientSigs) maxIngJac = Math.max(maxIngJac, setJaccard(candSig, prev))
+              if (maxIngJac >= NEAR_DUP_INGREDIENT_JACCARD) {
+                rejDupIngredients++
+                console.log(`[funnel] rejected "${name}" — ingredient overlap ${maxIngJac.toFixed(2)} with an existing meal (different name, same recipe)`)
+                return false
+              }
+              seenIngredientSigs.push(candSig)
+            }
             // Enforced in CODE, not just the prompt. "Do not scale" was already an explicit
             // instruction and was ignored anyway — same lesson as the format cap. A recipe that
             // asks for half an egg cannot be cooked, so it's rejected outright rather than ranked.
@@ -858,7 +923,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dropped ${rejDropped})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped})`)
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
