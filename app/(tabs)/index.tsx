@@ -22,7 +22,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
-import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, Sparkles, BarChart3 } from 'lucide-react-native'
+import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -72,7 +72,7 @@ const ENABLE_AI_PHOTO_LOG = false
 // backend is actually doing, in order, so the wait reads as work rather than lag.
 // Height of the meal card before there is a real meal in it — used by BOTH the resting card and
 // the loading skeleton so tapping one to reach the other doesn't shift the page.
-const HERO_COMPACT_H = 196
+const HERO_COMPACT_H = 172
 
 const DAILY_STATUS = [
   'Checking what\'s in your pantry…',
@@ -218,25 +218,32 @@ function MealCardResting({ pantryCount, onPress }: { pantryCount: number; onPres
     loop.start()
     return () => loop.stop()
   }, [])
-  // Opacity + transform only, so this stays on the native driver and costs no JS frames.
-  const haloScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] })
-  const haloOpacity = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.30, 0.06] })
+  // The breathe drives the GRADIENT, not an icon. Ambient light shifting behind the type reads as
+  // the card being alive; a glyph sitting on top of a card reads as decoration.
+  // Opacity only, so this stays on the native driver and costs no JS frames.
+  const washOpacity = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] })
 
   return (
     <TouchableOpacity style={styles.restingCard} activeOpacity={0.9} onPress={onPress}>
+      {/* Base wash — always present, so the card is never flat even at the bottom of the breath. */}
       <LinearGradient
-        colors={['rgba(74,222,128,0.13)', 'rgba(0,201,167,0.05)', '#0B0B0B']}
+        colors={['rgba(74,222,128,0.10)', 'rgba(0,201,167,0.04)', '#0B0B0B']}
         locations={[0, 0.45, 1]}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      <View style={styles.restingIconWrap}>
-        <RNAnimated.View
-          style={[styles.restingHalo, { opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
+      {/* Second wash breathes on top of the first, from a different corner, so the highlight
+          appears to drift across the card rather than simply fading in place. */}
+      <RNAnimated.View style={[StyleSheet.absoluteFill, { opacity: washOpacity }]}>
+        <LinearGradient
+          colors={['rgba(0,201,167,0.14)', 'rgba(74,222,128,0.05)', 'transparent']}
+          locations={[0, 0.5, 1]}
+          start={{ x: 0.95, y: 0.1 }}
+          end={{ x: 0.2, y: 1 }}
+          style={StyleSheet.absoluteFill}
         />
-        <Sparkles size={20} stroke="#4ADE80" strokeWidth={2} />
-      </View>
+      </RNAnimated.View>
       <Text style={styles.restingTitle}>Get tonight's meals</Text>
       <Text style={styles.restingSub}>
         {pantryCount > 0
@@ -2021,12 +2028,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
-  },
-  restingIconWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  restingHalo: {
-    position: 'absolute',
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: '#4ADE80',
   },
   restingTitle: { fontSize: 19, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
   restingSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 5, textAlign: 'center', paddingHorizontal: 24 },
