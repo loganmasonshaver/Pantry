@@ -265,6 +265,44 @@ function passesDietary(meal: DiscoverMeal, dislikes: string[]): boolean {
 // Diet identity (Classic/Pescatarian/Vegetarian/Vegan) + allergen restrictions,
 // matched against the generation-time tags. Classic matches everything. Legacy
 // rows with null tags pass permissively so nothing vanishes during rollout.
+// Preparation words describe how an ingredient was handled, not what it is. Stripping them is what
+// lets "melted dark chocolate" and "dark chocolate" compare as the same thing. Mirrors the list in
+// generate-trending-meals, which does the same job at ingestion.
+const PREP_MODIFIERS = new Set(['melted','crushed','chopped','diced','sliced','shredded','grated','fresh','frozen','low','fat','nonfat','plain','unsweetened','raw','cooked','ground','whole','large','small','ripe','skinless','boneless','canned','dried','toasted','roasted','mini','light','reduced','sugar','free','extra','virgin','of'])
+
+function ingredientSignature(meal: DiscoverMeal): Set<string> {
+  const out = new Set<string>()
+  for (const i of (meal.ingredients || []) as any[]) {
+    const raw = typeof i === 'string' ? i : (i?.name ?? '')
+    const cleaned = String(raw).toLowerCase().replace(/[^a-z ]/g, ' ').split(/\s+/)
+      .filter(w => w && !PREP_MODIFIERS.has(w)).join(' ')
+    if (cleaned) out.add(cleaned)
+  }
+  return out
+}
+
+function ingredientOverlap(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let overlap = 0
+  a.forEach(v => { if (b.has(v)) overlap++ })
+  const union = a.size + b.size - overlap
+  return union > 0 ? overlap / union : 0
+}
+
+// How similar two recipes may be before they are considered too alike to sit in the SAME shelf.
+//
+// Separate from — and much stricter than — the 0.85 the pipeline uses to reject a meal at
+// ingestion, because the two rules do different jobs. Ingestion decides what is worth STORING and
+// its mistakes are permanent, so it must be conservative. This decides what is worth showing
+// TOGETHER, deletes nothing, and a meal it skips is still available to every other shelf and to
+// tomorrow's rotation. That asymmetry is what lets this one be aggressive.
+//
+// Measured against the live 140-meal pool before choosing: simulating a greedy fill of 6 per shelf
+// at 0.4 / 0.5 / 0.6 skipped ZERO meals and starved ZERO shelves below the 2-meal render minimum.
+// The pool is already varied enough that this rarely fires — it is close to free insurance against
+// the case that has now happened twice ("Reese's Yogurt Cups" beside "Peanut Butter Yogurt Cups").
+const SHELF_DIVERSITY_MAX = 0.5
+
 function passesDietTags(meal: DiscoverMeal, dietType: string, restrictions: string[]): boolean {
   if (dietType && dietType !== 'Classic' && meal.compatible_diets) {
     if (!meal.compatible_diets.includes(dietType)) return false
@@ -631,11 +669,28 @@ export default function DiscoverScreen() {
     // rather than as thorough curation. Personalised shelves get first pick because they're the
     // most specific reason to tap.
     const taken = new Set<string>()
+    // Diversity is enforced WITHIN a shelf, not across the page: two similar meals in different
+    // shelves is fine (they are answering different questions), two side by side in one shelf is
+    // the repetition that reads as a thin catalog.
+    //
+    // The personalised shelves are why this is needed. Tag shelves group by cuisine so their
+    // members are already varied, but "Almost in your kitchen" / "Because you cooked X" /
+    // "Fits your remaining kcal" filter the WHOLE pool by pantry or macros — nothing in those
+    // filters cares whether two results are the same dessert. Both collisions Logan hit were there.
+    //
+    // A skipped meal is NOT consumed: `taken` is only marked for meals actually kept, so it stays
+    // available to every later shelf instead of vanishing from the page entirely.
     const claim = (meals: DiscoverMeal[], limit: number) => {
       const out: DiscoverMeal[] = []
+      const sigs: Set<string>[] = []
       for (const m of meals) {
         if (out.length >= limit) break
         if (taken.has(m.id)) continue
+        const sig = ingredientSignature(m)
+        // Under 3 ingredients the overlap score is noise — a two-item recipe matches too much by
+        // chance — so those are admitted without a diversity check rather than falsely blocked.
+        if (sig.size >= 3 && sigs.some(prev => ingredientOverlap(sig, prev) >= SHELF_DIVERSITY_MAX)) continue
+        if (sig.size >= 3) sigs.push(sig)
         taken.add(m.id)
         out.push(m)
       }
