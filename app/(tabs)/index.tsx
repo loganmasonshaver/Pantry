@@ -459,6 +459,19 @@ function SlotCard({
 }
 
 export default function HomeScreen() {
+  // Home was the ONLY tab left uninstrumented, which is why the new symptom — a freeze on
+  // Pantry for a couple of seconds when switching TO Home — produced no log at all. Its
+  // BLUR fires on the outgoing screen and then nothing until Home finishes whatever it is
+  // doing. This makes that gap visible.
+  useEffect(() => {
+    perfMark('Home MOUNT')
+    return () => perfMark('Home UNMOUNT')
+  }, [])
+  useFocusEffect(useCallback(() => {
+    perfMark('Home FOCUS')
+    return () => perfMark('Home BLUR')
+  }, []))
+
   const { user } = useAuth()
   const router = useRouter()
   // Backdrop-tap-to-close is the SAME gesture as tap-outside-to-dismiss-the-keyboard, so with a
@@ -1087,6 +1100,7 @@ export default function HomeScreen() {
   const totalCarbs = allEntries.reduce((s, e) => s + e.carbs, 0)
   const totalFat = allEntries.reduce((s, e) => s + e.fat, 0)
 
+  perfMark('Home RENDER')
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Rating feedback toast ── */}
