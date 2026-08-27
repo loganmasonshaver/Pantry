@@ -71,6 +71,34 @@ const ENABLE_AI_PHOTO_LOG = false
 // backend is actually doing, in order, so the wait reads as work rather than lag.
 // Height of the meal card before there is a real meal in it — used by BOTH the resting card and
 // the loading skeleton so tapping one to reach the other doesn't shift the page.
+// Manual `text-wrap: balance`. CSS has it, React Native does not, so the break is computed here
+// instead of being left to the layout engine's greedy fill.
+//
+// Greedy wrapping packs line 1 to capacity and dumps whatever is left on line 2, which is how
+// "Cottage Cheese and Pineapple Protein / Bowl" happens — a full line above one orphaned word.
+// Balancing splits at the word boundary that makes the two lines closest in length instead.
+//
+// Character count is a proxy for rendered width (an "M" is wider than an "i"), which is fine for
+// dish names and costs no measurement pass or extra render. HERO_ONE_LINE_MAX is tuned for the
+// hero: ~317pt of usable width at 18px/800 weight is roughly 33 characters.
+const HERO_ONE_LINE_MAX = 33
+
+function balanceTitle(name: string, oneLineMax = HERO_ONE_LINE_MAX): string {
+  const t = (name ?? '').trim()
+  // Fits on one line, or is a single unbreakable word — nothing to balance.
+  if (t.length <= oneLineMax || !t.includes(' ')) return t
+  const words = t.split(/\s+/)
+  let best = { diff: Infinity, at: 1 }
+  // Every split point EXCEPT the ends, so balancing can never itself create an orphan.
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i).join(' ').length
+    const b = words.slice(i).join(' ').length
+    const diff = Math.abs(a - b)
+    if (diff < best.diff) best = { diff, at: i }
+  }
+  return `${words.slice(0, best.at).join(' ')}\n${words.slice(best.at).join(' ')}`
+}
+
 const HERO_COMPACT_H = 172
 
 const DAILY_STATUS = [
@@ -1474,13 +1502,8 @@ export default function HomeScreen() {
                           style={styles.heroMealGradient}
                         />
                         <View style={styles.heroMealContent}>
-                          <Text style={styles.heroMealName} numberOfLines={2}>{m.name}</Text>
-                          {/* Left-aligned, not centred. The title above hangs off the left edge, so
-                              a centred pill row put the two in different alignments — which is what
-                              made a wrapped title with a short last line ("...Protein / Bowl") read
-                              as broken. Both now share one edge. Matches every meal card in
-                              Discover, which was already left/left. */}
-                          <View style={{ flexDirection: 'row', gap: 5, marginTop: 8 }}>
+                          <Text style={styles.heroMealName} numberOfLines={2}>{balanceTitle(m.name)}</Text>
+                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
                             {m.prepTime > 0 && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
                                 <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{m.prepTime} MIN</Text>
@@ -2170,6 +2193,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.textWhite,
     lineHeight: 22,
+    // Centred to match the pills below. This only works BECAUSE the wrap is balanced — a centred
+    // title whose last line is one word floats in the middle and looks worse than a left-hung one.
+    // Two even lines over a centred pill row is the poster treatment the hero is asking for.
+    textAlign: 'center',
   },
 
   // Meal slot cards (MyFitnessPal style)
