@@ -2115,7 +2115,15 @@ const styles = StyleSheet.create({
   },
   heroDot: {
     width: 6, height: 6, borderRadius: 3,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    // 0.35 -> 0.55 plus a drop shadow. The dots sit at the top of the card where the gradient has
+    // not started yet, so on a bright photo (white cottage cheese, a pale bowl) the inactive dots
+    // were effectively invisible — and they are the only thing advertising that the card swipes.
+    // A shadow rather than a scrim pill: it survives any photo without adding chrome to the card.
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.55,
+    shadowRadius: 2.5,
   },
   heroDotActive: { backgroundColor: '#FFFFFF', width: 16 },
   restingCard: {
