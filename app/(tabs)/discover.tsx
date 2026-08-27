@@ -670,19 +670,42 @@ export default function DiscoverScreen() {
         counts.set(name, (counts.get(name) ?? 0) + 1)
       }
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    // COLLAPSE QUALIFIED FORMS. The pool holds 547 distinct ingredient names and 387 of them are a
+    // qualified version of another ("liquid egg whites" of "egg whites", "boneless skinless chicken
+    // breast" of "chicken breast", six spellings of "greek yogurt"). Offering each separately makes
+    // one ingredient look like several and splits its count across chips that all lead to overlapping
+    // results.
+    //
+    // Only the SUGGESTIONS are collapsed. The stored ingredient lists are left exactly as the creator
+    // wrote them — those are a fidelity requirement, and rewriting them is how a dropped or reworded
+    // ingredient turns into a false allergen tag. Search itself already matches by substring, so the
+    // broader term finds the qualified rows anyway; this only stops the LIST from repeating itself.
+    const names = [...counts.keys()]
+    const byWords = names.map(n => [n, new Set(n.split(' '))] as const)
+    const canonical = byWords
+      .filter(([n, w]) => !byWords.some(([o, ow]) => o !== n && ow.size < w.size && [...ow].every(x => w.has(x))))
+      .map(([n]) => n)
+    return canonical.sort((a, b) => (counts.get(b)! - counts.get(a)!) || a.localeCompare(b))
   }, [filtered])
 
-  // Suggestions carry their result count, so you know what a tap gets you BEFORE you take it. This
-  // is the whole reason the feature works at this pool size: 257 of ~494 ingredient words appear in
-  // exactly one meal, so a bare free-text box would return nothing most of the time and teach the
-  // user the catalog is empty. Picking from a list built out of what actually exists cannot miss.
+  // The count shown on a chip is computed the same way the query itself matches — by substring over
+  // the real ingredient lists — so the number on the chip is exactly what tapping it returns. A chip
+  // promising 5 that opens 6 is worse than no number at all. Only the <=8 visible chips are counted,
+  // which keeps this cheap enough to run during render.
+  const countFor = useCallback((term: string) => filtered.reduce((n, m) => {
+    const hit = m.name.toLowerCase().includes(term) || ((m.ingredients || []) as any[]).some(ing => {
+      const raw = typeof ing === 'string' ? ing : (ing?.name ?? '')
+      return String(raw).toLowerCase().includes(term)
+    })
+    return hit ? n + 1 : n
+  }, 0), [filtered])
+
   const suggestions = useMemo(() => {
-    if (q.length < 2) return ingredientIndex.slice(0, 8)
-    const starts = ingredientIndex.filter(([n]) => n.startsWith(q))
-    const contains = ingredientIndex.filter(([n]) => !n.startsWith(q) && n.includes(q))
-    return [...starts, ...contains].slice(0, 8)
-  }, [ingredientIndex, q])
+    const pick = q.length < 2
+      ? ingredientIndex.slice(0, 8)
+      : [...ingredientIndex.filter(n => n.startsWith(q)), ...ingredientIndex.filter(n => !n.startsWith(q) && n.includes(q))].slice(0, 8)
+    return pick.map(n => [n, countFor(n)] as const)
+  }, [ingredientIndex, q, countFor])
 
   // Free text still works past the suggestions — the list steers, it doesn't gate. Matches the meal
   // NAME too, so "brownie" finds brownies even though it is not an ingredient of anything.
