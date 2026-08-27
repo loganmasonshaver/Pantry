@@ -126,7 +126,7 @@ export function trackMealRegenerated() {
 // Where a meal was surfaced. Threaded through view/save/log so the funnel can be read per
 // surface and per shelf — without it a cook is just a cook and no shelf can be evaluated.
 export type MealSource =
-  | 'discover_featured' | 'discover_rail' | 'discover_grid'
+  | 'discover_featured' | 'discover_rail' | 'discover_grid' | 'discover_search'
   | 'pantry_hero' | 'search' | 'saved' | 'scan' | 'manual'
 
 export type MealContext = {

@@ -9,11 +9,12 @@ import {
   AppState,
   RefreshControl,
   Dimensions,
+  TextInput,
 } from 'react-native'
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
-import { Flame, Compass, Utensils, Plus } from 'lucide-react-native'
+import { Flame, Compass, Utensils, Plus, Search, X } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
@@ -649,6 +650,55 @@ export default function DiscoverScreen() {
     return filtered.filter(m => !shown.has(m.id))
   }, [filtered, featured, creatorRail])
 
+  // ── Ingredient search ────────────────────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const q = searchQuery.trim().toLowerCase()
+
+  // Vocabulary is built from `filtered`, NOT the raw pool — so it inherits the diet and allergen
+  // filtering. Someone avoiding nuts must never be offered "cashews" as a suggestion, let alone be
+  // able to search their way to a meal the shelves correctly hide from them.
+  const ingredientIndex = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const m of filtered) {
+      const seen = new Set<string>()
+      for (const ing of ((m.ingredients || []) as any[])) {
+        const raw = typeof ing === 'string' ? ing : (ing?.name ?? '')
+        const name = String(raw).toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim()
+        if (name.length < 3 || seen.has(name)) continue
+        seen.add(name)
+        counts.set(name, (counts.get(name) ?? 0) + 1)
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [filtered])
+
+  // Suggestions carry their result count, so you know what a tap gets you BEFORE you take it. This
+  // is the whole reason the feature works at this pool size: 257 of ~494 ingredient words appear in
+  // exactly one meal, so a bare free-text box would return nothing most of the time and teach the
+  // user the catalog is empty. Picking from a list built out of what actually exists cannot miss.
+  const suggestions = useMemo(() => {
+    if (q.length < 2) return ingredientIndex.slice(0, 8)
+    const starts = ingredientIndex.filter(([n]) => n.startsWith(q))
+    const contains = ingredientIndex.filter(([n]) => !n.startsWith(q) && n.includes(q))
+    return [...starts, ...contains].slice(0, 8)
+  }, [ingredientIndex, q])
+
+  // Free text still works past the suggestions — the list steers, it doesn't gate. Matches the meal
+  // NAME too, so "brownie" finds brownies even though it is not an ingredient of anything.
+  const searchResults = useMemo(() => {
+    if (q.length < 2) return []
+    return filtered.filter(m => {
+      if (m.name.toLowerCase().includes(q)) return true
+      return ((m.ingredients || []) as any[]).some(ing => {
+        const raw = typeof ing === 'string' ? ing : (ing?.name ?? '')
+        return String(raw).toLowerCase().includes(q)
+      })
+    })
+  }, [filtered, q])
+
+  const searching = searchOpen && q.length >= 2
+
   // Grouped, not one endless scroll. A flat grid of 400 meals is a worse version of a search
   // results page — it strips out every reason to look at any particular meal. Sections restore
   // that, using columns that already exist (generated_at, category) plus the protein classifier
@@ -842,9 +892,60 @@ export default function DiscoverScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Discover</Text>
-          <Text style={styles.contextLine}>{contextLine}</Text>
+          <View style={styles.headerRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.title}>Discover</Text>
+              <Text style={styles.contextLine}>{contextLine}</Text>
+            </View>
+            {/* An icon, not a permanent input. This screen already carries a title, a context line
+                and eight filter chips above the fold; a always-visible search bar would be one more
+                thing competing before anyone has asked to search. */}
+            <PressableScale
+              onPress={() => { setSearchOpen(o => !o); if (searchOpen) setSearchQuery('') }}
+              hitSlop={12}
+              style={styles.searchToggle}
+            >
+              {searchOpen
+                ? <X size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+                : <Search size={20} stroke={COLORS.textWhite} strokeWidth={2} />}
+            </PressableScale>
+          </View>
         </View>
+
+        {searchOpen && (
+          <View style={styles.searchPanel}>
+            <View style={styles.searchInputWrap}>
+              <Search size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search by ingredient…"
+                placeholderTextColor={COLORS.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+              />
+              {q.length > 0 && (
+                <PressableScale onPress={() => setSearchQuery('')} hitSlop={10}>
+                  <X size={15} stroke={COLORS.textMuted} strokeWidth={2} />
+                </PressableScale>
+              )}
+            </View>
+            {/* Counts are the point: you can see a suggestion is worth tapping before you tap it. */}
+            {suggestions.length > 0 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.suggestRow} keyboardShouldPersistTaps="handled">
+                {suggestions.map(([name, count]) => (
+                  <PressableScale key={name} style={styles.suggestChip} onPress={() => setSearchQuery(name)}>
+                    <Text style={styles.suggestText}>{name}</Text>
+                    <Text style={styles.suggestCount}>{count}</Text>
+                  </PressableScale>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        )}
 
         {/* Filter chips */}
         <ScrollView
@@ -866,8 +967,40 @@ export default function DiscoverScreen() {
           })}
         </ScrollView>
 
+        {searching && (
+          <View style={{ marginTop: 8 }}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>
+                {searchResults.length} {searchResults.length === 1 ? 'recipe' : 'recipes'} with “{q}”
+              </Text>
+            </View>
+            {searchResults.length > 0 ? (
+              // Deliberately NOT run through the shelf diversity guard. That rule exists to keep a
+              // curated shelf varied; search is an explicit request, so if two matches are similar
+              // the user still asked for both and hiding one would look like a missing result.
+              <View style={styles.browseGrid}>
+                {searchResults.map((meal, index) => (
+                  <View key={meal.id} style={styles.browseCell}>
+                    <RailCard meal={meal} onPress={() => openMeal(meal, 'discover_search', 'search', index)} full />
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={styles.searchEmpty}>
+                <Text style={styles.searchEmptyTitle}>Nothing with “{q}”</Text>
+                <Text style={styles.searchEmptySub}>Tap a suggestion above — those are the ingredients that are actually in this week's recipes.</Text>
+              </View>
+            )}
+          </View>
+        )}
+
         {/* Featured hero */}
-        {loading ? (
+        {/* Hero, creator rail and shelves all step aside for results. Search REPLACES the page
+            rather than adding to it — appending a results block under eight shelves is how a
+            screen gets crowded and how the same meal shows up twice on one scroll.
+            The filter chips deliberately STAY: results derive from `filtered`, so searching inside
+            "High Protein" already works, and hiding the chip would hide that it applies. */}
+        {!searching && (loading ? (
           <View style={[styles.featuredHero, styles.featuredSkeleton]}>
             <Compass size={32} stroke="#333" strokeWidth={1.5} />
           </View>
@@ -904,7 +1037,7 @@ export default function DiscoverScreen() {
             </View>
           </PressableScale>
           </Animated.View>
-        ) : null}
+        ) : null)}
 
         {/* Trending Now rail — YouTube-sourced editorial-trendy recipes */}
         {/* The "Today's picks" rail is gone — it lived here. A 10-item horizontal rail showed ~2.5
@@ -912,7 +1045,7 @@ export default function DiscoverScreen() {
             empty by construction. It's now a normal grid section like everything else, so the page
             has one scroll direction and nothing hides behind a sideways gesture. The hero above
             remains the single "display" moment. */}
-        {!loading && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
+        {!searching && !loading && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
               <Text style={styles.sectionTitle}>From Creators</Text>
@@ -944,7 +1077,7 @@ export default function DiscoverScreen() {
             look at"; a grid answers "show me everything", which is the mode someone is in when they
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
-        {!loading && browseSections.map(section => {
+        {!searching && !loading && browseSections.map(section => {
           const shown = shownCount(section.key, section.meals.length)
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
@@ -1134,6 +1267,41 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 12,
   },
+  headerRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  // 40x40 tap target with the glyph centred, rather than sizing the box to the icon — a 20pt icon
+  // is below the comfortable minimum to hit, and hitSlop alone leaves it looking incidental.
+  searchToggle: {
+    width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#161616',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    marginTop: 2,
+  },
+  searchPanel: { paddingHorizontal: 20, paddingBottom: 4 },
+  searchInputWrap: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#161616',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 30,
+    paddingHorizontal: 16, paddingVertical: 11,
+  },
+  // No explicit height: the wrapper's padding sets it, so Dynamic Type can grow the field instead
+  // of clipping the text inside a fixed box.
+  searchInput: { flex: 1, fontSize: 15, color: COLORS.textWhite, padding: 0 },
+  suggestRow: { gap: 8, paddingVertical: 12, paddingRight: 20 },
+  suggestChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: '#161616',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 30,
+    paddingHorizontal: 13, paddingVertical: 8,
+  },
+  suggestText: { fontSize: 13, color: COLORS.textWhite, fontWeight: '600' },
+  // The count is the affordance, so it gets the accent — it is what tells you a tap is worth taking.
+  suggestCount: { fontSize: 12, color: COLORS.accent, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  searchEmpty: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 28 },
+  searchEmptyTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textWhite },
+  searchEmptySub: { fontSize: 13, color: COLORS.textMuted, marginTop: 6, lineHeight: 19 },
   title: {
     fontSize: 28,
     fontWeight: '800',
