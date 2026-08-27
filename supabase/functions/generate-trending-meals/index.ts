@@ -745,6 +745,14 @@ ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-
 
 OUTPUT TARGET: Return 15-20 DISTINCT recipes — this is a floor of effort, not an aspiration. Extract every appetizing, faithful recipe you can from the ${uniqueVideos.length} videos. Do NOT self-filter for density, variety, appeal, or balance — downstream scoring + variety-aware selection picks the final 6 from YOUR pool, so a bigger pool directly means a better, more varied final feed. Returning fewer than ~12 risks the whole feed coming up short. Never invent recipes to pad, but with ${uniqueVideos.length} real source videos you should comfortably clear 15.
 
+SHELF_TAG — REQUIRED, and it must be copied EXACTLY from this list. Any other value is discarded
+and the recipe loses its shelf, so never invent one, never leave it out, and never pluralise or
+rephrase (not "desserts", not "asian-inspired", not "snack"):
+  mexican | indian | asian | italian | mediterranean | american-comfort | sweet-treat | high-protein-snack | breakfast
+Pick by what the dish IS: cuisine first if it clearly belongs to one, otherwise sweet-treat for
+desserts, high-protein-snack for small savoury bites, breakfast for morning food, and
+american-comfort as the catch-all for everything else. Every recipe gets one — there is no "none".
+
 Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in steps (oil, garlic, salt, pepper) appears in the ingredients array:
 [
   {
@@ -752,7 +760,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "name": "The actual dish name (cleaned up)",
     "category": "meal",
     "servings": 1,
-    "shelf_tag": "american-comfort",
+    "shelf_tag": "american-comfort",   // REQUIRED. Must be EXACTLY one of the nine values listed below.
     "contains_dairy": false,
     "contains_gluten": false,
     "contains_nuts": false,
@@ -1206,7 +1214,15 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         // Unknown or invented values fall back to null rather than being coerced into a shelf the
         // model didn't mean — a wrong shelf is worse than no shelf, since the meal still reaches
         // the user via the catch-all.
-        shelf_tag: SHELF_TAGS.includes(String(r.shelf_tag)) ? String(r.shelf_tag) : null,
+        shelf_tag: (() => {
+          const raw = String(r.shelf_tag ?? '')
+          if (SHELF_TAGS.includes(raw)) return raw
+          // Was silently null before, which hid the real failure: the prompt showed shelf_tag ONLY
+          // as one example value with no enumeration, so the model guessed and 27% of an August
+          // batch guessed something off-list. A discarded tag now says so.
+          console.log(`[funnel] shelf_tag discarded for "${r.name}" — model returned ${raw ? `"${raw}"` : 'nothing'}, not in SHELF_TAGS`)
+          return null
+        })(),
         source_verified: r._sourceVerified === true,
         // Ingredients are stored at the creator's full-batch scale, so servings is what makes the
         // per-serving macros interpretable. Defaults to 1 rather than null: an unknown serving
