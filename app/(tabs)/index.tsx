@@ -56,7 +56,6 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 // Touchable that accepts an animated height, so the hero meal card can glide its size in sync
 // with the macros accordion (both driven by macrosAnim).
-const AnimatedTouchable = RNAnimated.createAnimatedComponent(TouchableOpacity)
 
 const { width } = Dimensions.get('window')
 
@@ -475,9 +474,7 @@ export default function HomeScreen() {
   }, [loading])
 
   const HERO_CYCLE_MS = 5000
-  const HERO_FADE_MS = 450
   const [heroIdx, setHeroIdx] = useState(0)
-  const heroFade = useRef(new RNAnimated.Value(1)).current
   // Ken Burns slow-zoom — image scales from 1.0 to 1.12 over the full slide duration,
   // resets on idx change. Gives constant motion even when crossfade is idle.
   const heroScale = useRef(new RNAnimated.Value(1)).current
@@ -485,28 +482,41 @@ export default function HomeScreen() {
   // otherwise the carousel flips through image-less placeholder cards while the FAL
   // images are still rendering. We start on the first ready meal, and by the time it
   // cycles (5s) the next image has usually landed.
-  const readyMeals = meals.filter(m => m.image && m.image.startsWith('http')).slice(0, 3)
-  // Until the first image is ready, fall back to the first meal so the hero is never
-  // blank — but cycling stays off until ≥2 images exist.
-  const carouselMeals = readyMeals.length > 0 ? readyMeals : meals.slice(0, 1)
+  // ALL of today's meals, not just the ones whose photo has landed. The old set filtered on
+  // `image`, which was invisible with a crossfade but is wrong for a pager: the page count would
+  // grow 1 -> 2 -> 3 as photos arrived and the swipe target would move under your finger. A
+  // photo-less page renders the "Plating your dish…" placeholder that already exists below.
+  const carouselMeals = meals.slice(0, 3)
+  const heroScrollRef = useRef<ScrollView>(null)
+  // Timestamp after which auto-advance may resume. Touching the carousel pushes it forward, so
+  // the timer can never yank the card out from under a finger mid-browse.
+  const heroResumeAt = useRef(0)
+
   useEffect(() => {
-    if (loading || readyMeals.length <= 1) return // need ≥2 ready images to cycle
+    if (loading || carouselMeals.length <= 1) return
     const interval = setInterval(() => {
-      RNAnimated.timing(heroFade, {
-        toValue: 0,
-        duration: HERO_FADE_MS,
-        useNativeDriver: true,
-      }).start(() => {
-        setHeroIdx(i => (i + 1) % readyMeals.length)
-        RNAnimated.timing(heroFade, {
-          toValue: 1,
-          duration: HERO_FADE_MS,
-          useNativeDriver: true,
-        }).start()
-      })
+      if (Date.now() < heroResumeAt.current) return // user is driving; stay out of the way
+      const next = (heroIdxRef.current + 1) % carouselMeals.length
+      heroScrollRef.current?.scrollTo({ x: next * width, animated: true })
     }, HERO_CYCLE_MS)
     return () => clearInterval(interval)
-  }, [loading, readyMeals.length, heroFade])
+  }, [loading, carouselMeals.length])
+
+  // Ref mirror so the interval above reads the live index without being re-created every advance.
+  const heroIdxRef = useRef(0)
+  useEffect(() => { heroIdxRef.current = heroIdx }, [heroIdx])
+
+  // Settled page is the single source of truth — it fires for a finger swipe and for the
+  // programmatic scrollTo alike, so both paths update the index and restart Ken Burns identically.
+  const onHeroSettle = useCallback((e: any) => {
+    const idx = Math.round(e.nativeEvent.contentOffset.x / width)
+    setHeroIdx(prev => (prev === idx ? prev : idx))
+  }, [])
+  const onHeroDragStart = useCallback(() => {
+    // 8s of quiet after the last touch. Long enough to read a card, short enough that the
+    // carousel doesn't feel dead if you swipe once and walk away.
+    heroResumeAt.current = Date.now() + 8000
+  }, [])
   // Ken Burns zoom — restart on every heroIdx change. Linear easing for steady drift.
   useEffect(() => {
     heroScale.setValue(1)
@@ -517,8 +527,7 @@ export default function HomeScreen() {
       useNativeDriver: true,
     }).start()
   }, [heroIdx, heroScale])
-  // Index into carouselMeals (ready-imaged set), wrapping so a shrinking set never
-  // points at an empty slot and leaves the hero blank.
+  // Wrapped so a shrinking set never points at an empty slot and leaves the hero blank.
   const safeHeroIdx = carouselMeals.length > 0 ? heroIdx % carouselMeals.length : 0
   const heroMeal = carouselMeals[safeHeroIdx]
 
@@ -1358,67 +1367,95 @@ export default function HomeScreen() {
                 </View>
               </RNAnimated.View>
             ) : heroMeal ? (
-              <>
-                <AnimatedTouchable
-                  // Height glides with the macros card (heroHeight, driven by macrosAnim) so the
-                  // photo + title + pills stay framed above the tab bar in both states.
-                  style={[styles.heroMealCard, { marginHorizontal: 20, height: heroHeight }]}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    // Guard against missing id (GPT sometimes omits it) — fall back
-                    // to a synthetic id so the URL is well-formed. mealData carries
-                    // the full meal so meal/[id].tsx renders from URL params either way.
-                    const safeId = heroMeal.id || `gen-${Date.now()}`
-                    router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(heroMeal) } })
-                  }}
+              // Height glides with the macros card (heroHeight, driven by macrosAnim) so the
+              // photo + title + pills stay framed above the tab bar in both states.
+              <RNAnimated.View style={{ height: heroHeight }}>
+                <ScrollView
+                  ref={heroScrollRef}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  // Touching pauses auto-advance; the settled page is what updates the index, and
+                  // it fires for a finger swipe and the programmatic scrollTo alike — so both
+                  // paths stay in sync through one code path.
+                  onScrollBeginDrag={onHeroDragStart}
+                  onMomentumScrollEnd={onHeroSettle}
+                  scrollEventThrottle={16}
                 >
-                  <RNAnimated.View style={[StyleSheet.absoluteFillObject, { opacity: heroFade }]}>
-                    {/* Image layer — slow zoom (Ken Burns). Wrapped in its own Animated.View
-                        so the gradient + text stay anchored while only the image scales. */}
-                    <RNAnimated.View style={[StyleSheet.absoluteFillObject, { transform: [{ scale: heroScale }] }]}>
-                      {heroMeal.image && heroMeal.image.startsWith('http') ? (
-                        <MealImage uri={heroMeal.image} style={styles.heroMealImage} priority="high" transition={0} />
-                      ) : (
-                        // The photo takes ~10s longer than the recipe text, and a bare shimmer on a
-                        // card this large just reads as a broken black rectangle — the screen went
-                        // from narrating ("Matching recipes…") to saying nothing at the exact moment
-                        // it had MORE to show. Keep narrating until the photo lands; the card is
-                        // fully tappable and cookable the whole time.
-                        <View style={styles.heroMealImage}>
-                          <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
-                          <View style={styles.heroMealPlating}>
-                            <Utensils size={26} stroke="#5A5A5A" strokeWidth={1.4} />
-                            <Text style={styles.heroMealPlatingText}>Plating your dish…</Text>
+                  {carouselMeals.map((m, i) => (
+                    <TouchableOpacity
+                      key={m.id ?? `hero-${i}`}
+                      style={{ width, height: '100%' }}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        // Guard against missing id (GPT sometimes omits it) — fall back
+                        // to a synthetic id so the URL is well-formed. mealData carries
+                        // the full meal so meal/[id].tsx renders from URL params either way.
+                        const safeId = m.id || `gen-${Date.now()}`
+                        router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(m) } })
+                      }}
+                    >
+                      <View style={[styles.heroMealCard, { marginHorizontal: 20, flex: 1 }]}>
+                        {/* Image layer — slow zoom (Ken Burns), applied ONLY to the settled page.
+                            Animating an offscreen page is wasted work, and it would be mid-drift
+                            when you swiped back to it instead of starting clean. */}
+                        <RNAnimated.View
+                          style={[StyleSheet.absoluteFillObject, i === safeHeroIdx ? { transform: [{ scale: heroScale }] } : null]}
+                        >
+                          {m.image && m.image.startsWith('http') ? (
+                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === 0 ? 'high' : 'normal'} transition={0} />
+                          ) : (
+                            // A photo-less page is why the pager can hold a stable 3 pages from the
+                            // first frame: it narrates instead of going blank, so the page count
+                            // never changes under a finger mid-swipe.
+                            <View style={styles.heroMealImage}>
+                              <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
+                              <View style={styles.heroMealPlating}>
+                                <Utensils size={26} stroke="#5A5A5A" strokeWidth={1.4} />
+                                <Text style={styles.heroMealPlatingText}>Plating your dish…</Text>
+                              </View>
+                            </View>
+                          )}
+                        </RNAnimated.View>
+                        <LinearGradient
+                          colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                          locations={[0.3, 0.6, 1]}
+                          style={styles.heroMealGradient}
+                        />
+                        <View style={styles.heroMealContent}>
+                          <Text style={styles.heroMealName} numberOfLines={2}>{m.name}</Text>
+                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                            {m.prepTime > 0 && (
+                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
+                                <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{m.prepTime} MIN</Text>
+                              </View>
+                            )}
+                            <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                              <Text style={styles.heroMealPillText}>{m.calories} CAL</Text>
+                            </View>
+                            {m.protein > 0 && (
+                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
+                                <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{m.protein}P</Text>
+                              </View>
+                            )}
                           </View>
                         </View>
-                      )}
-                    </RNAnimated.View>
-                    <LinearGradient
-                      colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
-                      locations={[0.3, 0.6, 1]}
-                      style={styles.heroMealGradient}
-                    />
-                    <View style={styles.heroMealContent}>
-                      <Text style={styles.heroMealName} numberOfLines={2}>{heroMeal.name}</Text>
-                      <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
-                        {heroMeal.prepTime > 0 && (
-                          <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
-                            <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{heroMeal.prepTime} MIN</Text>
-                          </View>
-                        )}
-                        <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                          <Text style={styles.heroMealPillText}>{heroMeal.calories} CAL</Text>
-                        </View>
-                        {heroMeal.protein > 0 && (
-                          <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
-                            <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{heroMeal.protein}P</Text>
-                          </View>
-                        )}
                       </View>
-                    </View>
-                  </RNAnimated.View>
-                </AnimatedTouchable>
-              </>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+                {/* Dots sit at the TOP of the card on purpose — the bottom already holds the dish
+                    name and macro pills, and overlaying them there would collide. Absolutely
+                    positioned so adding them costs no layout height (heroHeight feeds the
+                    above-the-tab-bar fit maths and must not move). */}
+                {carouselMeals.length > 1 && (
+                  <View style={styles.heroDots} pointerEvents="none">
+                    {carouselMeals.map((_, i) => (
+                      <View key={`dot-${i}`} style={[styles.heroDot, i === safeHeroIdx && styles.heroDotActive]} />
+                    ))}
+                  </View>
+                )}
+              </RNAnimated.View>
             ) : cacheChecked ? (
               // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
               // never flashes during the ~100ms disk read on a day that DOES have meals — showing
@@ -2013,6 +2050,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
+  heroDots: {
+    position: 'absolute',
+    top: 12, left: 0, right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  heroDot: {
+    width: 6, height: 6, borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.35)',
+  },
+  heroDotActive: { backgroundColor: '#FFFFFF', width: 16 },
   restingCard: {
     marginHorizontal: 20,
     height: HERO_COMPACT_H,
