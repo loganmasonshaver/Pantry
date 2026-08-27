@@ -21,6 +21,7 @@ import { COLORS } from '@/constants/colors'
 import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
 import { supabase } from '@/lib/supabase'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
+import { perfMark } from '@/lib/perf'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
@@ -404,6 +405,15 @@ function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
 const discoverCacheKey = (uid: string) => `pantry_discover_${uid}`
 
 export default function DiscoverScreen() {
+  // Dev-only screen trace. Black frames were reported ONLY on transitions between
+  // Pantry/Discover/Saved and never on any pair involving Home; this prints mount and
+  // unmount so the next repro shows whether a screen is being torn down on tab switch
+  // (it should not be) rather than producing another hypothesis.
+  useEffect(() => {
+    perfMark('Discover MOUNT')
+    return () => perfMark('Discover UNMOUNT')
+  }, [])
+
   const router = useRouter()
   const { user } = useAuth()
   const { promoActive } = usePremium()

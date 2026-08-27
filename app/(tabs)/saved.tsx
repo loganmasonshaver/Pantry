@@ -19,6 +19,7 @@ import Reanimated, { FadeIn } from 'react-native-reanimated'
 import PressableScale from '../../components/PressableScale'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
+import { perfMark } from '@/lib/perf'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter, useLocalSearchParams } from 'expo-router'
 import { Bookmark, Search, X, Utensils, Clock, Plus, Link, Compass } from 'lucide-react-native'
@@ -139,6 +140,15 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
 // ── Screen ─────────────────────────────────────────────────────────────
 
 export default function SavedScreen() {
+  // Dev-only screen trace. Black frames were reported ONLY on transitions between
+  // Pantry/Discover/Saved and never on any pair involving Home; this prints mount and
+  // unmount so the next repro shows whether a screen is being torn down on tab switch
+  // (it should not be) rather than producing another hypothesis.
+  useEffect(() => {
+    perfMark('Saved MOUNT')
+    return () => perfMark('Saved UNMOUNT')
+  }, [])
+
   const router = useRouter()
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()

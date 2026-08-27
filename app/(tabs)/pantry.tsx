@@ -21,6 +21,7 @@ import {
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
+import { perfMark } from '@/lib/perf'
 import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Trash2 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -211,6 +212,15 @@ function CategorySection({
 // ── Pantry screen ──────────────────────────────────────────────────────
 
 export default function PantryScreen() {
+  // Dev-only screen trace. Black frames were reported ONLY on transitions between
+  // Pantry/Discover/Saved and never on any pair involving Home; this prints mount and
+  // unmount so the next repro shows whether a screen is being torn down on tab switch
+  // (it should not be) rather than producing another hypothesis.
+  useEffect(() => {
+    perfMark('Pantry MOUNT')
+    return () => perfMark('Pantry UNMOUNT')
+  }, [])
+
   const { user } = useAuth()
   const router = useRouter()
   const { isPremium } = usePremium()
