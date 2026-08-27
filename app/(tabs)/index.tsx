@@ -1475,7 +1475,12 @@ export default function HomeScreen() {
                         />
                         <View style={styles.heroMealContent}>
                           <Text style={styles.heroMealName} numberOfLines={2}>{m.name}</Text>
-                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                          {/* Left-aligned, not centred. The title above hangs off the left edge, so
+                              a centred pill row put the two in different alignments — which is what
+                              made a wrapped title with a short last line ("...Protein / Bowl") read
+                              as broken. Both now share one edge. Matches every meal card in
+                              Discover, which was already left/left. */}
+                          <View style={{ flexDirection: 'row', gap: 5, marginTop: 8 }}>
                             {m.prepTime > 0 && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
                                 <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{m.prepTime} MIN</Text>
