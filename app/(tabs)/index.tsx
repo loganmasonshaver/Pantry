@@ -72,7 +72,7 @@ const ENABLE_AI_PHOTO_LOG = false
 // backend is actually doing, in order, so the wait reads as work rather than lag.
 // Height of the meal card before there is a real meal in it — used by BOTH the resting card and
 // the loading skeleton so tapping one to reach the other doesn't shift the page.
-const HERO_COMPACT_H = 132
+const HERO_COMPACT_H = 196
 
 const DAILY_STATUS = [
   'Checking what\'s in your pantry…',
@@ -196,6 +196,57 @@ function MacroBar({ label, consumed, goal, color, emphasized = false }: { label:
         {progress > 0 && <RNAnimated.View style={{ height: barHeight, backgroundColor: color, borderRadius: barHeight / 2, width: animWidth.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />}
       </View>
     </View>
+  )
+}
+
+// The resting state of the meal card — what Home shows before you've asked for today's meals.
+//
+// Deliberately carries NO food photography. The only image sources available on Home are the
+// one-shot onboarding `planMeals` and nothing else, and a square Flux photo dropped into a short
+// full-width box crops the dish out of frame. So the card earns attention from real data (your
+// actual pantry count), the accent language the app already uses for "something good is here"
+// (see planReadyCard), and one slow breathing halo — not from borrowed art.
+function MealCardResting({ pantryCount, onPress }: { pantryCount: number; onPress: () => void }) {
+  const breathe = useRef(new RNAnimated.Value(0)).current
+  useEffect(() => {
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(breathe, { toValue: 1, duration: 2400, useNativeDriver: true }),
+        RNAnimated.timing(breathe, { toValue: 0, duration: 2400, useNativeDriver: true }),
+      ])
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [])
+  // Opacity + transform only, so this stays on the native driver and costs no JS frames.
+  const haloScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] })
+  const haloOpacity = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.30, 0.06] })
+
+  return (
+    <TouchableOpacity style={styles.restingCard} activeOpacity={0.9} onPress={onPress}>
+      <LinearGradient
+        colors={['rgba(74,222,128,0.13)', 'rgba(0,201,167,0.05)', '#0B0B0B']}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.restingIconWrap}>
+        <RNAnimated.View
+          style={[styles.restingHalo, { opacity: haloOpacity, transform: [{ scale: haloScale }] }]}
+        />
+        <Sparkles size={20} stroke="#4ADE80" strokeWidth={2} />
+      </View>
+      <Text style={styles.restingTitle}>Get tonight's meals</Text>
+      <Text style={styles.restingSub}>
+        {pantryCount > 0
+          ? `Built from the ${pantryCount} things in your pantry`
+          : 'Built from what\'s in your pantry'}
+      </Text>
+      <View style={styles.restingCTA}>
+        <Text style={styles.restingCTAText}>Let's cook</Text>
+      </View>
+    </TouchableOpacity>
   )
 }
 
@@ -1365,14 +1416,7 @@ export default function HomeScreen() {
               // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
               // never flashes during the ~100ms disk read on a day that DOES have meals — showing
               // the resting card and then yanking it away reads worse than showing nothing.
-              <TouchableOpacity
-                style={[styles.heroMealCard, { marginHorizontal: 20, height: HERO_COMPACT_H, alignItems: 'center', justifyContent: 'center' }]}
-                activeOpacity={0.85}
-                onPress={() => setWantsGeneration(true)}
-              >
-                <Text style={styles.heroRestingTitle}>Get tonight's meals</Text>
-                <Text style={styles.heroRestingSub}>Built around what's in your pantry</Text>
-              </TouchableOpacity>
+              <MealCardResting pantryCount={pantryNames.size} onPress={() => setWantsGeneration(true)} />
             ) : null}
           </View>
         )}
@@ -1962,8 +2006,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  heroRestingTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
-  heroRestingSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 5 },
+  restingCard: {
+    marginHorizontal: 20,
+    height: HERO_COMPACT_H,
+    borderRadius: 18,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    // Same accent border + glow as planReadyCard. Reusing that language means the card reads as
+    // the app's existing "something good is waiting" signal rather than a new invention.
+    borderColor: 'rgba(74,222,128,0.22)',
+    shadowColor: '#4ADE80',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  restingIconWrap: { alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  restingHalo: {
+    position: 'absolute',
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: '#4ADE80',
+  },
+  restingTitle: { fontSize: 19, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
+  restingSub: { fontSize: 13, color: COLORS.textMuted, marginTop: 5, textAlign: 'center', paddingHorizontal: 24 },
+  // White on black at radius 30 — the app's primary-action convention. The old card was tappable
+  // but nothing in it looked tappable, which is most of why it read as dead space.
+  restingCTA: {
+    marginTop: 16,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 22,
+    paddingVertical: 9,
+    borderRadius: 30,
+  },
+  restingCTAText: { fontSize: 14, fontWeight: '700', color: '#000000', letterSpacing: -0.1 },
   heroMealSkeletonStatus: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
   heroMealPillSkeleton: { height: 22, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.14)' },
   heroMealPillText: {
