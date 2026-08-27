@@ -123,7 +123,6 @@ function IngredientRow({
   onDelete: () => void
   onToggle: () => void
 }) {
-  perfMark('Pantry RENDER')
   return (
     <Swipeable
       renderRightActions={() => (
@@ -613,6 +612,7 @@ export default function PantryScreen() {
   // 0 = matches now, 1 = anytime dish (or a meal cached before `slot` existed), 2 = wrong occasion.
   const slotScore = (m: { slot?: string }) => (m.slot === currentSlot ? 0 : (!m.slot || m.slot === 'any') ? 1 : 2)
 
+  perfMark('Pantry RENDER')
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header (fixed) ── */}

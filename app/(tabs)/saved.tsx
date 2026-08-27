@@ -73,7 +73,6 @@ function Pill({ label, tint }: { label: string; tint: 'amber' | 'green' | 'white
     green: { bg: 'rgba(74,222,128,0.18)', border: 'rgba(74,222,128,0.3)', color: '#4ADE80' },
     white: { bg: 'rgba(255,255,255,0.12)', border: 'rgba(255,255,255,0.2)', color: COLORS.textWhite },
   }[tint]
-  perfMark('Saved RENDER')
   return (
     <View style={[styles.pill, { backgroundColor: t.bg, borderColor: t.border }]}>
       <Text style={[styles.pillText, { color: t.color }]}>{label}</Text>
@@ -399,6 +398,7 @@ export default function SavedScreen() {
 
   const isEmpty = !loading && filtered.length === 0
 
+  perfMark('Saved RENDER')
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header ── */}
