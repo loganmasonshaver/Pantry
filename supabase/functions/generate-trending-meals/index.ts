@@ -794,6 +794,16 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // see 0 yield that day and the cron retries naturally tomorrow.
     const providers = [
       googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google" },
+      // OpenAI fallback. openaiApiKey was already declared at the top of this file and never
+      // wired in, so this was the ONLY Gemini-primary function with no second provider — a Gemini
+      // outage or rate-limit meant the whole trending pipeline produced nothing, and with 30-day
+      // retention that failure is invisible for days: the pool just quietly stops refreshing.
+      //
+      // Safe to add despite the strict fidelity rules, because those rules are enforced in CODE
+      // downstream, not by trusting the model: 100%-ingredient-retention-or-reject, the fractional
+      // check, name and ingredient dedup, and the shelf_tag whitelist all run on whatever comes
+      // back. A weaker model produces fewer usable recipes, not worse ones that ship.
+      openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI" },
     ].filter(Boolean) as { url: string; key: string; model: string; name: string }[]
 
     let recipes: any[] | null = null
