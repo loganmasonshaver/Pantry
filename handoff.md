@@ -1,112 +1,137 @@
-# Handoff — Pantry — 2026-08-12
+# Handoff — 2026-08-28
 
-Durable project rules live in `CLAUDE.md`, not here. This file carries only what a command
-can't tell you: unfinished work, decisions that look wrong from the code, and claims nobody
-has verified. Delete lines as they stop being true.
+14 commits today. **`git log` carries the full reasoning for every one of them** — what was tried,
+what was rejected, why. This file deliberately holds only what git and the code do NOT: unfinished
+work, dead ends worth not repeating, and things that need a human.
 
-## Run this first
+Read `git log --since="2026-08-28"` first. Nothing below repeats it.
+
+---
+
+## 1. BLOCKING — clean these up before shipping
+
+### Debug instrumentation is still in four screens
+20 `perfMark()` trace calls (`MOUNT`/`UNMOUNT`/`FOCUS`/`BLUR`/`RENDER`) in `app/(tabs)/index.tsx`,
+`discover.tsx`, `saved.tsx`, `pantry.tsx`. They are `__DEV__`-gated so **nothing reaches
+production** — safe to leave, noisy to keep. They exist for the unsolved black-screen bug below;
+delete them when that closes, not before.
+
+### `generate-meals` is committed but not deployed
+Last deploy Aug 12, last commit today. `npx supabase functions deploy generate-meals`.
+(Only the dead-Groq-line removal — harmless if it waits, but preflight will keep flagging it.)
+
+### `deno.lock` is untracked
+A byproduct of `deno check` runs. Either commit it or gitignore it; it just makes preflight noisy.
+
+---
+
+## 2. UNSOLVED — the black screen, and the five things it is NOT
+
+Switching tabs occasionally renders a black screen. Intermittent, cosmetic, clears on navigation.
+**I recommended cutting it for launch and Logan has not overruled that.**
+
+Do not re-run these. All were tested and eliminated:
+
+| Excluded | Evidence |
+|---|---|
+| Screen teardown | No `UNMOUNT` ever fires on a tab switch |
+| Focus handover | `FOCUS` fires every time |
+| Rendering | `RENDER` fires and the screen is *still* black |
+| Network stalls | Home's 3 focus queries measured 135–250ms every time |
+| Background render leak | Real bug, fixed (see git), black screen persisted |
+| Expo Go memory ceiling | Reproduces on a real dev build |
+| Memory pressure | Native log: 0 jetsam events, 0 Pantry faults while black |
+| `react-native-draggable-flatlist` | Pantry-only; Discover and Saved go black too |
+| Tab-distance / `animation: 'shift'` | Pantry↔Saved (2 apart) fails, Home↔Discover (2 apart) does not |
+
+**Everything JS-side is excluded by measurement.** React renders and the native view does not show
+it — a compositing problem. The only remaining lead is **20 packages out of sync** (`expo 55.0.6`
+vs expected `55.0.30`, `expo-router` 13 patches behind, RN 0.83.2 vs 0.83.10). `expo install --fix`
+ERESOLVEs on an `expo-router` / `@expo/log-box` peer conflict — it needs a deliberate session, not a
+patch. **I attempted it, it half-applied, and `npm ci` was needed to restore node_modules.** Do not
+retry casually.
+
+---
+
+## 3. NEEDS LOGAN — cannot proceed without input
+
+### The onboarding trailer
+Flagged as needing "a good amount" of tweaking. **The specifics were never captured — ask before
+touching anything.** The fix may be a new recording rather than code.
+Asset: `assets/onboarding-preview.mov`, played via `expo-video` in `app/onboarding/index.tsx`
+(~L2917), framed in a phone shell on the welcome step. That file is the repo's #1 bug source; read
+the CLAUDE.md gotcha before editing.
+
+### The remaining billing migrations
+Done: FAL, Supabase, Apple (membership + payouts), OpenAI, Northwest.
+Left: **Google AI** (this is the primary meal generator on Tier 1 Prepay — not a side service),
+PostHog, Cloudflare (the `.app` domain renews annually), Loops, FatSecret, YouTube Data.
+
+---
+
+## 4. WATCH AFTER LAUNCH — numbers, not code
+
+- **Generations per DAU and FAL spend.** Auto-generation was restored today; the commit that
+  originally removed it said to watch this. That number has never actually been observed, because
+  Pantry auto-generated the whole time the "manual" gate existed on Home.
+- **`[funnel]` lines** in `generate-trending-meals` logs. Two matter: `ingredient-list gate` (~28%
+  survive — the biggest loss, upstream of everything) and `dropped` (recipes that kept <100% of the
+  creator's ingredients). Those are the only real yield levers.
+- **The health-check push.** It was dead from the day it shipped — `profiles.expo_push_token` did
+  not exist. Column added today. **Logan must open the app once on his phone with notification
+  permission granted to populate the token**, then confirm:
+  `select id, expo_push_token from profiles where expo_push_token is not null;`
+  Until a row comes back, missed trending runs are still silent.
+- **`shelf_tag` distribution.** Today's manual run stored 9 meals, 9/9 tagged, but skewed heavily
+  Indian/South Asian. If that persists across a few days the query stride is sampling adjacent
+  phrases; widen the spread in `buildCategoryConfigs`.
+
+---
+
+## 5. TOOLS BUILT TODAY — re-runnable, don't rebuild
+
+Two eval harnesses. Both concluded **keep the current model** — that is a real result, not a null
+one, and it means the model question is settled until new models ship.
 
 ```bash
-bash scripts/preflight.sh && npx tsc --noEmit 2>&1 | grep "error TS" | grep -c "^app/\|^lib/\|^components/\|^hooks/\|^context/"
+# vision — pantry scan. 17 photos incl. 14 of Logan's own kitchen at 24MP.
+# FULL=1 restores the 3 reference rows (gpt-4.1 control, 5.4-mini, Gemini).
+OPENAI_API_KEY=sk-... node scripts/pantry-eval/run.mjs
+
+# text — generate-recipe, verbatim production prompt
+OPENAI_API_KEY=sk-... node scripts/text-eval/run.mjs
 ```
 
-Expect **no blocking issues** and **50**. Anything else — investigate before trusting a word below.
+**The lesson worth carrying:** list price lies. `gpt-5.6-terra` advertised 20% cheaper than
+production and measured **85% more expensive**, because it emitted 2531 output tokens where
+gpt-5.4 emitted 582. Always measure real usage tokens.
 
-This counts app code only, deliberately. The all-in total (207 today) moves by +1 every time any
-edge function gains a `_shared` import — noise that has already broken this assertion once and
-would have had the next session distrusting a correct file. 50 only moves when real code breaks.
+`gpt-5-nano` is disqualified for any drop-in text swap: it spends the entire `max_tokens` budget on
+reasoning and returns empty content at production's 2000 cap.
 
-Everything that landed is in `git log --oneline 9cfcb95..HEAD` (reasoning is in the commit bodies,
-`git show <sha>` for any of them).
+---
 
-## Next action
+## 6. PROCESS NOTES — two mistakes worth not repeating
 
-**Re-run the trending generation.** The last run aborted correctly at 5 recipes (min 6) and
-Discover is serving a stale pool. The fix is deployed and unproven.
+- **Never `git add ... 2>/dev/null`.** A commit today claimed two file changes and contained
+  neither: one pathspec no longer existed, `git add` aborts entirely on a bad pathspec, and the
+  suppressed stderr hid it. Check `git status` between staging and committing.
+- **`git stash`/`git stash pop` during a TS baseline check rewrites files**, which Fast Refresh
+  turns into a remount on the connected device. It corrupted a debugging session by producing
+  MOUNT/UNMOUNT pairs that looked like an app bug. Don't stash while Logan is testing on device.
 
-```sql
-SELECT net.http_post(url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'cron_service_role_key' LIMIT 1)), body := '{}'::jsonb);
-```
+---
 
-Then read the Edge Function logs:
+## 7. NOT DONE, deliberately
 
-| Log line | Healthy | Meaning if not |
-|---|---|---|
-| `ingredient-list gate: N/150` | ~40+ | parser precision, not a looser gate |
-| `ingredient retention "X": N/N` | all equal | model isn't honouring the contract → prompt |
-| `pool ranked + capped: storing N` | ≥6 | aborts again, keeps yesterday's feed |
-
-## Verify tomorrow — needs a day boundary, can't be rushed
-
-Two deployed changes are unprovable today. Both are logs-only; neither is visible in the app, so
-they will look fine whether or not they work.
-
-1. **Cook-Now repeat suppression.** Generate meals today, then again tomorrow, and read the
-   `generate-meals` logs for `Repeat filter: N/M candidates matched a recent dish`. **N > 0 on day
-   two is the proof** — N always 0 means either the window isn't persisting or the model isn't
-   producing repeats to catch, and those need telling apart before calling it done.
-2. **Trending retention gate**, once the re-run above succeeds — the allergen cross-check and the
-   `servings` fix have both only ever been exercised by a single batch.
-
-## In flight
-
-- **100% retention gate** — deployed, has **never completed a successful run**. First attempt
-  aborted; cause was the pool being capped to 60 *before* the list gate, so the gate saw 60 and
-  kept 17. Fixed by gating first and raising `maxResults` 20→50. Unproven.
-- **`shelf_tag`** — column live, **zero meals have one** (only populates on generation). Every tag
-  shelf is currently driven by the name-based fallback, which covers 81%. Looks broken; isn't.
-- **Cook-Now repeat suppression** (separate chat, same night) — `profiles.recent_meal_names` (30-name
-  server window) + a code-enforced drop in `generate-meals` using an order-insensitive dish
-  fingerprint, so "Fried Rice with Chicken" is caught as a repeat of "Chicken Fried Rice". Prompt-only
-  exclusion and a 12-name device list were the old mechanism; a heavy day (1 auto-fire + 3 rerolls)
-  flushed that entire window, which is how a meal carried across a day boundary. Migration applied,
-  function deployed, unit-tested — **but never observed across a real day boundary on device.**
-- **Discover Phase 1 ~70%** — context line, 3 personalised shelves, intent shelves, browse grid all
-  shipped. Card density not started. Phase 2 (weekly drop, cook-rate ranking, per-user shelf
-  ordering) not begun. See `PLAN-discover-personalization.md`.
-
-## Open decisions — yours, not mine
-
-- [ ] **Nut-free is treated identically to dairy/gluten in the filter UI.** Dairy wrong is
-      unpleasant; nuts wrong is a medical event. Keep as-is, make advisory, or drop pre-launch?
-- [ ] Health-check alert pushes to `OPS_USER_ID`. **Unverified whether that secret was ever set** —
-      if not, the alert is a silent no-op. Check, or accept it.
-
-## Do NOT repeat these
-
-- **Header/layout via absolute positioning** — failed 3× before I found the cause (no
-  SafeAreaProvider, see `CLAUDE.md`). Keep chrome in normal flow.
-- **Regex or keyword shelving** — tried twice (protein taxonomy, then intent rules). Fails
-  structurally; see `CLAUDE.md`.
-- **Rejecting recipes without a parseable ingredient list, at low parser coverage** — correct idea,
-  but it only became affordable once coverage improved. At 28% it discards ~72% of candidates, so
-  it needs volume compensation, not enthusiasm.
-- **Trusting a parser-coverage number measured on stored meals.** I reported 75% twice from bad
-  evidence — first mojibake in the test cache, then survivorship bias. Real rate is 28%.
-
-## Why it's built this way
-
-Places where the obvious "fix" is a regression:
-
-- `meal_logs.trending_meal_id` has **no foreign key on purpose** — retention deletes the parent row
-  and `ON DELETE SET NULL` would erase the attribution it exists to preserve.
-- **Impressions fire on viewport entry, not render.** The grid renders far below the fold; counting
-  renders would inflate the denominator and make every shelf's CTR look worse than it is.
-- **"Almost in your kitchen" is verified-recipes-only.** An incomplete recipe looks *more* cookable
-  than it is and ranks higher precisely because it's missing ingredients.
-- **`GRID_PAGE` is 6 for shelves but 24 for "Everything else"** — the catch-all holds hundreds at a
-  mature pool; 6 would be ~59 taps to reach the end.
-- **The horizontal rail was deleted deliberately.** It consumed the entire daily batch (10 slots vs
-  8–15 meals/day), starving the section beneath it.
-
-## Unverified
-
-- Nothing this session is device-verified beyond what Logan checked live: the plan reveal, the
-  home hero fit, and the milk serving fix.
-- The `servings` fix has produced exactly one correct batch recipe (`Protein Bars`, servings 8).
-- Allergen cross-check (model + keyword AND) has never run — needs a successful generation.
-- Repeat suppression has never been observed across a day boundary. Confirm by generating on two
-  consecutive days and checking the function logs for
-  `Repeat filter: N/M candidates matched a recent dish` — the exclusion is only real if N > 0 on
-  day two. The dish fingerprint is unit-tested (24 cases, incl. deliberate non-matches like
-  Chicken vs Beef Stir Fry) but has never seen live model output.
+- **782 stale meal images.** Regenerating in place reaches nobody: filenames derive from the meal
+  key and are served `cache-control: max-age=31536000`, so a regenerated image lands at a URL every
+  client has cached for a year. A real backfill needs **versioned filenames** first.
+- **Blurhash placeholders.** Biggest remaining perceived-speed win. Requires computing the hash at
+  generation time — inside the image pipeline, marked do-not-touch — plus a backfill of ~1000
+  images. Logan's call.
+- **Parallelising the trending search loop.** 13 configs × 2 fetches ≈ 10s of a ~150s budget. Fits
+  today. Next lever if wall-clock gets tight.
+- **Widening the ~28% ingredient-list gate** by reading captions or pinned comments instead of only
+  the video description. Structurally the largest yield win available, and a project rather than a
+  patch.
