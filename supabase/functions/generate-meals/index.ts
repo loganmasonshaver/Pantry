@@ -18,7 +18,6 @@ const MEAL_GEN_CAP_PER_DAY = 6
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
-const groqApiKey = Deno.env.get("GROQ_API_KEY")
 const replicateToken = Deno.env.get("REPLICATE_API_TOKEN")
 const fsKey = Deno.env.get("FATSECRET_KEY") ?? ""
 const fsSecret = Deno.env.get("FATSECRET_SECRET") ?? ""
