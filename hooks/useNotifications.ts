@@ -168,8 +168,13 @@ export function useNotifications(userId: string | null) {
           .from('profiles')
           .update({ expo_push_token: tokenData.data })
           .eq('id', userId)
-      } catch {
-        // Token fails on simulator — non-critical
+      } catch (e) {
+        // Expected on simulator (Expo issues push tokens only on physical devices), so this stays
+        // non-fatal. But an empty catch here hid a real bug for weeks: profiles.expo_push_token
+        // did not exist, every write failed with 42703, and the health-check job that depends on
+        // the token silently never alerted. Log it in dev so the next schema-shaped failure is
+        // visible instead of looking identical to the simulator case.
+        __DEV__ && console.log('[notifications] push token not stored:', (e as Error)?.message)
       }
 
       await scheduleAllReminders()
