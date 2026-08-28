@@ -447,17 +447,37 @@ Deno.serve(async (req: Request) => {
     //   • One YouTube algorithmic mostPopular call against the Howto & Style category — pure
     //     viral signal independent of our keyword bias, filtered to food titles.
     type QueryConfig = { query: string; order: 'relevance' | 'viewCount'; windowDays: number }
+    // Was 2 queries per category, now 4. The pools hold ~12 phrases each and only two were sampled
+    // per day, so a day whose two rotated queries happened to return thin results starved the whole
+    // run — which is what 7 of the last 19 days looked like.
+    //
+    // This is affordable because YouTube quota was barely touched: search.list costs 100 units and
+    // the run made 7 of them, ~700 of a 10,000/day allowance. Going to 13 searches is ~1,300 units,
+    // still 13% of quota. The constraint was never the API, it was how little of the pool we asked.
+    //
+    // Honest about what this does and does not do. It does NOT raise good days: the LLM is asked
+    // for 15-20 recipes against max_tokens 8000 and STORE_CAP is 18, so the ceiling is unchanged.
+    // It raises the FLOOR — more query diversity means one unlucky rotation can no longer starve a
+    // run. Variance reduction, not throughput.
+    const QUERIES_PER_CATEGORY = 4
     const buildCategoryConfigs = (arr: string[]): QueryConfig[] => {
-      const a = dayOfYear % arr.length
-      const b = (a + Math.floor(arr.length / 2)) % arr.length
+      const n = Math.min(QUERIES_PER_CATEGORY, arr.length)
+      // Evenly spread around the ring from today's offset rather than taking a contiguous block,
+      // so the four sampled phrases stay maximally different from each other.
+      const stride = Math.max(1, Math.floor(arr.length / n))
+      const picked = new Set<number>()
+      for (let i = 0; i < n; i++) picked.add((dayOfYear + i * stride) % arr.length)
       // 90-day window, not 7. A 7-day window plus the 100k view floor below is nearly empty by
       // construction — almost nothing clears 100k inside a week. Three months lets videos
       // accumulate views, and the 90-day video_id dedup already prevents a repeat on another day.
-      if (a === b) return [{ query: arr[a], order: 'relevance', windowDays: 90 }]
-      return [
-        { query: arr[a], order: 'relevance', windowDays: 90 },
-        { query: arr[b], order: 'viewCount', windowDays: 90 },
-      ]
+      //
+      // Alternating the sort matters as much as the phrase: 'relevance' and 'viewCount' return
+      // materially different sets for the same query, so this doubles coverage per phrase sampled.
+      return [...picked].map((idx, i) => ({
+        query: arr[idx],
+        order: (i % 2 === 0 ? 'relevance' : 'viewCount') as 'relevance' | 'viewCount',
+        windowDays: 90,
+      }))
     }
     const queryConfigs: QueryConfig[] = [
       ...buildCategoryConfigs(mealQueries),
