@@ -45,7 +45,7 @@ const OPENAI = 'https://api.openai.com/v1/chat/completions'
 //     determinism; the floor SWEEP handles temp on whichever model you pick).
 const MODELS = [
   {
-    label: 'GPT-4.1 (incumbent)',
+    label: 'GPT-4.1 (old incumbent)',
     endpoint: OPENAI, model: 'gpt-4.1', apiKey: process.env.OPENAI_API_KEY,
     detail: 'high', priceIn: 2.00, priceOut: 8.00,
   },
@@ -55,9 +55,33 @@ const MODELS = [
     detail: 'high', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.75, priceOut: 4.50,
   },
   {
-    label: 'GPT-5.4 (original detail)',
+    label: 'GPT-5.4 (PRODUCTION)',
     endpoint: OPENAI, model: 'gpt-5.4', apiKey: process.env.OPENAI_API_KEY,
     detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 2.50, priceOut: 15.00,
+  },
+  // ---- Aug 2026 challengers. Prices re-verified against the OpenAI pricing page on 2026-08-28.
+  // These IDs are NOT confirmed callable: if one 404s, that row prints the error and the rest of
+  // the sweep still completes — a 404 is a real answer (model not available to this account), not
+  // a broken run. Same reason `detail: 'original'` is assumed for the 5.6 family: they are patch-
+  // generation like 5.4, but if a row errors on the param that is the finding, not a bug.
+  {
+    // Newer AND cheaper than production on both sides — the single most interesting row here.
+    label: 'GPT-5.6-terra',
+    endpoint: OPENAI, model: 'gpt-5.6-terra', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 2.00, priceOut: 12.00,
+  },
+  {
+    // 92% cheaper in / 88% out than production. Only worth anything if recall holds — the whole
+    // reason 5.4 won last time was full-res patches reading small labels, and a cheap model that
+    // downsamples will look fine on item COUNT while quietly missing the fine print.
+    label: 'GPT-5.6-luna',
+    endpoint: OPENAI, model: 'gpt-5.6-luna', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.20, priceOut: 1.20,
+  },
+  {
+    label: 'GPT-5.4-nano',
+    endpoint: OPENAI, model: 'gpt-5.4-nano', apiKey: process.env.OPENAI_API_KEY,
+    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.20, priceOut: 1.25,
   },
   // gpt-5.5 dropped from the A/B — 5× the cost for a label-OCR task; revisit only if 5.4 can't read the fine print.
   {
