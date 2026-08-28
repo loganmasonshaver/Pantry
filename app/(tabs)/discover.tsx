@@ -103,6 +103,12 @@ const hashKey = (k: string) => { let h = 0; for (let i = 0; i < k.length; i++) h
 // a 96-meal section would surface only ~36 distinct meals on page 1 across a week and take two
 // months to cycle. Stepping by GRID_PAGE gives a genuinely different first page each day and cycles
 // even a large section in a few days.
+// Day index used by every rotation on this screen. Module-level so the hero and the shelves
+// cannot drift onto different days.
+const dayOfYearNow = () => Math.floor(
+  (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+)
+
 const rotateByDay = <T,>(arr: T[], day: number, key: string, stride: number): T[] => {
   if (arr.length < 2) return arr
   const n = (day * stride + hashKey(key)) % arr.length
@@ -645,7 +651,23 @@ export default function DiscoverScreen() {
         : 0),
     [trending, activeFilter, foodDislikes, dietaryRestrictions, dietType, mealTime]
   )
-  const featured = filtered[0]
+  // Rotate the hero DAILY instead of always taking filtered[0].
+  //
+  // filtered is ordered generated_at DESC and then stable-sorted by timeOfDayRank, so filtered[0]
+  // was "the newest meal that best fits this hour". That changes when new meals land — but the
+  // cron misses days (7 of the last 19 produced nothing), and on a miss the hero is byte-identical
+  // to yesterday's. The screen that is supposed to feel fresh repeats exactly when the pipeline
+  // was already having a bad day.
+  //
+  // Rotating only among the BEST-ranked candidates keeps the time-of-day guarantee intact — a
+  // dessert still never leads the feed at breakfast — while guaranteeing a different dish daily
+  // even if nothing new arrives.
+  const featured = useMemo(() => {
+    if (filtered.length === 0) return undefined
+    const bestRank = timeOfDayRank(filtered[0], mealTime)
+    const topTier = filtered.filter(m => timeOfDayRank(m, mealTime) === bestRank)
+    return rotateByDay(topTier, dayOfYearNow(), 'featured', 1)[0]
+  }, [filtered, mealTime])
   // The rail is a CURATED shelf, not the whole browsing surface — that distinction is why the tab
   // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
   // unreachable. The rail stays tight (10, protein-varied) and everything else drops into the
@@ -750,9 +772,7 @@ export default function DiscoverScreen() {
   // stale.
   const browseSections = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0]
-    const dayOfYear = Math.floor(
-      (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
-    )
+    const dayOfYear = dayOfYearNow()
 
     // FIRST SHELF WINS. Each section claims meals the earlier ones didn't take, so a meal appears
     // exactly once on the page. Without this a single recipe shows up under "Almost in your
