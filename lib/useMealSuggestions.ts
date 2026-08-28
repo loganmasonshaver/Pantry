@@ -61,7 +61,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     try {
       // DIAGNOSTIC: check session state before making any auth-required calls
       const sessionCheck = await supabase.auth.getSession()
-      console.log('[SESSION_CHECK v3]', {
+      __DEV__ && console.log('[SESSION_CHECK v3]', {
         hasSession: !!sessionCheck.data?.session,
         userId: sessionCheck.data?.session?.user?.id,
         expires_at: sessionCheck.data?.session?.expires_at,
@@ -73,9 +73,9 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
       // If no session, try refreshing
       if (!sessionCheck.data?.session) {
-        console.log('[SESSION_CHECK v3] no session, attempting refresh...')
+        __DEV__ && console.log('[SESSION_CHECK v3] no session, attempting refresh...')
         const refreshed = await supabase.auth.refreshSession()
-        console.log('[SESSION_CHECK v3] refresh result', {
+        __DEV__ && console.log('[SESSION_CHECK v3] refresh result', {
           hasSession: !!refreshed.data?.session,
           error: refreshed.error?.message,
         })
@@ -243,24 +243,24 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const generated = await generate()
       if (generated) setMeals(generated)
     } catch (err: any) {
-      console.log('MEAL ERROR v3:', err.message)
-      console.log('MEAL ERROR status:', err?.context?.status)
+      __DEV__ && console.log('MEAL ERROR v3:', err.message)
+      __DEV__ && console.log('MEAL ERROR status:', err?.context?.status)
       // Read the response body — use clone so we don't consume it
       try {
         if (err?.context && typeof err.context.clone === 'function') {
           const bodyText = await err.context.clone().text()
-          console.log('MEAL ERROR body text:', bodyText)
+          __DEV__ && console.log('MEAL ERROR body text:', bodyText)
         } else if (err?.context && typeof err.context.text === 'function') {
           const bodyText = await err.context.text()
-          console.log('MEAL ERROR body text:', bodyText)
+          __DEV__ && console.log('MEAL ERROR body text:', bodyText)
         }
       } catch (readErr: any) {
-        console.log('MEAL ERROR body read failed:', readErr?.message)
+        __DEV__ && console.log('MEAL ERROR body read failed:', readErr?.message)
       }
       // Check session state AFTER the error
       try {
         const s = await supabase.auth.getSession()
-        console.log('MEAL ERROR post-session', {
+        __DEV__ && console.log('MEAL ERROR post-session', {
           hasSession: !!s.data?.session,
           expires_at: s.data?.session?.expires_at,
           token_preview: s.data?.session?.access_token?.slice(0, 40),

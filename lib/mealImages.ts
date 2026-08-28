@@ -24,7 +24,7 @@ export async function fetchMealImage(name: string, ingredientNames: string[] = [
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const { data, error } = await supabase.functions.invoke('generate-meal-image', { body: { mealName: name, ingredients: ingredientNames, steps } })
-      console.log(`[MealImage] ${name}: data=`, JSON.stringify(data)?.substring(0, 100), 'error=', error)
+      __DEV__ && console.log(`[MealImage] ${name}: data=`, JSON.stringify(data)?.substring(0, 100), 'error=', error)
       if (data?.image) {
         try {
           const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
@@ -40,7 +40,7 @@ export async function fetchMealImage(name: string, ingredientNames: string[] = [
         } catch {}
         return data.image
       }
-    } catch (e) { console.log(`[MealImage] ${name} error:`, e) }
+    } catch (e) { __DEV__ && console.log(`[MealImage] ${name} error:`, e) }
     await new Promise(r => setTimeout(r, 3000)) // 3s gap between retries
   }
   return null
