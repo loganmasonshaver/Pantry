@@ -45,12 +45,12 @@ const OPENAI = 'https://api.openai.com/v1/chat/completions'
 //     determinism; the floor SWEEP handles temp on whichever model you pick).
 const MODELS = [
   {
-    label: 'GPT-4.1 (old incumbent)',
+    label: 'GPT-4.1 (old incumbent)', ref: true,
     endpoint: OPENAI, model: 'gpt-4.1', apiKey: process.env.OPENAI_API_KEY,
     detail: 'high', priceIn: 2.00, priceOut: 8.00,
   },
   {
-    label: 'GPT-5.4-mini',
+    label: 'GPT-5.4-mini', ref: true,
     endpoint: OPENAI, model: 'gpt-5.4-mini', apiKey: process.env.OPENAI_API_KEY,
     // 'original', not 'high'. It was 'high' while production gpt-5.4 runs 'original', so a loss
     // could have been the model OR the resolution and the row could not tell you which. Same
@@ -86,7 +86,7 @@ const MODELS = [
   // attention without answering a different question. Re-add only if luna is unavailable.
   // gpt-5.5 dropped from the A/B — 5× the cost for a label-OCR task; revisit only if 5.4 can't read the fine print.
   {
-    label: 'Gemini 3.1 Flash-Lite (fallback)',
+    label: 'Gemini 3.1 Flash-Lite (fallback)', ref: true,
     endpoint: GEMINI, model: 'gemini-3.1-flash-lite', apiKey: process.env.GOOGLE_AI_KEY,
     detail: 'high',
   },
@@ -100,7 +100,12 @@ const MODELS = [
     maxTokens: 8000,
     extra: { provider: { require_parameters: true } },
   }] : []),
-]
+].filter(m => process.env.FULL || !m.ref)
+// Rows tagged `ref: true` are reference points, not switch candidates: gpt-4.1 already lost the
+// July eval (63% vs 82%), gpt-5.4-mini only matters if BOTH challengers fail, and Gemini is the
+// outage fallback reachable only inside a catch. None can change the "should I switch my scan
+// primary" decision, and at 17 photos each row costs 17 full-resolution 24MP calls. FULL=1 brings
+// them back for a deeper pass.
 
 // The production first-pass prompt, verbatim, parameterized on photo count.
 // (Copied from supabase/functions/scan-pantry/index.ts — keep in sync if that changes.)
