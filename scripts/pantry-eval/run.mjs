@@ -52,7 +52,10 @@ const MODELS = [
   {
     label: 'GPT-5.4-mini',
     endpoint: OPENAI, model: 'gpt-5.4-mini', apiKey: process.env.OPENAI_API_KEY,
-    detail: 'high', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.75, priceOut: 4.50,
+    // 'original', not 'high'. It was 'high' while production gpt-5.4 runs 'original', so a loss
+    // could have been the model OR the resolution and the row could not tell you which. Same
+    // detail setting across every patch-generation row makes the model the only variable.
+    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.75, priceOut: 4.50,
   },
   {
     label: 'GPT-5.4 (PRODUCTION)',
@@ -78,11 +81,9 @@ const MODELS = [
     endpoint: OPENAI, model: 'gpt-5.6-luna', apiKey: process.env.OPENAI_API_KEY,
     detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.20, priceOut: 1.20,
   },
-  {
-    label: 'GPT-5.4-nano',
-    endpoint: OPENAI, model: 'gpt-5.4-nano', apiKey: process.env.OPENAI_API_KEY,
-    detail: 'original', tokenParam: 'max_completion_tokens', noTemp: true, priceIn: 0.20, priceOut: 1.25,
-  },
+  // gpt-5.4-nano dropped: $0.20/$1.25 against gpt-5.6-luna's $0.20/$1.20 — same input price,
+  // older generation, so luna dominates it on paper. Two near-identical cheap rows would split
+  // attention without answering a different question. Re-add only if luna is unavailable.
   // gpt-5.5 dropped from the A/B — 5× the cost for a label-OCR task; revisit only if 5.4 can't read the fine print.
   {
     label: 'Gemini 3.1 Flash-Lite (fallback)',
