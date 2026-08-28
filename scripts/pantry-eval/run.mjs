@@ -197,6 +197,76 @@ function confScore(c) {
 // keywords — a model "caught" the item if any of its names contains a keyword. Approximate
 // by nature (keyword overlap), but far more objective than counting.
 const GROUNDTRUTH = {
+  // ---- Added 2026-08-28. DRAFTED BY READING THE PHOTOS, NOT VERIFIED BY LOGAN.
+  // Only items whose label is legible enough to be confident about are listed. Ground truth that
+  // is WRONG is worse than ground truth that is short: a mislabelled item punishes the model that
+  // read the shelf correctly. Deliberately conservative — add what is missing, delete what is
+  // wrong, and every deletion makes the recall number more honest rather than less.
+  // `keys` are lowercase substrings; a detection matches if any key appears in its name.
+  'pantry-closet.jpg': [
+    { name: 'Honey Smacks cereal',      keys: ['honey smack'] },
+    { name: 'Frosted Flakes',           keys: ['frosted flake'] },
+    { name: 'Rice Crisps',              keys: ['rice crisp'] },
+    { name: 'Campbell\'s soup',         keys: ['campbell'] },
+    { name: 'Progresso soup',           keys: ['progresso'] },
+    { name: 'Tomato paste',             keys: ['tomato paste'] },
+    { name: 'Sweet peas',               keys: ['sweet pea', 'peas'] },
+    { name: 'Zatarain\'s',              keys: ['zatarain'] },
+    { name: 'Ragu pasta sauce',         keys: ['ragu'] },
+    { name: 'Pasta shells',             keys: ['shell'] },
+    { name: 'Elbow macaroni',           keys: ['elbow', 'macaroni'] },
+    { name: 'Chunky salsa',             keys: ['salsa'] },
+    { name: 'Black olives',             keys: ['olive'] },
+    { name: 'Planters mixed nuts',      keys: ['planters', 'mixed nut'] },
+    { name: 'Club crackers',            keys: ['club cracker'] },
+    { name: 'Ritz crackers',            keys: ['ritz'] },
+    { name: 'Tastykake cupcakes',       keys: ['tastykake', 'cupcake'] },
+    { name: 'Brownies',                 keys: ['brownie'] },
+    { name: 'Peanut butter',            keys: ['peanut butter'] },
+    { name: 'Grits',                    keys: ['grits'] },
+    { name: 'Oats',                     keys: ['oat'] },
+    { name: 'Mayonnaise',               keys: ['mayo'] },
+    { name: 'Honey Nut Cheerios',       keys: ['cheerio', 'honey nut'] },
+    { name: 'Coffee',                   keys: ['coffee', 'folgers'] },
+  ],
+  'pantry-walkin.jpg': [
+    { name: 'Cashews',                  keys: ['cashew'] },
+    { name: 'Protein powder',           keys: ['protein powder', 'protein'] },
+    { name: 'Pancake & waffle mix',     keys: ['pancake', 'waffle'] },
+    { name: 'Flour',                    keys: ['flour'] },
+    { name: 'Cocoa powder',             keys: ['cocoa', 'cacao'] },
+    { name: 'Corn starch',              keys: ['corn starch', 'cornstarch'] },
+    { name: 'Granulated sugar',         keys: ['granulated sugar', 'sugar'] },
+    { name: 'Organic cane sugar',       keys: ['cane sugar'] },
+    { name: 'Skittles',                 keys: ['skittles'] },
+    { name: 'Kosher sea salt',          keys: ['sea salt', 'kosher'] },
+    { name: 'Coconut oil',              keys: ['coconut oil'] },
+    { name: 'Olive oil',                keys: ['olive oil'] },
+    { name: 'Vinegar',                  keys: ['vinegar'] },
+    { name: 'Hot sauce',                keys: ['hot sauce'] },
+    { name: 'Dried beans',              keys: ['bean'] },
+    { name: 'Dried pasta',              keys: ['pasta', 'al dente'] },
+    { name: 'Basmati rice',             keys: ['basmati', 'rice'] },
+    { name: 'Aluminum foil',            keys: ['aluminum foil', 'foil'] },
+    { name: 'Chex Mix',                 keys: ['chex'] },
+    { name: 'Pretzels',                 keys: ['pretzel'] },
+    { name: 'Baking soda',              keys: ['baking soda'] },
+  ],
+  'fridge.jpg': [
+    { name: 'Fage Greek yogurt',        keys: ['fage', 'greek yogurt', 'yogurt'] },
+    { name: 'Daisy cottage cheese',     keys: ['cottage cheese', 'daisy'] },
+    { name: 'Mozzarella',               keys: ['mozzarella'] },
+    { name: 'Eggs',                     keys: ['egg'] },
+    { name: 'Apples',                   keys: ['apple'] },
+    { name: 'Cherry tomatoes',          keys: ['tomato'] },
+    { name: 'Lettuce / greens',         keys: ['lettuce', 'greens', 'spinach'] },
+    { name: 'Bell pepper',              keys: ['bell pepper', 'pepper'] },
+    { name: 'Avocado',                  keys: ['avocado'] },
+    { name: 'Grapes',                   keys: ['grape'] },
+    { name: 'La Colombe oat latte',     keys: ['la colombe', 'latte'] },
+    { name: 'Berries',                  keys: ['berry', 'berries', 'strawberr'] },
+  ],
+
   '18A13327-8F43-44F3-98A3-49E2B97B7B51.jpeg': [
     { name: 'Baked Beans', keys: ['baked bean'] },
     { name: 'Canned Chili', keys: ['chili'] },
