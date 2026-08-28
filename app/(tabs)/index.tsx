@@ -496,8 +496,25 @@ export default function HomeScreen() {
   // regardless of `enabled`), so this only gates the ~6s GPT call on a genuine miss — i.e. the
   // first open of a new day. Six seconds you asked for reads completely differently from six
   // seconds the app decided to spend on your behalf.
-  const [wantsGeneration, setWantsGeneration] = useState(false)
-  const { meals, loading, cacheChecked } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0 && wantsGeneration)
+  // Generates as soon as there is a pantry to generate FROM — no longer behind a tap.
+  //
+  // The tap gate was added to cut spend and perceived latency, and both arguments weakened. A
+  // cached day now paints in ~40ms (measured), so the ~6s call only ever happens on the first open
+  // of a new day, narrated. And the cost is small: Gemini text is ~$0.004 a generation and images
+  // are GLOBALLY cached, so the 500th user to generate a given dish pays nothing for its photo —
+  // about $75/month at 500 DAU, of which the gate saved maybe $30.
+  //
+  // Against that, one point of trial-to-paid at 500 DAU is worth ~$42/month. The gate had to cost
+  // ZERO conversion to break even, on the exact screen where a trial user decides whether the app
+  // works. It also violated the project's own rule against redundant CTAs: a button reading "Get
+  // tonight's meals" on the screen whose job is tonight's meals is asking for something the user
+  // already asked for by opening the app.
+  //
+  // It was also only ever half-real. Pantry called this same hook with `hasPantryItems` and no tap
+  // gate, sharing the 'cookNow' cache — so anyone who opened Pantry first (which is where you add
+  // ingredients) got auto-generation anyway. The behaviour depended on which tab you happened to
+  // open first, which is an accident, not a decision.
+  const { meals, loading, cacheChecked, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -1604,7 +1621,11 @@ export default function HomeScreen() {
               // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
               // never flashes during the ~100ms disk read on a day that DOES have meals — showing
               // the resting card and then yanking it away reads worse than showing nothing.
-              <MealCardResting pantryCount={pantryNames.size} onPress={() => setWantsGeneration(true)} />
+              // Now the FAILURE state, not the opening state. With generation automatic, reaching
+              // here means the cache was checked, no meals exist and nothing is loading — i.e. a
+              // generation that failed or was capped. Tapping retries. The empty-pantry case never
+              // gets here; it is handled by its own block above, gated on pantryNames.size === 0.
+              <MealCardResting pantryCount={pantryNames.size} onPress={retry} />
             ) : null}
           </View>
         )}
