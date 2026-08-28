@@ -1170,7 +1170,26 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // HARD MINIMUM GATE: only triggers if the candidate pool itself was under 6
     // (LLM yielded too few names). With MMR replacing the kill-filters, this
     // should be vanishingly rare — keeps the safety net in place for that case.
-    const MIN_TRENDING_MEALS = 6
+    // 6 -> 1. This floor was written when Discover WAS today's batch — 7-11 meals on screen — so
+    // a thin run meant a thin feed and its comment reads "keeping previous run's trending meals
+    // intact". That premise is gone. RETENTION_DAYS is 30, the pool is ~140, and Discover now
+    // renders shelves plus a browse grid over the whole thing. Today's batch is an INCREMENT, not
+    // the feed.
+    //
+    // Two facts make discarding survivors pure loss: this check runs BEFORE the retention delete
+    // and before the swap-then-cleanup, so aborting protects nothing that was at risk; and anything
+    // reaching this line already cleared 100%-ingredient-retention, both dedup gates and the
+    // fractional check. Rejecting 3 verified recipes to avoid a thin feed that can no longer occur
+    // trades real content for nothing.
+    //
+    // Cost of storing them is trivial — each meal triggers one image generation, measured at about
+    // $0.0115, so a 3-recipe day is ~4 cents.
+    //
+    // "Is today healthy?" stays a separate question, answered where it belongs: the
+    // trending-health-check job alerts below TRENDING_MIN_EXPECTED (default 12). Lowering this
+    // floor makes thin days visible as a yield WARNING instead of invisible as a silent skip —
+    // which is what let 7 of 19 days pass unnoticed.
+    const MIN_TRENDING_MEALS = 1
     if (recipes.length < MIN_TRENDING_MEALS) {
       console.log(`[abort] candidate pool was ${recipes.length}, below min of ${MIN_TRENDING_MEALS} — keeping previous run's trending meals intact`)
       return new Response(JSON.stringify({
