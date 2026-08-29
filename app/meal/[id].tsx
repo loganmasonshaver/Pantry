@@ -43,10 +43,11 @@ import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged,
 const screenWidth = Dimensions.get('window').width
 // Peak hero drift, in points. The tilt layer is inset by this on both sides so there is always
 // real photo to slide into — raising one without the other slides the image off its own edge.
-// 30 is the FREE ceiling: the hero is 440pt wide and a square photo renders 500pt wide under
-// contentFit="cover", so 60pt is hidden and +/-30 costs no extra upscaling. Past 30 the layer
-// exceeds 500pt, cover starts scaling to WIDTH, and the photo gets softer (40 -> 1.06x, 50 -> 1.14x).
-const HERO_TILT = 30
+// Landed at 20 by bisection: 20 at low sensitivity read as nothing, 30 at high sensitivity read as
+// too much. Sensitivity (TILT_RANGE) stayed at the responsive setting and only the travel came
+// down. 30 is the FREE ceiling — the hero is 440pt wide and a square photo renders 500pt wide
+// under contentFit="cover", so 60pt is hidden — but nothing requires using all of it.
+const HERO_TILT = 20
 
 // "Measured" = grams + tbsp/cups (needs a scale or measuring spoon).
 // "Eyeball"  = whole-unit count + descriptors like "a drizzle", "a handful"

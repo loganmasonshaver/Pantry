@@ -7,8 +7,10 @@
 // travel to 28deg meant a typical 10deg roll produced only a third of the drift. This is the
 // sensitivity knob — lower means more reaction to the same wrist movement.
 export const TILT_RANGE = 0.3
-// Ignore sub-degree noise so a resting hand doesn't shimmer the frame.
-export const DEADZONE = 0.02
+// Below this the photo does not move at all (~2deg). Widened from 0.02 (~1deg) because at the
+// higher sensitivity the frame was creeping during ordinary reading — "too much movement" is as
+// much about never being still as about travelling far.
+export const DEADZONE = 0.035
 // Per-frame approach rate for the one-pole filter. 0.12 at 60fps settles in roughly 100ms. Raised
 // alongside TILT_RANGE — with a slower filter the bigger travel lagged the wrist and read as
 // drift rather than response.
