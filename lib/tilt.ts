@@ -18,11 +18,13 @@ export const TILT_CURVE = 1.05
 // Below this the photo does not move at all (~1deg). Back down from 0.035: that widening was a
 // response to creep observed while the effect was broken, so it was suppressing nothing real.
 export const DEADZONE = 0.02
-// Per-frame approach rate for the one-pole filter. 0.15 at 60fps settles in roughly 80ms.
-// Raised hard: at 250ms the photo finished moving after the wrist had already stopped, so the
-// motion was over before you looked at it. Tracking the hand is most of what makes translation
-// perceptible at all. Lower = weightier, higher = snappier.
-export const SMOOTHING = 0.15
+// Per-frame approach rate for the one-pole filter. 0.10 at 60fps is a ~167ms time constant.
+//
+// SPEED, not distance, is what the effect is judged on here. At an identical 30pt of travel,
+// 0.06 (~278ms) read as too subtle and 0.15 (~111ms) read as too much movement — so displacement
+// was never the variable and bisecting it was wasted effort. Tune THIS first.
+// Lower = weightier and calmer, higher = snappier and more present.
+export const SMOOTHING = 0.10
 
 /**
  * Roll (radians) -> horizontal drift (points), measured from a baseline captured when the screen
