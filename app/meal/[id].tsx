@@ -25,9 +25,6 @@ import PressableScale from '../../components/PressableScale'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
-import Reanimated from 'react-native-reanimated'
-import { useTiltParallax } from '@/hooks/useTiltParallax'
-import { TiltDebugOverlay } from '@/components/TiltDebugOverlay'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
@@ -42,17 +39,6 @@ import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged, trackUpgradePromptShown } from '../../lib/analytics'
 
 const screenWidth = Dimensions.get('window').width
-// Peak hero drift, in points. The tilt layer is inset by this on both sides so there is always
-// real photo to slide into — raising one without the other slides the image off its own edge.
-// 30 is the FREE ceiling: the hero is 440pt wide and a square photo renders 500pt wide under
-// contentFit="cover", so 60pt is already hidden and riding it costs no extra upscaling. Past 30
-// the layer exceeds 500pt, cover starts scaling to WIDTH, and the photo softens (50pt -> 1.08x).
-//
-// Bracketed by feel: 30pt at a 250ms settle was invisible, 50pt at 80ms was too much. Those two
-// readings differ in BOTH distance and speed, and velocity drives perceived motion far harder
-// than displacement — so the fast tracking is most likely what made it visible and the extra
-// 20pt is what made it excessive. Holding SMOOTHING at 0.15 and taking travel back to free.
-const HERO_TILT = 30
 
 // "Measured" = grams + tbsp/cups (needs a scale or measuring spoon).
 // "Eyeball"  = whole-unit count + descriptors like "a drizzle", "a handful"
@@ -469,9 +455,6 @@ export default function MealDetailScreen() {
   // untagged URL here is what let one recipe's photo render under another's title.
   const [generatedImage, setGeneratedImage] = useState<{ name: string; uri: string } | null>(null)
   const generatedForRef = useRef<string | null>(null)
-  // Hero drifts with device roll. Rides the horizontal overflow contentFit="cover" already
-  // clips off a square photo, so it costs no extra upscaling on the 512px library.
-  const tilt = useTiltParallax(HERO_TILT)
   // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
   // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
   const slideAnim = useRef(new Animated.Value(0)).current
@@ -970,10 +953,7 @@ export default function MealDetailScreen() {
           </View>
         ) : (meal.image || heroGenerated) ? (
           <View style={styles.heroContainer}>
-            <Reanimated.View style={[styles.heroTiltLayer, tilt.style]}>
-              <MealImage uri={(meal.image || heroGenerated) as string} style={styles.heroImage} priority="high" />
-            </Reanimated.View>
-            {__DEV__ && <TiltDebugOverlay {...tilt.debug} />}
+            <MealImage uri={(meal.image || heroGenerated) as string} style={styles.heroImage} priority="high" />
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
               locations={[0.3, 0.7, 1]}
@@ -1528,16 +1508,6 @@ const styles = StyleSheet.create({
   heroImage: {
     height: 500,
     width: '100%',
-  },
-  // Overhangs the hero by HERO_TILT on each side. Because the photo is square and the hero is
-  // taller than it is wide, cover scales to the HEIGHT either way — so widening this layer crops
-  // less horizontally without changing the scale factor. The drift is genuinely free resolution.
-  heroTiltLayer: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: -HERO_TILT,
-    right: -HERO_TILT,
   },
   heroGradient: {
     position: 'absolute',
