@@ -2,11 +2,18 @@
 // under plain node — importing the hook itself drags in react-native-reanimated and expo-router,
 // neither of which resolves outside the app runtime.
 
-// Roll that produces FULL travel, in radians (~17deg). Tuned down from 0.5 (~28deg) after the
-// first pass read as invisible: casual handling is a 5-15deg wrist movement, and mapping full
-// travel to 28deg meant a typical 10deg roll produced only a third of the drift. This is the
-// sensitivity knob — lower means more reaction to the same wrist movement.
-export const TILT_RANGE = 0.3
+// Roll that produces FULL travel, in radians (~20deg).
+export const TILT_RANGE = 0.35
+
+// Response curve exponent. 1 is linear; higher makes small tilts calmer while still reaching full
+// travel on a deliberate one.
+//
+// This exists because LINEAR TUNING COULD NOT SATISFY BOTH COMPLAINTS. A gentle linear slope read
+// as "too subtle" on a deliberate tilt; a steep one read as "too sensitive" while simply holding
+// the phone. Those are opposite ends of the same straight line, so no single slope fixes both —
+// the fix is to change the SHAPE. At 1.6 the photo is nearly still through the 3-10deg range of
+// ordinary handling and still travels the full 20pt when the wrist actually turns.
+export const TILT_CURVE = 1.6
 // Below this the photo does not move at all (~2deg). Widened from 0.02 (~1deg) because at the
 // higher sensitivity the frame was creeping during ordinary reading — "too much movement" is as
 // much about never being still as about travelling far.
@@ -28,6 +35,9 @@ export function tiltOffset(roll: number, baseline: number, maxTravel: number): n
   'worklet'
   const delta = roll - baseline
   const clamped = Math.max(-TILT_RANGE, Math.min(TILT_RANGE, delta))
-  if (Math.abs(clamped) < DEADZONE) return 0
-  return -(clamped / TILT_RANGE) * maxTravel
+  const magnitude = Math.abs(clamped)
+  if (magnitude < DEADZONE) return 0
+  // Curve the magnitude, then re-apply the sign — raising a negative to a fractional power is NaN.
+  const eased = Math.pow(magnitude / TILT_RANGE, TILT_CURVE)
+  return -Math.sign(clamped) * eased * maxTravel
 }
