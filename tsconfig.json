@@ -2,6 +2,11 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Node-run unit tests import siblings as './tilt.ts'. Node's ESM loader requires the explicit
+    // extension; without this tsc reports TS5097 on every one of them, adding permanent noise to
+    // the app-code error count that real regressions are measured against. Safe here because the
+    // project only ever runs tsc with --noEmit — Metro does the bundling.
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/*": ["./*"]
     }

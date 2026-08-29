@@ -25,6 +25,8 @@ import PressableScale from '../../components/PressableScale'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
+import Reanimated from 'react-native-reanimated'
+import { useTiltParallax } from '@/hooks/useTiltParallax'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
@@ -39,6 +41,9 @@ import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged, trackUpgradePromptShown } from '../../lib/analytics'
 
 const screenWidth = Dimensions.get('window').width
+// Peak hero drift, in points. The tilt layer is inset by this on both sides so there is always
+// real photo to slide into — raising one without the other slides the image off its own edge.
+const HERO_TILT = 20
 
 // "Measured" = grams + tbsp/cups (needs a scale or measuring spoon).
 // "Eyeball"  = whole-unit count + descriptors like "a drizzle", "a handful"
@@ -455,6 +460,9 @@ export default function MealDetailScreen() {
   // untagged URL here is what let one recipe's photo render under another's title.
   const [generatedImage, setGeneratedImage] = useState<{ name: string; uri: string } | null>(null)
   const generatedForRef = useRef<string | null>(null)
+  // Hero drifts with device roll. Rides the horizontal overflow contentFit="cover" already
+  // clips off a square photo, so it costs no extra upscaling on the 512px library.
+  const tilt = useTiltParallax(HERO_TILT)
   // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
   // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
   const slideAnim = useRef(new Animated.Value(0)).current
@@ -953,7 +961,9 @@ export default function MealDetailScreen() {
           </View>
         ) : (meal.image || heroGenerated) ? (
           <View style={styles.heroContainer}>
-            <MealImage uri={(meal.image || heroGenerated) as string} style={styles.heroImage} priority="high" />
+            <Reanimated.View style={[styles.heroTiltLayer, tilt.style]}>
+              <MealImage uri={(meal.image || heroGenerated) as string} style={styles.heroImage} priority="high" />
+            </Reanimated.View>
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
               locations={[0.3, 0.7, 1]}
@@ -1508,6 +1518,16 @@ const styles = StyleSheet.create({
   heroImage: {
     height: 500,
     width: '100%',
+  },
+  // Overhangs the hero by HERO_TILT on each side. Because the photo is square and the hero is
+  // taller than it is wide, cover scales to the HEIGHT either way — so widening this layer crops
+  // less horizontally without changing the scale factor. The drift is genuinely free resolution.
+  heroTiltLayer: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: -HERO_TILT,
+    right: -HERO_TILT,
   },
   heroGradient: {
     position: 'absolute',

@@ -149,11 +149,18 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 207** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **50** in
-  app code (`app/ lib/ components/ hooks/ context/`) and **157** Deno-global noise from
+- **TS baseline = 149** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **45** in
+  app code (`app/ lib/ components/ hooks/ context/`) and **104** Deno-global noise from
   `supabase/functions` being inside the tsconfig. Watch the DELTA, not the total — a +1 caught a
-  real ReferenceError once. Adding any `_shared` import to an edge function raises the total by 1
-  (TS5097) without meaning anything; the app-code number is the one that matters.
+  real ReferenceError once, and a −4 on 2026-08-29 was the TDZ bug in `app/meal/[id].tsx` that
+  made every meal render the previously-viewed meal's photo. The app-code number is the one that
+  matters.
+- **TS5097 is gone** (was 46, now 0). `allowImportingTsExtensions` is on, so `_shared` imports in
+  edge functions and `./foo.ts` imports in unit tests no longer raise the count. Adding one is no
+  longer free noise — if the number moves, something real moved.
+- **Unit tests run under plain node, no Deno CLI and no jest:**
+  `node --test lib/tilt.test.ts supabase/functions/_shared/macro-estimate.test.ts`
+  Node 25 strips types natively. Test files are typechecked by `tsc` too — keep them compiling.
 - `bash scripts/preflight.sh` reports the three places state drifts: uncommitted files,
   unapplied migrations, and functions whose source is newer than their deploy. Run it at session
   start instead of trusting any written claim about deploy state.
