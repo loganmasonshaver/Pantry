@@ -736,8 +736,15 @@ export default function HomeScreen() {
   // was computed in JS and shipped over the bridge — on Home, which auto-generates meals on focus,
   // those frames queued behind whatever JS was already running and the glide stuttered.
   const heroExpandedH = Math.max(HERO_MIN, heroFit - 76)
+  // DIAGNOSTIC — isolating which of the two height animations is expensive. The hero contains a
+  // nested horizontal ScrollView of meal cards and images; animating its height re-measures that
+  // whole subtree every frame, which no amount of moving the interpolation off the JS thread can
+  // help. Set to true to restore the glide.
+  const ANIMATE_HERO_HEIGHT = false
   const heroStyle = useAnimatedStyle(() => ({
-    height: heroFit + (heroExpandedH - heroFit) * macrosAnim.value,
+    height: ANIMATE_HERO_HEIGHT
+      ? heroFit + (heroExpandedH - heroFit) * macrosAnim.value
+      : heroExpandedH, // hold the smaller size so nothing clips when the accordion is open
   }))
   const macrosRowsOpacity = useAnimatedStyle(() => ({ opacity: macrosAnim.value }))
   // Height is applied only once the rows have been measured; before that the view needs its
