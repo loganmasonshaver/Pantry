@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimateMacros, parseGrams, verifyMacros } from './macro-estimate.ts'
+import { estimateMacros, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -136,25 +136,6 @@ test('a tiny or quantity-less meal is never judged', () => {
   assert.equal(verifyMacros({ protein: 99 }, undefined).skipped, true)
 })
 
-test('the Greek yogurt bowl from the pantry list is reproducible', () => {
-  // 826 kcal / 66g protein. Reaching 66g from yogurt alone needs a very large tub, which is what
-  // made it worth checking against the prompt's own quantity-realism rule.
-  const v = verifyMacros(
-    { calories: 826, protein: 66, carbs: 82, fat: 22 },
-    [
-      { name: 'greek yogurt', grams: '500g' },
-      { name: 'granola', grams: '80g' },
-      { name: 'pecans', grams: '15g' },
-      { name: 'honey', grams: '20g' },
-    ],
-  )
-  // Documents what the estimator says rather than asserting a verdict — the real ingredient list
-  // is still unknown, and this fixture exists to be replaced with it.
-  assert.ok(v.estimate.protein > 0)
-  console.log(`  greek yogurt bowl -> est ${v.estimate.kcal} kcal / ${v.estimate.protein}g protein,`,
-    `claimed 826 / 66, ratios kcal ${v.kcalRatio.toFixed(2)}x protein ${v.proteinRatio.toFixed(2)}x, ok=${v.ok}`)
-})
-
 // ── Shadowing guard ───────────────────────────────────────────────────────────────────────────
 // The table resolves first-match-wins, so a broad row placed above a narrow one silently steals
 // it and the narrow row becomes dead code. That is exactly how "peanut butter" ended up reporting
@@ -209,4 +190,76 @@ test('every canonical ingredient is recognised at all', () => {
     .map(([n]) => n)
     .filter(n => estimateMacros([{ name: n, grams: '100g' }]).unmatched.length > 0)
   assert.deepEqual(unmatched, [], `unrecognised: ${unmatched.join(', ')}`)
+})
+
+// ── Household units ───────────────────────────────────────────────────────────────────────────
+// The generator does not always put grams in the `grams` field. A real meal shipped "1 scoop",
+// "1 tbsp" and "1 tsp"; reading those as 1g each lost ~24g of protein and made an honest meal
+// look like it overstated by 1.51x. This block is the regression bar for that false positive.
+
+test('parseQty converts household measures instead of reading them as 1g', () => {
+  assert.equal(parseQty('1 scoop').g, 30)
+  assert.equal(parseQty('2 scoops').g, 60)
+  assert.equal(parseQty('1 tbsp').g, 15)
+  assert.equal(parseQty('1 tablespoon').g, 15)
+  assert.equal(parseQty('1 tsp').g, 5)
+  assert.equal(parseQty('2 teaspoons').g, 10)
+  assert.equal(parseQty('1 cup').g, 240)
+  assert.equal(parseQty('2 cloves').g, 10)
+  assert.equal(parseQty('3 slices').g, 90)
+  for (const q of ['1 scoop', '1 tbsp', '120g', '15ml', '2 oz', '200']) {
+    assert.equal(parseQty(q).known, true, q)
+  }
+})
+
+test('an unrecognised unit is reported as unusable, never guessed', () => {
+  const p = parseQty('1 palm-sized piece')
+  assert.equal(p.g, 0)
+  assert.equal(p.known, false)
+  assert.equal(parseQty('to taste').known, false)
+})
+
+// REAL — "Mediterranean Greek Yogurt and Granola Bowl", 826 kcal / 66g protein, from the device
+// on 2026-08-29. Hand-checked as accurate. Before parseQty understood household units this meal
+// scored 1.51x and would have been DROPPED in production.
+const YOGURT_BOWL = {
+  claim: { calories: 826, protein: 66, carbs: 82, fat: 28 },
+  ingredients: [
+    { name: 'non-fat plain greek yogurt', grams: '340g' },
+    { name: 'protein powder', grams: '1 scoop' },
+    { name: 'granola', grams: '60g' },
+    { name: 'pecans', grams: '20g' },
+    { name: 'cinnamon granola butter', grams: '1 tbsp' },
+    { name: 'maple syrup', grams: '1 tsp' },
+  ],
+}
+
+test('REAL Greek yogurt bowl passes — the false positive that nearly shipped', () => {
+  const v = verifyMacros(YOGURT_BOWL.claim, YOGURT_BOWL.ingredients)
+  assert.equal(v.ok, true, v.reason)
+  assert.equal(v.skipped, false)
+  assert.ok(v.proteinRatio > 0.85 && v.proteinRatio < 1.2, `proteinRatio ${v.proteinRatio}`)
+})
+
+test('the scoop is what carries that meal — dropping it must abstain, not accuse', () => {
+  // Same bowl with an unreadable quantity on the protein powder. The estimate is then missing a
+  // third of the protein, so the check must decline to judge rather than call the meal a liar.
+  const v = verifyMacros(YOGURT_BOWL.claim, [
+    ...YOGURT_BOWL.ingredients.slice(0, 1),
+    { name: 'protein powder', grams: '1 heaping palmful' },
+    ...YOGURT_BOWL.ingredients.slice(2),
+  ])
+  assert.equal(v.skipped, true)
+  assert.equal(v.ok, true)
+  assert.match(v.reason, /unreadable quantity/)
+})
+
+test('a zero-macro seasoning with no weight does NOT suppress the check', () => {
+  // "salt, to taste" is everywhere. It must not push every meal into abstain.
+  const v = verifyMacros(
+    { calories: 676, protein: 70, carbs: 33, fat: 31 },
+    [...SCRAMBLE.ingredients.slice(0, 5), { name: 'salt', grams: 'to taste' }, { name: 'black pepper', grams: 'to taste' }],
+  )
+  assert.equal(v.skipped, false, v.reason)
+  assert.equal(v.ok, true)
 })

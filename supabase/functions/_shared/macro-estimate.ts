@@ -26,6 +26,8 @@ export type MacroEstimate = {
   /** matchedG / totalG — below ~0.7 the estimate is too partial to judge anything by */
   coverage: number
   unmatched: string[]
+  /** real ingredients whose quantity could not be read — the estimate is missing their macros */
+  unweighed: string[]
 }
 
 type Row = { re: RegExp; kcal: number; p: number; c: number; f: number }
@@ -143,32 +145,81 @@ const TABLE: Row[] = [
   { re: /\b(hummus)\b/i, kcal: 166, p: 7.9, c: 14.3, f: 9.6 },
 ]
 
-/** "120g" | "15ml" | "1.5 oz" | 200 -> grams. ml is treated as grams; close enough for a lie check. */
-export function parseGrams(raw: string | number | undefined): number {
-  if (raw === undefined || raw === null) return 0
-  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? raw : 0
+// Household measures the generator puts in the `grams` field despite the name. Approximate on
+// purpose — a lie detector with a 1.5x bar does not care that a tbsp of honey is 21g and a tbsp
+// of oil is 13.5g, it cares that neither is 1g.
+const UNIT_G: Array<[RegExp, number]> = [
+  [/\bscoops?\b/, 30],       // protein powder scoops run 28-35g
+  [/\btablespoons?\b|\btbsps?\b/, 15],
+  [/\bteaspoons?\b|\btsps?\b/, 5],
+  [/\bcups?\b/, 240],
+  [/\bcloves?\b/, 5],
+  [/\bslices?\b/, 30],
+  [/\bcans?\b/, 400],
+  [/\bhandfuls?\b/, 30],
+  [/\bpinch(es)?\b|\bdash(es)?\b/, 1],
+]
+
+export type ParsedQty = {
+  /** grams, 0 when nothing usable could be read */
+  g: number
+  /** false when a quantity was present but its unit was not understood — such an ingredient must
+   *  count AGAINST coverage rather than silently contributing a wrong number */
+  known: boolean
+}
+
+/**
+ * "120g" | "15ml" | "1.5 oz" | "1 scoop" | 200 -> grams.
+ *
+ * A bare number is read as grams, which is the documented contract for this field. The unit
+ * conversions exist because the generator does NOT always honour it: a real meal shipped
+ * "1 scoop" protein powder, "1 tbsp" butter and "1 tsp" maple syrup, and reading those as 1g each
+ * cost ~24g of protein and made an honest meal look like it was overstating by 1.51x.
+ */
+export function parseQty(raw: string | number | undefined): ParsedQty {
+  if (raw === undefined || raw === null) return { g: 0, known: false }
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? { g: raw, known: true } : { g: 0, known: false }
   const s = String(raw).trim().toLowerCase()
   const n = parseFloat(s.replace(/[^0-9.]/g, ''))
-  if (!Number.isFinite(n) || n <= 0) return 0
-  if (/\boz\b/.test(s)) return n * 28.35
-  if (/\blbs?\b|\bpounds?\b/.test(s)) return n * 453.6
-  if (/\bkg\b/.test(s)) return n * 1000
-  return n // g, ml, or bare number
+  if (!Number.isFinite(n) || n <= 0) return { g: 0, known: false }
+
+  if (/\bkg\b/.test(s)) return { g: n * 1000, known: true }
+  if (/\blbs?\b|\bpounds?\b/.test(s)) return { g: n * 453.6, known: true }
+  if (/\boz\b|\bounces?\b/.test(s)) return { g: n * 28.35, known: true }
+  for (const [re, grams] of UNIT_G) if (re.test(s)) return { g: n * grams, known: true }
+  if (/\d\s*(g|grams?|ml|milliliters?)\b/.test(s)) return { g: n, known: true }
+  // A number with no unit at all: trust the field name and read it as grams.
+  if (/^[\d.\s/]+$/.test(s)) return { g: n, known: true }
+  // A number with a unit we do not recognise ("1 palm-sized piece"). Guessing here is how an
+  // honest meal gets dropped, so report the weight as unusable and let coverage fall.
+  return { g: 0, known: false }
+}
+
+/** Back-compat convenience — grams only. */
+export function parseGrams(raw: string | number | undefined): number {
+  return parseQty(raw).g
 }
 
 export function estimateMacros(ingredients: MacroIngredient[] | undefined): MacroEstimate {
-  const out: MacroEstimate = { kcal: 0, protein: 0, carbs: 0, fat: 0, matchedG: 0, totalG: 0, coverage: 0, unmatched: [] }
+  const out: MacroEstimate = { kcal: 0, protein: 0, carbs: 0, fat: 0, matchedG: 0, totalG: 0, coverage: 0, unmatched: [], unweighed: [] }
   if (!Array.isArray(ingredients)) return out
 
   for (const ing of ingredients) {
     const name = String(ing?.name ?? '').trim()
-    const g = parseGrams(ing?.grams)
-    if (!name || g <= 0) continue
-    out.totalG += g
+    if (!name) continue
+    const qty = parseQty(ing?.grams)
     const row = TABLE.find(r => r.re.test(name))
+
+    if (qty.g <= 0) {
+      // No usable weight. Harmless for a zero-macro seasoning ("salt, to taste"), but for a real
+      // contributor it means the estimate is missing food and must not be used to accuse anyone.
+      if (row && row.kcal > 20) out.unweighed.push(name)
+      continue
+    }
+    out.totalG += qty.g
     if (!row) { out.unmatched.push(name); continue }
-    out.matchedG += g
-    const k = g / 100
+    out.matchedG += qty.g
+    const k = qty.g / 100
     out.kcal += row.kcal * k
     out.protein += row.p * k
     out.carbs += row.c * k
@@ -213,6 +264,15 @@ export function verifyMacros(claim: MacroClaim, ingredients: MacroIngredient[] |
   const proteinRatio = estimate.protein > 0 ? claimedP / estimate.protein : 0
   const kcalRatio = estimate.kcal > 0 ? claimedK / estimate.kcal : 0
 
+  // An ingredient we can price but cannot weigh leaves a hole in the estimate. Accusing a meal of
+  // overstating protein while knowingly omitting one of its protein sources is how this check
+  // would drop honest food, so abstain instead.
+  if (estimate.unweighed.length > 0) {
+    return {
+      ok: true, skipped: true, estimate, proteinRatio, kcalRatio,
+      reason: `unreadable quantity on ${estimate.unweighed.join(', ')} — estimate incomplete`,
+    }
+  }
   if (estimate.totalG < MACRO_TOLERANCE.minTotalG || estimate.coverage < MACRO_TOLERANCE.minCoverage) {
     return {
       ok: true, skipped: true, estimate, proteinRatio, kcalRatio,
