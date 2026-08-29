@@ -6,6 +6,7 @@ import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
 import { dishKey, RECENT_MEMORY } from '../_shared/dish-key.ts'
+import { verifyMacros } from '../_shared/macro-estimate.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -346,6 +347,7 @@ Rules:
 ${ingredientRule}${proteinVarietyRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
+- MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
 - CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.${fatLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
@@ -525,6 +527,31 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     })
     if (repeatCount > 0) {
       console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
+    }
+
+    // Independent macro check. Every other gate in this function reads the numbers the MODEL
+    // reported — the same model that wrote the ingredient list — so a meal whose food only
+    // supports 35g of protein could claim 70g and pass the band check untouched. This is the one
+    // gate that reads the FOOD instead. It runs BEFORE the ranking on purpose: the fit score
+    // rewards claimed-vs-target proximity, so an inflated meal would otherwise outrank an honest
+    // one on numbers it never earned. Abstains when ingredient coverage is too low to be sure.
+    {
+      const beforeCheck = meals.length
+      const kept: any[] = []
+      for (const m of meals) {
+        const v = verifyMacros(m, m?.ingredients)
+        console.log(`[macro-check] ${v.ok ? (v.skipped ? 'skip' : 'ok  ') : 'DROP'} "${m?.name}" — ${v.reason}`)
+        if (v.ok) kept.push(m)
+      }
+      // Never let this check empty the plate. If EVERY candidate fails, the likely cause is a gap
+      // in the reference table or a tolerance that's too tight — not five simultaneously dishonest
+      // meals — and a thin honest day still beats no day at all.
+      if (kept.length === 0 && beforeCheck > 0) {
+        console.log(`[macro-check] all ${beforeCheck} candidates failed — keeping them; suspect the table or tolerances, not the meals`)
+      } else {
+        if (kept.length < beforeCheck) console.log(`[macro-check] dropped ${beforeCheck - kept.length}/${beforeCheck}`)
+        meals = kept
+      }
     }
 
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
