@@ -11,17 +11,19 @@ export const TILT_RANGE = 0.35
 // This exists because LINEAR TUNING COULD NOT SATISFY BOTH COMPLAINTS. A gentle linear slope read
 // as "too subtle" on a deliberate tilt; a steep one read as "too sensitive" while simply holding
 // the phone. Those are opposite ends of the same straight line, so no single slope fixes both —
-// the fix is to change the SHAPE. At 1.6 the photo is nearly still through the 3-10deg range of
-// ordinary handling and still travels the full 20pt when the wrist actually turns.
-export const TILT_CURVE = 1.6
+// the fix is to change the SHAPE. 1.6 overcorrected — it flattened the 5-15deg band that is
+// where the wrist actually moves, and the effect vanished. 1.15 keeps a slight ease off centre
+// without hollowing out the middle; the "too eager" complaint is handled by SMOOTHING instead.
+export const TILT_CURVE = 1.15
 // Below this the photo does not move at all (~2deg). Widened from 0.02 (~1deg) because at the
 // higher sensitivity the frame was creeping during ordinary reading — "too much movement" is as
 // much about never being still as about travelling far.
 export const DEADZONE = 0.035
-// Per-frame approach rate for the one-pole filter. 0.12 at 60fps settles in roughly 100ms. Raised
-// alongside TILT_RANGE — with a slower filter the bigger travel lagged the wrist and read as
-// drift rather than response.
-export const SMOOTHING = 0.12
+// Per-frame approach rate for the one-pole filter. 0.06 at 60fps settles in roughly 250ms.
+// HALVED deliberately: "sensitivity is too high" turned out to be about the photo tracking the
+// hand too eagerly rather than travelling too far, and heavy damping fixes that without giving
+// up the distance that makes the effect visible at all. Lower = weightier, higher = snappier.
+export const SMOOTHING = 0.06
 
 /**
  * Roll (radians) -> horizontal drift (points), measured from a baseline captured when the screen

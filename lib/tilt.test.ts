@@ -64,13 +64,17 @@ test('the curve keeps ordinary handling calm without capping deliberate tilts', 
   // 20deg. Assert BOTH ends, so a future retune cannot quietly reintroduce either.
   const small = Math.abs(tiltOffset(DEG(5), 0, MAX))
   const large = Math.abs(tiltOffset(DEG(20), 0, MAX))
-  assert.ok(small < MAX * 0.2, `5deg gave ${small.toFixed(1)}pt — too lively while just holding it`)
+  // 0.25 not 0.2: small-angle calm is now delivered mainly by SMOOTHING (heavy damping), so the
+  // curve itself is allowed to be closer to linear here.
+  assert.ok(small < MAX * 0.25, `5deg gave ${small.toFixed(1)}pt — too lively while just holding it`)
   assert.ok(large > MAX * 0.85, `20deg gave ${large.toFixed(1)}pt — a deliberate tilt must pay off`)
 })
 
-test('the curve is genuinely eased, not linear', () => {
+test('the response is sub-linear', () => {
+  // The invariant is the SHAPE, not its strength: half a roll must give less than half the
+  // travel. How MUCH less is a tuning value that has moved between 1.6 and 1.15, so asserting a
+  // specific degree of ease just fails every time the feel is adjusted.
   assert.ok(TILT_CURVE > 1, 'a linear response could not satisfy both ends')
-  // Half a full-range roll must yield well under half the travel.
   const half = Math.abs(tiltOffset(TILT_RANGE / 2, 0, MAX))
-  assert.ok(half < MAX * 0.45, `half tilt gave ${half.toFixed(1)}pt, barely eased`)
+  assert.ok(half < MAX * 0.5, `half tilt gave ${half.toFixed(1)}pt of ${MAX} — not sub-linear`)
 })
