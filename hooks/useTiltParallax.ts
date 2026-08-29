@@ -65,5 +65,12 @@ export function useTiltParallax(maxTravel = 20, enabled = true) {
 
   const style = useAnimatedStyle(() => ({ transform: [{ translateX: tx.value }] }))
 
-  return { style, isActive: active && rotation.isAvailable }
+  return {
+    style,
+    isActive: active && rotation.isAvailable,
+    // Surfaced for the __DEV__ overlay only. Three very different faults — reduce-motion enabled,
+    // the sensor reporting unavailable, and a correctly-running-but-too-small effect — are
+    // indistinguishable on a device, which cost several rounds of blind tuning.
+    debug: { reduceMotion, sensorAvailable: rotation.isAvailable, roll: rotation.sensor, tx },
+  }
 }

@@ -27,6 +27,7 @@ import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
 import Reanimated from 'react-native-reanimated'
 import { useTiltParallax } from '@/hooks/useTiltParallax'
+import { TiltDebugOverlay } from '@/components/TiltDebugOverlay'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
@@ -968,6 +969,7 @@ export default function MealDetailScreen() {
             <Reanimated.View style={[styles.heroTiltLayer, tilt.style]}>
               <MealImage uri={(meal.image || heroGenerated) as string} style={styles.heroImage} priority="high" />
             </Reanimated.View>
+            {__DEV__ && <TiltDebugOverlay {...tilt.debug} />}
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
               locations={[0.3, 0.7, 1]}
