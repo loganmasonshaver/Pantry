@@ -439,7 +439,10 @@ export default function MealDetailScreen() {
   // Only the user's MANUAL opt-outs persist back to the profile — diet-derived exclusions are
   // recomputed from dietary_restrictions each load, never written into staples_excluded.
   const manualExcludedRef = useRef<string[]>([])
-  const [generatedImage, setGeneratedImage] = useState<string | null>(null)
+  // Tagged with the meal name it was fetched for — this screen is reused across recipes, so an
+  // untagged URL here is what let one recipe's photo render under another's title.
+  const [generatedImage, setGeneratedImage] = useState<{ name: string; uri: string } | null>(null)
+  const generatedForRef = useRef<string | null>(null)
   // Trending meals show a YouTube thumbnail (instant) until the AI image arrives,
   // then crossfade-slide to it. 0 = thumbnail visible, 1 = AI image visible.
   const slideAnim = useRef(new Animated.Value(0)).current
@@ -544,38 +547,10 @@ export default function MealDetailScreen() {
     }
   }
 
-  // Auto-generate AI meal image if none provided (trending meals)
-  useEffect(() => {
-    if (!meal || meal.image || generatedImage) return
-    const ingredientNames = meal.ingredients.map(i => i.name)
-
-    const tryGenerate = (attempt = 0) => {
-      supabase.functions.invoke('generate-meal-image', {
-        body: { mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [] },
-      }).then(({ data }) => {
-        if (data?.image) {
-          Image.prefetch(data.image).then(() => {
-            setGeneratedImage(data.image)
-            setTimeout(() => {
-              Animated.timing(slideAnim, {
-                toValue: 1,
-                duration: 1400,
-                useNativeDriver: true,
-                easing: require('react-native').Easing.bezier(0.25, 0.1, 0.25, 1),
-              }).start()
-            }, 2000)
-          }).catch(() => {
-            setGeneratedImage(data.image)
-          })
-        } else if (attempt < 2) {
-          setTimeout(() => tryGenerate(attempt + 1), 3000)
-        }
-      }).catch(() => {
-        if (attempt < 2) setTimeout(() => tryGenerate(attempt + 1), 3000)
-      })
-    }
-    tryGenerate()
-  }, [meal?.name])
+  // NOTE: the AI-image generation effect used to live here, above `let meal`. Its dependency
+  // array read `meal?.name` before the declaration, so the dep was always undefined and the
+  // effect never re-ran when you opened a different recipe — leaving the previous recipe's
+  // photo in state to slide in over the new hero. It now lives below `meal`. See there.
 
   const addToGrocery = async (ingredientName: string) => {
     if (!user || addedToGrocery.has(ingredientName)) return
@@ -693,6 +668,72 @@ export default function MealDetailScreen() {
   const isCreatorOwner = !!(creator?.user_id && creator.user_id === user?.id)
   const canEditMeal = isUserCreated || isCreatorOwner
 
+  // Auto-generate an AI photo when the meal has none — trending meals arrive carrying only a
+  // YouTube thumbnail. Deliberately placed BELOW `meal`: while this sat above the declaration
+  // its dep array read `meal` in the TDZ, so the dep was undefined on every render, the effect
+  // fired once per mount, and a stale photo slid in over the next recipe's hero.
+  useEffect(() => {
+    const name = meal?.name
+    if (!name) return
+    // Expo Router reuses this screen across recipes, so state survives navigation. Drop the
+    // previous recipe's photo and rewind the swap before anything can paint.
+    if (generatedForRef.current !== name) {
+      generatedForRef.current = name
+      setGeneratedImage(null)
+      slideAnim.setValue(0)
+    }
+    if (meal?.image) return
+
+    const ingredientNames = meal!.ingredients.map(i => i.name)
+    const steps = meal!.steps ?? []
+    let cancelled = false
+    const timers: ReturnType<typeof setTimeout>[] = []
+
+    // Every write carries the meal it was fetched for, so a request that resolves after the
+    // user has moved on is dropped at render instead of overwriting the new hero.
+    const apply = (uri: string, animate: boolean) => {
+      if (cancelled) return
+      setGeneratedImage({ name, uri })
+      if (!animate) return
+      // Beat on the thumbnail first so the swap reads as intentional, not as a late load.
+      timers.push(setTimeout(() => {
+        if (cancelled) return
+        Animated.timing(slideAnim, {
+          toValue: 1,
+          duration: 1400,
+          useNativeDriver: true,
+          easing: require('react-native').Easing.bezier(0.25, 0.1, 0.25, 1),
+        }).start()
+      }, 2000))
+    }
+
+    const tryGenerate = (attempt = 0) => {
+      supabase.functions.invoke('generate-meal-image', {
+        body: { mealName: name, ingredients: ingredientNames, steps },
+      }).then(({ data }) => {
+        if (cancelled) return
+        if (data?.image) {
+          Image.prefetch(data.image).then(() => apply(data.image, true)).catch(() => apply(data.image, false))
+        } else if (attempt < 2) {
+          timers.push(setTimeout(() => tryGenerate(attempt + 1), 3000))
+        }
+      }).catch(() => {
+        if (cancelled || attempt >= 2) return
+        timers.push(setTimeout(() => tryGenerate(attempt + 1), 3000))
+      })
+    }
+    tryGenerate()
+
+    return () => {
+      cancelled = true
+      timers.forEach(clearTimeout) // retries outlived the screen and fired against the next recipe
+    }
+  }, [meal?.name, meal?.image])
+
+  // Only honour a generated photo that belongs to the recipe currently on screen. Everything
+  // downstream reads this, never `generatedImage`, so a mismatched tag simply renders nothing.
+  const heroGenerated = generatedImage && generatedImage.name === meal?.name ? generatedImage.uri : null
+
   // Bulk "Add all missing to grocery" was removed — it overlapped the per-row "+ Add" (redundant
   // CTAs). Per-row adding is the single, flexible way to build the grocery list now.
 
@@ -746,7 +787,7 @@ export default function MealDetailScreen() {
     setSaving(true)
     // Persist the image so saved meals show the same photo as the original card
     // (prevents re-generation with a different prompt for trending meals)
-    const imageToSave = meal!.image || generatedImage || null
+    const imageToSave = meal!.image || heroGenerated || null
     const { error } = await supabase.rpc('insert_saved_meal', {
       p_user_id: user.id,
       p_name: meal!.name,
@@ -779,7 +820,7 @@ export default function MealDetailScreen() {
     // Fallback to the shared image_cache (populated by other users who've already
     // generated this meal) so meal logs render with an image even if this user
     // tapped Log before the local generate-meal-image call resolved.
-    let mealImage = meal.image || generatedImage || null
+    let mealImage = meal.image || heroGenerated || null
     if (!mealImage) {
       const cacheKey = meal.name.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
       const { data: cached } = await supabase.from('image_cache').select('image_url').eq('meal_key', cacheKey).single()
@@ -879,11 +920,11 @@ export default function MealDetailScreen() {
           /* Sliding hero: YouTube thumbnail slides out, AI image slides in */
           <View style={styles.heroContainer}>
             {/* AI image behind */}
-            {generatedImage && (
+            {heroGenerated && (
               <Animated.View style={[StyleSheet.absoluteFill, {
                 transform: [{ translateX: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [screenWidth, 0] }) }],
               }]}>
-                <Image source={{ uri: generatedImage }} style={styles.heroImage} resizeMode="cover" />
+                <Image source={{ uri: heroGenerated }} style={styles.heroImage} resizeMode="cover" />
               </Animated.View>
             )}
             {/* YouTube thumbnail on top, slides out */}
@@ -898,9 +939,9 @@ export default function MealDetailScreen() {
               style={styles.heroGradient}
             />
           </View>
-        ) : (meal.image || generatedImage) ? (
+        ) : (meal.image || heroGenerated) ? (
           <View style={styles.heroContainer}>
-            <MealImage uri={(meal.image || generatedImage) as string} style={styles.heroImage} priority="high" />
+            <MealImage uri={(meal.image || heroGenerated) as string} style={styles.heroImage} priority="high" />
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.6)', '#000000']}
               locations={[0.3, 0.7, 1]}
@@ -914,7 +955,7 @@ export default function MealDetailScreen() {
         )}
 
         {/* ── Meal title + meta ── */}
-        <View style={[styles.mealTitleSection, !(meal.image || generatedImage || (meal as any).thumbnailImage) && { marginTop: 16 }]}>
+        <View style={[styles.mealTitleSection, !(meal.image || heroGenerated || (meal as any).thumbnailImage) && { marginTop: 16 }]}>
           <Text style={styles.mealTitleText}>{meal.name}</Text>
           <View style={styles.mealMetaRow}>
             {meal.prepTime != null && meal.prepTime > 0 && (
