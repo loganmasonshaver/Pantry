@@ -20,6 +20,7 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
+import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, Easing as ReaEasing } from 'react-native-reanimated'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
 import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
@@ -700,15 +701,15 @@ export default function HomeScreen() {
   // One animated value (0=collapsed, 1=expanded) drives BOTH the carbs/fat accordion height AND
   // the hero card resize, so they glide together instead of the old LayoutAnimation snap that made
   // the "Cook from pantry" line skip. JS-driven (height can't use the native driver), 280ms.
-  const macrosAnim = useRef(new RNAnimated.Value(0)).current
+  const macrosAnim = useSharedValue(0)
   const [extraRowsH, setExtraRowsH] = useState(0) // measured height of the carbs+fat rows
   const extraRowsHRef = useRef(0)
-  useEffect(() => {
-    RNAnimated.timing(macrosAnim, { toValue: macrosExpanded ? 1 : 0, duration: 280, easing: Easing.inOut(Easing.ease), useNativeDriver: false }).start()
-  }, [macrosExpanded, macrosAnim])
+  // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
+  // this 2400-line component between the tap and the first frame, which is what made the toggle
+  // feel slow to respond. The press handler kicks the animation off directly instead.
   useEffect(() => {
     AsyncStorage.getItem('pantry_macros_expanded').then(v => {
-      if (v === 'true') { setMacrosExpanded(true); macrosAnim.setValue(1) } // start expanded without an open-animation on launch
+      if (v === 'true') { setMacrosExpanded(true); macrosAnim.value = 1 } // start expanded without an open-animation on launch
     })
   }, [])
   // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
@@ -731,10 +732,17 @@ export default function HomeScreen() {
     return Math.max(HERO_MIN, Math.min(HERO_MAX, viewportH - cardTop - 12))
   }, [viewportH, heroSectionY, heroHeaderH])
   // Expanding the macros accordion grows the card above, so the hero gives back the same 76pt.
-  const heroHeight = macrosAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [heroFit, Math.max(HERO_MIN, heroFit - 76)],
-  })
+  // Both of these run on the UI thread now. As RN Animated with useNativeDriver:false every frame
+  // was computed in JS and shipped over the bridge — on Home, which auto-generates meals on focus,
+  // those frames queued behind whatever JS was already running and the glide stuttered.
+  const heroExpandedH = Math.max(HERO_MIN, heroFit - 76)
+  const heroStyle = useAnimatedStyle(() => ({
+    height: heroFit + (heroExpandedH - heroFit) * macrosAnim.value,
+  }))
+  const macrosRowsOpacity = useAnimatedStyle(() => ({ opacity: macrosAnim.value }))
+  // Height is applied only once the rows have been measured; before that the view needs its
+  // natural height so onLayout has something to report. Opacity still hides them meanwhile.
+  const macrosRowsHeight = useAnimatedStyle(() => ({ height: macrosAnim.value * extraRowsH }))
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -1286,11 +1294,7 @@ export default function HomeScreen() {
             <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized={!macrosExpanded} />
             {/* Carbs+Fat accordion — height glides 0↔measured with macrosAnim so the reflow below
                 is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
-            <RNAnimated.View style={{
-              overflow: 'hidden',
-              opacity: macrosAnim,
-              height: extraRowsH === 0 ? undefined : macrosAnim.interpolate({ inputRange: [0, 1], outputRange: [0, extraRowsH] }),
-            }}>
+            <Reanimated.View style={[{ overflow: 'hidden' }, macrosRowsOpacity, extraRowsH > 0 && macrosRowsHeight]}>
               <View
                 onLayout={e => { const h = e.nativeEvent.layout.height; if (h && Math.abs(h - extraRowsHRef.current) > 0.5) { extraRowsHRef.current = h; setExtraRowsH(h) } }}
                 style={{ gap: 10, paddingTop: 10 }}
@@ -1298,14 +1302,17 @@ export default function HomeScreen() {
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
               </View>
-            </RNAnimated.View>
+            </Reanimated.View>
             <TouchableOpacity
-              onPress={async () => {
+              onPress={() => {
                 const next = !macrosExpanded
-                // macrosAnim (driven by the effect on macrosExpanded) glides both the accordion and
-                // the hero height — no LayoutAnimation snap.
+                // Animation FIRST: this writes a shared value and starts on the UI thread
+                // immediately, so motion begins on touch instead of after React has reconciled
+                // this whole screen. setState still runs, but it no longer gates the first frame.
+                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
                 setMacrosExpanded(next)
-                await AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false')
+                // Fire and forget — a disk write has no business in a tap handler's critical path.
+                AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
               }}
               activeOpacity={0.7}
               style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12 }}
@@ -1524,7 +1531,7 @@ export default function HomeScreen() {
             ) : heroMeal ? (
               // Height glides with the macros card (heroHeight, driven by macrosAnim) so the
               // photo + title + pills stay framed above the tab bar in both states.
-              <RNAnimated.View style={{ height: heroHeight }}>
+              <Reanimated.View style={heroStyle}>
                 <ScrollView
                   ref={heroScrollRef}
                   horizontal
@@ -1616,7 +1623,7 @@ export default function HomeScreen() {
                     ))}
                   </View>
                 )}
-              </RNAnimated.View>
+              </Reanimated.View>
             ) : cacheChecked ? (
               // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
               // never flashes during the ~100ms disk read on a day that DOES have meals — showing
