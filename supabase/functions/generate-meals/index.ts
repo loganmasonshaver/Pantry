@@ -5,7 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
-import { dishKey, RECENT_MEMORY } from '../_shared/dish-key.ts'
+import { RECENT_MEMORY, dishKey, matchesRecentDish } from '../_shared/dish-key.ts'
 import { verifyMacros } from '../_shared/macro-estimate.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -193,7 +193,6 @@ Deno.serve(async (req: Request) => {
     // Fingerprints for the code-level drop below. The prompt line alone was never enough:
     // this endpoint already assumes the primary model ignores constraints under load (see the
     // macro-band enforcement), and meal names got no such backstop until now.
-    const recentKeys = new Set(recentMealNames.map(dishKey).filter(Boolean))
 
     // Overgenerate-then-rank: ask the LLM for MORE meals than we'll display, filter against
     // tight bands, then return the top N by macro fit. Compensates for LLM non-compliance
@@ -514,19 +513,42 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     // model may only be able to build dishes we've already shown, and an empty deck is worse than
     // a familiar one. Marked meals sort last in the ranking below, so a repeat only survives when
     // there aren't enough fresh candidates to fill the deck.
-    const seenThisBatch = new Set<string>()
+    // Matched by SIMILARITY, not exact fingerprint. The model is handed a do-not-repeat list of
+    // exact names, complies literally, and returns a one-word rewording — which produced a totally
+    // different dishKey and sailed through. Measured on real data: 18 remembered names, 18 distinct
+    // keys, zero repeats detected, while all three meals shown that day had a near-duplicate
+    // already in the list. See _shared/dish-key.ts.
+    const shownThisBatch: string[] = []
     let repeatCount = 0
     meals = meals.map((m: any) => {
-      const key = dishKey(m?.name)
-      // Two kinds of repeat: shown in a previous generation, or duplicated inside this single
-      // response — the "No repeated meals" prompt line doesn't reliably prevent the latter.
-      const isRepeat = !!key && (recentKeys.has(key) || seenThisBatch.has(key))
-      if (key) seenThisBatch.add(key)
+      const name = String(m?.name ?? '')
+      // Two kinds of repeat: the same dish as a previous generation, or as an earlier candidate in
+      // THIS response — the "No repeated meals" prompt line doesn't reliably prevent the latter.
+      const isRepeat = matchesRecentDish(name, recentMealNames) || matchesRecentDish(name, shownThisBatch)
+      shownThisBatch.push(name)
       if (isRepeat) repeatCount++
       return { ...m, _repeat: isRepeat }
     })
     if (repeatCount > 0) {
       console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
+    }
+
+    // DROP repeats when enough fresh candidates remain. They used to be only sorted last by the
+    // ranking below — and that ranking is skipped entirely when the pool is already <= displayCount,
+    // so a batch thinned by the fat or macro filters bypassed repeat avoidance altogether. Sorting
+    // is not a filter; this is.
+    {
+      const fresh = meals.filter((m: any) => !m._repeat)
+      if (fresh.length >= displayCount) {
+        if (fresh.length < meals.length) {
+          console.log(`Repeat filter: dropped ${meals.length - fresh.length} repeat(s), ${fresh.length} fresh remain`)
+        }
+        meals = fresh
+      } else if (repeatCount > 0) {
+        // Never starve the deck: a familiar meal beats an empty screen. The ranking still sorts
+        // these last so the fresh ones lead.
+        console.log(`Repeat filter: only ${fresh.length} fresh of ${meals.length}, keeping repeats to fill ${displayCount}`)
+      }
     }
 
     // Independent macro check. Every other gate in this function reads the numbers the MODEL
