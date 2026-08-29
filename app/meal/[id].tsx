@@ -44,16 +44,15 @@ import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged,
 const screenWidth = Dimensions.get('window').width
 // Peak hero drift, in points. The tilt layer is inset by this on both sides so there is always
 // real photo to slide into — raising one without the other slides the image off its own edge.
-// 50 puts peak-to-peak travel at ~23% of the frame width. Translation only becomes reliably
-// noticeable around 10%, and every setting below this was reported as invisible — several of them
-// against a baseline bug that pinned drift at zero, so those readings meant nothing.
+// 30 is the FREE ceiling: the hero is 440pt wide and a square photo renders 500pt wide under
+// contentFit="cover", so 60pt is already hidden and riding it costs no extra upscaling. Past 30
+// the layer exceeds 500pt, cover starts scaling to WIDTH, and the photo softens (50pt -> 1.08x).
 //
-// This is PAST the free ceiling of 30 (hero 440pt wide, square photo renders 500pt under
-// contentFit="cover", so 60pt is hidden). Beyond 30 the layer exceeds 500pt, cover starts scaling
-// to WIDTH, and the photo softens: 50pt costs 1.08x the upscale, 60pt costs 1.12x. Paid knowingly
-// — the hero is already a ~2.9x upscale of a 512px image, and an effect nobody can see is worth
-// less than 8% more blur. square_hd would erase the cost entirely.
-const HERO_TILT = 50
+// Bracketed by feel: 30pt at a 250ms settle was invisible, 50pt at 80ms was too much. Those two
+// readings differ in BOTH distance and speed, and velocity drives perceived motion far harder
+// than displacement — so the fast tracking is most likely what made it visible and the extra
+// 20pt is what made it excessive. Holding SMOOTHING at 0.15 and taking travel back to free.
+const HERO_TILT = 30
 
 // "Measured" = grams + tbsp/cups (needs a scale or measuring spoon).
 // "Eyeball"  = whole-unit count + descriptors like "a drizzle", "a handful"
