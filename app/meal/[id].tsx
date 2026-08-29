@@ -131,17 +131,29 @@ function getWholeUnitDisplay(name: string, gramsStr: string | undefined): { coun
     }
   }
 
+  // Processed forms are bought and used by weight/volume even though the name still contains a
+  // whole-unit noun. "liquid egg whites" is not seven eggs, and dividing its grams by 50 invents
+  // a count that is simply wrong.
+  if (/\b(liquid|carton|substitute|powdered|beaten)\b/i.test(name)) return null
+
   const match = WHOLE_UNIT_FOODS.find(w => w.match.test(name))
   if (!match) return null
+  // Only rebuild as "{adj} {noun}" when the matched noun ENDS the name. Pulling it out of the
+  // middle reorders the phrase — stripping "egg" from "liquid egg whites" leaves "liquid whites",
+  // which then had "eggs" appended and shipped as "7 liquid whites eggs".
+  if (!new RegExp(`${match.match.source}\\s*$`, 'i').test(name.trim())) return null
   const c = Math.max(1, Math.round(grams / match.weight))
   const noun = c === 1 ? match.singular : match.plural
   // Strip the matched noun (e.g., "eggs") from the original name to get the
   // adjective ("large"). If the noun match consumed the whole name, just show
   // the noun by itself ("3 garlic cloves" with name="cloves" → name has no adj).
   const adj = name.replace(match.match, '').trim().replace(/\s+/g, ' ')
+  // The label can already carry the adjective — "cloves" maps to "garlic cloves", so a name of
+  // "garlic cloves" leaves adj="garlic" and rendered "3 garlic garlic cloves".
+  const showAdj = adj && !noun.toLowerCase().includes(adj.toLowerCase())
   return {
     count: String(c),
-    name: adj ? `${adj} ${noun}` : noun,
+    name: showAdj ? `${adj} ${noun}` : noun,
   }
 }
 
