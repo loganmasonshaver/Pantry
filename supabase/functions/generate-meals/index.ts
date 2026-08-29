@@ -533,24 +533,6 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
     }
 
-    // DROP repeats when enough fresh candidates remain. They used to be only sorted last by the
-    // ranking below — and that ranking is skipped entirely when the pool is already <= displayCount,
-    // so a batch thinned by the fat or macro filters bypassed repeat avoidance altogether. Sorting
-    // is not a filter; this is.
-    {
-      const fresh = meals.filter((m: any) => !m._repeat)
-      if (fresh.length >= displayCount) {
-        if (fresh.length < meals.length) {
-          console.log(`Repeat filter: dropped ${meals.length - fresh.length} repeat(s), ${fresh.length} fresh remain`)
-        }
-        meals = fresh
-      } else if (repeatCount > 0) {
-        // Never starve the deck: a familiar meal beats an empty screen. The ranking still sorts
-        // these last so the fresh ones lead.
-        console.log(`Repeat filter: only ${fresh.length} fresh of ${meals.length}, keeping repeats to fill ${displayCount}`)
-      }
-    }
-
     // Independent macro check. Every other gate in this function reads the numbers the MODEL
     // reported — the same model that wrote the ingredient list — so a meal whose food only
     // supports 35g of protein could claim 70g and pass the band check untouched. This is the one
@@ -565,21 +547,29 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
         console.log(`[macro-check] ${v.ok ? (v.skipped ? 'skip' : 'ok  ') : 'DROP'} "${m?.name}" — ${v.reason}`)
         if (v.ok) kept.push(m)
       }
-      // Never let this check empty the plate. If EVERY candidate fails, the likely cause is a gap
-      // in the reference table or a tolerance that's too tight — not five simultaneously dishonest
-      // meals — and a thin honest day still beats no day at all.
-      if (kept.length === 0 && beforeCheck > 0) {
-        console.log(`[macro-check] all ${beforeCheck} candidates failed — keeping them; suspect the table or tolerances, not the meals`)
-      } else {
-        if (kept.length < beforeCheck) console.log(`[macro-check] dropped ${beforeCheck - kept.length}/${beforeCheck}`)
+      // Only apply the drop while enough candidates survive to fill the deck — the same rule the
+      // fat filter above uses. Dropping past that point would show the user 2 meals instead of 3,
+      // and a batch where 3+ of 5 fail is far more likely to mean a gap in the reference table or
+      // a tolerance that is too tight than five simultaneously dishonest meals.
+      if (kept.length === beforeCheck) {
+        // nothing to do
+      } else if (kept.length >= displayCount) {
+        console.log(`[macro-check] dropped ${beforeCheck - kept.length}/${beforeCheck}`)
         meals = kept
+      } else {
+        console.log(`[macro-check] would drop ${beforeCheck - kept.length}/${beforeCheck}, leaving only ${kept.length} for ${displayCount} slots — keeping all; suspect the table or tolerances, not the meals`)
       }
     }
 
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
     // displayCount (3). Rank survivors by macro fit — sum of normalized squared distance
     // from per-meal targets — and slice to the top displayCount. Lower score = better fit.
-    if (meals.length > displayCount) {
+    // Runs UNCONDITIONALLY, not only when there is a surplus. Repeats are ordered last here and
+    // nowhere else — an earlier version hard-dropped them at the repeat filter instead, which
+    // thinned the pool BEFORE the macro and prep-time filters and could leave only 2 meals on
+    // screen. Keeping repeats as reserves and letting the slice discard them means a repeat
+    // reaches the user only when there genuinely aren't enough fresh survivors to fill the deck.
+    {
       const beforeRank = meals.length
       meals = meals
         .map((m: any) => {
@@ -596,7 +586,11 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
         .sort((a: any, b: any) => (a._repeat === b._repeat ? a._fitScore - b._fitScore : (a._repeat ? 1 : -1)))
         .slice(0, displayCount)
         .map((m: any) => { const { _fitScore, ...rest } = m; return rest })
-      console.log(`Macro rank: kept top ${displayCount}/${beforeRank} meals by freshness then per-meal target fit`)
+      const shownRepeats = meals.filter((m: any) => m._repeat).length
+      console.log(
+        `Macro rank: kept top ${Math.min(displayCount, beforeRank)}/${beforeRank} by freshness then target fit` +
+        (shownRepeats > 0 ? ` — ${shownRepeats} repeat(s) had to fill the deck (not enough fresh)` : ''),
+      )
     }
     // Strip the marker whether or not the ranking above ran — it must never reach the client cache.
     meals = meals.map((m: any) => { const { _repeat, ...rest } = m; return rest })
