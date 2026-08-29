@@ -44,11 +44,16 @@ import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged,
 const screenWidth = Dimensions.get('window').width
 // Peak hero drift, in points. The tilt layer is inset by this on both sides so there is always
 // real photo to slide into — raising one without the other slides the image off its own edge.
-// Landed at 20 by bisection: 20 at low sensitivity read as nothing, 30 at high sensitivity read as
-// too much. Sensitivity (TILT_RANGE) stayed at the responsive setting and only the travel came
-// down. 30 is the FREE ceiling — the hero is 440pt wide and a square photo renders 500pt wide
-// under contentFit="cover", so 60pt is hidden — but nothing requires using all of it.
-const HERO_TILT = 30
+// 50 puts peak-to-peak travel at ~23% of the frame width. Translation only becomes reliably
+// noticeable around 10%, and every setting below this was reported as invisible — several of them
+// against a baseline bug that pinned drift at zero, so those readings meant nothing.
+//
+// This is PAST the free ceiling of 30 (hero 440pt wide, square photo renders 500pt under
+// contentFit="cover", so 60pt is hidden). Beyond 30 the layer exceeds 500pt, cover starts scaling
+// to WIDTH, and the photo softens: 50pt costs 1.08x the upscale, 60pt costs 1.12x. Paid knowingly
+// — the hero is already a ~2.9x upscale of a 512px image, and an effect nobody can see is worth
+// less than 8% more blur. square_hd would erase the cost entirely.
+const HERO_TILT = 50
 
 // "Measured" = grams + tbsp/cups (needs a scale or measuring spoon).
 // "Eyeball"  = whole-unit count + descriptors like "a drizzle", "a handful"
