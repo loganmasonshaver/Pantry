@@ -2,13 +2,17 @@
 // under plain node — importing the hook itself drags in react-native-reanimated and expo-router,
 // neither of which resolves outside the app runtime.
 
-// Comfortable wrist roll in radians (~28deg). Past this the image is pinned at its limit.
-export const TILT_RANGE = 0.5
+// Roll that produces FULL travel, in radians (~17deg). Tuned down from 0.5 (~28deg) after the
+// first pass read as invisible: casual handling is a 5-15deg wrist movement, and mapping full
+// travel to 28deg meant a typical 10deg roll produced only a third of the drift. This is the
+// sensitivity knob — lower means more reaction to the same wrist movement.
+export const TILT_RANGE = 0.3
 // Ignore sub-degree noise so a resting hand doesn't shimmer the frame.
 export const DEADZONE = 0.02
-// Per-frame approach rate for the one-pole filter. ~0.09 at 60fps settles in roughly 150ms —
-// slow enough to feel like weight, fast enough not to lag the wrist.
-export const SMOOTHING = 0.09
+// Per-frame approach rate for the one-pole filter. 0.12 at 60fps settles in roughly 100ms. Raised
+// alongside TILT_RANGE — with a slower filter the bigger travel lagged the wrist and read as
+// drift rather than response.
+export const SMOOTHING = 0.12
 
 /**
  * Roll (radians) -> horizontal drift (points), measured from a baseline captured when the screen

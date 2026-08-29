@@ -3,7 +3,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { tiltOffset } from './tilt.ts'
+import { TILT_RANGE, tiltOffset } from './tilt.ts'
 
 const MAX = 20
 
@@ -30,8 +30,8 @@ test('drift never exceeds maxTravel, however far the phone is turned', () => {
     assert.ok(Math.abs(v) <= MAX + 1e-9, `roll ${roll} gave ${v}, over the ${MAX}pt limit`)
   }
   // Past the comfortable range it should be pinned exactly at the limit, not creeping.
-  assert.equal(Math.round(tiltOffset(0.5, 0, MAX)), -20)
-  assert.equal(Math.round(tiltOffset(0.9, 0, MAX)), -20)
+  assert.equal(Math.round(tiltOffset(TILT_RANGE, 0, MAX)), -MAX)
+  assert.equal(Math.round(tiltOffset(TILT_RANGE * 3, 0, MAX)), -MAX)
 })
 
 test('the baseline is genuinely relative, not absolute', () => {
@@ -44,7 +44,17 @@ test('the baseline is genuinely relative, not absolute', () => {
 })
 
 test('response is linear across the range', () => {
-  const half = tiltOffset(0.25, 0, MAX)
-  const full = tiltOffset(0.5, 0, MAX)
+  // Derived from TILT_RANGE, not hardcoded — retuning sensitivity must not break this.
+  const half = tiltOffset(TILT_RANGE / 2, 0, MAX)
+  const full = tiltOffset(TILT_RANGE, 0, MAX)
   assert.ok(Math.abs(full - 2 * half) < 1e-9, 'half the tilt should give half the drift')
+  assert.ok(Math.abs(full) === MAX, 'a full-range roll should reach exactly maxTravel')
+})
+
+test('a casual 10deg roll produces most of the effect', () => {
+  // The regression that prompted the retune: at TILT_RANGE 0.5 a normal 10deg wrist movement
+  // yielded 7pt of drift and read as no effect at all. Guard the sensitivity, not just the cap.
+  const tenDeg = 10 * Math.PI / 180
+  const at10 = Math.abs(tiltOffset(tenDeg, 0, MAX))
+  assert.ok(at10 > MAX * 0.4, `10deg gave only ${at10.toFixed(1)}pt of ${MAX} — too subtle`)
 })
