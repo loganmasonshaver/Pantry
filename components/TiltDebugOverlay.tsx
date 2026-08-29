@@ -15,19 +15,21 @@ export function TiltDebugOverlay({
   sensorAvailable,
   roll,
   tx,
+  baseline,
 }: {
   reduceMotion: boolean
   sensorAvailable: boolean
   roll: SharedValue<ValueRotation>
   tx: SharedValue<number>
+  baseline: SharedValue<number>
 }) {
-  const [snap, setSnap] = useState({ roll: 0, tx: 0 })
+  const [snap, setSnap] = useState({ roll: 0, tx: 0, baseline: 0 })
 
   useEffect(() => {
     if (!__DEV__) return
     const id = setInterval(() => {
       // Shared values are readable from JS; this is a sample, not a subscription.
-      setSnap({ roll: roll.value?.roll ?? 0, tx: tx.value })
+      setSnap({ roll: roll.value?.roll ?? 0, tx: tx.value, baseline: baseline.value })
     }, 200)
     return () => clearInterval(id)
   }, [])
@@ -41,6 +43,9 @@ export function TiltDebugOverlay({
         {reduceMotion ? 'REDUCE MOTION ON — tilt disabled' : sensorAvailable ? 'sensor ok' : 'SENSOR UNAVAILABLE'}
       </Text>
       <Text style={s.line}>roll {(snap.roll * 57.2958).toFixed(1)}°</Text>
+      {/* delta is what actually drives the image — if roll moves but this stays ~0, the baseline
+          is chasing the roll instead of holding still, which is what killed the effect before. */}
+      <Text style={s.line}>delta {((snap.roll - snap.baseline) * 57.2958).toFixed(1)}°</Text>
       <Text style={s.line}>drift {snap.tx.toFixed(1)}pt</Text>
     </View>
   )

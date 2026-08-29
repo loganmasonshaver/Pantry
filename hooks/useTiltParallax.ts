@@ -1,5 +1,3 @@
-import { useCallback } from 'react'
-import { useFocusEffect } from 'expo-router'
 import {
   SensorType,
   useAnimatedReaction,
@@ -8,7 +6,7 @@ import {
   useReducedMotion,
   useSharedValue,
 } from 'react-native-reanimated'
-import { SMOOTHING, tiltOffset } from '@/lib/tilt'
+import { BASELINE_FOLLOW, SMOOTHING, tiltOffset } from '@/lib/tilt'
 
 // Letterboxd-style tilt parallax for a hero image: the photo drifts horizontally as the phone
 // rolls, so it reads as sitting behind the screen rather than printed on it.
@@ -36,25 +34,26 @@ export function useTiltParallax(maxTravel = 20, enabled = true) {
     adjustToInterfaceOrientation: true,
   })
 
-  // Offset is measured from however the phone was being held when the screen appeared. Without a
-  // baseline, someone reading in bed gets the image parked against one edge for the whole visit.
-  const baseline = useSharedValue<number | null>(null)
+  // Offset is measured from however the phone is being held, not from absolute level — otherwise
+  // someone reading at an angle gets the image parked against one edge for the whole visit.
+  //
+  // The baseline is seeded ONCE from inside the reaction and then only ever eased. It used to be a
+  // nullable value reset by a useFocusEffect, which is what made the effect dead: every reset made
+  // the next tick re-capture the current roll as the new baseline, so the delta was permanently
+  // ~0 and tx never left 0. Nothing outside this worklet touches it now.
+  const baseline = useSharedValue(0)
+  const hasBaseline = useSharedValue(false)
   const tx = useSharedValue(0)
-
-  // Re-centre on every visit — the phone is rarely at the same angle twice.
-  useFocusEffect(
-    useCallback(() => {
-      baseline.value = null
-      return () => { baseline.value = null }
-    }, []),
-  )
 
   useAnimatedReaction(
     () => (active && rotation.isAvailable ? rotation.sensor.value.roll : null),
     (roll) => {
       if (roll === null) { tx.value = 0; return }
-      if (baseline.value === null) { baseline.value = roll; return }
+      if (!hasBaseline.value) { baseline.value = roll; hasBaseline.value = true; return }
 
+      // Very slow follower so a change of posture re-centres over seconds instead of pinning the
+      // photo at a limit, while a deliberate tilt still reads as a full deflection.
+      baseline.value += (roll - baseline.value) * BASELINE_FOLLOW
       const target = tiltOffset(roll, baseline.value, maxTravel)
       // Plain lerp rather than withTiming: the sensor already fires every frame, so a one-pole
       // filter is both cheaper and smoother than restarting an animation 60 times a second.
@@ -71,6 +70,6 @@ export function useTiltParallax(maxTravel = 20, enabled = true) {
     // Surfaced for the __DEV__ overlay only. Three very different faults — reduce-motion enabled,
     // the sensor reporting unavailable, and a correctly-running-but-too-small effect — are
     // indistinguishable on a device, which cost several rounds of blind tuning.
-    debug: { reduceMotion, sensorAvailable: rotation.isAvailable, roll: rotation.sensor, tx },
+    debug: { reduceMotion, sensorAvailable: rotation.isAvailable, roll: rotation.sensor, tx, baseline },
   }
 }

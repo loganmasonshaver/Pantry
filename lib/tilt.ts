@@ -43,3 +43,7 @@ export function tiltOffset(roll: number, baseline: number, maxTravel: number): n
   const eased = Math.pow(magnitude / TILT_RANGE, TILT_CURVE)
   return -Math.sign(clamped) * eased * maxTravel
 }
+
+// How fast the rest orientation chases the phone's actual angle, per frame. Deliberately tiny
+// (~8s time constant) so it only absorbs posture changes; a deliberate tilt still deflects fully.
+export const BASELINE_FOLLOW = 0.002

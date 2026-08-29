@@ -48,7 +48,7 @@ const screenWidth = Dimensions.get('window').width
 // too much. Sensitivity (TILT_RANGE) stayed at the responsive setting and only the travel came
 // down. 30 is the FREE ceiling — the hero is 440pt wide and a square photo renders 500pt wide
 // under contentFit="cover", so 60pt is hidden — but nothing requires using all of it.
-const HERO_TILT = 24
+const HERO_TILT = 30
 
 // "Measured" = grams + tbsp/cups (needs a scale or measuring spoon).
 // "Eyeball"  = whole-unit count + descriptors like "a drizzle", "a handful"
