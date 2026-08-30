@@ -171,6 +171,32 @@ const CANONICAL: Array<[string, number]> = [
   // condiments
   ['honey', 0.3], ['maple syrup', 0.3], ['soy sauce', 8.1], ['mayonnaise', 1],
   ['chicken broth', 0.9], ['pesto', 5], ['hummus', 7.9],
+  // ── South Asian staples. The table was Western-biased: paneer alone was 1,815g across 13 live
+  // rows with no entry, and 21.5% of all weighed grams in the pool went unpriced.
+  ['paneer', 18.3], ['low fat paneer', 24], ['chhena', 18], ['curd', 3.5], ['dahi', 3.5],
+  ['quark', 11.5], ['skyr', 11.5],
+  ['soya chunks', 52], ['chana dal', 22], ['moong dal', 22], ['rajma', 24], ['roasted chana', 22],
+  ['besan', 22.4], ['gram flour', 22.4], ['atta', 13.2], ['semolina', 12.7], ['sooji', 12.7],
+  ['lauki', 0.6],
+  // Pulses are listed DRY; the soaked/boiled prefix must win and roughly halve the density.
+  ['boiled kala chana', 9.5], ['soaked chana dal', 9.5],
+  // "bean curd" is TOFU, not dahi — without the compound guard the curd row claims it.
+  ['bean curd', 17.3], ['soy curd', 17.3],
+  // ── chocolate. "milk chocolate" was shadowed by the dairy \bmilk\b row (3.3g, 50 kcal — an 11x
+  // calorie understatement) until it moved into the compound block. Cocoa POWDER is not chocolate.
+  ['chocolate', 5], ['dark chocolate', 7.8], ['white chocolate', 5.9], ['milk chocolate', 7.6],
+  ['chocolate chips', 4.2], ['cocoa powder', 19.6], ['cacao powder', 19.6],
+  // A ready-to-drink shake is mostly water — must beat the chocolate rows.
+  ['chocolate protein shake', 8], ['protein milkshake', 8],
+  // ── seeds, flours, shapes
+  ['sunflower seeds', 20.8], ['pumpkin seeds', 30.2], ['sesame seeds', 17.7], ['hemp hearts', 31.6],
+  ['pistachios', 20.2],
+  ['self rising flour', 10.3], ['all purpose flour', 10.3], ['coconut flour', 18],
+  ['orzo', 5], ['elbow macaroni', 5], ['dry fettuccine', 5], ['sourdough loaf', 9],
+  // ── produce & sauces
+  ['capsicum', 1], ['frozen mixed vegetables', 3], ['frozen peas', 5.4], ['dates', 2.5],
+  ['medjool dates', 2.5], ['mango', 0.8], ['pineapple', 0.5],
+  ['vodka sauce', 2], ['bolognese sauce', 2], ['buffalo wing sauce', 1], ['media crema', 2.5],
 ]
 
 test('no table row is shadowed by a broader row above it', () => {

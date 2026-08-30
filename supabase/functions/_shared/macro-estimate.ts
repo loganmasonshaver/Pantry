@@ -48,6 +48,17 @@ const TABLE: Row[] = [
   // is not chicken (31g vs 0.9). Both were caught by the shadowing test, not by review.
   { re: /\b(almond|oat|soy) milk\b/i, kcal: 45, p: 1.2, c: 6, f: 1.5 },
   { re: /\b(broth|stock)\b/i, kcal: 6, p: 0.9, c: 0.5, f: 0.2 },
+  // "bean curd" is TOFU. Without this the `curd` row below (Indian dahi, ~3.5g protein) claims it
+  // and reports a fifth of the real protein — the same trap diet-tags.ts documents for allergens.
+  { re: /\b(bean|soy|soya)[\s-]*curd\b/i, kcal: 144, p: 17.3, c: 2.8, f: 8.7 },
+  // "milk chocolate" is chocolate, not milk. The dairy \bmilk\b row sits above the sweets section
+  // and was reporting 3.3g protein and 50 kcal for it — an 11x calorie understatement. Caught by
+  // the shadowing test, not by reading. diet-tags.ts keeps 'milk chocolate' in COMPOUND_DAIRY for
+  // the mirror-image reason.
+  { re: /\bmilk chocolate\b/i, kcal: 535, p: 7.6, c: 59.4, f: 29.7 },
+  // A ready-to-drink shake is mostly water. Must precede the chocolate rows or "chocolate protein
+  // shake" (a real 330g stored ingredient) gets priced as a bar of chocolate — 5x its calories.
+  { re: /\bprotein (shake|drink|milkshake)\b/i, kcal: 60, p: 8, c: 3, f: 1.5 },
 
   // ── nut butters & nuts. MUST precede fats & oils: "peanut butter" has to be claimed here or
   // the generic /butter/ row swallows it and reports 0.85g protein per 100g instead of 25.
@@ -58,6 +69,11 @@ const TABLE: Row[] = [
   { re: /\balmonds?\b/i, kcal: 579, p: 21.2, c: 21.6, f: 49.9 },
   { re: /\bcashews?\b/i, kcal: 553, p: 18.2, c: 30.2, f: 43.9 },
   { re: /\bchia|flax\s*seeds?\b/i, kcal: 486, p: 16.5, c: 42.1, f: 30.7 },
+  { re: /\bsunflower seeds?\b/i, kcal: 584, p: 20.8, c: 20, f: 51.5 },
+  { re: /\b(pumpkin|pepita)\s*seeds?\b/i, kcal: 559, p: 30.2, c: 10.7, f: 49 },
+  { re: /\bsesame seeds?\b/i, kcal: 573, p: 17.7, c: 23.4, f: 49.7 },
+  { re: /\bhemp (hearts?|seeds?)\b/i, kcal: 553, p: 31.6, c: 8.7, f: 48.8 },
+  { re: /\bpistachios?\b/i, kcal: 560, p: 20.2, c: 27.2, f: 45.3 },
 
   // ── fats & oils
   { re: /\b(olive|avocado|coconut|vegetable|canola|sesame|peanut)\s*oil\b/i, kcal: 884, p: 0, c: 0, f: 100 },
@@ -73,6 +89,11 @@ const TABLE: Row[] = [
   { re: /\bgreek yogurt\b/i, kcal: 59, p: 10.3, c: 3.6, f: 0.4 },
   { re: /\byogh?urt\b/i, kcal: 61, p: 3.5, c: 4.7, f: 3.3 },
   { re: /\bcottage cheese\b/i, kcal: 84, p: 11.8, c: 4.3, f: 2.3 },
+  { re: /\blow[\s-]?fat paneer\b/i, kcal: 206, p: 24, c: 4, f: 10.5 },
+  { re: /\bpaneer\b/i, kcal: 296, p: 18.3, c: 3.4, f: 23 },
+  { re: /\b(chh?ena|chh?anna)\b/i, kcal: 265, p: 18, c: 2, f: 20 },
+  { re: /\b(quark|skyr)\b/i, kcal: 66, p: 11.5, c: 4, f: 0.3 },
+  { re: /\b(curd|dahi)\b/i, kcal: 61, p: 3.5, c: 4.7, f: 3.3 },
   { re: /\b(cream cheese)\b/i, kcal: 342, p: 6, c: 4.1, f: 34 },
   { re: /\b(parmesan|pecorino)\b/i, kcal: 431, p: 38.5, c: 4.1, f: 29 },
   { re: /\b(feta)\b/i, kcal: 264, p: 14.2, c: 4.1, f: 21.3 },
@@ -102,18 +123,54 @@ const TABLE: Row[] = [
 
   // ── grains & starches. "cooked" forms differ ~3x from dry, so both are listed.
   { re: /\b(cooked )?(white |brown |jasmine |basmati )?rice\b/i, kcal: 130, p: 2.7, c: 28.2, f: 0.3 },
-  { re: /\b(cooked )?(pasta|spaghetti|penne|noodles?|soba|udon)\b/i, kcal: 131, p: 5, c: 25, f: 1.1 },
+  { re: /\b(cooked )?(pasta|spaghetti|penne|noodles?|soba|udon|orzo|fettuccine|linguine|macaroni|rigatoni|farfalle|lasagne|lasagna)\b/i, kcal: 131, p: 5, c: 25, f: 1.1 },
   { re: /\bquinoa\b/i, kcal: 120, p: 4.4, c: 21.3, f: 1.9 },
   { re: /\b(rolled |steel.cut )?oats?\b|\boatmeal\b/i, kcal: 389, p: 16.9, c: 66.3, f: 6.9 },
   { re: /\bgranola\b/i, kcal: 471, p: 10.1, c: 64.3, f: 20 },
   { re: /\b(tortillas?|wraps?|pita)\b/i, kcal: 300, p: 8, c: 50, f: 7 },
-  { re: /\b(bread|toast|bagel|bun|roll)\b/i, kcal: 265, p: 9, c: 49, f: 3.2 },
+  { re: /\b(bread|toast|bagel|bun|roll|sourdough|loaf|naan|roti|chapati|paratha)\b/i, kcal: 265, p: 9, c: 49, f: 3.2 },
   { re: /\bsweet potato(es)?\b/i, kcal: 86, p: 1.6, c: 20.1, f: 0.1 },
   { re: /\bpotato(es)?\b/i, kcal: 77, p: 2, c: 17.5, f: 0.1 },
   { re: /\b(black beans|kidney beans|pinto|beans)\b/i, kcal: 132, p: 8.9, c: 23.7, f: 0.5 },
   { re: /\b(chickpeas?|garbanzo)\b/i, kcal: 164, p: 8.9, c: 27.4, f: 2.6 },
   { re: /\blentils?\b/i, kcal: 116, p: 9, c: 20.1, f: 0.4 },
   { re: /\bcorn\b/i, kcal: 96, p: 3.4, c: 21, f: 1.5 },
+
+  // ── SOUTH ASIAN STAPLES. The table was Western-biased and it showed: paneer alone accounted for
+  // 1,815g across 13 live rows with no entry at all, and 21.5% of all weighed grams in the pool
+  // went unpriced. That bias is not only an accuracy problem — coverage feeds macroAgreementScore,
+  // so an Indian recipe scored worse than an American one for being unrecognised, and the same
+  // blindness is why food-table coverage was rejected as a language detector (a "Lauki Galouti
+  // Kebab" scored identically to a Polish ingredient list).
+  //
+  // DRY vs COOKED: pulses are listed DRY, because creators write dry weights in an ingredient
+  // list. The soaked/boiled forms roughly double in weight and so roughly halve per 100g, and are
+  // matched first so the prefix wins.
+  { re: /\b(soaked|boiled|cooked)\s+\w*\s*(chana|dal|daal|rajma|moong|masoor|toor|urad)\b/i, kcal: 160, p: 9.5, c: 27, f: 1 },
+  { re: /\bsoya?\s*(chunks?|granules?|nuggets?)\b/i, kcal: 336, p: 52, c: 33, f: 0.5 },
+  { re: /\b(chana|kala chana|chickpea)\s*dal\b|\b(moong|masoor|toor|urad|chana)\b|\bdaals?\b|\bdals?\b/i, kcal: 352, p: 22, c: 60, f: 1.5 },
+  { re: /\brajma\b/i, kcal: 333, p: 24, c: 60, f: 0.8 },
+  { re: /\bbesan\b|\bgram flour\b/i, kcal: 387, p: 22.4, c: 57.8, f: 6.7 },
+  { re: /\batta\b|\bwhole wheat flour\b/i, kcal: 340, p: 13.2, c: 72, f: 2.5 },
+  { re: /\b(semolina|sooji|suji|rava)\b/i, kcal: 360, p: 12.7, c: 72.8, f: 1.1 },
+  { re: /\b(lauki|bottle gourd|ghiya)\b/i, kcal: 14, p: 0.6, c: 3.4, f: 0.1 },
+
+  // ── flours. Specific before generic, or "almond flour" (50g fat) is priced as wheat (1g).
+  { re: /\balmond flour\b|\balmond meal\b/i, kcal: 571, p: 21.2, c: 21.6, f: 50 },
+  { re: /\bcoconut flour\b/i, kcal: 400, p: 18, c: 60, f: 13 },
+  { re: /\boat flour\b/i, kcal: 389, p: 16.9, c: 66.3, f: 6.9 },
+  { re: /\bflour\b/i, kcal: 364, p: 10.3, c: 76.3, f: 1 },
+
+  // ── chocolate & sweets. Cocoa POWDER is not chocolate — 228 kcal against 546 — and it appeared
+  // in 18 rows. The generic row is last so the specific forms claim their own names first.
+  { re: /\b(cocoa|cacao)\s*powder\b/i, kcal: 228, p: 19.6, c: 57.9, f: 13.7 },
+  { re: /\bdark chocolate\b/i, kcal: 546, p: 7.8, c: 45.9, f: 31.3 },
+  { re: /\bwhite chocolate\b/i, kcal: 539, p: 5.9, c: 59.2, f: 32.1 },
+  { re: /\bchocolate chips?\b/i, kcal: 480, p: 4.2, c: 63, f: 25 },
+  { re: /\bchocolate\b|\bcocoa\b|\bcacao\b/i, kcal: 500, p: 5, c: 60, f: 28 },
+  { re: /\b(medjool )?dates?\b/i, kcal: 282, p: 2.5, c: 75, f: 0.4 },
+  { re: /\b(biscoff|speculoos)\b/i, kcal: 500, p: 5, c: 70, f: 22 },
+  { re: /\b(oreo|cookies?|biscuits?)\b/i, kcal: 480, p: 5, c: 70, f: 20 },
 
   // ── produce
   { re: /\bavocados?\b/i, kcal: 160, p: 2, c: 8.5, f: 14.7 },
@@ -125,7 +182,7 @@ const TABLE: Row[] = [
   { re: /\b(lettuce|romaine|cabbage)\b/i, kcal: 17, p: 1.2, c: 3.3, f: 0.3 },
   { re: /\bbroccoli\b/i, kcal: 34, p: 2.8, c: 6.6, f: 0.4 },
   { re: /\bcauliflower\b/i, kcal: 25, p: 1.9, c: 5, f: 0.3 },
-  { re: /\b(bell )?peppers?\b/i, kcal: 31, p: 1, c: 6, f: 0.3 },
+  { re: /\b(bell )?peppers?\b|\bcapsicum\b|jalape[nñ]o/i, kcal: 31, p: 1, c: 6, f: 0.3 },
   { re: /\b(tomato(es)?|salsa)\b/i, kcal: 22, p: 1, c: 4.5, f: 0.2 },
   { re: /\bonions?\b/i, kcal: 40, p: 1.1, c: 9.3, f: 0.1 },
   { re: /\bgarlic\b/i, kcal: 149, p: 6.4, c: 33.1, f: 0.5 },
@@ -143,6 +200,15 @@ const TABLE: Row[] = [
   { re: /\b(hot sauce|sriracha|vinegar|relish|pickles?)\b/i, kcal: 20, p: 0.5, c: 3, f: 0.2 },
   { re: /\b(pesto)\b/i, kcal: 450, p: 5, c: 6, f: 45 },
   { re: /\b(hummus)\b/i, kcal: 166, p: 7.9, c: 14.3, f: 9.6 },
+  // Jarred pasta sauces read as produce-adjacent but carry real fat. "vodka sauce" was the single
+  // largest unmatched line in the pool at 700g.
+  { re: /\b(vodka|marinara|bolognese|pasta|tomato|alfredo|arrabbiata)\s*sauce\b/i, kcal: 110, p: 2, c: 12, f: 5 },
+  { re: /\b(buffalo|wing|bbq|barbecue|teriyaki|chilli?|sweet chilli?)\s*sauce\b/i, kcal: 90, p: 1, c: 20, f: 0.5 },
+  { re: /\b(media crema|table cream|single cream|double cream)\b/i, kcal: 200, p: 2.5, c: 4, f: 19 },
+  { re: /\b(frozen )?(mixed )?(vegetables?|veg|veggies)\b/i, kcal: 65, p: 3, c: 12, f: 0.4 },
+  { re: /\bpeas\b/i, kcal: 81, p: 5.4, c: 14.5, f: 0.4 },
+  { re: /\bmangoe?s?\b/i, kcal: 60, p: 0.8, c: 15, f: 0.4 },
+  { re: /\bpineapples?\b/i, kcal: 50, p: 0.5, c: 13, f: 0.1 },
 ]
 
 // Household measures the generator puts in the `grams` field despite the name. Approximate on
