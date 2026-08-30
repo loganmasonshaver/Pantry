@@ -20,7 +20,6 @@ import {
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, Easing as ReaEasing } from 'react-native-reanimated'
 import { ToggleProbe } from '@/components/ToggleProbe'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
@@ -57,7 +56,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 // Touchable that accepts an animated height, so the hero meal card can glide its size in sync
-// with the macros accordion (both driven by macrosAnim).
+// with the macros accordion (both reflow together under LayoutAnimation).
 
 const { width } = Dimensions.get('window')
 
@@ -726,8 +725,12 @@ export default function HomeScreen() {
   // One animated value (0=collapsed, 1=expanded) drives BOTH the carbs/fat accordion height AND
   // the hero card resize, so they glide together instead of the old LayoutAnimation snap that made
   // the "Cook from pantry" line skip. JS-driven (height can't use the native driver), 280ms.
-  const macrosAnim = useSharedValue(0)
-  const [extraRowsH, setExtraRowsH] = useState(0) // measured height of the carbs+fat rows
+  // No animated height any more. Frame analysis of a device recording showed the accordion
+  // updating only 3 times in 117ms (~20fps) on a 120Hz screen, with dead frames between each
+  // step, while a native ScrollView in the same recording moved on every frame. Animating a
+  // LAYOUT prop has to round-trip through a shadow-tree commit, and those do not happen per
+  // frame — so a height animation physically cannot be smooth, whichever thread drives it.
+  // LayoutAnimation interpolates layout natively instead, which is what it exists for.
   // __DEV__ counters feeding ToggleProbe. A render-per-frame count is the signature of the
   // animation driving a setState loop; a low count with high frame times means layout instead.
   const homeRenderCount = useRef(0)
@@ -745,22 +748,20 @@ export default function HomeScreen() {
   // screen. So the last value seen during the animation is stashed and applied once at the end,
   // which keeps the sizing correct without re-rendering per frame.
   const layoutPaused = useRef(false)
-  const pendingLayout = useRef<{ heroY?: number; heroH?: number; rowsH?: number }>({})
+  const pendingLayout = useRef<{ heroY?: number; heroH?: number }>({})
   const flushLayout = useCallback(() => {
     layoutPaused.current = false
     const p = pendingLayout.current
     pendingLayout.current = {}
     if (p.heroY !== undefined) setHeroSectionY(p.heroY)
     if (p.heroH !== undefined) setHeroHeaderH(p.heroH)
-    if (p.rowsH !== undefined) { extraRowsHRef.current = p.rowsH; setExtraRowsH(p.rowsH) }
   }, [])
-  const extraRowsHRef = useRef(0)
   // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
   // this 2400-line component between the tap and the first frame, which is what made the toggle
   // feel slow to respond. The press handler kicks the animation off directly instead.
   useEffect(() => {
     AsyncStorage.getItem('pantry_macros_expanded').then(v => {
-      if (v === 'true') { setMacrosExpanded(true); macrosAnim.value = 1 } // start expanded without an open-animation on launch
+      if (v === 'true') setMacrosExpanded(true) // no open-animation on launch: LayoutAnimation only runs when explicitly armed
     })
   }, [])
   // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
@@ -787,32 +788,7 @@ export default function HomeScreen() {
   // was computed in JS and shipped over the bridge — on Home, which auto-generates meals on focus,
   // those frames queued behind whatever JS was already running and the glide stuttered.
   const heroExpandedH = Math.max(HERO_MIN, heroFit - 76)
-  // DIAGNOSTIC — isolating which of the two height animations is expensive. The hero contains a
-  // nested horizontal ScrollView of meal cards and images; animating its height re-measures that
-  // whole subtree every frame, which no amount of moving the interpolation off the JS thread can
-  // help. Set to true to restore the glide.
-  const ANIMATE_HERO_HEIGHT = false
-  const heroStyle = useAnimatedStyle(() => ({
-    height: ANIMATE_HERO_HEIGHT
-      ? heroFit + (heroExpandedH - heroFit) * macrosAnim.value
-      : heroExpandedH, // hold the smaller size so nothing clips when the accordion is open
-  }))
-  // No opacity ANIMATION: height 0 + overflow hidden already hides the rows completely, so the
-  // fade was pure compositing cost. It also explains why opening felt worse than closing — a
-  // fully transparent subtree can be skipped by the compositor, so opening had to rasterise the
-  // rows from scratch on exactly the frames where the layout was also moving. Opacity is still
-  // pinned to 0 until the rows have been measured, because the height style isn't applied yet
-  // then and they would otherwise flash at full size on first render.
-  // Height is applied only once the rows have been measured; before that the view needs its
-  // natural height so onLayout has something to report. Opacity still hides them meanwhile.
-  const macrosRowsHeight = useAnimatedStyle(() => ({ height: macrosAnim.value * extraRowsH }))
-  // The rows SLIDE DOWN into the space as it opens, rather than being unveiled in place by the
-  // growing clip. Without this the rows appear line by line while everything below them slides —
-  // two different motions in one transition, which reads as a wipe rather than as movement. This
-  // is the classic reason an accordion feels worse opening than closing.
-  const macrosRowsSlide = useAnimatedStyle(() => ({
-    transform: [{ translateY: (macrosAnim.value - 1) * extraRowsH }],
-  }))
+
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -1369,17 +1345,14 @@ export default function HomeScreen() {
                 transition. Protein is the headline macro on Home regardless of the other two
                 being visible, so keeping it emphasized is also the more honest hierarchy. */}
             <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized />
-            {/* Carbs+Fat accordion — height glides 0↔measured with macrosAnim so the reflow below
-                is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
-            <Reanimated.View style={[{ overflow: 'hidden', opacity: extraRowsH > 0 ? 1 : 0 }, extraRowsH > 0 && macrosRowsHeight]}>
-              <Reanimated.View
-                onLayout={e => { layoutFireCount.current++; const h = e.nativeEvent.layout.height; if (!h || Math.abs(h - extraRowsHRef.current) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.rowsH = h; return } extraRowsHRef.current = h; setExtraRowsH(h) }}
-                style={[{ gap: 10, paddingTop: 10 }, macrosRowsSlide]}
-              >
+            {/* Carbs+Fat rows. Mounted/unmounted rather than height-animated — LayoutAnimation
+                (armed in the toggle below) interpolates the reflow natively. */}
+            {macrosExpanded && (
+              <View style={{ gap: 10, paddingTop: 10 }}>
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
-              </Reanimated.View>
-            </Reanimated.View>
+              </View>
+            )}
             {__DEV__ && <ToggleProbe renderCount={homeRenderCount.current} layoutCount={layoutFireCount.current} />}
             <TouchableOpacity
               onPress={() => {
@@ -1387,14 +1360,18 @@ export default function HomeScreen() {
                 // Animation FIRST: this writes a shared value and starts on the UI thread
                 // immediately, so motion begins on touch instead of after React has reconciled
                 // this whole screen. setState still runs, but it no longer gates the first frame.
-                // Hold measurements until the glide is done — see layoutPaused above.
+                // Hold the hero's layout measurements until the reflow settles — they feed
+                // heroFit, which feeds the hero's height, which would otherwise loop.
                 layoutPaused.current = true
-                setTimeout(flushLayout, 320 * (__DEV__ ? 8 : 1)) // animation + a frame of settle
-                // __DEV__ slow motion. "Feels bad" cannot be debugged at 280ms — at 8x the exact
-                // frame where something jumps, stalls, or moves against the rest becomes visible
-                // and describable. Production is unaffected.
-                const SLOWMO = __DEV__ ? 8 : 1
-                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280 * SLOWMO, easing: ReaEasing.out(ReaEasing.cubic) })
+                setTimeout(flushLayout, 400)
+                // Native layout interpolation. This is the only mechanism that animates a reflow
+                // per-frame; a JS- or UI-thread-driven height cannot.
+                LayoutAnimation.configureNext({
+                  duration: 260,
+                  update: { type: LayoutAnimation.Types.easeInEaseOut },
+                  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+                  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+                })
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
                 AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
@@ -1614,9 +1591,9 @@ export default function HomeScreen() {
                 </View>
               </RNAnimated.View>
             ) : heroMeal ? (
-              // Height glides with the macros card (heroHeight, driven by macrosAnim) so the
-              // photo + title + pills stay framed above the tab bar in both states.
-              <Reanimated.View style={heroStyle}>
+              // Fixed height. Was glided with the macros card, but a height animation steps at
+              // ~20fps (see the note at the state declarations) so the glide was never smooth.
+              <View style={{ height: heroExpandedH }}>
                 <ScrollView
                   ref={heroScrollRef}
                   horizontal
@@ -1708,7 +1685,7 @@ export default function HomeScreen() {
                     ))}
                   </View>
                 )}
-              </Reanimated.View>
+              </View>
             ) : cacheChecked ? (
               // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
               // never flashes during the ~100ms disk read on a day that DOES have meals — showing
