@@ -21,7 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, Easing as ReaEasing } from 'react-native-reanimated'
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
 import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
@@ -144,7 +144,11 @@ function iconForSlot(label: string): React.ElementType {
   return Utensils
 }
 
-function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
+// strokeDashoffset is an SVG attribute, so it still can't use the native driver — but binding
+// it to the Animated value directly avoids a per-frame React render, which was the real cost.
+const AnimatedSvgCircle = RNAnimated.createAnimatedComponent(SvgCircle)
+
+function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number }) {
   const remaining = goal - consumed
   const isOver = remaining < 0
   const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
@@ -155,24 +159,25 @@ function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
 
   const animProgress = useRef(new RNAnimated.Value(0)).current
   const [displayRemaining, setDisplayRemaining] = useState(goal)
-  const [displayOffset, setDisplayOffset] = useState(circumference)
 
   useEffect(() => {
     if (isOver) {
       // Over goal — show full red ring immediately, display how much over
       setDisplayRemaining(remaining)
-      setDisplayOffset(0)
       return
     }
     animProgress.setValue(0)
     setDisplayRemaining(goal)
-    setDisplayOffset(circumference)
     // useNativeDriver: false — strokeDashoffset is an SVG attribute, not a transform/opacity,
     // so the native driver can't animate it. We pay the JS-bridge cost here to drive the ring.
     RNAnimated.timing(animProgress, { toValue: progress, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
+    // Only the LABEL goes through React now, and only when the rounded integer changes — the ring
+    // itself is bound to the Animated value below. This was two setState calls per frame for
+    // 1800ms (~108 re-renders of this subtree) and made any concurrent state change expensive.
+    let lastShown = goal
     const listener = animProgress.addListener(({ value }) => {
-      setDisplayRemaining(Math.round(goal - goal * value))
-      setDisplayOffset(circumference * (1 - value))
+      const next = Math.round(goal - goal * value)
+      if (next !== lastShown) { lastShown = next; setDisplayRemaining(next) }
     })
     // stopAnimation() too — otherwise an in-flight ring animation keeps firing the
     // listener (setState) after unmount, warning on a dead component.
@@ -183,8 +188,10 @@ function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
     <View style={{ alignItems: 'center', justifyContent: 'center', width: size, height: size }}>
       <Svg width={size} height={size} style={{ transform: [{ rotate: '-90deg' }] }}>
         <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.10)" strokeWidth={strokeWidth} fill="transparent" />
-        <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke={isOver ? '#EF4444' : '#4ADE80'} strokeWidth={strokeWidth} fill="transparent"
-          strokeDasharray={`${circumference}`} strokeDashoffset={isOver ? 0 : displayOffset} strokeLinecap="round" />
+        <AnimatedSvgCircle cx={size / 2} cy={size / 2} r={radius} stroke={isOver ? '#EF4444' : '#4ADE80'} strokeWidth={strokeWidth} fill="transparent"
+          strokeDasharray={`${circumference}`}
+          strokeDashoffset={isOver ? 0 : animProgress.interpolate({ inputRange: [0, 1], outputRange: [circumference, 0] })}
+          strokeLinecap="round" />
       </Svg>
       <View style={{ position: 'absolute', alignItems: 'center' }}>
         <Text style={{ fontSize: 38, fontWeight: '800', color: isOver ? '#EF4444' : COLORS.textWhite, letterSpacing: -1 }}>{isOver ? `-${Math.abs(remaining).toLocaleString()}` : displayRemaining.toLocaleString()}</Text>
@@ -194,14 +201,21 @@ function CalorieGauge({ consumed, goal }: { consumed: number; goal: number }) {
   )
 }
 
-function MacroBar({ label, consumed, goal, color, emphasized = false }: { label: string; consumed: number; goal: number; color: string; emphasized?: boolean }) {
+// Memoized: Home re-renders on every state change (macros toggle, meal loads, focus), and this
+// subtree is an SVG ring. Its inputs are two numbers, so a shallow compare is exact.
+const CalorieGauge = memo(CalorieGaugeInner)
+
+function MacroBarInner({ label, consumed, goal, color, emphasized = false }: { label: string; consumed: number; goal: number; color: string; emphasized?: boolean }) {
   const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
-  const animWidth = useRef(new RNAnimated.Value(0)).current
+  // scaleX, not width. Width is a LAYOUT prop: it cannot use the native driver, so every bar ran
+  // 1800ms of JS-thread work and forced a layout pass per frame. A transform runs natively and
+  // triggers no layout, which is what made the macros card hitch whenever anything re-rendered.
+  const animScale = useRef(new RNAnimated.Value(0)).current
 
   useEffect(() => {
-    animWidth.setValue(0)
-    RNAnimated.timing(animWidth, { toValue: progress * 100, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
-    return () => animWidth.stopAnimation() // halt in-flight animation on unmount
+    animScale.setValue(0)
+    RNAnimated.timing(animScale, { toValue: progress, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
+    return () => animScale.stopAnimation() // halt in-flight animation on unmount
   }, [consumed, goal])
 
   // Emphasized = the headline macro (Protein on home). Thicker bar + bigger text
@@ -221,11 +235,21 @@ function MacroBar({ label, consumed, goal, color, emphasized = false }: { label:
         <Text style={{ fontSize: valueSize, fontWeight: '700', color: COLORS.textWhite }}>{consumed}<Text style={{ color: COLORS.textMuted, fontWeight: '500' }}> / {goal}g</Text></Text>
       </View>
       <View style={{ height: barHeight, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: barHeight / 2, overflow: 'hidden' }}>
-        {progress > 0 && <RNAnimated.View style={{ height: barHeight, backgroundColor: color, borderRadius: barHeight / 2, width: animWidth.interpolate({ inputRange: [0, 100], outputRange: ['0%', '100%'] }) }} />}
+        {progress > 0 && (
+          // Full-width fill anchored left and scaled horizontally, so 0->progress reads identically
+          // to the old width animation without touching layout.
+          <RNAnimated.View style={{
+            height: barHeight, backgroundColor: color, borderRadius: barHeight / 2,
+            width: '100%', transformOrigin: 'left', transform: [{ scaleX: animScale }],
+          }} />
+        )}
       </View>
     </View>
   )
 }
+
+// Memoized for the same reason — four of these render on Home, all with primitive props.
+const MacroBar = memo(MacroBarInner)
 
 // The resting state of the meal card — what Home shows before you've asked for today's meals.
 //
@@ -1316,16 +1340,7 @@ export default function HomeScreen() {
                 // Animation FIRST: this writes a shared value and starts on the UI thread
                 // immediately, so motion begins on touch instead of after React has reconciled
                 // this whole screen. setState still runs, but it no longer gates the first frame.
-                // DIAGNOSTIC — A/B/C (handler-start, no await, UI-thread animation) and freezing
-                // the hero height all changed nothing, so the animation driver is not the
-                // bottleneck. This makes the toggle INSTANT to split the two remaining suspects:
-                // if it snaps cleanly, the cost is the per-frame layout pass and the fix is to
-                // stop animating height at all (D). If it still hitches with no animation running,
-                // the cost is re-rendering this 2400-line component and the fix is memoisation.
-                const INSTANT_TOGGLE = true
-                macrosAnim.value = INSTANT_TOGGLE
-                  ? (next ? 1 : 0)
-                  : withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
+                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
                 AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
