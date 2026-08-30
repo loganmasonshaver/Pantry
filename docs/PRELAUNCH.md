@@ -71,21 +71,16 @@ significant findings on every pass — 13 fixes on 2026-08-30 alone, including t
 
 ---
 
-## Unresolved — surfaced 2026-08-30, not yet triaged by Logan
+## Unresolved — surfaced 2026-08-30
 
-Verified as still present. Each is small; none is accepted onto the list above yet.
+Four of the five originals are now fixed (orphan Discover row deleted, grocery evening date bug,
+mock data removed from the bundle, `last_active` schema drift). What remains:
 
-- **Orphan creator row in Discover.** "Fidget avacaodo brownie" (2026-05-12) has a null image, a
-  mangled name and 2 steps. Creator recipes are a v2 feature, not launch — so this single row is an
-  orphan rendering a broken card in the launch feed. One `delete` removes it; retention never
-  touches `trend_source='creator'` rows, so it will not age out.
-- **`grocery.tsx:265`** compares `created_at` (a timestamp) against a bare UTC date string, so
-  "today's order" goes unfound in the evening. Needs a local-midnight instant.
-- **`MOCK_MEAL_DETAILS`** ships in the bundle with a live fallback path in `app/meal/[id].tsx`.
-  Cannot fire in practice (keys are '1','2','3'; real IDs are UUIDs), but it is mock data in a
-  shipping binary.
-- **`last_active` schema drift.** Onboarding upserts it and NO migration creates it. Migrations
-  alone cannot rebuild this database, and a fresh environment would hard-fail onboarding on the one
-  upsert CLAUDE.md calls the #1 bug source.
 - **`CODE_REVIEW.md` holds 87 confirmed findings.** Its paywall findings were verified stale on
-  2026-08-30; the other ~80 have not been checked. Worth one triage pass.
+  2026-08-30; the other ~80 have not been checked. Worth one triage pass — some are certainly
+  already fixed, some may not be.
+- **Engagement trackers wired but not device-verified.** `touchLastActive`,
+  `trackCookTonightUsed`, `trackMealSavedEngagement` and `trackGoalsCustomized` had never been
+  called by anything; they are now wired (`8977f41`). They fire on real interactions and write
+  server-side, so confirm by using the app and re-reading the profiles row. Until that is checked,
+  treat the Loops email sequences as unproven.
