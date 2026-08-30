@@ -194,8 +194,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       for (const food of res) {
         const def = pickDefaultServing(food.servings)
         if (def) {
-          const m = parseMacros(def)
-          macros[food.food_id] = { cal: m.calories, prot: m.protein, serving: def.serving_description }
+          const m = parseMacros(def) // exact values — round here because this is display-only
+          macros[food.food_id] = { cal: Math.round(m.calories), prot: Math.round(m.protein), serving: def.serving_description }
         } else {
           const q = quickMacros(food.food_description)
           macros[food.food_id] = {
@@ -785,10 +785,10 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
             foodKey={key}
             foodName={selectedFood.food_name}
             userId={currentUserId}
-            originalCalories={parsed.calories}
-            originalProtein={parsed.protein}
-            originalCarbs={parsed.carbs}
-            originalFat={parsed.fat}
+            originalCalories={Math.round(parsed.calories)}
+            originalProtein={Math.round(parsed.protein)}
+            originalCarbs={Math.round(parsed.carbs)}
+            originalFat={Math.round(parsed.fat)}
             onSaved={async (overrideActive) => {
               if (overrideActive) {
                 const override = await getOverride(currentUserId, key)
