@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import {
   cleanIngredientName, formatHalf, getMeasuredDisplay, getWholeUnitDisplay,
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
-  isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball,
+  isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
   formatQuarter, scaleVisual, countMissingIngredients,
 } from './ingredientDisplay.ts'
 
@@ -50,6 +50,49 @@ test('a WEIGHT visual is not read as a count', () => {
   assert.equal(getWholeUnitDisplay('eggs', '5g'), null)
   // ...but a stated count is the creator's own number and is not second-guessed.
   assert.deepEqual(getWholeUnitDisplay('garlic cloves', '2g', '1 clove'), { count: '1', name: 'garlic clove' })
+})
+
+test('"pepper" the vegetable and the cheese are not spices', () => {
+  // 150g of bell pepper rendered as "25 tbsp" and 120g of pepper jack as "20 tbsp" — the seasoning
+  // branch matched \bpepper\b and converted their weight into spoons. Seven live rows read that way.
+  assert.equal(getMeasuredDisplay('red bell pepper', '150g', '1'), '150g')
+  assert.equal(getMeasuredDisplay('green bell pepper', '150g', '1 medium'), '150g')
+  assert.equal(getMeasuredDisplay('pepper jack cheese', '120g', '6 slices'), '120g')
+  assert.equal(getMeasuredDisplay('chargrilled peppers', '100g', '2'), '100g')
+  // ...and the real spice still goes through the spice branch. "salt & pepper" keeps salt, which is
+  // why the non-spice senses are STRIPPED rather than used to negate the whole test.
+  assert.equal(getMeasuredDisplay('black pepper', '6g', 'a pinch'), '1 tbsp')
+  assert.equal(getMeasuredDisplay('salt & pepper', '6g', 'a pinch'), '1 tsp')
+  assert.equal(getMeasuredDisplay('red pepper flakes', '6g', 'a pinch'), '1 tbsp')
+  assert.equal(getMeasuredDisplay('white pepper', '2g', 'a pinch'), '1 tsp')
+  // Pepperoni needs no rule at all — \b does not match inside the word.
+  assert.equal(getMeasuredDisplay('turkey pepperoni', '80g', '34 slices'), '80g')
+})
+
+test('a packet is a measurement, and the actionable one', () => {
+  // "1 packet ranch seasoning" became "5 tbsp": arithmetically fine, useless in a kitchen and
+  // wrong on a grocery list. Six live rows.
+  assert.equal(getMeasuredDisplay('ranch seasoning', '30g', '1 packet'), '1 packet')
+  assert.equal(getMeasuredDisplay('fajita seasoning', '60g', '2 packets'), '2 packets')
+  assert.equal(getMeasuredDisplay('chili seasoning', '30g', '1 pack'), '1 pack')
+  // A vague descriptor still falls through to a computed spoon measure — that is why tier 2 exists.
+  assert.equal(getMeasuredDisplay('paprika', '6g', 'a pinch'), '1 tbsp')
+  assert.equal(getMeasuredDisplay('cumin', '2g', 'to taste'), '1 tsp')
+})
+
+test('decimals render as the fractions a kitchen actually has', () => {
+  assert.equal(toCookingFraction('0.75 tsp'), '¾ tsp')
+  assert.equal(toCookingFraction('0.5 tsp'), '½ tsp')
+  assert.equal(toCookingFraction('0.25 cup'), '¼ cup')
+  assert.equal(toCookingFraction('1.5 cups'), '1½ cups')
+  assert.equal(toCookingFraction('6.75 cups'), '6¾ cups')
+  assert.equal(toCookingFraction('2.5 oz'), '2½ oz')
+  // No clean fraction exists for these — left exactly as written rather than rounded into a lie.
+  assert.equal(toCookingFraction('1.4 oz'), '1.4 oz')
+  assert.equal(toCookingFraction('0.9 tsp'), '0.9 tsp')
+  // Reaches the rendered string, not just the helper.
+  assert.equal(getMeasuredDisplay('garlic powder', undefined, '0.75 tsp'), '¾ tsp')
+  assert.equal(getMeasuredDisplay('chicken broth', undefined, '1.5 cups'), '1½ cups')
 })
 
 test('whole-unit counting still works where it should', () => {

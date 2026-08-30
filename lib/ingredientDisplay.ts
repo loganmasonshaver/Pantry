@@ -279,10 +279,41 @@ export function gramsToSpiceTsp(name: string, grams: number): string {
 //   3. Liquid or seasoning visual that already has a real unit → use visual
 //   4. Seasoning without a usable visual → convert grams to tsp
 //   5. Plain grams — rounded to nearest 5 above 20g for "psychologically clean" numbers
+// The non-spice senses of "pepper". Plural "peppers" is the vegetable in every live row
+// ("chargrilled peppers"); the spice stays singular ("red pepper flakes", "black pepper").
+const NON_SPICE_PEPPER = /\b(bell|sweet|banana|poblano|serrano|habanero|shishito|cubanelle|mini|chargrilled|roasted)\s+peppers?\b|\bpepper\s*jack\b|\bpeppers\b/gi
+
+// Recipes are written in fractions, not decimals. A creator's own visual reaches us as typed —
+// "0.75 tsp", "1.5 cups", "6.75 cups" — and rendering that verbatim asks a cook to measure three
+// quarters of a teaspoon as a decimal. The gram converters above already emit ¼/½/¾, so a raw
+// visual was the only place decimals survived, which is why it looked inconsistent within one list.
+//
+// Only the fractions a kitchen actually has are converted. "1.4 oz" has no clean fraction and is
+// left exactly as written rather than rounded into a lie.
+const COOKING_FRACTION: Record<string, string> = {
+  '125': '⅛', '25': '¼', '33': '⅓', '333': '⅓', '5': '½', '66': '⅔', '667': '⅔', '75': '¾',
+}
+
+export function toCookingFraction(s: string): string {
+  return s.replace(/\b(\d+)\.(\d+)\b/g, (match, whole: string, frac: string) => {
+    const glyph = COOKING_FRACTION[frac]
+    if (!glyph) return match
+    return whole === '0' ? glyph : `${whole}${glyph}`
+  })
+}
+
 export function getMeasuredDisplay(name: string, gramsStr: string | undefined, visualStr: string | undefined): string {
   const n = name.toLowerCase()
   const isLiquid = /\b(oil|vinegar|sauce|dressing|honey|syrup|extract|juice|milk|broth|stock|wine|tahini|mayo|mustard|cream)\b/.test(n)
-  const isSeasoning = /\b(salt|pepper|paprika|cumin|cinnamon|turmeric|oregano|thyme|basil|rosemary|parsley|cilantro|dill|chili|spice|powder|seasoning|flakes?|herbs?|sweetener|stevia|sugar)\b/.test(n)
+  // "pepper" names three unrelated foods: the spice, the vegetable and a cheese. Only the spice
+  // belongs in the seasoning branch — routing the others through it converted 150g of bell pepper
+  // into "25 tbsp" and 120g of pepper jack into "20 tbsp". Same substring trap already recorded
+  // for "cloves" (the garlic bulb vs the spice) in WHOLE_UNIT_FOODS.
+  //
+  // Stripped rather than negated, so a name that ALSO carries a real spice still qualifies:
+  // "salt & pepper" keeps salt. Pepperoni needs no rule — \b does not match inside it.
+  const nSpice = n.replace(NON_SPICE_PEPPER, ' ')
+  const isSeasoning = /\b(salt|pepper|paprika|cumin|cinnamon|turmeric|oregano|thyme|basil|rosemary|parsley|cilantro|dill|chili|spice|powder|seasoning|flakes?|herbs?|sweetener|stevia|sugar)\b/.test(nSpice)
   const isProteinPowder = /\b(whey|casein|protein\s*powder|plant\s*protein)\b/i.test(n)
   const isSeeds = /\b(chia|flax|hemp|sesame)\b/i.test(n) && /\bseeds?\b/i.test(n)
 
@@ -308,8 +339,12 @@ export function getMeasuredDisplay(name: string, gramsStr: string | undefined, v
 
   // Tier 1: prefer template visual if it has a real measurement unit
   // (NOT "pinch"/"dash" — those are descriptors that belong in Eyeball).
-  if ((isLiquid || isSeasoning) && visualStr && /(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ounces?)/i.test(visualStr)) {
-    return visualStr
+  // Packets are a real measurement and the ACTIONABLE one: a creator writing "1 packet ranch
+  // seasoning" is naming what you buy. Converting that to "5 tbsp" was arithmetically fine and
+  // useless — nobody spoons out a seasoning packet. Six live rows read that way.
+  if ((isLiquid || isSeasoning) && visualStr &&
+      /(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ounces?|packets?|packs?|sachets?|sticks?|cans?|jars?|bottles?)/i.test(visualStr)) {
+    return toCookingFraction(visualStr)
   }
 
   // Tier 2: seasoning fell through tier 1 (template likely has "a pinch" or
@@ -327,7 +362,7 @@ export function getMeasuredDisplay(name: string, gramsStr: string | undefined, v
     if (grams > 0) return `${roundDisplayGrams(grams)}g`
   }
 
-  return gramsStr || visualStr || ''
+  return toCookingFraction(gramsStr || visualStr || '')
 }
 
 // Eyeball mode: convert measurement-unit visuals (1 tbsp, 1/2 cup) into
