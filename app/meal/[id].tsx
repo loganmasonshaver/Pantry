@@ -766,15 +766,36 @@ export default function MealDetailScreen() {
 
         {/* ── Ingredients ── */}
         <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <View>
+          {/* The title and the portion toggle share a row; the NOTES deliberately do not.
+              They used to sit in an unstyled <View> beside the pill, and an unstyled flex child
+              defaults to flexShrink: 0 — so neither side would give way, the row overflowed, and
+              the pill printed on top of "Makes N servings · macros are per serving". Full-width
+              notes cannot collide with anything and read better besides: the allergen line is a
+              sentence, and it was being squeezed into the ~170pt left over beside the pill. */}
+          <View style={styles.sectionHeaderBlock}>
+            <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>Ingredients</Text>
+              <View style={styles.pillToggle}>
+                {(['Measured', 'Eyeball'] as PortionMode[]).map(mode => (
+                  <TouchableOpacity
+                    key={mode}
+                    style={[styles.pillOption, portionMode === mode && styles.pillOptionActive]}
+                    onPress={() => setPortionMode(mode)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.pillOptionText, portionMode === mode && styles.pillOptionTextActive]}>
+                      {mode}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
               {/* Quantities are the creator's FULL BATCH, while the macros above are per serving.
                   Without this line a 4-egg cheesecake next to "278 cal" reads as a lie — it's the
                   label that makes the two numbers reconcilable. Hidden at 1 serving, where the
                   distinction doesn't exist. */}
-              {(meal as any)?.servings > 1 && (
-                <Text style={styles.servingsNote}>Makes {(meal as any).servings} servings · macros are per serving</Text>
+            {(meal as any)?.servings > 1 && (
+              <Text style={styles.servingsNote}>Makes {(meal as any).servings} servings · macros are per serving</Text>
               )}
               {/* States what was CHECKED, never that the dish is safe. These tags are derived from
                   an LLM's reading of a video description, and both failure modes have happened in
@@ -800,21 +821,6 @@ export default function MealDetailScreen() {
                   {' '}Always check the full recipe before cooking.
                 </Text>
               )}
-            </View>
-            <View style={styles.pillToggle}>
-              {(['Measured', 'Eyeball'] as PortionMode[]).map(mode => (
-                <TouchableOpacity
-                  key={mode}
-                  style={[styles.pillOption, portionMode === mode && styles.pillOptionActive]}
-                  onPress={() => setPortionMode(mode)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.pillOptionText, portionMode === mode && styles.pillOptionTextActive]}>
-                    {mode}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
           </View>
 
           {/* Split ingredients into NEED / HAVE buckets so the eye lands on what the user
@@ -1328,15 +1334,21 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 20,
   },
+  // The block owns the spacing below the whole header; the ROW only lays out title + toggle.
+  sectionHeaderBlock: { marginBottom: 12 },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    // gap + flexShrink are belt-and-braces: with only a short title beside the pill there is
+    // room to spare, but an unstyled flex child defaults to flexShrink: 0, which is exactly how
+    // the previous layout printed the toggle on top of the servings line.
+    gap: 12,
   },
   allergenNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 4, lineHeight: 17 },
   servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 2 },
   sectionTitle: {
+    flexShrink: 1,
     fontSize: 11,
     fontWeight: '700',
     color: '#4ADE80',
@@ -1346,6 +1358,7 @@ const styles = StyleSheet.create({
 
   // Portion pill toggle
   pillToggle: {
+    flexShrink: 0,
     flexDirection: 'row',
     backgroundColor: COLORS.cardElevated,
     borderRadius: 20,
