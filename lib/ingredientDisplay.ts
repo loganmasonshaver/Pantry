@@ -381,12 +381,15 @@ export function toEyeball(visualStr: string | undefined, ingredientName: string)
   return v
 }
 
+// One compiled alternation instead of 21 RegExp constructions per call. This function sits in the
+// inner loop of every missing-ingredient count, and building the regexes there cost ~3 SECONDS on a
+// full Discover pass (600 meals x 8 ingredients x 200 pantry entries) — a synchronous freeze on the
+// render path. Behaviour is unchanged: \b anchors mean a shorter adjective can't match inside a
+// longer one ("cooked" never fires inside "uncooked"), so alternation order doesn't matter.
+const ADJECTIVE_RE = new RegExp(`\\b(${COOKING_ADJECTIVES.join('|')})\\b`, 'g')
+
 export function stripAdjectives(name: string): string {
-  let result = name.toLowerCase()
-  for (const adj of COOKING_ADJECTIVES) {
-    result = result.replace(new RegExp(`\\b${adj}\\b`, 'g'), '').trim()
-  }
-  return result.replace(/\s+/g, ' ').trim()
+  return name.toLowerCase().replace(ADJECTIVE_RE, '').replace(/\s+/g, ' ').trim()
 }
 
 // Check if an item is already covered by existing names
@@ -436,9 +439,23 @@ export function countMissingIngredients(
     .map(i => String(i?.name ?? i ?? '').trim())
     .filter(Boolean)
   if (names.length === 0) return 0
-  return names.filter(name => {
-    if (isAlreadyInList(name, pantryNames)) return false          // already in the pantry
-    if (isAssumedStaple(name, excludedStaples)) return false      // a basic we assume they keep
+
+  // isAlreadyInList re-strips every pantry entry for every ingredient it's asked about, which is
+  // O(ingredients x pantry) regex work. The stripped forms depend only on the pantry, so build
+  // them once here and match by lookup. Same three conditions that function tests, in the same
+  // order — see the note above it for why exact-match rather than substring.
+  const strippedPantry = new Set<string>()
+  for (const p of pantryNames) strippedPantry.add(stripAdjectives(p))
+
+  return names.filter(raw => {
+    // Clean ONCE and use it for both checks. isAlreadyInList cleans internally but isAssumedStaple
+    // does not, so passing a raw model name like "1 tsp salt" matched the pantry path and missed
+    // the staple path — the exact screen-to-screen divergence this function exists to prevent.
+    const name = cleanIngredientName(raw)
+    const lower = name.toLowerCase()
+    const stripped = stripAdjectives(lower)
+    if (pantryNames.has(lower) || pantryNames.has(stripped) || strippedPantry.has(stripped)) return false
+    if (isAssumedStaple(name, excludedStaples)) return false
     return true
   }).length
 }

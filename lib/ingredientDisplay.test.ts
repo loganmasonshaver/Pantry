@@ -407,3 +407,16 @@ test('the screenshot case: the smoothie really needs all three', () => {
   assert.equal(countMissingIngredients(
     ['frozen mango chunks', 'fresh pineapple chunks', 'milk of choice'], p), 3)
 })
+
+test('counting a full Discover pass stays off the render-blocking path', () => {
+  // This runs inside a useMemo on Discover. stripAdjectives used to build 21 RegExp objects per
+  // call and was invoked once per pantry entry per ingredient, so this shape took ~3 SECONDS —
+  // a visible freeze. Pin it: the pantry is stripped once and matched by lookup.
+  const bigPantry = new Set(Array.from({ length: 200 }, (_, i) => `pantry item number ${i} with a longish name`))
+  const meals = Array.from({ length: 600 }, (_, m) =>
+    Array.from({ length: 8 }, (_, i) => ({ name: `grilled ingredient ${m}-${i} chunks` })))
+  const started = process.hrtime.bigint()
+  for (const ings of meals) countMissingIngredients(ings, bigPantry)
+  const ms = Number(process.hrtime.bigint() - started) / 1e6
+  assert.ok(ms < 600, `600x8 over a 200-item pantry took ${Math.round(ms)}ms — was ~3000ms before the fix`)
+})

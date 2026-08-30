@@ -102,9 +102,12 @@ const rotateByDay = <T,>(arr: T[], day: number, key: string, stride: number): T[
 // screen listed things to buy. It also knew nothing about assumed staples, so it counted salt as
 // missing where the recipe screen did not. Two errors pointing opposite ways.
 //
-// A meal with no ingredient data returns 0 rather than the old sentinel 99, which rendered as a
-// literal "Missing 99" badge if such a row ever reached the grid.
 function missingCount(meal: DiscoverMeal, pantry: Set<string>, excluded: Set<string>): number {
+  // A meal with NO ingredient data is unknown, not fully owned. countMissingIngredients correctly
+  // returns 0 for an empty list — but 0 here means "have it all", which would sort such a row to
+  // the TOP of "Almost in your kitchen" and badge it as cookable. Rank it last instead; the badge
+  // is only rendered for rows the grid actually shows, and those have ingredients.
+  if (!meal.ingredients?.length) return 99
   return countMissingIngredients(meal.ingredients, pantry, excluded)
 }
 
@@ -789,14 +792,17 @@ export default function DiscoverScreen() {
       ...intent.map(sec => ({ ...sec, accent: false })),
       { key: 'other', title: 'Everything else', meals: leftovers, accent: false },
     ].filter(sec => sec.meals.length > 0)
-  }, [browseGrid, budget, pantryNames, lastCooked])
+    // excludedStaples feeds nearlyRanked's missingCount above and arrives after first paint.
+  }, [browseGrid, budget, pantryNames, lastCooked, excludedStaples])
 
   // Per-meal missing counts for the "Almost in your kitchen" badges. Recomputed with the same
   // inputs as the section itself so the two can't disagree.
   const missingByMeal = useMemo(() => {
     if (pantryNames.size === 0) return new Map<string, number>()
     return new Map(browseGrid.map(m => [m.id, missingCount(m, pantryNames, excludedStaples)]))
-  }, [browseGrid, pantryNames])
+    // excludedStaples arrives from the profile fetch AFTER first paint, so it has to be a
+    // dependency or the badges keep whatever they computed before it loaded.
+  }, [browseGrid, pantryNames, excludedStaples])
 
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from
   // mounting 400 image cards at once, and keeps each section's header reachable by scroll.
