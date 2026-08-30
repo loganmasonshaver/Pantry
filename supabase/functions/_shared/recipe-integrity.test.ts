@@ -29,7 +29,24 @@ test('real ingredients are never mistaken for junk', () => {
     // real dishes in this pool. Missing the odd "Spread cream cheese" line is far cheaper than
     // deleting a real ingredient, since a false positive here silently shortens a recipe.
     'Spread cream cheese', 'Chocolate spread', 'Wrap', 'Slice of sourdough',
+    // Every one of these was caught by a broad equipment net over the live pool and is FOOD.
+    // They are the reason the equipment rules are anchored to non-food qualifiers rather than
+    // matching /paper/, /wrap/ or /spray/ outright.
+    'rice paper sheet', 'flour wrap', 'Ole Xtreme Wellness High Fiber Wrap', 'Oil spray',
+    'oil spray', 'everything bagel seasoning', 'bagel seasoning', 'chicken skewers',
+    'Crunchy Taco Wrap', 'cupcake', 'baking powder', 'baking soda',
   ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+})
+
+test('equipment and packaging are not ingredients', () => {
+  for (const kit of [
+    'parchment paper setup', 'parchment', 'Parchment paper', 'Butter paper', 'wax paper',
+    'baking paper', 'greaseproof paper', 'paper towel', 'paper towels',
+    'aluminium foil', 'aluminum foil', 'tin foil', 'Foil',
+    'bamboo skewers', 'wooden skewer', 'toothpicks',
+    'cupcake liners', 'muffin liner', 'baking cups',
+    'cling film', 'plastic wrap', 'piping bag', 'ziploc bag',
+  ]) assert.equal(isNonIngredientLine(kit), true, `"${kit}" should be rejected`)
 })
 
 test('realIngredients strips junk and accepts both shapes', () => {

@@ -43,6 +43,28 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   // because those two are unambiguous as phrases even though the bare verbs are not.
   /^\s*(preheat|combine|stir|whisk|bake|blend|pour|repeat|garnish|transfer|sprinkle|drizzle|chop|fold|layer|place|cook|mix|heat)\b\s+\w/i,
   /^\s*(season|serve|top)\s+(with|the)\b/i,
+  // Equipment and packaging. A stored row listed "parchment paper setup" (0g) as an ingredient,
+  // and another listed "Butter paper" — the Indian term for greaseproof. This is not cosmetic:
+  // the retention gate asks whether the model kept at least as many ingredients as the parser
+  // found, so an equipment line buys a free point toward that threshold exactly the way a repeated
+  // ingredient does, and it renders in the app as something to go and buy.
+  //
+  // Narrow by NECESSITY, not caution. Measured over 161 live rows, a broad net caught 9 lines and
+  // only 2 were equipment; the other 7 are real food — "rice paper sheet" (in a dish named "Rice
+  // Paper Bacon Egg Bagel"), "flour wrap", "Ole Xtreme Wellness High Fiber Wrap", "oil spray",
+  // "bagel seasoning". A bare /paper/ or /wrap/ rule would delete every one of them. So each
+  // alternative here is anchored to a qualifier that no food carries, and "skewers" is required to
+  // be bamboo/wooden/metal because CHICKEN skewers are dinner.
+  /\bparchment\b/i,
+  /\b(wax(ed)?|baking|greaseproof|butter)\s+paper\b/i,
+  /\bpaper\s+towels?\b/i,
+  /\b(aluminium|aluminum|tin)\s+foil\b/i,
+  /^\s*foil\b/i,
+  /\b(bamboo|wooden|metal|steel)\s+skewers?\b/i,
+  /\btoothpicks?\b/i,
+  /\b(cupcake|muffin|baking)\s+(liners?|cups?)\b/i,
+  /\b(cling film|plastic wrap|saran|piping bag|zip-?lock|ziploc)\b/i,
+  /\bsetup\s*$/i,
 ]
 
 /** True when a line is plainly not a food item — a heading, a macro summary, a link, boilerplate. */
