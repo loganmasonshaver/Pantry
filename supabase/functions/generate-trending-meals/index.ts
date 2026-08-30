@@ -774,6 +774,15 @@ Pick by what the dish IS: cuisine first if it clearly belongs to one, otherwise 
 desserts, high-protein-snack for small savoury bites, breakfast for morning food, and
 american-comfort as the catch-all for everything else. Every recipe gets one — there is no "none".
 
+LANGUAGE. Source descriptions are often not in English — this pipeline searches YouTube globally
+and German, Polish and Spanish high-protein cooking are large scenes. TRANSLATE everything you
+output into English: ingredient names, step text and the dish name. Never copy a source word
+through untranslated ("Haferflocken" is rolled oats, "borówki" are blueberries, "serek wiejski" is
+cottage cheese). Translate the FOOD, not the brand: "ESN Flexpresso" stays as it is, "Skyr" stays
+Skyr. A recipe whose ingredients are still in the source language is unusable to the reader even
+though every other field looks correct, and that is exactly what shipped before this line existed —
+English dish names sitting over German and Polish ingredient lists.
+
 Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in steps (oil, garlic, salt, pepper) appears in the ingredients array:
 [
   {
