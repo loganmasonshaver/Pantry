@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { countedIngredients, realIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
+import { countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
@@ -1091,7 +1091,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             }
             // Store the cleaned list. Duplicates are kept here (a recipe may genuinely use eggs
             // twice); only headings, macro lines and instruction text are removed.
-            r.ingredients = realIngredients(r.ingredients)
+            //
+            // massBearingIngredients runs HERE, after the retention comparison, and only here: the
+            // creator-side list carries no grams, so filtering on mass before the comparison would
+            // shrink one side and reject the recipe. It catches the junk no name rule can — a live
+            // row stored the creator's channel tags ("Superhero", "Villain", "Anime", "Band Geeks")
+            // as eight 0g ingredients, and those are ordinary words no pattern can separate from food.
+            r.ingredients = massBearingIngredients(realIngredients(r.ingredients))
             r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }

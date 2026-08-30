@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isNonIngredientLine, realIngredients, countedIngredients, nameIngredientGaps,
+import { isNonIngredientLine, realIngredients, countedIngredients, massBearingIngredients, nameIngredientGaps,
          looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
@@ -65,6 +65,47 @@ test('preference placeholders are not ingredients, but named foods survive', () 
     'everything bagel seasoning', 'cajun seasoning blend', 'soy sauce', 'fresh herbs',
     'mixed spices', 'favorite protein powder',
   ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+})
+
+test('method scaffolding and bare macro blocks are not ingredients', () => {
+  // All 25 of these shapes were found STORED in the live pool and hand-checked as junk.
+  for (const junk of [
+    'whisking step', 'placement step', 'flip step', 'folding step', 'topping step',
+    'method placeholder', 'kernel prep', 'mixing', 'instruction label', 'oven temp',
+    'protein header', 'Air fryer heat', 'parchment paper setup',
+    'dry mix', 'wet mix', 'batter mix',
+    'Directions', "What you'll need", 'Method', 'Notes',
+    // A bare macro block satisfies neither the digit rule ("504 kcal") nor the colon rule
+    // ("Protein: 51g"). One live row stored these with the macro VALUE as the weight.
+    'protein', 'carbs', 'fat', 'calories', 'total calories', 'total protein',
+  ]) assert.equal(isNonIngredientLine(junk), true, `"${junk}" should be rejected`)
+
+  for (const good of [
+    // Anchoring keeps every one of these — the macro words are substrings, not the whole name.
+    'protein powder', 'low fat yogurt', 'high-protein macaroni', 'carb balance tortillas',
+    'chocolate protein powder', 'fat free milk',
+    // "Milk and water mixture" (120g) is a real combined ingredient — it names two foods. Only the
+    // dry/wet/batter GROUPING shape is method scaffolding, which is why /mixture$/ was not added.
+    'Milk and water mixture', 'cake mix', 'pancake mix', 'brownie mix',
+    // \bheat$ must not reach "wheat" — no word boundary between the w and the h.
+    'wheat', 'cracked wheat', 'buckwheat',
+  ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+})
+
+test('a 0g ingredient is junk, but only an explicit zero', () => {
+  const items = [
+    { name: 'chicken breast', grams: '900g' },
+    { name: 'Superhero', grams: '0g' },      // a creator's channel tags, echoed as ingredients
+    { name: 'Band Geeks', grams: '0g' },
+    { name: 'salt', grams: '5g' },
+    { name: 'olive oil' },                    // no grams field at all — absence is not evidence
+    { name: 'water', grams: '' },
+  ]
+  assert.deepEqual(massBearingIngredients(items).map(i => i.name),
+    ['chicken breast', 'salt', 'olive oil', 'water'])
+  // Source-side entries are bare strings parsed from a description and carry no mass to judge.
+  assert.deepEqual(massBearingIngredients(['flour', 'Superhero']), ['flour', 'Superhero'])
+  assert.deepEqual(massBearingIngredients(undefined), [])
 })
 
 test('non-Latin ingredient lines are not punctuation', () => {

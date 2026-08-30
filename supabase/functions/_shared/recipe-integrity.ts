@@ -86,6 +86,24 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   // DELIBERATELY NOT "X of choice": "milk of choice" is live, names an actual food, and is how
   // recipes ordinarily write a substitution.
   /^(?:your\s+|my\s+)?(?:fave|fav|favou?rite|preferred)\s+(?:seasonings?|spices?|herbs?|toppings?|condiments?|sauces?)\b/i,
+  // Method scaffolding the model emits as ingredients. Measured over the live 164-meal pool these
+  // five shapes account for 25 stored entries and every one is junk, hand-checked:
+  //   "whisking step" / "flip step" / "folding step"        — instruction labels
+  //   "method placeholder" / "kernel prep" / "oven temp"    — method meta
+  //   "dry mix" / "wet mix" / "batter mix"                  — method groupings
+  //   "Directions" / "What you'll need"                     — headings the heading rule missed
+  //   "protein" / "carbs" / "fat" / "total calories"        — a macro block, no digits or colon
+  /\bsteps?\s*$/i,
+  /\b(prep|mixing|placeholder|header|label|setup|temp|heat)\s*$/i,
+  /^\s*(dry|wet|batter)\s+mix\s*$/i,
+  /^\s*(what you.{0,3}ll need|directions?|instructions?|method|notes?|you.{0,3}ll need)\s*$/i,
+  // The existing macro rules need a DIGIT ("504 kcal") or a COLON ("Protein: 51g"). A creator who
+  // writes a bare macro block — "protein" / "carbs" / "fat" on their own lines — satisfies neither,
+  // and one live row stored them with the macro VALUE as the weight: protein 82g, carbs 44g, fat
+  // 39g. Anchored to the whole name so "protein powder" and "low fat yogurt" are untouched.
+  /^\s*(total\s+)?(calories|protein|carbs?|fats?|kcal|macros?)\s*$/i,
+  // NOT added: a bare /mixture$/. "Milk and water mixture" (120g) is a real combined ingredient and
+  // names two foods; only the dry/wet/batter grouping shape above is method scaffolding.
 ]
 
 // ── Language-independent instruction detection ───────────────────────────────────────────────
@@ -131,6 +149,33 @@ export function realIngredients<T>(ingredients: T[] | undefined): T[] {
   return (ingredients || []).filter(i => {
     const name = typeof i === 'string' ? i : String((i as any)?.name ?? '')
     return !isNonIngredientLine(name)
+  })
+}
+
+// An ingredient the model gave no mass is not an ingredient.
+//
+// Measured over the live 164-meal pool: 32 entries across 14 meals carry 0 grams and every one is
+// junk — a creator's own channel tags echoed as a list ("Superhero", "Villain", "Anime", "Band
+// Geeks"), instruction labels, method groupings, bare headings. Not one is food.
+//
+// This is the ONLY signal that reaches ten of them. "Superhero" and "Gaming" are ordinary English
+// words with no food-shaped tell; the name rules above cannot be extended to separate them from an
+// ingredient without deleting real food, so mass is the only thing left to judge them by.
+//
+// ORDERING IS LOAD-BEARING: this runs AFTER the retention comparison, never before. The creator
+// side of that comparison is parsed from a description and carries no grams at all, so filtering on
+// mass earlier would shrink only the MODEL's side and reject the whole recipe — the exact
+// cleaned-vs-uncleaned asymmetry that was the pipeline's biggest false-rejection source. Run after,
+// it cannot cause a rejection: the contract has already been satisfied on names.
+//
+// Only an EXPLICIT zero counts. A missing grams field is not evidence of junk.
+export function massBearingIngredients<T>(ingredients: T[] | undefined): T[] {
+  return (ingredients || []).filter(i => {
+    if (typeof i === 'string') return true
+    const raw = String((i as any)?.grams ?? '').trim()
+    if (!raw) return true
+    const g = parseFloat(raw.replace(/[^0-9.]/g, ''))
+    return !Number.isFinite(g) || g > 0
   })
 }
 
