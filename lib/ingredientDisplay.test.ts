@@ -57,7 +57,9 @@ test('"pepper" the vegetable and the cheese are not spices', () => {
   // branch matched \bpepper\b and converted their weight into spoons. Seven live rows read that way.
   assert.equal(getMeasuredDisplay('red bell pepper', '150g', '1'), '150g')
   assert.equal(getMeasuredDisplay('green bell pepper', '150g', '1 medium'), '150g')
-  assert.equal(getMeasuredDisplay('pepper jack cheese', '120g', '6 slices'), '120g')
+  // "6 slices", not "120g": the creator's count now wins for an unambiguous unit. What this test
+  // pins is that it is not routed through the SPICE branch — it used to read "20 tbsp".
+  assert.equal(getMeasuredDisplay('pepper jack cheese', '120g', '6 slices'), '6 slices')
   assert.equal(getMeasuredDisplay('chargrilled peppers', '100g', '2'), '100g')
   // ...and the real spice still goes through the spice branch. "salt & pepper" keeps salt, which is
   // why the non-spice senses are STRIPPED rather than used to negate the whole test.
@@ -66,7 +68,7 @@ test('"pepper" the vegetable and the cheese are not spices', () => {
   assert.equal(getMeasuredDisplay('red pepper flakes', '6g', 'a pinch'), '1 tbsp')
   assert.equal(getMeasuredDisplay('white pepper', '2g', 'a pinch'), '1 tsp')
   // Pepperoni needs no rule at all — \b does not match inside the word.
-  assert.equal(getMeasuredDisplay('turkey pepperoni', '80g', '34 slices'), '80g')
+  assert.equal(getMeasuredDisplay('turkey pepperoni', '80g', '34 slices'), '34 slices')
 })
 
 test('a packet is a measurement, and the actionable one', () => {
@@ -79,6 +81,32 @@ test('a packet is a measurement, and the actionable one', () => {
   // A vague descriptor still falls through to a computed spoon measure — that is why tier 2 exists.
   assert.equal(getMeasuredDisplay('paprika', '6g', 'a pinch'), '1 tbsp')
   assert.equal(getMeasuredDisplay('cumin', '2g', 'to taste'), '1 tsp')
+})
+
+test("an unambiguous creator measure beats a gram count", () => {
+  // "6 lbs ground beef" was rendering as "2722g" — the same quantity and useless, since nobody
+  // buys, weighs or thinks in 2722 grams. A 15-serving batch recipe made it obvious because the
+  // numbers get large, but it applied at every size.
+  assert.equal(getMeasuredDisplay('96/4 ground beef', '2722g', '6 lbs'), '6 lbs')
+  assert.equal(getMeasuredDisplay('Beef Bacon', '300g', '20 slices'), '20 slices')
+  assert.equal(getMeasuredDisplay('Provolone cheese', '300g', '15 slices'), '15 slices')
+  assert.equal(getMeasuredDisplay('Red onions', '340g', '12 oz'), '12 oz')
+  assert.equal(getMeasuredDisplay('chicken tenders', '1360g', '3 lbs'), '3 lbs')
+  // Decimal weights still become fractions on the way out.
+  assert.equal(getMeasuredDisplay('shaved ribeye steak', '680g', '1.5 lbs'), '1½ lbs')
+
+  // VOLUME OF A SOLID keeps grams. A cup of yoghurt, quark or dal depends on how it is packed, so
+  // the gram figure is genuinely more precise there rather than merely different — 210 live rows.
+  // This is the line: the creator's unit wins where it is provably better, not everywhere.
+  assert.equal(getMeasuredDisplay('Greek Yoghurt', '500g', '2 cups'), '500g')
+  assert.equal(getMeasuredDisplay('Low-fat quark', '500g', '2 cups'), '500g')
+  assert.equal(getMeasuredDisplay('Green moong dal', '500g', '2 cups'), '500g')
+
+  // A vague visual is not a measurement and must not win.
+  assert.equal(getMeasuredDisplay('red bell pepper', '150g', '1 medium'), '150g')
+  assert.equal(getMeasuredDisplay('spinach', '60g', 'a handful'), '60g')
+  // Liquids and seasonings keep their own tier — tbsp/tsp/cups are exact for a liquid.
+  assert.equal(getMeasuredDisplay('buffalo wing sauce', '355g', '1.5 cups'), '1½ cups')
 })
 
 test('a container shows the count AND the size, like a recipe site', () => {
@@ -199,7 +227,9 @@ test('measured display routes each ingredient class correctly', () => {
   assert.match(getMeasuredDisplay('chia seeds', '8g', undefined), /tsp|tbsp/)
   assert.equal(getMeasuredDisplay('olive oil', '15g', '1 tbsp'), '1 tbsp')  // real unit wins
   assert.match(getMeasuredDisplay('paprika', '4g', 'a pinch'), /tsp/)       // pinch is not a unit
-  assert.equal(getMeasuredDisplay('chicken breast', '170g', '1 piece'), '170g')
+  // A stated count wins here too. Note the real render never reaches this path for a chicken
+  // breast — getWholeUnitDisplay claims it first and prints "1 chicken breast".
+  assert.equal(getMeasuredDisplay('chicken breast', '170g', '1 piece'), '1 piece')
   assert.equal(getMeasuredDisplay('red potatoes', '44g', undefined), '45g') // rounded
 })
 

@@ -307,6 +307,9 @@ export function toCookingFraction(s: string): string {
 // recipes are actually written, and nobody prints a gram weight for a clove.
 const CONTAINER_UNIT = /\b(jars?|cans?|tins?|bottles?|packets?|packs?|sachets?|tubs?|cartons?|boxes)\b/i
 const MEASURE_OR_CONTAINER = /\b(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ounces?|sticks?)\b|\b(jars?|cans?|tins?|bottles?|packets?|packs?|sachets?|tubs?|cartons?|boxes)\b/i
+// A weight, or a count of discrete pieces, and nothing else on the line. Volume units (cup/tbsp/
+// tsp/ml) are deliberately absent — see the tier that uses this.
+const UNAMBIGUOUS_VISUAL = /^\s*[\d.\/]+\s*(kg|g|grams?|oz|ounces?|lbs?|pounds?|slices?|pieces?|units?|cloves?|sticks?|sheets?|scoops?|fillets?|breasts?)\s*$/i
 // A creator who already wrote the size ("1 400g can", "1 jar (500g)") needs nothing added.
 const SIZE_ALREADY = /\d\s*(g|kg|ml|l|oz|ounces?|lbs?|pounds?)\b/i
 
@@ -369,6 +372,22 @@ export function getMeasuredDisplay(name: string, gramsStr: string | undefined, v
       if (grams > 0) return `${shown} (${roundDisplayGrams(grams)}g)`
     }
     return shown
+  }
+
+  // The creator's own measure wins whenever it is UNAMBIGUOUS — a weight, or a count of discrete
+  // pieces. A recipe that says "6 lbs ground beef" was rendering as "2722g", which is the same
+  // number and useless: nobody buys, weighs or thinks in 2722 grams. Same for "20 slices" bacon
+  // shown as 300g. 15-serving batch recipes made this obvious because the numbers get large, but
+  // it applies at every size.
+  //
+  // Deliberately NOT volume-of-a-solid. "2 cups Greek yoghurt" stays 500g — 210 live rows — because
+  // a cup of a solid depends on how it is packed, so there the gram figure is genuinely more
+  // precise rather than merely different. Weights and counts have no such ambiguity, which is the
+  // line this draws: the creator's unit wins where it is provably better, not everywhere.
+  //
+  // Liquids and seasonings keep their own tier below: tbsp/tsp/cups are exact for a liquid.
+  if (visualStr && UNAMBIGUOUS_VISUAL.test(visualStr)) {
+    return toCookingFraction(visualStr)
   }
 
   if ((isLiquid || isSeasoning) && visualStr && MEASURE_OR_CONTAINER.test(visualStr)) {
