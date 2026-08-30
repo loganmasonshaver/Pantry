@@ -50,6 +50,23 @@ test('equipment and packaging are not ingredients', () => {
   ]) assert.equal(isNonIngredientLine(kit), true, `"${kit}" should be rejected`)
 })
 
+test('preference placeholders are not ingredients, but named foods survive', () => {
+  // "your fave seasoning!" names a preference, not a food. It rendered on Discover as a shoppable
+  // row with an "+ Add" button (video 5QygSHOw4z0) and counted toward the 100%-retention threshold.
+  for (const junk of [
+    'fave seasoning!', 'your fave seasoning', 'favorite seasoning', 'fav spices',
+    'preferred toppings', 'My Favourite Herbs', 'your favourite condiments',
+  ]) assert.equal(isNonIngredientLine(junk), true, `"${junk}" should be rejected`)
+  // The rule needs a preference word IMMEDIATELY before a generic CATEGORY noun. Anything that
+  // still names an actual food is kept — the defect is a missing food noun, not the word
+  // "favorite". "milk of choice" is live in the pool and is ordinary substitution phrasing.
+  for (const good of [
+    'favorite hot sauce', 'milk of choice', 'Carob molasses (optional)', 'taco seasoning',
+    'everything bagel seasoning', 'cajun seasoning blend', 'soy sauce', 'fresh herbs',
+    'mixed spices', 'favorite protein powder',
+  ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+})
+
 test('non-Latin ingredient lines are not punctuation', () => {
   // \W is ASCII-only, so the old punctuation-only rule classified every Cyrillic, Devanagari and
   // CJK line as junk and deleted it. A real Russian source list collapsed from 12 items to 1.

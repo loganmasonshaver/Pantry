@@ -70,6 +70,22 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /\b(cupcake|muffin|baking)\s+(liners?|cups?)\b/i,
   /\b(cling film|plastic wrap|saran|piping bag|zip-?lock|ziploc)\b/i,
   /\bsetup\s*$/i,
+  // Preference placeholders. "your fave seasoning!" names a PREFERENCE, not a food, and it is not
+  // a harmless cosmetic: the row renders on Discover as a shoppable line with an "+ Add" button
+  // that puts "fave seasoning!" on a real grocery list, and it buys a free point toward the
+  // 100%-retention threshold exactly the way an equipment line does. One live row had it since
+  // 2026-08-17 (video 5QygSHOw4z0, "Seasoned Sheet Pan Chicken").
+  //
+  // Requires a preference word IMMEDIATELY followed by a generic CATEGORY noun, because that is
+  // the shape that names no food at all. "favorite hot sauce" still names hot sauce and is left
+  // alone — the defect is a missing food noun, not the word "favorite".
+  //
+  // Measured over the 1300 ingredient names in the live 165-row pool: matches exactly one, the
+  // row above, with no false positives.
+  //
+  // DELIBERATELY NOT "X of choice": "milk of choice" is live, names an actual food, and is how
+  // recipes ordinarily write a substitution.
+  /^(?:your\s+|my\s+)?(?:fave|fav|favou?rite|preferred)\s+(?:seasonings?|spices?|herbs?|toppings?|condiments?|sauces?)\b/i,
 ]
 
 // ── Language-independent instruction detection ───────────────────────────────────────────────
