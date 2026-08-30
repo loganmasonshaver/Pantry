@@ -158,7 +158,7 @@ Hey {{firstName}},
 
 Your trial ends tomorrow. Quick math:
 
-Monthly: $7.99/mo = $95.88/year
+Monthly: $9.99/mo = $119.88/year
 Annual:  $30/year
 
 If you're going to keep using Pantry past 4 months (which is what most members do), annual saves you $66/year.
@@ -182,7 +182,7 @@ Hey {{firstName}},
 
 Welcome to Pantry.
 
-Heads up — Pantry's a paid app ($7.99/mo or $30/yr). Every new account gets a 7-day free trial before any charge. Cancel anytime from iPhone Settings before day 7 and you pay nothing.
+Heads up — Pantry's a paid app ($9.99/mo or $30/yr). Every new account gets a 7-day free trial before any charge. Cancel anytime from iPhone Settings before day 7 and you pay nothing.
 
 If you're on the fence: open the app, tap "Cook Tonight" once. It generates 3 meals you can make right now with what's in your pantry. That's the whole product, in one tap.
 
@@ -234,7 +234,7 @@ You signed up for Pantry two weeks ago. If you're still here, you probably get t
 
 Premium unlocks the part that actually solves the "what's for dinner" problem: AI meal generation that uses YOUR pantry, your macros, your cooking skill, your dislikes — and produces 3 meals every morning you can actually make tonight.
 
-7-day free trial, then $7.99/mo or $30/yr. Cancel anytime from iPhone Settings.
+7-day free trial, then $9.99/mo or $30/yr. Cancel anytime from iPhone Settings.
 
 Try it: pantry://trial
 
@@ -260,7 +260,7 @@ Quick recap of what it does:
 - High-protein, macro-aware, no diet-food clichés
 - Cook from what you have OR plan ahead with a grocery list
 
-Free 7-day trial, then $7.99/mo or $30/yr.
+Free 7-day trial, then $9.99/mo or $30/yr.
 
 If you have any issues or feedback, just hit reply.
 

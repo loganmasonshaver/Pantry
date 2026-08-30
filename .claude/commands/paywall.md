@@ -10,7 +10,7 @@ Gate the following feature behind the Pantry premium subscription: $ARGUMENTS
 - Context: `context/SuperwallContext.tsx`
 - Hook: `const { isPremium, showPaywall } = usePremium()`
 - Free tier limits: 1 meal suggestion/day, 5 saved meals max
-- Price: $7.99/month
+- Price: $9.99/month ($29.99/year)
 
 ## What to implement
 

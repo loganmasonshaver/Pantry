@@ -35,7 +35,7 @@ Walk the funnel in order, in character as that skeptic:
 4. **Paywall copy.** The three questions the skeptic asks, in order:
    - "What do I get RIGHT NOW?" — the value proposition above the fold
    - "What am I committing to?" — trial framing must be exactly the safe version:
-     "try free for 7 days before any charge." Price is $7.99/mo; yearly is
+     "try free for 7 days before any charge." Price is $9.99/mo; yearly is
      $29.99 in the IAP and may round to "$30" in marketing prose — flag any
      other number, and flag "$30" if it appears where the exact IAP price
      shows (paywall price labels, App Store Connect).
@@ -66,4 +66,4 @@ This is taste plus funnel logic, not data — a real A/B test in Superwall beats
 any single opinion, and PostHog numbers overrule the skeptic every time. It can
 only audit what's pasted in or in the repo: live Superwall variants and App
 Store Connect state must be provided as screenshots, not assumed. And it judges
-copy, not price strategy — "is $7.99 right" is an honest-advisor question.
+copy, not price strategy — "is $9.99 right" is an honest-advisor question.

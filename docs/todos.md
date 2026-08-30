@@ -13,7 +13,7 @@
 ### Paywall Optimization (RevenueCat study — freemium underperforms)
 Based on RevenueCat's analysis of 115K+ apps: pure freemium converts under 2%, free trials convert 15-30% of starters. Health/fitness apps have higher willingness to pay than average.
 - [ ] Add 7-day free trial of premium — shown during onboarding paywall step. Single biggest conversion lever per RevenueCat data.
-- [ ] A/B test weekly ($2.99/week) vs monthly ($7.99/month) pricing via Superwall — weekly sounds cheaper but earns more annually. RevenueCat found weekly effective in fitness.
+- [ ] A/B test weekly ($2.99/week) vs monthly ($9.99/month) pricing via Superwall — weekly sounds cheaper but earns more annually. RevenueCat found weekly effective in fitness.
 - [ ] A/B test hard paywall for paid ad traffic vs soft paywall for organic — hard paywall converts ~34.5% on paid traffic (already planned in Superwall AppStack)
 - [ ] A/B test paywall placement — onboarding step 8 (current) vs immediately after personalization preview vs after first meal generation
 
