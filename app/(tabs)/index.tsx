@@ -28,6 +28,7 @@ import { Swipeable } from 'react-native-gesture-handler'
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
+import { todayStr } from '@/lib/localDate'
 import { MealImage } from '@/components/MealImage'
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAuth } from '../../context/AuthContext'
@@ -957,26 +958,26 @@ export default function HomeScreen() {
 
   const [slots, setSlots] = useState<MealSlot[]>(INITIAL_SLOTS)
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set(['breakfast']))
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [selectedDate, setSelectedDate] = useState(() => todayStr())
   useEffect(() => { calorieMilestoneRef.current = null }, [selectedDate]) // new day = fresh baseline, don't celebrate the goal on a day switch
-  const isToday = selectedDate === new Date().toISOString().split('T')[0]
+  const isToday = selectedDate === todayStr()
 
   // Anchor at noon when constructing the Date so DST transitions don't shift the day
   // backward (e.g. midnight + DST fallback = previous day on iOS).
   const goBackDay = () => {
     const d = new Date(selectedDate + 'T12:00:00')
     d.setDate(d.getDate() - 1)
-    setSelectedDate(d.toISOString().split('T')[0])
+    setSelectedDate(todayStr(d))
   }
   const goForwardDay = () => {
     // Recompute today HERE rather than trusting the render-time isToday constant — if the
     // app sat open across midnight, isToday would still reflect yesterday and wrongly block
     // navigating into the real new day. String date compare is safe for YYYY-MM-DD.
-    const todayStr = new Date().toISOString().split('T')[0]
-    if (selectedDate >= todayStr) return
+    const todayLocal = todayStr()
+    if (selectedDate >= todayLocal) return
     const d = new Date(selectedDate + 'T12:00:00')
     d.setDate(d.getDate() + 1)
-    setSelectedDate(d.toISOString().split('T')[0])
+    setSelectedDate(todayStr(d))
   }
 
   const fetchTodayLogs = useCallback(async () => {
@@ -1286,13 +1287,13 @@ export default function HomeScreen() {
           <TouchableOpacity onPress={goBackDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
-          <PressableScale scaleTo={0.94} haptic onPress={() => setSelectedDate(new Date().toISOString().split('T')[0])}>
+          <PressableScale scaleTo={0.94} haptic onPress={() => setSelectedDate(todayStr())}>
             <Text style={styles.dayNavText}>
               {isToday ? 'Today' : (() => {
                 const d = new Date(selectedDate + 'T12:00:00')
                 const yesterday = new Date()
                 yesterday.setDate(yesterday.getDate() - 1)
-                if (selectedDate === yesterday.toISOString().split('T')[0]) return 'Yesterday'
+                if (selectedDate === todayStr(yesterday)) return 'Yesterday'
                 return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
               })()}
             </Text>

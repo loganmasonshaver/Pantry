@@ -18,6 +18,7 @@ import { Flame, Compass, Utensils, Plus, Search, X } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
+import { todayStr } from '@/lib/localDate'
 import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
 import { supabase } from '@/lib/supabase'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
@@ -490,9 +491,9 @@ export default function DiscoverScreen() {
         // profile without macro goals silently lost the pantry shelf too. Unrelated data should
         // never share an early return.
         if (!goalCal && !goalPro) return
-        const todayStr = new Date().toISOString().split('T')[0]
+        const loggedToday = todayStr() // LOCAL day, matching how logged_at is written
         const { data: logs } = await supabase.from('meal_logs')
-          .select('calories, protein').eq('user_id', user.id).eq('logged_at', todayStr)
+          .select('calories, protein').eq('user_id', user.id).eq('logged_at', loggedToday)
         const eatenCal = (logs ?? []).reduce((sum, l: any) => sum + (l.calories ?? 0), 0)
         const eatenPro = (logs ?? []).reduce((sum, l: any) => sum + (l.protein ?? 0), 0)
         setBudget({
@@ -771,7 +772,9 @@ export default function DiscoverScreen() {
   // used to provide, which is what lets retention grow from 7 days to 30 without the feed feeling
   // stale.
   const browseSections = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0]
+    // Deliberately UTC: this is compared against generated_at, a SERVER pipeline timestamp, not
+    // against anything in the user's local day. Do not swap this for the local-date helper.
+    const pipelineTodayUtc = new Date().toISOString().split('T')[0]
     const dayOfYear = dayOfYearNow()
 
     // FIRST SHELF WINS. Each section claims meals the earlier ones didn't take, so a meal appears
@@ -837,7 +840,7 @@ export default function DiscoverScreen() {
 
     // ── Today. One section, not a rail plus a leftovers grid: the rail took 10 and today's batch
     // is 8-15, so "More from today" was empty by construction and the two names described one set.
-    const today = claim(browseGrid.filter(m => m.generated_at?.startsWith(todayStr)), 18)
+    const today = claim(browseGrid.filter(m => m.generated_at?.startsWith(pipelineTodayUtc)), 18)
 
     // ── Intent shelves ──
     // Shelf COUNT scales with the pool. Four shelves over 35 meals leaves two-item sections that

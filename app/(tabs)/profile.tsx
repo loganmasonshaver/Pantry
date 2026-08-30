@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Settings, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import { todayStr } from '@/lib/localDate'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useRouter } from 'expo-router'
 import { useAuth } from '@/context/AuthContext'
@@ -110,7 +111,7 @@ function calcStreak(dates: string[]): number {
   let streak = 0
   const d = new Date()
   while (true) {
-    const key = d.toISOString().split('T')[0]
+    const key = todayStr(d) // LOCAL day — logged_at rows are local calendar dates
     if (!dateSet.has(key)) break
     streak++
     d.setDate(d.getDate() - 1)
@@ -123,7 +124,7 @@ function getLast7ActiveDays(dates: string[]): boolean[] {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date()
     d.setDate(d.getDate() - (6 - i))
-    return dateSet.has(d.toISOString().split('T')[0])
+    return dateSet.has(todayStr(d))
   })
 }
 
@@ -715,7 +716,7 @@ export default function ProfileScreen() {
 
     // Meal logs — streak uses a 180-day window (plenty for any streak), bounded so the
     // query doesn't grow all-time. Total count comes from a separate head count.
-    const streakWindow = new Date(Date.now() - 180 * 86400000).toISOString().split('T')[0]
+    const streakWindow = todayStr(new Date(Date.now() - 180 * 86400000))
     supabase
       .from('meal_logs')
       .select('logged_at')
@@ -731,7 +732,7 @@ export default function ProfileScreen() {
       .then(({ count }) => setMealLogCount(count ?? 0))
 
     // Weekly nutrition summary
-    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+    const sevenDaysAgo = todayStr(new Date(Date.now() - 7 * 86400000))
     supabase
       .from('meal_logs')
       .select('calories, protein, logged_at')

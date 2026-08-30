@@ -29,6 +29,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
 import { escapeLike } from '@/lib/sqlLike'
+import { todayStr } from '@/lib/localDate'
 import { categorizeItem } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
@@ -504,7 +505,7 @@ export default function MealDetailScreen() {
     loggingRef.current = true
     setShowSlotPicker(false) // close immediately so a second slot can't be tapped mid-insert
     setLogging(true)
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayStr() // LOCAL day — logged_at is the day a meal COUNTS for
 
     // Fallback to the shared image_cache (populated by other users who've already
     // generated this meal) so meal logs render with an image even if this user

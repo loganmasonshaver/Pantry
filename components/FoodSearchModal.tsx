@@ -19,6 +19,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { X, Search, ScanBarcode, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react-native'
 import Svg, { Circle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
+import { todayStr } from '@/lib/localDate'
 import { supabase } from '@/lib/supabase'
 import { trackMealLogged } from '@/lib/analytics'
 import {
@@ -293,7 +294,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         carbs: Math.round(base.carbs * qty),
         fat: Math.round(base.fat * qty),
       }
-      const logDay = logDate || new Date().toISOString().split('T')[0]
+      const logDay = logDate || todayStr() // LOCAL day — see lib/localDate.ts
       let error: any
       if (editLogId) {
         ;({ error } = await supabase.from('meal_logs').update({

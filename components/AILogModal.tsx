@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker'
 import * as ImageManipulator from 'expo-image-manipulator'
 import { X, Camera, FileText, ImageIcon, ChevronRight, Zap } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
+import { todayStr } from '@/lib/localDate'
 import { supabase } from '@/lib/supabase'
 import { edgeErrorInfo } from '@/lib/edgeError'
 import { useAuth } from '@/context/AuthContext'
@@ -281,7 +282,7 @@ export default function AILogModal({ visible, slots, defaultSlot, onClose, onLog
   const saveLog = async () => {
     if (!user || !mealName.trim()) return
     setSaving(true)
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayStr() // LOCAL day — see lib/localDate.ts
     const cals = parseInt(calories) || 0
     const prot = parseInt(protein) || 0
     const crbs = parseInt(carbs) || 0

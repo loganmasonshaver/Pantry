@@ -317,7 +317,7 @@ export default function PantryScreen() {
         // DATE column (the day a meal counts for); created_at is insert time — use logged_at here.
         const proteinGoal = data?.protein_goal ?? 0
         if (proteinGoal > 0) {
-          const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0]
+          const sevenDaysAgo = todayStr(new Date(Date.now() - 7 * 86400000))
           supabase.from('meal_logs').select('protein, logged_at').eq('user_id', user.id).gte('logged_at', sevenDaysAgo)
             .then(({ data: logs }) => {
               if (!logs?.length) return
