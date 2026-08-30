@@ -313,3 +313,34 @@ test('no source file carries a stray control character', () => {
   walk('supabase/functions')
   assert.deepEqual(bad, [])
 })
+
+// ── language-independent instruction detection ───────────────────────────────────────────────
+test('instructions are caught without knowing the language', () => {
+  for (const instruction of [
+    // The two real Russian lines that got a galette rejected: they sat in the parsed SOURCE list,
+    // so the contract demanded the model copy a method step in as an ingredient.
+    'тесто убрать в холодильник на 30 минут (можно в морозильную камеру на 15 минут)',
+    '190–195°C — 30–35 мин (ориентируйтесь на свою духовку)',
+    // ...and English ones the verb list misses because they do not start with a listed verb.
+    'Add Salt, Oregano, Mix it Well and Cook for about 5-7 minutes.',
+    'Take a Pan, Add Butter, Toast the bread on both the sides until golden brown and crispy.',
+    'Now apply the cheese spread mixture on the toasted bread and',
+    'Wrap it from both sides carefully so that it doesn’t break.',
+    'Dip in melted dark chocolate. Sprinkle flaky sea salt on top and enjoy',
+    'Backe bei 180°C für 25 Minuten',
+  ]) assert.equal(isNonIngredientLine(instruction), true, `"${instruction}" should be rejected`)
+})
+
+test('long ingredient lines and emoji names survive the word count', () => {
+  // Measured against 723 stored names (max 6 words) and 63 real source lines (max 9). The bread
+  // line reads 11 tokens but only 9 WORDS — excluding emoji is what keeps it.
+  for (const good of [
+    'Bread 🍞 or Bread 🥖 (we’re using Zero Maida Garlic Bread)',
+    '1 cup (200g) cottage cheese (or cream cheese, ricotta).',
+    '1 cup (250 ml) 10% cream or milk',
+    'масло сливочное (растопленное) — 100 г',
+    'Bell Peppers (Green, Red, Yellow) 🫑',
+    // A time unit is NOT a rejection signal — these are real products.
+    '10 minute rice', '5 minute oats', 'Minute Rice',
+  ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+})

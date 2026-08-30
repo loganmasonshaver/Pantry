@@ -72,10 +72,41 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /\bsetup\s*$/i,
 ]
 
+// ── Language-independent instruction detection ───────────────────────────────────────────────
+//
+// The instruction-verb list above is English-only, so a Russian "put the dough in the fridge for
+// 30 minutes" reads as an ingredient. That is not cosmetic: the retention gate builds its contract
+// from the parsed source list, so an instruction in that list demands the model copy an instruction
+// in AS an ingredient — and then rejects the recipe when it sensibly refuses. A real Russian
+// galette was dropped for exactly this, one item short of a spec containing two method lines.
+//
+// Extending the verb list to Russian, German, Polish and Spanish is unbounded and guesses at which
+// languages appear next. These two signals need no vocabulary at all. Both were measured against
+// 723 stored ingredient names and 63 real source ingredient lines: ZERO false positives on either.
+
+/** A temperature belongs to a method. No ingredient carries one. */
+const TEMPERATURE = /\d\s*°|\b\d{2,3}\s*(?:degrees?|deg)\b/i
+
+/** Words carrying at least one letter — emoji and bare quantities do not count. */
+const letterWords = (t: string): number => t.split(/\s+/).filter(w => /\p{L}/u.test(w)).length
+
+// 10 is measured, not guessed. Stored ingredient NAMES top out at 6 words. SOURCE lines carry
+// quantities and parentheticals and reach 9 — "Bread 🍞 or Bread 🥖 (we're using Zero Maida Garlic
+// Bread)" is a real one. Instructions run 10-18. At 10 the corpus separates cleanly; at 9 that
+// bread line gets deleted, which is why emoji are excluded from the count: with them it reads 11.
+const MAX_INGREDIENT_WORDS = 10
+
+// DELIBERATELY NOT ADDED: a digit-plus-time-unit rule ("30 минут", "for 5-7 minutes"). Measured, it
+// caught nothing the two rules above miss, and it deletes real food — "10 minute rice" and
+// "5 minute oats" are products people list. A signal that adds no catches and costs ingredients is
+// not worth carrying.
+
 /** True when a line is plainly not a food item — a heading, a macro summary, a link, boilerplate. */
 export function isNonIngredientLine(text: string): boolean {
   const t = (text ?? '').trim()
   if (!t) return true
+  if (TEMPERATURE.test(t)) return true
+  if (letterWords(t) >= MAX_INGREDIENT_WORDS) return true
   return NON_INGREDIENT_PATTERNS.some(re => re.test(t))
 }
 
