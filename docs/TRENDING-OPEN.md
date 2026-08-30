@@ -65,3 +65,32 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
       Constants re-derived from the pool: garlic clove 5g->3g, chicken breast 170g->190g.
       **Remaining:** avocado is 200g in the table but the pool implies ~150g (n=3, range 100-150).
       Left alone — thin evidence and it caused no visible contradiction. Re-check as the pool grows.
+
+## 2026-08-30 — junk-ingredient re-audit (item 1 of a screenshot review)
+
+**The earlier narrow fix (`314ae64`) was not enough.** A full audit of the pool found 36 non-food
+entries across 15 meals. Fixed in `<commit>`: name rules for the shapes with a tell, plus
+`massBearingIngredients` for the ten that have none ("Superhero", "Gaming", "Band Geeks" — a
+creator's channel tags, all 0g). Live rows cleaned: 1297 -> 1261 ingredients.
+
+**36 pre-gate rows deleted.** 22% of the pool was `source_verified=false`, ALL from 2026-08-09..12,
+before the 100%-retention gate existed — they had passed no integrity check of any kind. Verified
+rows run 08-16 onward with zero overlap, and the insert sets `source_verified: r._sourceVerified
+=== true` where that flag is only set inside the filter that returns true, so current code cannot
+produce one. Pool is now 128, all verified. Backup: scratchpad `deleted_36_unverified_rows.json`.
+
+- [x] **DEAD END — do not add a "creamy"/"cheesy" name-gap rule.** `nameIngredientGaps` misses
+      "Creamy Fajita Chicken" twice over: `cream` is not in `DEFINING_FOODS`, and `singular()` only
+      strips plurals so "creamy" never stems to "cream". Fixing both LOOKS right and is wrong.
+      Measured over the pool, 4 meals have "creamy" with no literal cream and only ONE is a real
+      gap — the other three are satisfied by cashew cream, paneer and **vodka sauce**. The rule
+      would reject 3 good recipes to catch 1. Same profile as the digit-plus-time-unit and
+      fractional-gate dead ends.
+- [ ] **Macro coherence is still NOT a per-row verdict.** Re-confirmed: `verifyMacros` fails 39% of
+      VERIFIED rows, matching the "rejects a third of the feed" figure already recorded in
+      `recipe-integrity.ts`. Most failures point the wrong way (ingredients suggesting MORE than
+      claimed = table overestimation, not a drop). Use it to corroborate a hand-checked case, never
+      as evidence on its own.
+- [ ] **Vague names WITH mass are still uncaught** — "20g topping", "5g ga", "1 tsp oil", "5g Roas".
+      Neither signal reaches them: they are not 0g and not patternable. Open as items 9-12 of the
+      screenshot review.
