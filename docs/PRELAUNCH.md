@@ -79,6 +79,11 @@ mock data removed from the bundle, `last_active` schema drift). What remains:
 - **`CODE_REVIEW.md` holds 87 confirmed findings.** Its paywall findings were verified stale on
   2026-08-30; the other ~80 have not been checked. Worth one triage pass — some are certainly
   already fixed, some may not be.
+- **Email system needs one real end-to-end test.** It had NEVER worked: loops-sync selected
+  `email` and `full_name` from profiles, which have never been columns there, so every call
+  failed on the unknown column and no contact or event ever reached Loops (fixed `4c016c2`).
+  Subscription lifecycle now recorded server-side by superwall-webhook. Proving it needs a real
+  purchase or expiration through Superwall — worth doing during TestFlight rather than at launch.
 - **Engagement trackers wired but not device-verified.** `touchLastActive`,
   `trackCookTonightUsed`, `trackMealSavedEngagement` and `trackGoalsCustomized` had never been
   called by anything; they are now wired (`8977f41`). They fire on real interactions and write
