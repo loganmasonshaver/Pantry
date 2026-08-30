@@ -1389,8 +1389,12 @@ export default function HomeScreen() {
                 // this whole screen. setState still runs, but it no longer gates the first frame.
                 // Hold measurements until the glide is done — see layoutPaused above.
                 layoutPaused.current = true
-                setTimeout(flushLayout, 320) // 280ms animation + a frame of settle
-                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.out(ReaEasing.cubic) })
+                setTimeout(flushLayout, 320 * (__DEV__ ? 8 : 1)) // animation + a frame of settle
+                // __DEV__ slow motion. "Feels bad" cannot be debugged at 280ms — at 8x the exact
+                // frame where something jumps, stalls, or moves against the rest becomes visible
+                // and describable. Production is unaffected.
+                const SLOWMO = __DEV__ ? 8 : 1
+                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280 * SLOWMO, easing: ReaEasing.out(ReaEasing.cubic) })
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
                 AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
