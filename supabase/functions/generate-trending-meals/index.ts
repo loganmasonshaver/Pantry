@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { countedIngredients, realIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource } from '../_shared/recipe-integrity.ts'
+import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -279,72 +280,6 @@ async function correctMealMacros(recipe: any): Promise<any> {
 // Derive diet/allergen tags from a meal's ingredient list so Discover can build a
 // per-user feed. Keyword substring match — cheap, no extra API calls. Tags are
 // computed at generation time and stored on the row.
-const TAG_MEAT = ['chicken', 'beef', 'steak', 'pork', 'turkey', 'bacon', 'sausage', 'lamb', 'veal', 'prosciutto', 'pepperoni', 'salami', 'chorizo', 'carnitas', 'ribeye', 'sirloin', 'brisket', 'pastrami', 'jerky', 'duck', 'venison', 'bison', 'meatball', 'ground meat']
-const TAG_SEAFOOD = ['salmon', 'tuna', 'shrimp', 'prawn', 'crab', 'lobster', 'cod', 'tilapia', 'fish', 'anchovy', 'sardine', 'scallop', 'mussel', 'clam', 'oyster', 'squid']
-// 'butter' handled separately so nut butters don't read as dairy.
-// COMPOUND FOODS are the second failure mode, and the one that scanning more text cannot fix.
-// The first mode was the extractor dropping an ingredient (parmesan missing from a dish literally
-// named "Parmesan-Crusted Chicken") — solved by widening the haystack. This one is different: the
-// ingredient IS present, but its NAME contains no allergen keyword. "Pesto" is not in a dairy list,
-// so a pesto dish read as dairy-free and nut-free; "gnocchi" and "teriyaki" read as gluten-free.
-// Four live rows were mis-tagged this way, one of them wrong on all three axes.
-//
-// The list below can never be complete — regional dishes, brand products and "house sauce" are
-// unbounded — which is exactly why the LLM's own allergen judgement is ANDed with it downstream.
-const COMPOUND_DAIRY = ['pesto', 'ranch', 'caesar', 'alfredo', 'tzatziki', 'naan', 'brioche', 'croissant', 'carbonara', 'stroganoff', 'au gratin', 'bechamel', 'tiramisu', 'ice cream', 'custard', 'butterscotch', 'milk chocolate']
-const COMPOUND_GLUTEN = ['gnocchi', 'teriyaki', 'hoisin', 'orzo', 'farro', 'bulgur', 'semolina', 'graham', 'pretzel', 'brioche', 'croissant', 'naan', 'roux', 'tempura', 'panzanella', 'miso', 'malt']
-const COMPOUND_NUTS = ['pesto', 'satay', 'marzipan', 'praline', 'nutella', 'baklava', 'romesco', 'gianduja']
-
-const TAG_DAIRY = ['milk', 'cheese', 'cream', 'yogurt', 'whey', 'ghee', 'mozzarella', 'cheddar', 'parmesan', 'ricotta', 'brie', 'feta', 'paneer', 'queso', 'casein', ...COMPOUND_DAIRY]
-const TAG_GLUTEN = ['bread', 'pasta', 'flour', 'wheat', 'barley', 'rye', 'soy sauce', 'breadcrumb', 'panko', 'crouton', 'tortilla', 'noodle', 'ramen', 'udon', 'couscous', 'cracker', 'bun', 'pita', 'bagel', 'wrap', 'seitan', ...COMPOUND_GLUTEN]
-const TAG_NUTS = ['peanut', 'almond', 'cashew', 'walnut', 'pecan', 'pistachio', 'hazelnut', 'macadamia', 'pine nut', 'nut butter', ...COMPOUND_NUTS]
-// SAFETY: scans the NAME and STEPS as well as the ingredient list.
-//
-// Scanning ingredients alone made these tags only as trustworthy as the extractor's completeness,
-// and the extractor drops things. Three live rows proved it: "Parmesan-Crusted Chicken Sheet Pan"
-// was tagged DAIRY-FREE because parmesan never made it into the ingredients array — despite being
-// in the dish's own name — and "Stuffed Chicken Caesar Sourdough" was tagged GLUTEN-FREE the same
-// way. passesDietTags treats is_dairy_free === true as safe, so those were being served to users
-// who had asked to avoid exactly that.
-//
-// Widening the haystack fails SAFE: a stray mention costs one meal its "free" tag, while a missed
-// one hands an allergen to someone avoiding it. Those errors are not equivalent, so the false
-// positives are the correct trade.
-function classifyDietTags(
-  ingredients: any[],
-  name = '',
-  steps: any[] = [],
-): { compatible_diets: string[]; is_dairy_free: boolean; is_gluten_free: boolean; is_nut_free: boolean } {
-  const stepText = (steps || [])
-    .map((st: any) => typeof st === 'string' ? st : `${st?.title ?? ''} ${st?.detail ?? ''}`)
-    .join(' | ')
-  const hay = [
-    (ingredients || []).map((i: any) => (i?.name ?? '')).join(' | '),
-    name,
-    stepText,
-  ].join(' | ').toLowerCase()
-  const has = (arr: string[]) => arr.some(k => hay.includes(k))
-  const hasMeat = has(TAG_MEAT) || /\bham\b/.test(hay)   // \bham\b avoids "graham"
-  const hasSeafood = has(TAG_SEAFOOD)
-  // Dairy butter only — a nut/seed butter (peanut, almond…) is not dairy.
-  const dairyButter = /\bbutter\b/.test(hay) && !/(peanut|almond|cashew|hazelnut|pecan|nut|seed|sun)[\s-]*butter/.test(hay)
-  const hasDairy = has(TAG_DAIRY) || dairyButter
-  const hasEgg = /\beggs?\b/.test(hay)          // whole word — avoids "eggplant"
-  const hasHoney = hay.includes('honey')
-  // Nested: every meal is Classic; no land meat → Pescatarian; also no seafood →
-  // Vegetarian; also no dairy/egg/honey → Vegan.
-  const compatible = ['Classic']
-  if (!hasMeat) compatible.push('Pescatarian')
-  if (!hasMeat && !hasSeafood) compatible.push('Vegetarian')
-  if (!hasMeat && !hasSeafood && !hasDairy && !hasEgg && !hasHoney) compatible.push('Vegan')
-  return {
-    compatible_diets: compatible,
-    is_dairy_free: !hasDairy,
-    is_gluten_free: !has(TAG_GLUTEN),
-    is_nut_free: !has(TAG_NUTS),
-  }
-}
-
 Deno.serve(async (req: Request) => {
   // Allow service-role-key callers (pg_cron daily job) to bypass user auth and rate limit.
   // pg_cron runs without a user session — service-role JWT is the only token it can attach.
