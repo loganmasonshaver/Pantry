@@ -294,12 +294,27 @@ const COOKING_FRACTION: Record<string, string> = {
   '125': '⅛', '25': '¼', '33': '⅓', '333': '⅓', '5': '½', '66': '⅔', '667': '⅔', '75': '¾',
 }
 
+// Slash fractions, the OTHER way a creator writes a part-measure. One live list showed
+// "1/2 tsp baking powder" directly above "⅛ tsp salt" — same list, same units, two notations,
+// because only the computed side used glyphs. Handles mixed numbers too ("1 1/2 cups" -> "1½ cups").
+const SLASH_FRACTION: Record<string, string> = {
+  '1/2': '½', '1/4': '¼', '3/4': '¾', '1/3': '⅓', '2/3': '⅔',
+  '1/8': '⅛', '3/8': '⅜', '5/8': '⅝', '7/8': '⅞',
+}
+
 export function toCookingFraction(s: string): string {
-  return s.replace(/\b(\d+)\.(\d+)\b/g, (match, whole: string, frac: string) => {
-    const glyph = COOKING_FRACTION[frac]
-    if (!glyph) return match
-    return whole === '0' ? glyph : `${whole}${glyph}`
-  })
+  return s
+    .replace(/\b(\d+)\.(\d+)\b/g, (match, whole: string, frac: string) => {
+      const glyph = COOKING_FRACTION[frac]
+      if (!glyph) return match
+      return whole === '0' ? glyph : `${whole}${glyph}`
+    })
+    // A whole number immediately before the fraction is a mixed number and stays attached.
+    .replace(/(?:(\d+)\s+)?\b(\d+\/\d+)\b/g, (match, whole: string | undefined, frac: string) => {
+      const glyph = SLASH_FRACTION[frac]
+      if (!glyph) return match
+      return whole ? `${whole}${glyph}` : glyph
+    })
 }
 
 // Units that name a PACKAGE whose size varies between brands — the ones recipe publishers print a
@@ -307,9 +322,10 @@ export function toCookingFraction(s: string): string {
 // recipes are actually written, and nobody prints a gram weight for a clove.
 const CONTAINER_UNIT = /\b(jars?|cans?|tins?|bottles?|packets?|packs?|sachets?|tubs?|cartons?|boxes)\b/i
 const MEASURE_OR_CONTAINER = /\b(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ounces?|sticks?)\b|\b(jars?|cans?|tins?|bottles?|packets?|packs?|sachets?|tubs?|cartons?|boxes)\b/i
-// A weight, or a count of discrete pieces, and nothing else on the line. Volume units (cup/tbsp/
-// tsp/ml) are deliberately absent — see the tier that uses this.
-const UNAMBIGUOUS_VISUAL = /^\s*[\d.\/]+\s*(kg|g|grams?|oz|ounces?|lbs?|pounds?|slices?|pieces?|units?|cloves?|sticks?|sheets?|scoops?|fillets?|breasts?)\s*$/i
+// Any real measurement the creator stated, and nothing else on the line: a weight, a count of
+// discrete pieces, or a volume. Fractions count ("1/2 cup", "¾ cup") — those are how recipes are
+// written, not an approximation of grams.
+const UNAMBIGUOUS_VISUAL = /^\s*[\d.\/½¼¾⅓⅔⅛]+\s*(kg|g|grams?|oz|ounces?|lbs?|pounds?|ml|l|litres?|liters?|cups?|tbsps?|tablespoons?|tsps?|teaspoons?|slices?|pieces?|units?|cloves?|sticks?|sheets?|scoops?|fillets?|breasts?)\s*$/i
 // A creator who already wrote the size ("1 400g can", "1 jar (500g)") needs nothing added.
 const SIZE_ALREADY = /\d\s*(g|kg|ml|l|oz|ounces?|lbs?|pounds?)\b/i
 
@@ -380,12 +396,15 @@ export function getMeasuredDisplay(name: string, gramsStr: string | undefined, v
   // shown as 300g. 15-serving batch recipes made this obvious because the numbers get large, but
   // it applies at every size.
   //
-  // Deliberately NOT volume-of-a-solid. "2 cups Greek yoghurt" stays 500g — 210 live rows — because
-  // a cup of a solid depends on how it is packed, so there the gram figure is genuinely more
-  // precise rather than merely different. Weights and counts have no such ambiguity, which is the
-  // line this draws: the creator's unit wins where it is provably better, not everywhere.
+  // Volume is included, and that was a deliberate reversal. The first cut kept grams for
+  // volume-of-a-solid on the argument that a cup of yoghurt depends on packing, so grams carry
+  // more precision. True, and beside the point: a cook following a recipe measures the cup. If the
+  // creator wrote "1 cup", the list should say one cup — the precision the gram figure adds is
+  // precision nobody uses, and it makes the row read like a nutrition label instead of a recipe.
+  // Macros are already stated separately at the top of the screen.
   //
-  // Liquids and seasonings keep their own tier below: tbsp/tsp/cups are exact for a liquid.
+  // A VAGUE visual still loses: "1 medium", "a handful" and "a pinch" are not measurements and
+  // fall through to grams, or to the computed spoon measure for a seasoning.
   if (visualStr && UNAMBIGUOUS_VISUAL.test(visualStr)) {
     return toCookingFraction(visualStr)
   }

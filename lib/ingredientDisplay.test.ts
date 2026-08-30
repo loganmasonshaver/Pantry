@@ -95,12 +95,15 @@ test("an unambiguous creator measure beats a gram count", () => {
   // Decimal weights still become fractions on the way out.
   assert.equal(getMeasuredDisplay('shaved ribeye steak', '680g', '1.5 lbs'), '1½ lbs')
 
-  // VOLUME OF A SOLID keeps grams. A cup of yoghurt, quark or dal depends on how it is packed, so
-  // the gram figure is genuinely more precise there rather than merely different — 210 live rows.
-  // This is the line: the creator's unit wins where it is provably better, not everywhere.
-  assert.equal(getMeasuredDisplay('Greek Yoghurt', '500g', '2 cups'), '500g')
-  assert.equal(getMeasuredDisplay('Low-fat quark', '500g', '2 cups'), '500g')
-  assert.equal(getMeasuredDisplay('Green moong dal', '500g', '2 cups'), '500g')
+  // VOLUME COUNTS TOO. The first cut kept grams here, arguing a cup of a solid depends on packing
+  // so grams are more precise. True and beside the point: a cook measures the cup. If the creator
+  // wrote "2 cups", the list says two cups — the precision grams add is precision nobody uses, and
+  // the macros are already stated separately at the top of the screen.
+  assert.equal(getMeasuredDisplay('Greek Yoghurt', '500g', '2 cups'), '2 cups')
+  assert.equal(getMeasuredDisplay('Low-fat quark', '500g', '2 cups'), '2 cups')
+  assert.equal(getMeasuredDisplay('Green moong dal', '500g', '2 cups'), '2 cups')
+  assert.equal(getMeasuredDisplay('oats', '40g', '1/2 cup'), '½ cup')
+  assert.equal(getMeasuredDisplay('Water', '1000g', '1 Liter'), '1 Liter')
 
   // A vague visual is not a measurement and must not win.
   assert.equal(getMeasuredDisplay('red bell pepper', '150g', '1 medium'), '150g')
@@ -116,7 +119,7 @@ test('a container shows the count AND the size, like a recipe site', () => {
   // that printing both does not.
   assert.equal(getMeasuredDisplay('Vodka Sauce', '700g', '1 jar'), '1 jar (700g)')
   assert.equal(getMeasuredDisplay('cream of chicken soup', '300g', '1 can'), '1 can (300g)')
-  assert.equal(getMeasuredDisplay('corn', '100g', '1/2 can'), '1/2 can (100g)')
+  assert.equal(getMeasuredDisplay('corn', '100g', '1/2 can'), '½ can (100g)')
   // Not gated on liquid/seasoning: canned goods and boxed pasta are the most shoppable rows on the
   // list and were rendering as bare grams while the creator had written "1 can".
   assert.equal(getMeasuredDisplay('drained and rinsed black beans', '250g', '1 can'), '1 can (250g)')
@@ -132,6 +135,21 @@ test('a container shows the count AND the size, like a recipe site', () => {
   assert.equal(getMeasuredDisplay('Cinnamon', '5g', '1 stick'), '1 stick')
   // Plain measures are untouched.
   assert.equal(getMeasuredDisplay('buffalo wing sauce', '355g', '1.5 cups'), '1½ cups')
+})
+
+test('slash fractions become glyphs, so one list uses one notation', () => {
+  // A live list showed "1/2 tsp baking powder" directly above "⅛ tsp salt" — same units, two
+  // notations, because only the COMPUTED side used glyphs and a creator's raw visual did not.
+  assert.equal(toCookingFraction('1/2 tsp'), '½ tsp')
+  assert.equal(toCookingFraction('1/4 cup'), '¼ cup')
+  assert.equal(toCookingFraction('2/3 cup'), '⅔ cup')
+  assert.equal(toCookingFraction('1/8 tsp'), '⅛ tsp')
+  // A whole number before the fraction is a mixed number and stays attached.
+  assert.equal(toCookingFraction('1 1/2 cups'), '1½ cups')
+  // Not every slash is a fraction, and the ones that are not must survive untouched: "96/4" is a
+  // beef lean ratio and "5/16" is not a measure any kitchen owns.
+  assert.equal(toCookingFraction('5/16 tsp'), '5/16 tsp')
+  assert.equal(toCookingFraction('96/4'), '96/4')
 })
 
 test('decimals render as the fractions a kitchen actually has', () => {
