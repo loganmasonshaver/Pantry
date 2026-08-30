@@ -86,28 +86,6 @@ function dedupeDetected(items: DetectedItem[]): DetectedItem[] {
   return Array.from(seen.values())
 }
 
-// ── Mock detected ingredients ──────────────────────────────────────────
-
-const MOCK_DETECTED: DetectedItem[] = [
-  { id: 'd1',  name: 'Chicken breast',   category: 'Protein',        checked: true },
-  { id: 'd2',  name: 'Eggs',             category: 'Protein',        checked: true },
-  { id: 'd3',  name: 'Greek yogurt',     category: 'Protein',        checked: true },
-  { id: 'd4',  name: 'White rice',       category: 'Carbs',          checked: true },
-  { id: 'd5',  name: 'Oats',             category: 'Carbs',          checked: true },
-  { id: 'd6',  name: 'Whole wheat bread',category: 'Carbs',          checked: true },
-  { id: 'd7',  name: 'Spinach',          category: 'Produce',        checked: true },
-  { id: 'd8',  name: 'Broccoli',         category: 'Produce',        checked: true },
-  { id: 'd9',  name: 'Lemon',            category: 'Produce',        checked: true },
-  { id: 'd10', name: 'Garlic',           category: 'Produce',        checked: true },
-  { id: 'd11', name: 'Olive oil',        category: 'Condiments',     checked: true },
-  { id: 'd12', name: 'Soy sauce',        category: 'Condiments',     checked: true },
-  { id: 'd13', name: 'Hot sauce',        category: 'Condiments',     checked: true },
-  { id: 'd14', name: 'Milk',             category: 'Dairy',          checked: true },
-  { id: 'd15', name: 'Cheddar cheese',   category: 'Dairy',          checked: true },
-  { id: 'd16', name: 'Butter',           category: 'Dairy',          checked: true },
-  { id: 'd17', name: 'Canned beans',     category: 'Pantry Staples', checked: true },
-  { id: 'd18', name: 'Chicken stock',    category: 'Pantry Staples', checked: true },
-]
 
 const RESULT_CATEGORIES = [
   'Protein', 'Carbs', 'Produce', 'Condiments', 'Dairy', 'Pantry Staples',

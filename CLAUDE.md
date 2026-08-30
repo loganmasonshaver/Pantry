@@ -149,9 +149,14 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 150** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **45** in
+- **TS baseline = 132** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **27** in
   app code (`app/ lib/ components/ hooks/ context/`) and **105** Deno-global noise from
-  `supabase/functions` being inside the tsconfig. (Was 149/104 until 2026-08-29: adding one
+  `supabase/functions` being inside the tsconfig.
+  (Was 150/45 until 2026-08-30. Deleting the dead `MOCK_DETECTED` array from `PantryScanModal`
+  removed 18 errors in one go — all of them `Property 'zone' is missing ... required in type
+  'DetectedItem'`. The array predated `zone` being added to the type and nothing referenced it, so
+  40% of the app-code baseline was type errors in code that could never run. Worth remembering when
+  a baseline looks stubbornly high: check what is DEAD before assuming it is load-bearing.) (Was 149/104 until 2026-08-29: adding one
   `Deno.env.get` line to `_shared/scan-cap.ts` adds one `Cannot find name 'Deno'` — expected,
   and the reason to watch the app-code number rather than the total.) Watch the DELTA, not the total — a +1 caught a
   real ReferenceError once, and a −4 on 2026-08-29 was the TDZ bug in `app/meal/[id].tsx` that

@@ -261,13 +261,20 @@ export default function GroceryScreen() {
   useEffect(() => {
     if (!user) return
     const checkOrders = async () => {
-      // Check for today's order for prep timeline
-      const today = new Date().toISOString().split('T')[0]
+      // Check for today's order for prep timeline.
+      // Local midnight as an INSTANT, not the UTC calendar date. created_at is a timestamp, and
+      // toISOString() renders UTC — so splitting off the date gave the UTC day and compared a
+      // timestamp against it. Wrong in both directions: for a US user after ~7pm the UTC day is
+      // already tomorrow, so the cutoff sits in the future and today's order vanishes from the prep
+      // timeline all evening; for a UTC+10 user in the morning the UTC day is still yesterday, so
+      // yesterday's order shows up as today's.
+      const startOfToday = new Date()
+      startOfToday.setHours(0, 0, 0, 0)
       const { data: todayOrder } = await supabase
         .from('order_history')
         .select('items, created_at')
         .eq('user_id', user.id)
-        .gte('created_at', today)
+        .gte('created_at', startOfToday.toISOString())
         .order('created_at', { ascending: false })
         .limit(1)
         .single()

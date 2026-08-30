@@ -31,7 +31,7 @@ import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
 import { escapeLike } from '@/lib/sqlLike'
 import { todayStr } from '@/lib/localDate'
 import { categorizeItem } from '@/lib/categories'
-import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
+import { MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
@@ -350,10 +350,10 @@ export default function MealDetailScreen() {
         }),
       }
     } catch {
-      meal = MOCK_MEAL_DETAILS[id ?? ''] ?? null
+      meal = null
     }
   } else {
-    meal = MOCK_MEAL_DETAILS[id ?? ''] ?? null
+    meal = null
   }
 
   const creator = (meal as any)?.creator ?? null
