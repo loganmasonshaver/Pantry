@@ -829,6 +829,16 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     ].filter(Boolean) as { url: string; key: string; model: string; name: string }[]
 
     let recipes: any[] | null = null
+    // Why each provider failed. The 500 below used to say only "Failed to generate recipes from
+    // video titles", which is true of a provider outage, a rate limit, an oversized prompt and a
+    // JSON parse error alike — four different problems behind one string, in a function whose logs
+    // are not reachable from the CLI. The cron reads its response out of net._http_response, so
+    // putting the reason IN the response is the difference between diagnosing this in one run and
+    // guessing at it.
+    const providerErrors: string[] = []
+    // Prompt size is the first thing to suspect when every provider fails at once, and it is the
+    // one number that is free to compute here.
+    console.log(`[funnel] prompt: ${prompt.length} chars across ${uniqueVideos.length} videos`)
 
     for (const provider of providers) {
       stageLog(`LLM call start: ${provider.name}`)
@@ -843,21 +853,46 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
-          // max_tokens 6000 — 20-recipe output with full ingredient arrays + step arrays
-          // pushes 4-5k tokens easily. Lower caps were silently truncating mid-JSON,
-          // producing parse errors that masked as "0 recipes generated".
-          // 8000 (was 6000): now that the prompt asks for a generous 15-20 candidate
-          // pool, the JSON output is larger — too low a cap truncates mid-array and
-          // the parse fails, masquerading as "0 recipes generated".
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 8000 }),
+          // max_tokens has been raised twice for the same reason and was still too small: at 8000
+          // a run returned finish_reason=length with the JSON cut mid-string at 22,684 chars, and
+          // the resulting SyntaxError surfaced as the generic "Failed to generate recipes" 500.
+          // That is the third time this cap has masqueraded as "the model produced nothing".
+          //
+          // It got tighter, not looser, when the description parser stopped truncating at 500
+          // chars: the SOURCE INGREDIENT LIST checklists are now complete, so a recipe that used
+          // to emit 5 ingredients now correctly emits 15, and 15-20 recipes of that size do not
+          // fit in 8000 tokens.
+          //
+          // 32000 is chosen against a real ceiling rather than by doubling until it works:
+          // gemini-3.1-flash-lite's model card documents a 64K output limit, so this takes about
+          // half of it and leaves the rest as headroom. The cap is a truncation guard, not a
+          // budget — nothing is charged for tokens the model does not emit.
+          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 32000 }),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId))
         const data = await res.json()
         stageLog(`LLM call done: ${provider.name}, response ${JSON.stringify(data).length} bytes`)
-        if (data.error) { stageLog(`LLM error: ${data.error?.message}`); continue }
+        if (data.error) {
+          const msg = String(data.error?.message ?? 'unknown').slice(0, 300)
+          stageLog(`LLM error: ${msg}`)
+          providerErrors.push(`${provider.name}: api error: ${msg}`)
+          continue
+        }
         const text = data.choices?.[0]?.message?.content || "[]"
+        // finish_reason 'length' means the model hit max_tokens and the JSON is cut mid-array.
+        // That parses as a SyntaxError indistinguishable from a malformed response, so name it.
+        const finish = data.choices?.[0]?.finish_reason ?? 'unknown'
         const clean = text.replace(/```json|```/g, "").trim()
-        const parsed = JSON.parse(clean)
+        let parsed: any
+        try {
+          parsed = JSON.parse(clean)
+        } catch (pe) {
+          providerErrors.push(`${provider.name}: unparseable JSON (finish_reason=${finish}, ${clean.length} chars): ${(pe as Error).message.slice(0, 120)}`)
+          continue
+        }
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          providerErrors.push(`${provider.name}: returned no recipes (finish_reason=${finish}, ${clean.length} chars)`)
+        }
         if (Array.isArray(parsed) && parsed.length > 0) {
           // Within-batch name dedup — Groq sometimes ignores the variety prompt
           // and returns two recipes for the same dish (e.g. two oatmeal bowls)
@@ -1006,6 +1041,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         }
       } catch (e) {
         stageLog(`LLM call threw: ${(e as Error).message}`)
+        providerErrors.push(`${provider.name}: threw: ${String((e as Error).message).slice(0, 200)}`)
         continue
       }
     }
@@ -1013,9 +1049,15 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     stageLog(`LLM yielded ${recipes?.length ?? 0} recipes`)
 
     if (!recipes || recipes.length === 0) {
-      return new Response(JSON.stringify({ error: "Failed to generate recipes from video titles" }), {
-        status: 500, headers: { 'Content-Type': 'application/json' },
-      })
+      return new Response(JSON.stringify({
+        error: "Failed to generate recipes from video titles",
+        providerErrors,
+        promptChars: prompt.length,
+        candidateVideos: uniqueVideos.length,
+        // 0 here with providerErrors empty means the model returned recipes and the sanitize
+        // gates rejected every one — a completely different problem from a provider failure.
+        sanitizedCount: recipes?.length ?? null,
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
     // Step 2.5: Post-LLM cleanup — enforce variety + clean names deterministically.
