@@ -1,3 +1,4 @@
+import { todayStr } from './localDate'
 import { useState, useEffect, useRef } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
@@ -26,13 +27,6 @@ const MAX_DAILY_REGENS = 3
 // the current user are treated as a miss. Absent userId = legacy/onboarding write, accepted.
 type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number; regenCount?: number; userId?: string }
 
-// Local-timezone date string. Previously this used toISOString() which is UTC,
-// so reloading the app after ~7pm CT (00:00 UTC) treated cached meals as
-// stale and forced regeneration even though it was still "today" for the user.
-function todayStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
   const { requestConsent } = useAIConsent()

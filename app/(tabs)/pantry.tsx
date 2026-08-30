@@ -27,6 +27,7 @@ import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
+import { todayStr } from '@/lib/localDate'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useAIConsent } from '@/context/AIConsentContext'
@@ -390,7 +391,7 @@ export default function PantryScreen() {
     if (mealsLoading || mealsError || meals.length === 0) { setFreshState(null); return }
     let cancelled = false
     ;(async () => {
-      const today = new Date().toLocaleDateString('en-CA') // local YYYY-MM-DD (matches the daily cache's local-date keying)
+      const today = todayStr() // same local-date helper the daily cache keys on (lib/localDate.ts)
       const last = await AsyncStorage.getItem(MEAL_FRESH_DATE_KEY)
       if (cancelled) return
       setFreshState(last === today ? 'seen' : 'new')

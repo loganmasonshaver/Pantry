@@ -1,3 +1,4 @@
+import { todayStr } from '../../lib/localDate'
 import { useState, useRef } from 'react'
 import {
   View,
@@ -159,7 +160,7 @@ export default function CreateAccountScreen() {
           foodDislikes: [...(d.foodDislikes || []), ...(d.foodDislikesText || '').split(',').map((s: string) => s.trim()).filter(Boolean)],
           mode: 'cookNow',
         })
-        const today = new Date().toISOString().slice(0, 10)
+        const today = todayStr() // LOCAL date — a UTC stamp here made this cache miss on the next read
         await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: d.dietStyle || 'Classic' }))
       } catch {}
     })()

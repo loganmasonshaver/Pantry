@@ -35,6 +35,7 @@ import { ActivityIndicator } from 'react-native'
 import { supabase } from '../../lib/supabase'
 import { templates as recipeTemplates } from '../../lib/recipeTemplates'
 import { scaleVisual } from '../../lib/ingredientDisplay'
+import { todayStr } from '../../lib/localDate'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
@@ -2644,7 +2645,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       }
     })
     const payload = {
-      date: new Date().toISOString().slice(0, 10),
+      date: todayStr(), // LOCAL date — must match the cache readers, see lib/localDate.ts
       dietStyle: data.dietStyle || 'Classic',
       maxPrepMinutes: prepMin,
       meals,

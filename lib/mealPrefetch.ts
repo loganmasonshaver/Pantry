@@ -1,3 +1,4 @@
+import { todayStr } from './localDate'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
@@ -19,10 +20,6 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'
 // How many meals cook-reveal shows (meals.slice(0, 3) there) — i.e. how many images are worth warming.
 const REVEAL_CARDS = 3
 
-function todayStr() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
 
 // Single in-flight slot — only one prefetch runs at a time, and the latest scan wins (a new
 // scan changes the pantry, so its meals should replace an earlier scan's this session).
