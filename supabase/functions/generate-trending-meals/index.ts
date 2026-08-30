@@ -722,7 +722,7 @@ ALSO MANDATORY:
 - Recipe names must all be distinct after normalization
 
 PORTION + MACRO DETAILS:
-- ALL macros and ingredient quantities must be PER SINGLE SERVING (1 person). If the video makes a batch, divide everything down to one portion CLEANLY (don't change ratios).
+- MACROS are per single serving. INGREDIENTS are the full batch. See SERVINGS AND SCALE above — never divide the ingredients to match the macros.
 - Categorize each recipe by INTENT, not calorie cap:
   - "meal" — a sit-down meal (anywhere from 400 to 1200+ kcal — bigger meal-prep portions are fine for bulkers/athletes)
   - "snack" — a quick bite between meals (typically 150-400 kcal, but can go higher if protein-dense)
