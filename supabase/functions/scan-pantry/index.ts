@@ -4,7 +4,7 @@ import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCapWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { rejectOversizeImage } from '../_shared/image.ts'
-import { cleanupResult, confScore } from '../_shared/scan-cleanup.ts'
+import { cleanupResult } from '../_shared/scan-cleanup.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
@@ -72,7 +72,8 @@ async function visionCall(endpoint: string, apiKey: string, model: string, messa
 // Primary GPT-5.4 at 'original' image detail — in the pantry-eval on Logan's real photos it hit
 // 82% recall vs gpt-4.1's 63%, because gpt-4.1's tile tokenizer downscales the shortest side to
 // 768px and shreds small labels; gpt-5.4's full-res patches actually read them. Its SINGLE pass
-// already out-recalls gpt-4.1's old two-pass, so the second pass is off (halves scan cost).
+// already out-recalls gpt-4.1's old two-pass, which is why this function is single-pass — see the
+// note above the density log. Halved scan cost to ~$0.10.
 // Fallback: Gemini 3.1 Flash-Lite keeps the paid scan alive during an OpenAI outage.
 async function scanVision(messages: any[], maxTokens: number): Promise<string> {
   try {
@@ -156,7 +157,7 @@ Deno.serve(async (req: Request) => {
       image_url: { url: `data:image/jpeg;base64,${base64}`, detail: "original" as const },
     }))
 
-    const firstPassPrompt = `These are ${images.length} photo(s) of a kitchen (fridge, pantry shelves, counter), numbered 0 to ${images.length - 1} in the order shown. Identify every visible food ingredient or grocery item.
+    const scanPrompt = `These are ${images.length} photo(s) of a kitchen (fridge, pantry shelves, counter), numbered 0 to ${images.length - 1} in the order shown. Identify every visible food ingredient or grocery item.
 
 You are a kitchen inventory scanner. Be EXHAUSTIVE — your job is to spot every single edible item in these photos, even ones that are small, partially hidden, in clear containers, on shelf edges, or at the very top/bottom/back of the frame. Better to over-include with a best-guess name than to silently miss something.
 
@@ -242,20 +243,20 @@ Item rules:
 Return ONLY the raw JSON object, no markdown, no explanation.`
 
     const t0 = Date.now()
-    const firstPassMessages = [{
+    const scanMessages = [{
       role: "user",
-      content: [...imageContent, { type: "text", text: firstPassPrompt }],
+      content: [...imageContent, { type: "text", text: scanPrompt }],
     }]
     // gpt-4.1 primary (best recall in eval), Gemini Flash-Lite fallback. Each call has a 90s
     // ceiling (vision can hang past the edge runtime's ~150s limit and force-kill the function).
     let text: string
     try {
-      text = await scanVision(firstPassMessages, 10000) // 10k: gpt-5.4 max_completion_tokens covers reasoning + a dense multi-photo JSON without truncating (you only pay for tokens actually generated)
+      text = await scanVision(scanMessages, 10000) // 10k: gpt-5.4 max_completion_tokens covers reasoning + a dense multi-photo JSON without truncating (you only pay for tokens actually generated)
     } catch (e) {
       const msg = (e as Error).name === 'AbortError'
         ? 'Scan timed out. Try again with fewer or smaller photos.'
         : `Scan failed: ${(e as Error).message}`
-      console.log(`[scan-pantry] first pass failed (both providers): ${msg}`)
+      console.log(`[scan-pantry] scan failed (both providers): ${msg}`)
       await refundScan(req, 'pantry') // transient fail — don't burn the user's weekly slot
       return new Response(JSON.stringify({ error: msg }), {
         status: 504, headers: { "Content-Type": "application/json" },
@@ -263,18 +264,18 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     }
     const clean = text.replace(/```json|```/g, "").trim()
     const result = JSON.parse(clean)
-    const firstPassMs = Date.now() - t0
-    const firstPassItemCount = (result.zones || []).reduce(
+    const scanMs = Date.now() - t0
+    const itemCount = (result.zones || []).reduce(
       (acc: number, z: any) => acc + (z.items?.length || 0), 0,
     )
-    console.log(`[scan-pantry] first pass: ${firstPassMs}ms, ${firstPassItemCount} items, ${images.length} photos`)
+    console.log(`[scan-pantry] scan: ${scanMs}ms, ${itemCount} items, ${images.length} photos`)
 
-    // Per-photo density check — drives the gate that decides whether the second
-    // pass is worth its ~30s cost. The "photo" field on each item is supplied by
-    // the first-pass prompt; if the LLM forgot to include it (older models, prompt
-    // drift) we conservatively treat everything as photo 0, which yields the
-    // densest possible distribution and triggers the second pass — safer default
-    // than skipping.
+    // Per-photo density, logged only. This used to gate a second "what did you miss?" pass,
+    // removed once gpt-5.4's single pass out-recalled it. The number is kept because it is the
+    // most useful single line for diagnosing a thin scan: it says whether recall collapsed on
+    // one crowded photo or was evenly poor across all of them. Items missing a "photo" field
+    // fall back to 0, so a model that omits it reports as one dense photo rather than silently
+    // vanishing from the count.
     const photoCounts = new Map<number, number>()
     for (const zone of (result.zones || [])) {
       for (const item of (zone.items || [])) {
@@ -283,91 +284,8 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
       }
     }
     const maxPerPhoto = Math.max(...photoCounts.values(), 0)
-    // 12+ items in a single photo triggers the second pass. Lowered from 20: a
-    // real fridge/pantry shot routinely has 20+ items but GPT-4o under-counts
-    // (a 13-detected fridge actually had ~21), so a high threshold meant the
-    // densest, most-missed scans never got the catch-misses pass. 12 errs toward
-    // recall — the ~30s second-pass cost is worth not dropping milk/eggs/PB.
-    // Second pass DISABLED for gpt-5.4: its single full-res pass already out-recalls gpt-4.1's
-    // old two-pass (82% vs 63% in the eval), so the catch-misses pass is redundant and would
-    // just double the scan cost. Density calc kept for the log. Re-enable if we ever fall back
-    // to a weaker primary model. (maxPerPhoto still referenced below in the log line.)
-    const shouldRunSecondPass = false
-    console.log(`[scan-pantry] per-photo density: max=${maxPerPhoto} across ${photoCounts.size} photo(s), secondPass=${shouldRunSecondPass}`)
+    console.log(`[scan-pantry] per-photo density: max=${maxPerPhoto} across ${photoCounts.size} photo(s)`)
 
-    // ── SECOND PASS: catch what the first pass missed ───────────────────
-    // GPT-4o spreads attention thin on dense kitchen photos. A focused
-    // second pass with the first-pass list as context reliably surfaces
-    // small/partial/back-row items that got skipped. Cost ~2× per scan
-    // but recognition rate jumps noticeably. Failures here are non-fatal —
-    // if the second pass errors out, we just return the first-pass result.
-    if (shouldRunSecondPass) try {
-      const secondPassStart = Date.now()
-      const firstPassNames: string[] = (result.zones || []).flatMap(
-        (z: any) => (z.items || []).map((i: any) => i.name)
-      )
-      const knownZones: string[] = (result.zones || []).map((z: any) => z.zone)
-      if (firstPassNames.length > 0) {
-        const secondPassPrompt = `You previously scanned these same photos and identified these items:
-${firstPassNames.map(n => `- ${n}`).join('\n')}
-
-NOW LOOK AGAIN more carefully. List ONLY items you MISSED in the first pass. DO NOT repeat any item already in the list above.
-
-Focus your attention on:
-- Small items: spices, herbs in small jars, salt/pepper shakers, hot sauce bottles
-- Items in clear/transparent containers — identify the CONTENTS, not the container
-- Back-row items partially hidden behind front items — look PAST the front row for caps, lids, and label edges poking out behind/between items
-- Loose EGGS in molded door trays or egg shelves — they blend into the tray shape and are easy to miss
-- Door contents — fridge door condiments, butter/cheese compartments
-- Top shelf and bottom shelf items (these get less attention)
-- Items in drawers, especially the produce drawer
-- Anything edible you previously dismissed as ambiguous — give a best-guess name now
-
-EXCLUDE pet food/treats and non-edible household goods (cleaning supplies, paper goods, toiletries) — only list things a person would cook with or eat.
-
-Use SAME zone names from first pass where possible: ${knownZones.join(', ') || '(none — invent zones based on layout)'}.
-Categories: Protein, Carbs, Produce, Condiments, Dairy, Pantry Staples, Other.
-"photo" is REQUIRED on every item — the 0-based index (0 to ${images.length - 1}) of the photo it appears in${images.length === 1 ? ' (always 0 here)' : ', so it groups under the right photo'}.
-"box" is REQUIRED on every item — [x, y, w, h] normalized 0-1 from the photo's TOP-LEFT corner, a tight box around the visible item (its width/height as fractions of the photo).
-"confidence" is REQUIRED — integer 0-100 for how sure you are the item is really there and correctly named (90-100 clearly readable; 60-85 confident type, unsure variant; 35-55 partly hidden/ambiguous; 0-30 a genuine guess at a blob/opaque container). These are items you MISSED the first time, so most will score lower; only give 85+ to one you can now clearly read/identify. Don't inflate — low scores get filtered as noise.
-
-Return JSON: { "missed": [{ "name": "...", "category": "...", "zone": "...", "photo": 0, "box": [0.1, 0.2, 0.1, 0.15], "confidence": 40 }] }
-
-Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] }.`
-
-        const secondText = await scanVision(
-          [{ role: "user", content: [...imageContent, { type: "text", text: secondPassPrompt }] }],
-          2000,
-        )
-        const secondClean = secondText.replace(/```json|```/g, "").trim()
-        const secondResult = JSON.parse(secondClean)
-        const missed: any[] = Array.isArray(secondResult.missed) ? secondResult.missed : []
-
-        // Merge missed items into the first-pass result, deduping by lowercased name
-        const seenNames = new Set<string>(firstPassNames.map(n => n.toLowerCase()))
-        for (const item of missed) {
-          if (!item?.name || typeof item.name !== 'string') continue
-          const key = item.name.toLowerCase()
-          if (seenNames.has(key)) continue
-          seenNames.add(key)
-          const zoneName = item.zone || 'Other'
-          let zone = result.zones.find((z: any) => z.zone === zoneName)
-          if (!zone) {
-            zone = { zone: zoneName, items: [] }
-            result.zones.push(zone)
-          }
-          // Carry the photo index (default 0) so second-pass finds don't orphan to the
-          // client's "More" page in multi-photo scans the way first-pass items wouldn't.
-          // Second-pass finds are the small/hidden/ambiguous items — default to a middling-low
-          // score (40) when the model omits one, so a genuinely-uncertain find can still be
-          // floor-dropped rather than waved through as fully confident.
-          zone.items.push({ name: item.name, category: item.category || 'Other', photo: typeof item.photo === 'number' ? item.photo : 0, box: Array.isArray(item.box) && item.box.length === 4 ? item.box : null, confidence: confScore(item.confidence) === 100 ? 40 : confScore(item.confidence) })
-        }
-        console.log(`[scan-pantry] second pass: ${Date.now() - secondPassStart}ms, added ${missed.length} items`)
-      }
-    } catch (e) {
-      console.log('[scan-pantry] second pass failed (non-fatal):', e)
-    }
 
     // Deterministic safety net over the model output: drop hallucinated non-food (dishes,
     // nail polish, pet food), strip parenthetical qualifiers, and collapse dupes across the
@@ -386,7 +304,7 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
-    await refundScan(req, 'pantry') // first-pass parse / unexpected fail — refund the slot
+    await refundScan(req, 'pantry') // parse / unexpected fail — refund the slot
     console.error('[scan-pantry] error:', (error as Error).message) // detail server-side only
     return new Response(
       JSON.stringify({ error: "Scan failed" }), // generic — don't leak internals to the client
