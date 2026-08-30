@@ -122,21 +122,48 @@ const SYNONYMS: Record<string, string[]> = {
  * Foods promised by the dish name that appear nowhere in its ingredients.
  * Empty array means the name is supported by the list.
  */
+// Meats and fish, where the difference between the FOOD and a FLAVOURING made from it is the whole
+// point of the dish. "Marry Me Chicken Pasta" shipped on 2026-08-30 with no chicken in it: the only
+// chicken token in the list was `chicken broth`, which satisfied the name and closed the gap. Its
+// macros came from the creator's chicken version, so the row claimed 61g protein per serving
+// against ~21g the ingredients can actually produce — a ~3x overclaim, which is exactly the harm a
+// dropped defining ingredient does.
+//
+// Restricted to meat DELIBERATELY. The same reasoning does not hold for flavour-led foods: a
+// "Chocolate Protein Shake" built on chocolate protein powder genuinely is a chocolate dish, and a
+// vanilla extract genuinely makes something vanilla. Broth is the exception because a stock made
+// from an animal is not that animal — you cannot eat it as the protein.
+const MEAT_LIKE = new Set([
+  'chicken', 'beef', 'steak', 'pork', 'bacon', 'sausage', 'turkey', 'lamb',
+  'salmon', 'tuna', 'shrimp', 'cod',
+])
+
+// Forms in which a meat appears as seasoning rather than as the meat itself.
+const MEAT_DERIVATIVE = /\b(broth|stock|bouillon|consomm[eé]|seasoning|spice|rub|powder|flavou?r(?:ing|ed)?|extract|essence|base|granules?|cubes?)\b/i
+
 export function nameIngredientGaps(name: string, ingredients: any[] | undefined): string[] {
   const nameTokens = tokens(name)
   if (nameTokens.size === 0) return []
-  const ingText = realIngredients(ingredients)
+  const lines = realIngredients(ingredients)
     .map(i => (typeof i === 'string' ? i : String((i as any)?.name ?? '')))
-    .join(' ')
-  const ingTokens = tokens(ingText)
+  const ingTokens = tokens(lines.join(' '))
   if (ingTokens.size === 0) return [] // nothing to judge against; the count gate handles empties
+
+  // The same token set with flavouring lines removed, used only for MEAT_LIKE foods.
+  // When the DISH NAME itself says broth or stock ("Chicken Broth Ramen", "Beef Stock Pho"), the
+  // creator is naming the flavouring on purpose and the plain set is the right one to judge by —
+  // otherwise this would invent a gap in the one case where a broth genuinely is the dish.
+  const substantive = MEAT_DERIVATIVE.test(name)
+    ? ingTokens
+    : tokens(lines.filter(l => !MEAT_DERIVATIVE.test(l)).join(' '))
 
   const gaps: string[] = []
   for (const food of DEFINING_FOODS) {
     const stem = singular(food)
     if (!nameTokens.has(stem)) continue
-    if (ingTokens.has(stem)) continue
-    if ((SYNONYMS[food] ?? []).some(alt => ingTokens.has(singular(alt)))) continue
+    const pool = MEAT_LIKE.has(stem) ? substantive : ingTokens
+    if (pool.has(stem)) continue
+    if ((SYNONYMS[food] ?? []).some(alt => pool.has(singular(alt)))) continue
     gaps.push(food)
   }
   return gaps

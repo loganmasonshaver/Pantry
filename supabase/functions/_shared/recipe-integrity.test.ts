@@ -93,6 +93,57 @@ test('a name with no defining food is never rejected', () => {
   assert.deepEqual(nameIngredientGaps('Crispy Air Fryer Breakfast Bowl', [{ name: 'eggs' }]), [])
 })
 
+// ── meat named, only a flavouring present ────────────────────────────────────────────────────
+test('a broth or stock line does not satisfy the meat the dish is named after', () => {
+  // The real 2026-08-30 row, verbatim. It shipped claiming 61g protein per serving.
+  assert.deepEqual(
+    nameIngredientGaps('Marry Me Chicken Pasta', [
+      { name: 'chicken broth' }, { name: 'minced garlic' }, { name: 'sun dried tomatoes' },
+      { name: 'fat free cottage cheese' }, { name: 'grated parmesan' }, { name: 'penne pasta' },
+    ]),
+    ['chicken'],
+  )
+  for (const flavouring of [
+    'chicken stock', 'chicken bouillon', 'beef broth', 'beef stock cube', 'chicken seasoning',
+    'chicken bouillon powder', 'beef flavoring', 'chicken stock granules', 'chicken base',
+  ]) {
+    const meat = /beef/.test(flavouring) ? 'beef' : 'chicken'
+    assert.deepEqual(
+      nameIngredientGaps(`${meat} Rice Bowl`, [{ name: flavouring }, { name: 'rice' }]),
+      [meat],
+      flavouring,
+    )
+  }
+})
+
+test('the real meat still satisfies the name even when a broth is also listed', () => {
+  assert.deepEqual(
+    nameIngredientGaps('Marry Me Chicken Pasta',
+      [{ name: 'chicken breast' }, { name: 'chicken broth' }, { name: 'penne pasta' }]), [])
+  assert.deepEqual(
+    nameIngredientGaps('Beef Rice Bowl',
+      [{ name: 'ground beef' }, { name: 'beef stock' }, { name: 'jasmine rice' }]), [])
+})
+
+test('a dish named for the broth itself is not reported as a gap', () => {
+  // Otherwise this invents a gap in the one case where the flavouring genuinely IS the dish.
+  assert.deepEqual(nameIngredientGaps('Chicken Broth Ramen',
+    [{ name: 'chicken broth' }, { name: 'ramen noodles' }]), [])
+  assert.deepEqual(nameIngredientGaps('Beef Stock Pho',
+    [{ name: 'beef stock' }, { name: 'rice noodles' }]), [])
+})
+
+test('flavour-led foods are NOT held to the meat rule', () => {
+  // A chocolate protein powder really does make the dish chocolate; a stock made from an animal
+  // is not that animal. Restricting the rule to meat is what keeps these passing.
+  assert.deepEqual(nameIngredientGaps('Brownie Batter Protein Ice Cream',
+    [{ name: 'chocolate protein shake' }, { name: 'black cocoa powder' }]), [])
+  assert.deepEqual(nameIngredientGaps('Vanilla Almond Bites',
+    [{ name: 'vanilla extract' }, { name: 'almond butter' }]), [])
+  assert.deepEqual(nameIngredientGaps('Chocolate Peanut Butter Cups',
+    [{ name: 'chocolate protein powder' }, { name: 'peanut butter' }]), [])
+})
+
 // ── untranslated output ──────────────────────────────────────────────────────────────────────
 test('a list carried through in its source language is flagged', () => {
   for (const ings of [
