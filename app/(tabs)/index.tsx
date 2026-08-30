@@ -1316,7 +1316,16 @@ export default function HomeScreen() {
                 // Animation FIRST: this writes a shared value and starts on the UI thread
                 // immediately, so motion begins on touch instead of after React has reconciled
                 // this whole screen. setState still runs, but it no longer gates the first frame.
-                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
+                // DIAGNOSTIC — A/B/C (handler-start, no await, UI-thread animation) and freezing
+                // the hero height all changed nothing, so the animation driver is not the
+                // bottleneck. This makes the toggle INSTANT to split the two remaining suspects:
+                // if it snaps cleanly, the cost is the per-frame layout pass and the fix is to
+                // stop animating height at all (D). If it still hitches with no animation running,
+                // the cost is re-rendering this 2400-line component and the fix is memoisation.
+                const INSTANT_TOGGLE = true
+                macrosAnim.value = INSTANT_TOGGLE
+                  ? (next ? 1 : 0)
+                  : withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
                 AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
