@@ -385,6 +385,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // needing them to re-take photos.
   useEffect(() => {
     if (step !== 5) return
+    // Backing out of the review screen lands here again. A scan is a paid call, so results
+    // already in state mean this step is just re-showing them — never re-running them. A retry
+    // after an error still works: showDone is false on that path.
+    if (showDone && !scanError) return
     setScanError(null)
     const loop = Animated.loop(
       Animated.sequence([
@@ -729,6 +733,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     setEditingText('')
   }
 
+  // True while any captured photo is still being downscaled/encoded. scanPhotos() builds its
+  // upload with photos.filter(p => p.base64), so scanning early would silently drop whichever
+  // photos hadn't finished — the user would pay for a scan of fewer photos than they took.
+  const encoding = photos.some(p => !p.base64)
+
   // Ride the photo count rather than the capture call, so gallery imports scroll too.
   useEffect(() => {
     if (photos.length === 0) return
@@ -748,13 +757,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       // destroyed label readability while still keeping the upload small.
       const photo = await cameraRef.current.takePictureAsync({ quality: 1 })
       if (photo) {
-        const base64 = await downscaleToBase64(photo.uri)
-        setPhotos(prev => [...prev, {
-          id: String(Date.now()),
-          label,
-          uri: photo.uri,
-          base64,
-        }])
+        // Show the thumbnail and free the shutter IMMEDIATELY. downscaleToBase64 resizes to
+        // 2048px, re-encodes JPEG at 0.95 and base64s the result — hundreds of ms on a modern
+        // phone photo — and awaiting it before setPhotos is what made the second shot feel
+        // laggy. The encode now runs in the background and patches itself into the same row.
+        const id = String(Date.now())
+        setPhotos(prev => [...prev, { id, label, uri: photo.uri, base64: undefined }])
+        downscaleToBase64(photo.uri)
+          .then(base64 => setPhotos(prev => prev.map(p => p.id === id ? { ...p, base64 } : p)))
+          // A failed encode leaves base64 undefined, which keeps the Scan button disabled rather
+          // than letting the photo be silently dropped from the upload (scanPhotos filters on it).
+          .catch(() => {})
       }
     } catch (e) {
       Alert.alert('Capture failed', 'Could not take photo.')
@@ -955,14 +968,32 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     <X size={20} stroke="#FFFFFF" strokeWidth={2} />
                   </TouchableOpacity>
                 )}
-                <View style={styles.cameraTopCenter}>
-                  {photos.length > 0 && <Text style={styles.cameraCountText}>{photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>}
-                </View>
+                {/* The photo count lived here. It duplicated the filmstrip below — which shows the
+                    same number as actual pictures — so the tips pill gets the slot instead. */}
+                <View style={styles.cameraTopCenter} />
                 {/* The "?" lived here and opened the same guide as the tips pill above the shutter —
                     two controls, one destination. Removed; the pill is the single, visible entry.
                     Invisible spacer (NOT cameraCloseBtn, whose background rendered as a grey blob)
                     keeps the photo count centered between it and the ✕. */}
                 <View style={{ width: 36 }} />
+              </View>
+
+              {/* Tips pill, moved up out of the bottom stack. It's guidance you want BEFORE framing
+                  a shot, and down there it was competing with the filmstrip and the shutter for
+                  the space the viewfinder needs. */}
+              <View style={[styles.cameraTipWrap, { top: insets.top + 58 }]} pointerEvents="box-none">
+                <TouchableOpacity
+                  style={styles.cameraTipRow}
+                  onPress={() => setShowPrep(true)}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Lightbulb size={13} stroke="#4ADE80" strokeWidth={2} />
+                  <Text style={styles.cameraTip} numberOfLines={1}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
+                  <View style={styles.cameraTipDivider} />
+                  <Text style={styles.cameraTipMore}>More tips</Text>
+                  <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} style={{ marginLeft: -2 }} />
+                </TouchableOpacity>
               </View>
 
               {/* Hero beat: the instruction opens large and centered, then settles above the shutter. */}
@@ -989,21 +1020,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
                     </>
                   )}
-                  {/* The tip was a dead line of text. It's now the entry point to the full
-                      best-scan guide — bordered pill + chevron so it reads as "there's more here",
-                      which a bare lightbulb + sentence did not. */}
-                  <TouchableOpacity
-                    style={styles.cameraTipRow}
-                    onPress={() => setShowPrep(true)}
-                    activeOpacity={0.7}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Lightbulb size={13} stroke="#4ADE80" strokeWidth={2} />
-                    <Text style={styles.cameraTip} numberOfLines={1}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
-                    <View style={styles.cameraTipDivider} />
-                    <Text style={styles.cameraTipMore}>More tips</Text>
-                    <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} style={{ marginLeft: -2 }} />
-                  </TouchableOpacity>
                 </View>
 
                 {/* Captured filmstrip. Sits ABOVE the shutter, not beside it: the row carries the
@@ -1068,20 +1084,28 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     "More areas" keeps the coverage nudge, which is the one genuinely useful thing
                     the hub does: more ingredients is the app's quality lever, and nobody asks for a
                     freezer photo unaided. */}
+                {/* Full-width, and the only action down here. "More areas" is gone — it was a second
+                    control competing with the primary one, and the areas hub is still one tap away
+                    on the back chevron. Disabled until every photo has finished encoding, because
+                    the upload silently drops photos that haven't. */}
                 {photos.length > 0 && (
-                  <View style={styles.cameraActions}>
-                    <TouchableOpacity
-                      style={styles.cameraScanBtn}
-                      onPress={() => setStep(5)}
-                      activeOpacity={0.85}
-                    >
-                      <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />
-                      <Text style={styles.cameraScanBtnText}>Scan {photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => { setPendingLabel(null); setStep(4) }} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Text style={styles.cameraDoneText}>More areas</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <TouchableOpacity
+                    style={[styles.cameraScanBtn, encoding && styles.cameraScanBtnBusy]}
+                    onPress={() => {
+                      if (encoding) return
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+                      setStep(5)
+                    }}
+                    disabled={encoding}
+                    activeOpacity={0.85}
+                  >
+                    {encoding
+                      ? <ActivityIndicator size="small" color="#000000" />
+                      : <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />}
+                    <Text style={styles.cameraScanBtnText}>
+                      {encoding ? 'Preparing photos…' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
+                    </Text>
+                  </TouchableOpacity>
                 )}
               </LinearGradient>
             </View>
@@ -1101,10 +1125,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           return (
           <View style={stepWithSafeTop}>
             <View style={styles.topBar}>
-              {/* X first, flex spacer after — keeps the close affordance in the
-                  same top-left position across every step of the modal. */}
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+              {/* Back to the camera, NOT out of the scan. Only the camera-with-no-photos screen
+                  may abandon the process — anywhere else, a stray ✕ would throw away photos the
+                  user has already walked their kitchen to take. Same rule on steps 5 and 55. */}
+              <TouchableOpacity style={styles.closeBtn} onPress={() => { setPendingLabel(null); setStep(1) }}>
+                <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
               <View style={{ flex: 1 }} />
             </View>
@@ -1244,9 +1269,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 step. */}
             <TouchableOpacity
               style={[styles.closeBtn, styles.closeBtnAbs, { top: insets.top + 8, left: 8, right: undefined }]}
-              onPress={handleClose}
+              onPress={() => setStep(4)}
             >
-              <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+              <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
 
             {/* Loading body — LIVE DETECTION THEATRE while scanning (the user's own photos scanned
@@ -1380,9 +1405,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                           already spent). A second tap, keyboard down, closes the scan as normal. */}
                       <TouchableOpacity
                         style={styles.closeBtn}
-                        onPress={() => { if (keyboardUp) { Keyboard.dismiss(); return } handleClose() }}
+                        onPress={() => { if (keyboardUp) { Keyboard.dismiss(); return } setStep(5) }}
                       >
-                        <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+                        <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
                     </View>
                     {/* Scan thumbnails as a centered, content-hugging grid (2 across for ≤4 photos,
@@ -1818,7 +1843,6 @@ const styles = StyleSheet.create({
   cameraHeroWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
   cameraHeroTitle: { fontSize: 38, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.8, lineHeight: 44, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.85)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 14 },
   cameraSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.9)', lineHeight: 20, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 6 },
-  cameraDoneText: { fontSize: 14, color: '#4ADE80', fontWeight: '700' },
   cameraTopBar: {
     position: 'absolute',
     left: 16,
@@ -1832,16 +1856,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 12,
     alignItems: 'center',
-  },
-  cameraCountText: {
-    color: '#FFFFFF',
-    fontSize: 13,
-    fontWeight: '600',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    overflow: 'hidden',
   },
   cameraCloseBtn: {
     width: 36,
@@ -1861,8 +1875,11 @@ const styles = StyleSheet.create({
   bracketTL: { top: '13%', left: '4%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
   bracketTR: { top: '13%', right: '4%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
   // Bottom brackets sit well above the copy/shutter scrim (was 20% → collided with the title).
-  bracketBL: { bottom: '27%', left: '4%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
-  bracketBR: { bottom: '27%', right: '4%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  // Raised from 27%: the bottom stack grew a filmstrip and a full-width button, and the corner
+  // brackets were being drawn straight through the first thumbnail. They frame the shot, so they
+  // have to sit above everything that isn't the shot.
+  bracketBL: { bottom: '40%', left: '4%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '40%', right: '4%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
   cameraBottom: {
     paddingTop: 12,
     paddingBottom: 4,
@@ -1972,17 +1989,19 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   filmLabel: { fontSize: 10, color: '#AAAAAA', fontWeight: '500', maxWidth: 56, textAlign: 'center' },
-  cameraActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   cameraScanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    alignSelf: 'stretch',      // full width of the overlay — the one action on this screen
     backgroundColor: '#FFFFFF',
     paddingHorizontal: 22,
-    paddingVertical: 13,
+    paddingVertical: 15,
     borderRadius: 30,
   },
+  cameraScanBtnBusy: { opacity: 0.65 },
+  cameraTipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   cameraScanBtnText: { fontSize: 15, fontWeight: '700', color: '#000000' },
 
   // Extra grid (step 4)
