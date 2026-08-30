@@ -806,6 +806,13 @@ export default function HomeScreen() {
   // Height is applied only once the rows have been measured; before that the view needs its
   // natural height so onLayout has something to report. Opacity still hides them meanwhile.
   const macrosRowsHeight = useAnimatedStyle(() => ({ height: macrosAnim.value * extraRowsH }))
+  // The rows SLIDE DOWN into the space as it opens, rather than being unveiled in place by the
+  // growing clip. Without this the rows appear line by line while everything below them slides —
+  // two different motions in one transition, which reads as a wipe rather than as movement. This
+  // is the classic reason an accordion feels worse opening than closing.
+  const macrosRowsSlide = useAnimatedStyle(() => ({
+    transform: [{ translateY: (macrosAnim.value - 1) * extraRowsH }],
+  }))
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
@@ -1365,13 +1372,13 @@ export default function HomeScreen() {
             {/* Carbs+Fat accordion — height glides 0↔measured with macrosAnim so the reflow below
                 is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
             <Reanimated.View style={[{ overflow: 'hidden', opacity: extraRowsH > 0 ? 1 : 0 }, extraRowsH > 0 && macrosRowsHeight]}>
-              <View
+              <Reanimated.View
                 onLayout={e => { layoutFireCount.current++; const h = e.nativeEvent.layout.height; if (!h || Math.abs(h - extraRowsHRef.current) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.rowsH = h; return } extraRowsHRef.current = h; setExtraRowsH(h) }}
-                style={{ gap: 10, paddingTop: 10 }}
+                style={[{ gap: 10, paddingTop: 10 }, macrosRowsSlide]}
               >
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
-              </View>
+              </Reanimated.View>
             </Reanimated.View>
             {__DEV__ && <ToggleProbe renderCount={homeRenderCount.current} layoutCount={layoutFireCount.current} />}
             <TouchableOpacity
@@ -1383,7 +1390,7 @@ export default function HomeScreen() {
                 // Hold measurements until the glide is done — see layoutPaused above.
                 layoutPaused.current = true
                 setTimeout(flushLayout, 320) // 280ms animation + a frame of settle
-                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
+                macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.out(ReaEasing.cubic) })
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
                 AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
