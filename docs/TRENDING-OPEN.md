@@ -44,3 +44,24 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
       "missing maple" gaps on recipes listing only "syrup".
 - [ ] Two stored rows carry `1/2 can` / `1/2 packet` ingredients. Harmless — the gate now correctly
       ignores common kitchen fractions. Noted so they are not re-flagged as findings.
+- [ ] **Vague-ingredient class is only PARTLY closed** (2026-08-30, `314ae64`). `fave seasoning!`
+      shipped to Discover as a shoppable row with an "+ Add" button. Cause: every rule in
+      `isNonIngredientLine` detects lines that are NOT FOOD (headings, macro lines, equipment,
+      instructions), and a preference placeholder is food-SHAPED — a generic category noun with a
+      preference qualifier. Nothing was looking for "names no specific food".
+      The fix is deliberately narrow: preference word IMMEDIATELY followed by a generic category
+      noun (1 match across 1300 live names, zero false positives). **Still passing the gate**,
+      verified by running it: `whatever you like`, `your choice of protein`, `toppings of your
+      choice`, bare `spices` / `seasonings`. None are in the live pool today. Do NOT close these
+      with a broad "of choice" rule — `milk of choice` is live, names an actual food, and is
+      ordinary substitution phrasing.
+      Note the second-order effect: removing a placeholder can drop a recipe BELOW the >=3
+      candidate gate. That is the intended direction ("fewer recipes, never incomplete recipes") —
+      the sheet-pan row reduced to chicken + salt and its row was deleted.
+- [ ] **Whole-unit counts came from grams, not the creator** (2026-08-30, `5fe566a`). The meal
+      screen said "5 chicken breasts" where the row stored `visual: "6 pieces"`; 10 of 79 live rows
+      that state a count were contradicted. `getWholeUnitDisplay` never received `visual`. Fixed —
+      stated count wins, grams is the fallback, weight visuals ("2 lb") are explicitly not counts.
+      Constants re-derived from the pool: garlic clove 5g->3g, chicken breast 170g->190g.
+      **Remaining:** avocado is 200g in the table but the pool implies ~150g (n=3, range 100-150).
+      Left alone — thin evidence and it caused no visible contradiction. Re-check as the pool grows.
