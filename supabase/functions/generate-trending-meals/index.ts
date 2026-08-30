@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { countedIngredients, realIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
+import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -553,7 +554,7 @@ Deno.serve(async (req: Request) => {
             // videos.list already returns this and it was being discarded. Authoritative source
             // language beats guessing at it from the extracted text — see recipe-integrity.
             const sourceLang = item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null
-            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, DESC_PARSE_CHARS), viewCount, likeCount, sourceLang })
+            allVideos.push({ videoId, title, thumbnail, description: truncateSafe(description, DESC_PARSE_CHARS), viewCount, likeCount, sourceLang })
           }
         }
       } catch (e) {
@@ -581,7 +582,7 @@ Deno.serve(async (req: Request) => {
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
           const sourceLang = item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, DESC_PARSE_CHARS), viewCount, likeCount, sourceLang })
+          allVideos.push({ videoId, title, thumbnail, description: truncateSafe(description, DESC_PARSE_CHARS), viewCount, likeCount, sourceLang })
         }
       }
     } catch (e) {
@@ -666,7 +667,7 @@ Deno.serve(async (req: Request) => {
     const videoList = uniqueVideos.map((v, i) => {
       // Shown-to-the-model slice only. The full text is still what parseIngredientBlock reads
       // below, so widening the parse window never costs prompt budget — see DESC_PROMPT_CHARS.
-      const desc = v.description ? `\n   Description: ${v.description.substring(0, DESC_PROMPT_CHARS)}` : ''
+      const desc = v.description ? `\n   Description: ${truncateSafe(v.description, DESC_PROMPT_CHARS)}` : ''
       // Naming the language turns the general "translate" rule into a specific instruction about
       // THIS video, which is the difference between the model noticing and not.
       const langNote = isNonEnglishSource(v.sourceLang)
@@ -815,7 +816,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // reliable enough that a single-provider setup is fine; if it fails outright we'll
     // see 0 yield that day and the cron retries naturally tomorrow.
     const providers = [
-      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google" },
+      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google", maxTokens: 32000 },
       // OpenAI fallback. openaiApiKey was already declared at the top of this file and never
       // wired in, so this was the ONLY Gemini-primary function with no second provider — a Gemini
       // outage or rate-limit meant the whole trending pipeline produced nothing, and with 30-day
@@ -825,8 +826,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // downstream, not by trusting the model: 100%-ingredient-retention-or-reject, the fractional
       // check, name and ingredient dedup, and the shelf_tag whitelist all run on whatever comes
       // back. A weaker model produces fewer usable recipes, not worse ones that ship.
-      openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI" },
-    ].filter(Boolean) as { url: string; key: string; model: string; name: string }[]
+      openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI", maxTokens: 16000 },
+    ].filter(Boolean) as { url: string; key: string; model: string; name: string; maxTokens: number }[]
 
     let recipes: any[] | null = null
     // Why each provider failed. The 500 below used to say only "Failed to generate recipes from
@@ -863,11 +864,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           // to emit 5 ingredients now correctly emits 15, and 15-20 recipes of that size do not
           // fit in 8000 tokens.
           //
-          // 32000 is chosen against a real ceiling rather than by doubling until it works:
-          // gemini-3.1-flash-lite's model card documents a 64K output limit, so this takes about
-          // half of it and leaves the rest as headroom. The cap is a truncation guard, not a
-          // budget — nothing is charged for tokens the model does not emit.
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: 32000 }),
+          // Per PROVIDER, because the ceilings differ and a single number silently broke the
+          // fallback: gemini-3.1-flash-lite documents a 64K output limit (32000 takes half and
+          // leaves headroom), while gpt-4o-mini tops out at 16,384 — so the shared 32000 was an
+          // invalid request to OpenAI before its body was even read. The cap is a truncation
+          // guard, not a budget: nothing is charged for tokens the model does not emit.
+          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: provider.maxTokens }),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId))
         const data = await res.json()
