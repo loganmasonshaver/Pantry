@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
+import { countedIngredients, realIngredients, nameIngredientGaps } from '../_shared/recipe-integrity.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -946,7 +947,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // beats wrong.
             const srcVideo = uniqueVideos[(r.video_index || 1) - 1]
             const srcList = srcVideo ? parseIngredientBlock(srcVideo.description || '') : []
-            const got = r.ingredients?.length ?? 0
+            // Junk stripped and duplicates collapsed BEFORE counting. Both inflated `got` and so
+            // bought a free pass at this threshold: five stored meals counted section headings
+            // ("Składniki") or macro lines ("Kalorien: 504 kcal") as ingredients, and seven listed
+            // the same item twice. A model that echoes the raw description block should not clear
+            // a retention check by echoing more of it.
+            const counted = countedIngredients(r.ingredients)
+            const got = counted.length
             if (srcList.length < 3) { rejDropped++; return false }
             console.log(`[funnel] ingredient retention "${name}": ${got}/${srcList.length}`)
             if (got < srcList.length) {
@@ -954,6 +961,25 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               console.log(`[funnel] rejected "${name}" — kept ${got} of ${srcList.length} ingredients`)
               return false
             }
+            // The count above is blind to IDENTITY: three ingredients satisfy "three or more"
+            // whether or not they are the right three, and srcList is only as complete as the
+            // parser managed to be — so when parsing under-extracts, the specification quietly
+            // shrinks to whatever the model produced and both sides of the comparison agree on a
+            // wrong answer. "Blueberry-Lemon High-Protein Pancakes" passed with eggs, yogurt and
+            // maple syrup: no blueberries, no lemon, not even flour.
+            //
+            // A dish named after a food that appears nowhere in its ingredients is the direct
+            // evidence of that. Measured over a 168-meal pool this rejects 4% with no false
+            // positives; every one of the seven was hand-checked as a genuine drop.
+            const gaps = nameIngredientGaps(name, counted)
+            if (gaps.length > 0) {
+              rejDropped++
+              console.log(`[funnel] rejected "${name}" — named for ${gaps.join(', ')}, absent from ingredients`)
+              return false
+            }
+            // Store the cleaned list. Duplicates are kept here (a recipe may genuinely use eggs
+            // twice); only headings, macro lines and instruction text are removed.
+            r.ingredients = realIngredients(r.ingredients)
             r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
