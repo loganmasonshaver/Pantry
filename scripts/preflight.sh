@@ -117,11 +117,21 @@ for r in rows if isinstance(rows, list) else []:
       continue
     fi
 
-    # 3-minute grace: deploying and then committing the same code is a normal order and leaves the
-    # commit a few seconds "newer" than the deploy. Without this every such pair reports as drift.
-    # Both rendered from epoch in local time, so the two halves are actually comparable.
+    # Deploying and then committing the same code is a normal order and leaves the commit slightly
+    # "newer" than the deploy, so a bare newer-than test reports drift on every such pair. The old
+    # code absorbed that with a flat 3-minute grace — but the grace is absolute (deploy + 180s), so
+    # a commit made two minutes AFTER a deploy, containing entirely new code, scored as clean
+    # FOREVER rather than briefly. That is the drift detector hiding the exact drift it exists to
+    # catch, and it did so on a real scan-pantry change (deployed 21:42:25, committed 21:44:46).
+    #
+    # Timestamps genuinely cannot separate "committed what I just deployed" from "committed
+    # something new shortly after deploying". So the in-grace case is now REPORTED as ambiguous
+    # rather than resolved as fine — a drift checker should surface what it cannot decide.
     if [ "$src_ts" -gt "$((dep_ts + 180))" ]; then
       review "$name — committed $(date -r "$src_ts" '+%b %d %H:%M'), last deployed $(date -r "$dep_ts" '+%b %d %H:%M'). Redeploy if that commit touched it."
+      drift=1
+    elif [ "$src_ts" -gt "$dep_ts" ]; then
+      review "$name — committed $(( (src_ts - dep_ts) / 60 ))m$(( (src_ts - dep_ts) % 60 ))s AFTER its last deploy. If that commit changed it, redeploy; if it just recorded what you deployed, ignore."
       drift=1
     fi
   done
