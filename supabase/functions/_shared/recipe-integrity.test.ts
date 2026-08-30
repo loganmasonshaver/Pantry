@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isNonIngredientLine, realIngredients, countedIngredients, nameIngredientGaps } from './recipe-integrity.ts'
+import { isNonIngredientLine, realIngredients, countedIngredients, nameIngredientGaps,
+         looksUntranslated, isNonEnglishSource } from './recipe-integrity.ts'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
 test('section headings, macro lines and boilerplate are not ingredients', () => {
@@ -90,4 +91,39 @@ test('a junk-only or empty list is left to the count gate, not reported as a nam
 
 test('a name with no defining food is never rejected', () => {
   assert.deepEqual(nameIngredientGaps('Crispy Air Fryer Breakfast Bowl', [{ name: 'eggs' }]), [])
+})
+
+// ── untranslated output ──────────────────────────────────────────────────────────────────────
+test('a list carried through in its source language is flagged', () => {
+  for (const ings of [
+    ['borówki', 'woda', 'skórka z pomarańczy', 'serek wiejski wysokobiałkowy'],
+    ['Haferflocken', 'Skyr', 'Chiasamen', 'Backkakao'],
+    ['pechuga de pollo', 'aceite de oliva', 'cebolla picada'],
+    ["blanc de poulet", "oignon émincé", "crème fraîche épaisse"],
+  ]) assert.equal(looksUntranslated(ings.map(n => ({ name: n }))), true, ings[0])
+})
+
+test('English recipes are never flagged, including non-Western cuisines', () => {
+  // These are the ones that broke the two detectors tried before this. Indian recipes score
+  // nothing against a Western food table, but they are plainly written in English.
+  for (const ings of [
+    ['dry soy chunks', 'soaked chana dal', 'lauki', 'coriander seeds'],
+    ['boiled Kala chana', 'paneer', 'beetroot', 'green chillie'],
+    ['Green moong dal', 'Jaggery', 'Desi ghee', 'Crushed almonds'],
+    ['rajma', 'paneer', 'sweet corn', 'olive oil', 'smoked sea salt'],
+    ['Eggs', 'High-protein Greek yogurt', 'Maple syrup'],
+  ]) assert.equal(looksUntranslated(ings.map(n => ({ name: n }))), false, ings[0])
+})
+
+test('an all-brand English list is why this is never used alone', () => {
+  // "Quest Salted Caramel Milkshake, Xanthan Gum, Monk Fruit Sweetener, Honey" is a real, English
+  // meal with no marker words. The source-language gate is what keeps it from being deleted.
+  const brandy = ['Quest Salted Caramel Milkshake', 'Xanthan Gum', 'Monk Fruit Sweetener'].map(n => ({ name: n }))
+  assert.equal(looksUntranslated(brandy), true)          // the text check alone would drop it...
+  assert.equal(isNonEnglishSource('en-US'), false)       // ...and this is what stops that
+})
+
+test('source language: only an explicit non-English tag counts', () => {
+  for (const l of ['de', 'pl', 'es', 'fr-CA', 'hi']) assert.equal(isNonEnglishSource(l), true, String(l))
+  for (const l of ['en', 'en-US', 'en-GB', '', null, undefined]) assert.equal(isNonEnglishSource(l as any), false, String(l))
 })

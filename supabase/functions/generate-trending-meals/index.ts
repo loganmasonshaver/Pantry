@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { countedIngredients, realIngredients, nameIngredientGaps } from '../_shared/recipe-integrity.ts'
+import { countedIngredients, realIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource } from '../_shared/recipe-integrity.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -521,7 +521,8 @@ Deno.serve(async (req: Request) => {
 
     stageLog(`dedup history loaded: ${prevNames.length} prev names, ${prevIngredientSigs.length} prev ingredient sigs, ${recentVideoIds.size} prev video_ids`)
 
-    const allVideos: { videoId: string; title: string; thumbnail: string; description: string; viewCount: number; likeCount: number }[] = []
+    // sourceLang: YouTube's defaultAudioLanguage/defaultLanguage, null when the creator omitted it.
+    const allVideos: { videoId: string; title: string; thumbnail: string; description: string; viewCount: number; likeCount: number; sourceLang: string | null }[] = []
     // Used to filter chart=mostPopular results down to food content (the Howto & Style
     // category includes DIY, beauty, fashion, tech tutorials — we only want recipes).
     const isFoodTitle = (t: string) => /\b(recipe|cook|meal|food|dish|breakfast|lunch|dinner|snack|dessert|bake|grill|fry|roast|smoothie|salad|wrap|bowl|pasta|stir fry|pancake|cheesecake|brownie|cottage cheese|protein|anabolic)\b/i.test(t)
@@ -569,7 +570,10 @@ Deno.serve(async (req: Request) => {
             const likeCount = parseInt(item.statistics?.likeCount ?? '0', 10) || 0
             if (!videoId || !title || !thumbnail) continue
             if (isNotRecipeContent(title)) continue
-            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount })
+            // videos.list already returns this and it was being discarded. Authoritative source
+            // language beats guessing at it from the extracted text — see recipe-integrity.
+            const sourceLang = item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null
+            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount, sourceLang })
           }
         }
       } catch (e) {
@@ -596,7 +600,8 @@ Deno.serve(async (req: Request) => {
           const likeCount = parseInt(item.statistics?.likeCount ?? '0', 10) || 0
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount })
+          const sourceLang = item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount, sourceLang })
         }
       }
     } catch (e) {
@@ -680,6 +685,11 @@ Deno.serve(async (req: Request) => {
     // Step 2: Send video titles + descriptions to Groq to generate accurate recipes
     const videoList = uniqueVideos.map((v, i) => {
       const desc = v.description ? `\n   Description: ${v.description}` : ''
+      // Naming the language turns the general "translate" rule into a specific instruction about
+      // THIS video, which is the difference between the model noticing and not.
+      const langNote = isNonEnglishSource(v.sourceLang)
+        ? `\n   SOURCE LANGUAGE: ${v.sourceLang} — this description is NOT English. Translate every ingredient and step into English.`
+        : ''
       // When the creator published an explicit list, restate it as a checklist with its exact
       // count. "Return all 14" is a far harder instruction to quietly ignore than "keep every
       // ingredient", which was already in the prompt and was being ignored half the time.
@@ -687,7 +697,7 @@ Deno.serve(async (req: Request) => {
       const checklist = parsed.length >= 3
         ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
         : ''
-      return `${i + 1}. "${v.title}"${desc}${checklist}`
+      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}`
     }).join('\n\n')
 
     const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
@@ -984,6 +994,18 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             if (gaps.length > 0) {
               rejDropped++
               console.log(`[funnel] rejected "${name}" — named for ${gaps.join(', ')}, absent from ingredients`)
+              return false
+            }
+            // Untranslated output. TWO signals must agree: YouTube's own defaultAudioLanguage says
+            // the source is not English, AND the extracted list shows no sign of English writing.
+            // Neither is safe alone — the text check drops a real all-brand English recipe
+            // ("Quest Salted Caramel Milkshake, Xanthan Gum, Monk Fruit Sweetener"), and a
+            // non-English source that WAS translated properly is exactly what we want to keep. It
+            // is the pairing that makes this precise. Absent language metadata counts as English,
+            // so this can only ever fire on a video that declared itself foreign.
+            if (isNonEnglishSource(srcVideo?.sourceLang) && looksUntranslated(counted)) {
+              rejDropped++
+              console.log(`[funnel] rejected "${name}" — source is ${srcVideo?.sourceLang} and the ingredients were not translated`)
               return false
             }
             // Store the cleaned list. Duplicates are kept here (a recipe may genuinely use eggs

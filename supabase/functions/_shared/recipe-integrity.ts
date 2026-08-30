@@ -165,3 +165,56 @@ export function countedIngredients(ingredients: any[] | undefined): any[] {
   }
   return out
 }
+
+// ── Untranslated output ──────────────────────────────────────────────────────────────────────
+//
+// English recipe writing is built out of modifiers, units and connectives that appear whatever the
+// cuisine: "soaked chana dal", "boiled Kala chana", "dry red chillies". A list carried through in
+// its source language has none of them: "serek wiejski wysokobiałkowy", "Haferflocken",
+// "pechuga de pollo".
+//
+// Two detectors were measured against the live pool and REJECTED before landing on this one:
+//   * Food-table coverage (does macro-estimate recognise the ingredients). It does not separate:
+//     the lowest scorers are English-language INDIAN recipes — "Lauki Galouti Kebab" scored 0.00,
+//     the same as a Polish list — because the table is Western-biased. It would have deleted a
+//     whole cuisine.
+//   * Marker words alone. Every foreign fixture scored 0.00, but so did one genuine English meal
+//     whose ingredients are all brand nouns ("Quest Salted Caramel Milkshake, Xanthan Gum, Monk
+//     Fruit Sweetener, Honey"). One false positive in 159 is too many when the penalty is deleting
+//     real food.
+//
+// So this check is never used on its own. The caller runs it ONLY when YouTube's own
+// defaultAudioLanguage says the source is not English — an authoritative signal the pipeline was
+// already fetching and discarding. Two independent signals must agree before anything is dropped.
+const ENGLISH_MARKERS = new Set((
+  'fresh dried chopped sliced diced minced ground grated shredded crushed whole halved cubed ' +
+  'roasted boiled cooked raw baked frozen canned drained rinsed soaked toasted melted softened beaten ' +
+  'large small medium extra light heavy low high full reduced fat free sugar plain unsweetened sweetened ' +
+  'powder powdered seeds seed leaves leaf sauce oil water milk juice syrup butter cheese cream yogurt yoghurt ' +
+  'flour protein whey bread rice pasta noodles chicken beef pork egg eggs salt pepper spray stock broth paste ' +
+  'of with and or for to taste optional plus about into cut skinless boneless nonfat non slices pinch clove cloves ' +
+  'tbsp tsp cup cups oz lb kg ml teaspoon tablespoon ounce pound gram grams'
+).split(' '))
+
+/**
+ * True when an ingredient list shows no sign of having been written in English.
+ *
+ * Only meaningful for a source already known to be non-English — on its own it misfires on
+ * brand-only lists. See the note above.
+ */
+export function looksUntranslated(ingredients: any[] | undefined): boolean {
+  const names = realIngredients(ingredients)
+    .map(i => String((typeof i === 'string' ? i : i?.name) ?? '').trim())
+    .filter(Boolean)
+  if (names.length === 0) return false // nothing to judge; other gates handle empties
+  return !names.some(n =>
+    (n.toLowerCase().match(/[a-z]+/g) ?? []).some(t => ENGLISH_MARKERS.has(t))
+  )
+}
+
+/** True when YouTube reports a source language that is not English. Absent metadata is NOT foreign. */
+export function isNonEnglishSource(lang: string | null | undefined): boolean {
+  const l = String(lang ?? '').trim().toLowerCase()
+  if (!l) return false            // most videos omit it — absence is not evidence
+  return !l.startsWith('en')      // en, en-US, en-GB all pass
+}
