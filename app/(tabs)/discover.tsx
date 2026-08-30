@@ -22,6 +22,7 @@ import {
   loadTrendingMeals, readDiscoverCache, writeDiscoverCache, prefetchDiscover,
   type DiscoverMeal,
 } from '@/lib/discoverFeed'
+import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
 import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
@@ -714,14 +715,20 @@ export default function DiscoverScreen() {
     const claim = (meals: DiscoverMeal[], limit: number) => {
       const out: DiscoverMeal[] = []
       const sigs: Set<string>[] = []
+      const forms = new Map<string, number>()
       for (const m of meals) {
         if (out.length >= limit) break
         if (taken.has(m.id)) continue
+        // Dish form is checked BEFORE ingredients: it is the cheaper test and the one that catches
+        // the case ingredient overlap structurally cannot (see dishArchetype).
+        const form = dishArchetype(m)
+        if (form && (forms.get(form) ?? 0) >= ARCHETYPE_PER_SHELF) continue
         const sig = ingredientSignature(m)
         // Under 3 ingredients the overlap score is noise — a two-item recipe matches too much by
         // chance — so those are admitted without a diversity check rather than falsely blocked.
         if (sig.size >= 3 && sigs.some(prev => ingredientOverlap(sig, prev) >= SHELF_DIVERSITY_MAX)) continue
         if (sig.size >= 3) sigs.push(sig)
+        if (form) forms.set(form, (forms.get(form) ?? 0) + 1)
         taken.add(m.id)
         out.push(m)
       }
@@ -782,7 +789,10 @@ export default function DiscoverScreen() {
       else meals.forEach(m => taken.delete(m.id))
     }
 
-    const leftovers = browseGrid.filter(m => !taken.has(m.id))
+    // Everything the shelves did not claim, including everything the archetype cap skipped — which
+    // is exactly where the repeats now accumulate, so this section is the one that most needs the
+    // spread. Reordered, not filtered: nothing is removed from the page.
+    const leftovers = spreadByArchetype(browseGrid.filter(m => !taken.has(m.id)))
 
     return [
       { key: 'nearly', title: 'Almost in your kitchen', meals: nearly, accent: true },

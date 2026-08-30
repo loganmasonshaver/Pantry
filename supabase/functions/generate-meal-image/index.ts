@@ -3,6 +3,47 @@ import { verifyUser } from '../_shared/auth.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
+// Photographic direction, varied per DISH and stable for it.
+//
+// Every image was generated with one identical direction string — "overhead or 3/4-angle, natural
+// daylight from upper left, Sony A7R IV 50mm" — so two unrelated chocolate cheesecakes came back as
+// the same photograph, and a browse grid of six brownies looked like the same brownie six times.
+// The recipes were genuinely different; only the camera was not.
+//
+// Keyed by a hash of the dish name, deliberately NOT random and NOT per user:
+//   * stable, so regenerating a dish yields the same frame instead of a new one each time;
+//   * per DISH, so the image cache stays one image per meal shared by everyone. Varying per user
+//     would multiply generations per dish, which is the cost model that must not be touched.
+//
+// Changing this string does NOT invalidate anything already stored: the cache key is
+// normalizeKey(mealName), not the prompt. Existing images keep resolving; only new dishes pick up
+// the variation.
+function photoVariant(mealName: string): string {
+  let h = 0
+  for (let i = 0; i < mealName.length; i++) h = (h * 31 + mealName.charCodeAt(i)) >>> 0
+  const ANGLE = [
+    'straight overhead flat-lay',
+    'three-quarter angle at table height',
+    'low fifteen-degree angle close to the surface',
+    'tight forty-five-degree crop filling the frame',
+  ]
+  const SURFACE = [
+    'pale ceramic plate on a warm oak board',
+    'matte stoneware on a dark slate surface',
+    'off-white speckled plate on natural linen',
+    'rustic terracotta dish on weathered wood',
+  ]
+  const LIGHT = [
+    'soft window light from the upper left',
+    'warm directional light from the right with long shadows',
+    'diffused overcast daylight with minimal shadow',
+    'golden late-afternoon side light',
+  ]
+  // Independent bit ranges per axis, so two dishes that collide on one axis still differ on the
+  // others instead of sharing the whole look.
+  return `${ANGLE[h % ANGLE.length]}, ${SURFACE[(h >>> 3) % SURFACE.length]}, ${LIGHT[(h >>> 6) % LIGHT.length]}`
+}
+
 // Per-user daily ceiling on actual generations (cache hits are exempt). Derived from the
 // real max a user can drive: meal-gen is capped at 3/day server-side × up to 5 meals per
 // Cook Now generation = 15 images, plus a small buffer for the onboarding plan reveal and
@@ -234,7 +275,7 @@ Deno.serve(async (req: Request) => {
       // STAGE 2 (preferred): description-led prompt with photography direction layered on.
       // The negative-prompt trailer is embedded in the prompt body since Flux 2's API
       // doesn't accept a separate negative_prompt field — this is best-effort guidance.
-      prompt = `${description}. Professional overhead or 3/4-angle food photography, natural daylight from upper left, sharp focus on subject, shallow depth of field, shot on Sony A7R IV with 50mm f/2.8 prime, photorealistic raw photo aesthetic, soft natural shadows. Negative prompt: text, watermark, logo, signage, label, blurry, oversaturated, artificial steam plume, cartoon, illustration, plastic-looking, stacked separate components, hallucinated ingredients not in the dish, weird AI artifacts, multiple plates, deconstructed.`
+      prompt = `${description}. Professional food photography, ${photoVariant(mealName)}, sharp focus on subject, shallow depth of field, shot on Sony A7R IV with 50mm f/2.8 prime, photorealistic raw photo aesthetic. Negative prompt: text, watermark, logo, signage, label, blurry, oversaturated, artificial steam plume, cartoon, illustration, plastic-looking, stacked separate components, hallucinated ingredients not in the dish, weird AI artifacts, multiple plates, deconstructed.`
     } else {
       // FALLBACK: original static template (keyword-detected vessel + sauce-filtered
       // ingredients). Worse than the LLM-guided version but never breaks image gen.
@@ -260,7 +301,7 @@ Deno.serve(async (req: Request) => {
                    : nameLower.includes('curry')     ? 'ceramic bowl with rice on the side'
                    : nameLower.includes('toast')     ? 'dark ceramic plate'
                    : 'dark ceramic plate'
-      prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant — glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra vessels, dark moody background, warm moody restaurant lighting, sharp focus, appetizing, photorealistic`
+      prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant — glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra vessels, ${photoVariant(mealName)}, sharp focus, appetizing, photorealistic`
     }
 
     // Generate via FAL Flux 2
