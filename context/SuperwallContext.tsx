@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import * as Notifications from 'expo-notifications'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
-import { markTrialStarted, markTrialEnded, markSubscribed } from '@/lib/engagement'
+import { markTrialStarted, markTrialEnded } from '@/lib/engagement'
 
 // AsyncStorage keys for tracking trial lifecycle across app restarts
 const TRIAL_STARTED_KEY = 'pantry_trial_started_at'

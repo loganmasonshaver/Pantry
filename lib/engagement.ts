@@ -117,22 +117,12 @@ export async function markTrialEnded(userId: string, converted: boolean): Promis
   }
 }
 
-export async function markSubscribed(userId: string): Promise<void> {
-  try {
-    const now = new Date().toISOString()
-    await supabase.from('profiles').update({ subscribed_at: now, churned_at: null }).eq('id', userId)
-    await fireLoopsEvent(userId, 'subscribed')
-  } catch (e) {
-    // Non-fatal
-  }
-}
-
-export async function markChurned(userId: string): Promise<void> {
-  try {
-    const now = new Date().toISOString()
-    await supabase.from('profiles').update({ churned_at: now }).eq('id', userId)
-    await fireLoopsEvent(userId, 'churned')
-  } catch (e) {
-    // Non-fatal
-  }
-}
+// markSubscribed / markChurned deliberately do NOT live here.
+//
+// Superwall's client SDK reports only ACTIVE/INACTIVE, so the app cannot tell a trial converting
+// to paid from a trial starting, nor a lapsed trial from a paying customer churning. The client
+// versions were imported-but-never-called and never-imported respectively, and both fields sat
+// null for every user. subscribed_at / churned_at and their Loops events are now written by
+// supabase/functions/superwall-webhook, which receives the authoritative initial_purchase and
+// expiration events from Superwall's servers. Do not re-add a client path — it would guess, and
+// it would double-fire against the webhook.

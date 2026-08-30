@@ -123,12 +123,32 @@ Deno.serve(async (req: Request) => {
   // AUTH GATE — verify the caller's JWT and require them to be operating on
   // their own user_id. Without this, anyone with the function URL could spam
   // Loops events against other users' accounts.
-  const callerUser = await verifyUser(req)
-  if (!callerUser) return unauthorizedResponse()
+  //
+  // TRUSTED SERVER CALLER exception. superwall-webhook is the authority on subscription
+  // lifecycle — only Superwall's servers know that a trial converted to paid, or that a paying
+  // customer's access expired — and it has no user JWT to present. It authenticates with the same
+  // CRON_SECRET-preferred shared secret the trending cron and generate-meal-image already use.
+  //
+  // The self-only rule below exists to stop a USER acting on someone else's record. It does not
+  // apply to a caller holding the service-role secret, which can already read and write every
+  // profile directly; requiring it to impersonate a JWT would add ceremony, not safety. The
+  // secret never reaches the client — it lives in function env only.
+  const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? ""
+  const authToken = (req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "")
+    .replace(/^Bearer\s+/i, "").trim()
+  const isTrustedServer =
+    (CRON_SECRET !== "" && authToken === CRON_SECRET) ||
+    (supabaseServiceKey !== "" && authToken === supabaseServiceKey)
 
-  const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
-  const { allowed } = rateLimit(ip, 30, 60000)
-  if (!allowed) return rateLimitResponse()
+  let callerUser: { id: string; email?: string | null } | null = null
+  if (!isTrustedServer) {
+    callerUser = await verifyUser(req)
+    if (!callerUser) return unauthorizedResponse()
+
+    const ip = req.headers.get('x-forwarded-for') ?? req.headers.get('cf-connecting-ip') ?? 'unknown'
+    const { allowed } = rateLimit(ip, 30, 60000)
+    if (!allowed) return rateLimitResponse()
+  }
 
   try {
     // Expected payload from in-app call. Three shapes accepted:
@@ -140,6 +160,13 @@ Deno.serve(async (req: Request) => {
     const action = body.action ?? "sync_profile"
 
     if (action === "delete") {
+      // Delete stays USER-ONLY, including for the trusted server caller. The email below is taken
+      // from the verified session precisely so a caller cannot name someone else's contact, and a
+      // server caller has no session to take it from. delete-account is the only caller and it is
+      // a user action; a server path would need to resolve the email itself and justify doing so.
+      if (!callerUser) {
+        return new Response(JSON.stringify({ error: "delete requires a user session" }), { status: 403, headers: jsonCors })
+      }
       // Self-delete only — caller's userId must match. Resolve email from auth
       // since the profile may already be deleted by the time this is called.
       if (body.userId && body.userId !== callerUser.id) {
@@ -157,15 +184,24 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: "userId required" }), { status: 400, headers: jsonCors })
     }
 
-    // Enforce that the caller is operating on their own user record.
-    if (body.userId !== callerUser.id) {
+    // Enforce that the caller is operating on their own user record. Skipped for the trusted
+    // server caller, which acts on behalf of whichever user Superwall's event names.
+    if (!isTrustedServer && body.userId !== callerUser!.id) {
       return new Response(JSON.stringify({ error: "userId mismatch" }), { status: 403, headers: jsonCors })
     }
 
-    // Pull the latest profile state so the Loops contact properties stay fresh
+    // Pull the latest profile state so the Loops contact properties stay fresh.
+    //
+    // `email` and `full_name` are NOT selected here and never were columns on profiles — the
+    // email_marketing migration added the marketing and lifecycle fields but not those two, and
+    // this select asked for them anyway. PostgREST fails the WHOLE query on an unknown column, so
+    // every loops-sync call returned "column profiles.email does not exist" — meaning no contact
+    // was ever synced and no lifecycle event ever fired, for any user, since the file was written.
+    // The auth fallback below existed the whole time and could never be reached, because the
+    // select died first.
     const { data: profile, error: profileErr } = await db
       .from("profiles")
-      .select("id, email, full_name, marketing_email_opt_in, marketing_consent_at, last_active_at, cook_tonight_used_count, meals_saved_count, goals_customized, trial_started_at, trial_ended_at, subscribed_at, churned_at")
+      .select("id, marketing_email_opt_in, marketing_consent_at, last_active_at, cook_tonight_used_count, meals_saved_count, goals_customized, trial_started_at, trial_ended_at, subscribed_at, churned_at")
       .eq("id", body.userId)
       .single()
 
@@ -173,12 +209,13 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: profileErr?.message ?? "profile not found" }), { status: 404, headers: jsonCors })
     }
 
-    // Only sync contacts who exist with an email (fallback: pull from auth if profile.email is empty)
-    let email: string | null = profile.email
-    if (!email) {
-      const { data: authUser } = await db.auth.admin.getUserById(body.userId)
-      email = authUser?.user?.email ?? null
-    }
+    // Identity lives in auth.users, not profiles: email is the auth email, and full_name is stored
+    // in user metadata at signup. This is now the only source rather than a fallback.
+    const { data: authUser } = await db.auth.admin.getUserById(body.userId)
+    const email: string | null = authUser?.user?.email ?? null
+    const fullName: string | null =
+      (authUser?.user?.user_metadata?.full_name as string | undefined) ??
+      (authUser?.user?.user_metadata?.name as string | undefined) ?? null
     if (!email) {
       return new Response(JSON.stringify({ ok: false, skipped: "no email" }), { headers: jsonCors })
     }
@@ -188,7 +225,7 @@ Deno.serve(async (req: Request) => {
     // subscribed, churned, …) is the part that actually drives Loops sequences, and
     // events/send auto-creates/updates the contact anyway. Losing a property refresh is
     // recoverable on the next sync; silently dropping a lifecycle event is not.
-    const props = profileToLoopsProps({ ...profile, email })
+    const props = profileToLoopsProps({ ...profile, email, full_name: fullName })
     let upsertFailed: string | null = null
     try {
       await loopsUpsertContact(email, body.userId, props)

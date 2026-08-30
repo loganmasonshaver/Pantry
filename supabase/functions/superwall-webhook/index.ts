@@ -78,6 +78,31 @@ function premiumFor(type: string, data: any): boolean | null {
   }
 }
 
+// Subscription LIFECYCLE, which is a different question from entitlement.
+//
+// premiumFor answers "should this user have access right now". This answers "did something happen
+// worth telling the email system about". They are not the same event set: a renewal grants access
+// but is not a new subscription, and a cancellation is not yet a churn because access continues
+// until the period ends.
+//
+// This has to live server-side. Superwall's client SDK reports only ACTIVE/INACTIVE, so the app
+// cannot tell a trial converting to paid from a trial starting, nor a lapsed trial from a paying
+// customer churning — it was guessing from a local AsyncStorage flag and therefore only ever
+// handled the trial cases. markSubscribed was imported and never called; markChurned was never
+// imported at all. Both timestamps were null for every user, so the "you're subscribed" and
+// win-back sequences could not fire.
+function lifecycleFor(type: string): "subscribed" | "churned" | null {
+  switch (type) {
+    case "initial_purchase":
+    case "non_renewing_purchase": // lifetime / one-time
+      return "subscribed"
+    case "expiration": // access actually ended — cancellation alone does NOT churn a user, they
+      return "churned" // keep access until the period runs out and expiration follows
+    default:
+      return null
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "method_not_allowed" }), { status: 405 })
@@ -108,6 +133,35 @@ Deno.serve(async (req: Request) => {
       premium_updated_at: new Date().toISOString(),
       premium_source: `superwall:${type}`,
     }).eq("id", userId).then(() => {}, () => {})
+  }
+
+  // Record the lifecycle moment and tell Loops. Best-effort throughout: a Loops outage must never
+  // turn into a webhook retry storm, and entitlement (above) is the load-bearing write.
+  const lifecycle = isUuid ? lifecycleFor(type) : null
+  if (lifecycle && isUuid) {
+    const now = new Date().toISOString()
+    // Clearing churned_at on resubscribe matters: a returning customer who still carried a churn
+    // timestamp would keep matching the win-back sequence after paying.
+    const patch = lifecycle === "subscribed"
+      ? { subscribed_at: now, churned_at: null }
+      : { churned_at: now }
+    await db.from("profiles").update(patch).eq("id", userId).then(() => {}, () => {})
+
+    // loops-sync owns the marketing-opt-in and Apple-private-relay rules and already lists
+    // "subscribed" and "churned" as transactional, so it is the right caller rather than hitting
+    // the Loops API directly and duplicating those guards. Authenticates as the trusted server.
+    try {
+      await fetch(`${supabaseUrl}/functions/v1/loops-sync`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${Deno.env.get("CRON_SECRET") || supabaseServiceKey}`,
+        },
+        body: JSON.stringify({ action: "event", userId, eventName: lifecycle, eventProperties: { source: `superwall:${type}` } }),
+      })
+    } catch (e) {
+      console.log(`[superwall-webhook] loops ${lifecycle} failed for ${userId}:`, (e as Error).message)
+    }
   }
 
   // Always 200 quickly so Svix doesn't retry a delivery we've accepted.
