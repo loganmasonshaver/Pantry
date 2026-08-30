@@ -921,7 +921,15 @@ export default function MealDetailScreen() {
               <>
                 {needRows.length > 0 && (
                   <>
-                    <Text style={styles.ingredientGroupLabel}>YOU'LL NEED</Text>
+                    {/* The bucket label only carries meaning when there is a second bucket to
+                        contrast with. On a recipe where everything has to be bought there is no
+                        "IN YOUR PANTRY" section, so this becomes a heading over the only list on
+                        screen — a third stacked label ("INGREDIENTS", the servings note, then
+                        this) above what may be two rows of food. The pantry label below is
+                        deliberately NOT conditional: it always contrasts with something. */}
+                    {(haveRows.length > 0 || basicRows.length > 0) && (
+                      <Text style={styles.ingredientGroupLabel}>YOU'LL NEED</Text>
+                    )}
                     <View style={styles.ingredientList}>
                       {needRows.map(ing => renderRow(ing, 'need'))}
                     </View>
@@ -1335,7 +1343,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   // The block owns the spacing below the whole header; the ROW only lays out title + toggle.
-  sectionHeaderBlock: { marginBottom: 12 },
+  sectionHeaderBlock: { marginBottom: 14 },
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1346,7 +1354,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   allergenNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 4, lineHeight: 17 },
-  servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 2 },
+  // marginTop 8, not 2. The header ROW is 36pt tall because the pill sets its height, while the
+  // title inside it is 11pt and vertically centred — so ~12pt of the row sits empty below the
+  // title. At marginTop 2 this line attached to that dead space and read as glued to the label
+  // at an arbitrary distance; 8 lets it clear the row and sit as its own caption.
+  servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 8 },
   sectionTitle: {
     flexShrink: 1,
     fontSize: 11,
