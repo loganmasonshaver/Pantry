@@ -9,6 +9,7 @@
 #   2. local vs remote  — migrations written but never applied, or applied with no file
 #   3. repo vs deployed — function source committed after its last deploy (Supabase deploys are
 #                         NOT part of git; reverting a file does not undeploy it)
+#   4. shoot-mode secrets — abuse ceilings temporarily raised for filming and never put back
 #
 # Read-only. Safe to run any time, and worth running before handing the repo to another chat.
 
@@ -37,14 +38,34 @@ fi
 
 echo ""
 echo "── migrations ──────────────────────────────────"
-mig=$(npx supabase migration list 2>/dev/null | grep -E '^\s+[0-9]{14}|\|\s+[0-9]{14}')
+# CLI 2.116 emits JSON here by DEFAULT, and (counter-intuitively) `-o json` gives back the old
+# padded table — so neither flag choice is safe to assume. Normalise both shapes to
+# "local<TAB>remote" and let the same comparison run. A preamble ("Initialising login role...")
+# precedes the payload, so the JSON is located rather than assumed to start at byte 0.
+mig=$(npx supabase migration list 2>/dev/null | python3 -c "
+import sys, json, re
+raw = sys.stdin.read()
+i = raw.find('{')
+if i != -1:
+    try:
+        d = json.loads(raw[i:])
+        for r in d.get('migrations', []):
+            print(f\"{r.get('local','') or ''}\t{r.get('remote','') or ''}\")
+        sys.exit(0)
+    except Exception:
+        pass
+# Table fallback: rows look like ' \`2026...\` | \`2026...\` | \`time\` ', either side possibly blank.
+for line in raw.splitlines():
+    if '|' not in line or '---' in line: continue
+    cols = [re.sub(r'[^0-9]', '', c) for c in line.split('|')[:2]]
+    if len(cols) == 2 and (cols[0] or cols[1]) and (len(cols[0]) in (0, 14)) and (len(cols[1]) in (0, 14)):
+        print(f'{cols[0]}\t{cols[1]}')
+" 2>/dev/null)
 if [ -z "$mig" ]; then
   review "could not read migration list (offline, or CLI not linked)"
 else
   drift=0
-  while IFS='|' read -r local remote _; do
-    local=$(echo "$local" | tr -d ' ')
-    remote=$(echo "$remote" | tr -d ' ')
+  while IFS=$'\t' read -r local remote; do
     # A local file with no remote row has been written but never applied to the database.
     [ -n "$local" ] && [ -z "$remote" ] && { bad "migration $local written but NOT applied to remote"; drift=1; }
     # A remote row with no local file means the ledger references a migration nobody can reproduce.
@@ -55,10 +76,25 @@ fi
 
 echo ""
 echo "── edge functions ──────────────────────────────"
-deployed=$(npx supabase functions list 2>/dev/null | grep ACTIVE)
-if [ -z "$deployed" ]; then
+# CLI 2.116 changed `functions list` from a padded table to JSON. The old parser split on '|' and
+# read fixed columns, so after the upgrade every function silently reported "NOT deployed" — 19
+# false blockers at once, which is worse than no check because it trains you to ignore the output.
+# Parse the JSON instead: it carries updated_at as epoch MILLIS, which needs no date parsing at all.
+# `-o json` is explicit so a future default flip back to a table can't quietly break this again.
+deployed=$(npx supabase functions list -o json 2>/dev/null)
+if [ -z "$deployed" ] || ! printf '%s' "$deployed" | grep -q '"slug"'; then
   review "could not read deployed functions (offline, or CLI not linked)"
 else
+  # slug<TAB>updated_at_seconds, one ACTIVE function per line.
+  deployed=$(printf '%s' "$deployed" | python3 -c "
+import sys, json
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+rows = d.get('functions', d) if isinstance(d, dict) else d
+for r in rows if isinstance(rows, list) else []:
+    if r.get('status') == 'ACTIVE' and r.get('slug'):
+        print(f\"{r['slug']}\t{int(r.get('updated_at', 0)) // 1000}\")
+" 2>/dev/null)
   drift=0
   for dir in supabase/functions/*/; do
     name=$(basename "$dir")
@@ -74,17 +110,12 @@ else
     src_ts=$(git log -1 --format=%ct -- "${paths[@]}" 2>/dev/null)
     [ -z "$src_ts" ] && continue
 
-    # The NAME column is space-padded to a fixed width, so trim before comparing.
-    dep_date=$(echo "$deployed" | awk -F'|' -v n="$name" '
-      { gsub(/^[ \t]+|[ \t]+$/, "", $2); gsub(/^[ \t]+|[ \t]+$/, "", $6)
-        if ($2 == n) print $6 }' | head -1)
-    if [ -z "$dep_date" ]; then
+    dep_ts=$(printf '%s' "$deployed" | awk -F'\t' -v n="$name" '$1 == n { print $2 }' | head -1)
+    if [ -z "$dep_ts" ] || [ "$dep_ts" = "0" ]; then
       bad "$name has source in git but is NOT deployed"
       drift=1
       continue
     fi
-    dep_ts=$(TZ=UTC date -j -f "%Y-%m-%d %H:%M:%S" "$dep_date" +%s 2>/dev/null)
-    [ -z "$dep_ts" ] && continue
 
     # 3-minute grace: deploying and then committing the same code is a normal order and leaves the
     # commit a few seconds "newer" than the deploy. Without this every such pair reports as drift.
@@ -95,6 +126,39 @@ else
     fi
   done
   [ "$drift" -eq 0 ] && ok "every function deployed at or after its last source commit"
+fi
+
+echo ""
+echo "── shoot-mode secrets ──────────────────────────"
+# SCAN_CAP_WEEK gets raised to film the trailer (7 real scans will not survive a shoot) and has to
+# go back afterwards. The code comment in scan-pantry calls this "the forgot-to-revert-before-launch
+# footgun" — a raised cap left in prod removes the cost ceiling on the most expensive endpoint in
+# the app. A note in a todo file is not a guard, so check it here where it blocks.
+#
+# Supabase stores an unsalted SHA-256 of each secret value, so the digest alone confirms a
+# short known value without ever reading it. 7 is the prod default; the secret being ABSENT is
+# also correct, since scan-pantry falls back to 7.
+secrets=$(npx supabase secrets list -o json 2>/dev/null)
+if [ -z "$secrets" ]; then
+  review "could not read secrets (offline, or CLI not linked)"
+else
+  cap_digest=$(printf '%s' "$secrets" | python3 -c "
+import sys, json
+try: rows = json.load(sys.stdin)
+except Exception: sys.exit(0)
+rows = rows.get('secrets', rows) if isinstance(rows, dict) else rows
+for r in rows if isinstance(rows, list) else []:
+    if r.get('name') == 'SCAN_CAP_WEEK': print(r.get('value','')); break
+" 2>/dev/null)
+  seven=$(printf '%s' '7' | shasum -a 256 | cut -d' ' -f1)
+  if [ -z "$cap_digest" ]; then
+    ok "SCAN_CAP_WEEK unset — scan-pantry falls back to 7/week"
+  elif [ "$cap_digest" = "$seven" ]; then
+    ok "SCAN_CAP_WEEK is 7 (prod value)"
+  else
+    bad "SCAN_CAP_WEEK is RAISED — shoot mode is still on. Revert before launch:"
+    printf '       npx supabase secrets unset SCAN_CAP_WEEK\n'
+  fi
 fi
 
 echo ""
