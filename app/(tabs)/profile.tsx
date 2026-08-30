@@ -27,6 +27,7 @@ import { supabase } from '@/lib/supabase'
 import { useSuperwall, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackWeightLogged } from '@/lib/analytics'
+import { trackGoalsCustomized } from '@/lib/engagement'
 
 const { width } = Dimensions.get('window')
 
@@ -597,6 +598,8 @@ export default function ProfileScreen() {
     // show a "saved" value the DB never got (and meal-gen would keep using the old goal).
     const { error } = await supabase.from('profiles').update({ [editGoal.field]: num }).eq('id', user.id)
     if (error) { Alert.alert('Save failed', error.message); return }
+    // Only after the write succeeded — a failed save is not a customised goal.
+    trackGoalsCustomized(user.id)
     setProfile(p => p ? { ...p, [editGoal.field]: num } : p)
     // Calorie/protein/meals/prep all size meal generation — drop the cached daily meals so
     // they regenerate to the new target instead of serving stale, wrong-sized suggestions.

@@ -33,6 +33,7 @@ import { usePremium } from '@/context/SuperwallContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import { haptic } from '@/lib/haptics'
+import { trackCookTonightUsed } from '@/lib/engagement'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
@@ -895,7 +896,13 @@ export default function PantryScreen() {
                             key={`${meal.id}-${idx}`}
                             style={styles.cookTonightRow}
                             activeOpacity={0.7}
-                            onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
+                            onPress={() => {
+                              // Opening a Cook Tonight pick IS the feature being used. This counter
+                              // and its Loops event were never fired, so cook_tonight_used_count was
+                              // 0 for every user despite 12 meal logs in the table.
+                              if (user) trackCookTonightUsed(user.id)
+                              router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
+                            }}
                           >
                             {meal.image && meal.image.startsWith('http') ? (
                               <Image source={{ uri: meal.image }} style={styles.cookTonightThumb} resizeMode="cover" />

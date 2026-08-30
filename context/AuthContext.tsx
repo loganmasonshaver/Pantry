@@ -3,6 +3,7 @@ import { Session, User } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../lib/supabase';
 import { identifyUser, resetUser } from '../lib/analytics';
+import { touchLastActive } from '../lib/engagement';
 import { syncProfileToLoops, fireLoopsEvent } from '../lib/loops';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Crypto from 'expo-crypto';
@@ -86,6 +87,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
+      // Stamp activity on cold start. Fire-and-forget: it swallows its own errors and must never
+      // delay the session resolving. Naturally idempotent — the re-engagement event only fires
+      // when the STORED timestamp is >3 days old, so a second call in the same session sees the
+      // fresh one and stays quiet.
+      if (session?.user) touchLastActive(session.user.id);
     });
 
     // Subscribe to all future auth changes (sign in, sign out, token refresh)
@@ -95,6 +101,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         // Sync user identity to PostHog so events are attributed to this user
         identifyUser(session.user.id, { email: session.user.email });
+        // Also on sign-in and token refresh — a refresh means the app is open and in use, which is
+        // the signal Loops needs to tell an active user from one who should get a win-back email.
+        touchLastActive(session.user.id);
         // On the initial sign-in event, apply any pending email marketing opt-in
         // stashed by the createaccount screen and fire the Loops signup event.
         if (event === 'SIGNED_IN') {

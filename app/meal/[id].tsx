@@ -39,6 +39,7 @@ import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
 import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackMealViewed, trackMealSaved, trackMealSaveBlocked, trackMealLogged, trackUpgradePromptShown } from '../../lib/analytics'
+import { trackMealSavedEngagement } from '../../lib/engagement'
 
 const screenWidth = Dimensions.get('window').width
 
@@ -498,6 +499,10 @@ export default function MealDetailScreen() {
     } else {
       setSaved(true)
       trackMealSaved(meal!.name, meal!.calories, meal!.protein)
+      // Analytics (PostHog) and ENGAGEMENT (profiles counter + Loops) are different systems and
+      // only the first was wired — meals_saved_count sat at 0 for every user while 32 saved meals
+      // existed in the table.
+      trackMealSavedEngagement(user.id)
     }
   }
 
