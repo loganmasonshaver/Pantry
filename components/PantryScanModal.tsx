@@ -251,24 +251,6 @@ function PrepTip({ emoji, bold, rest, index }: { emoji: string; bold: string; re
   )
 }
 
-function PhotoThumbnail({ label, uri }: { label: string; uri?: string }) {
-  return (
-    <View style={styles.thumbnail}>
-      {uri ? (
-        <Image source={{ uri }} style={styles.thumbnailImg} resizeMode="cover" />
-      ) : (
-        <View style={styles.thumbnailImg}>
-          <ScanLine size={16} stroke="#4ADE80" strokeWidth={1.5} />
-        </View>
-      )}
-      <View style={styles.thumbnailCheck}>
-        <Check size={8} stroke="#000" strokeWidth={3} />
-      </View>
-      <Text style={styles.thumbnailLabel} numberOfLines={1}>{label}</Text>
-    </View>
-  )
-}
-
 // ── Main modal ─────────────────────────────────────────────────────────
 
 type Props = {
@@ -759,8 +741,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     } catch (e) {
       Alert.alert('Capture failed', 'Could not take photo.')
     }
-    setPendingLabel(null) // consumed the queued "add this area" label (if any)
-    setStep(next)
+    // next === 0 means "stay on the camera". The shutter used to hand you back to the areas hub
+    // after EVERY photo, so four shots cost eight screen transitions and four camera remounts —
+    // all of it while you're stood at an open fridge that's warming up. Staying also keeps
+    // pendingLabel, so consecutive shots of the same area stay labelled as that area.
+    if (next !== 0) {
+      setPendingLabel(null) // consumed the queued "add this area" label (if any)
+      setStep(next)
+    }
   }
 
   const launchGallery = async (label: string, next: number) => {
@@ -785,8 +773,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         uri: result.assets[0].uri,
         base64,
       }])
-      setPendingLabel(null) // consumed the queued "add this area" label (if any)
-      setStep(next)
+      if (next !== 0) {
+        setPendingLabel(null)
+        setStep(next)
+      }
     }
   }
 
@@ -968,19 +958,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <Text style={styles.cameraHeroTitle}>{captureTitle}</Text>
               </Animated.View>
 
-              {/* Captured thumbnails — top-left under the bar, out of the shutter's way */}
-              {photos.length > 0 && (
-                <View style={[styles.cameraPhotoRow, { top: insets.top + 60 }]}>
-                  {photos.map(p => <PhotoThumbnail key={p.id} label={p.label} uri={p.uri} />)}
-                </View>
-              )}
-
               {/* Bottom scrim carries the copy + shutter so text is always readable over the camera */}
               <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)']} style={[styles.cameraBottomOverlay, { paddingBottom: insets.bottom + 14 }]}>
                 <View style={styles.stepTextCompact}>
                   {/* Fades in as the centered hero fades out — same words, one continuous beat. */}
                   <Animated.Text style={[styles.cameraTitle, { opacity: titleAnim }]}>{captureTitle}</Animated.Text>
-                  <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
+                  {photos.length === 0 && <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>}
                   {/* The tip was a dead line of text. It's now the entry point to the full
                       best-scan guide — bordered pill + chevron so it reads as "there's more here",
                       which a bare lightbulb + sentence did not. */}
@@ -998,23 +981,81 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   </TouchableOpacity>
                 </View>
 
+                {/* Captured filmstrip. Sits ABOVE the shutter, not beside it: the row carries the
+                    only destructive control on this screen, and the shutter is where a thumb rests.
+                    Tap the image to check the shot full-screen; ✕ drops it. Removal is silent, the
+                    same as the hub's — and a mis-tap here is cheap in a way it usually isn't,
+                    because you're stood in front of the thing with the camera already open. */}
+                {photos.length > 0 && (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.filmstrip}
+                    contentContainerStyle={styles.filmstripContent}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {photos.map(p => (
+                      <View key={p.id} style={styles.filmItem}>
+                        <TouchableOpacity
+                          activeOpacity={0.85}
+                          disabled={!p.uri}
+                          onPress={() => p.uri && setZoomUri(p.uri)}
+                          accessibilityLabel={`Review ${p.label} photo`}
+                        >
+                          {p.uri
+                            ? <Image source={{ uri: p.uri }} style={styles.filmImg} resizeMode="cover" />
+                            : <View style={[styles.filmImg, styles.filmImgEmpty]}><ScanLine size={16} stroke="#4ADE80" strokeWidth={1.5} /></View>}
+                        </TouchableOpacity>
+                        {/* Offset OUTSIDE the image corner and given hitSlop, so the destructive
+                            target and the tap-to-review target aren't the same 56pt square. */}
+                        <TouchableOpacity
+                          style={styles.filmRemove}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          onPress={() => {
+                            setPhotos(prev => prev.filter(x => x.id !== p.id))
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+                          }}
+                          accessibilityLabel={`Remove ${p.label} photo`}
+                        >
+                          <X size={11} stroke="#FFFFFF" strokeWidth={3} />
+                        </TouchableOpacity>
+                        <Text style={styles.filmLabel} numberOfLines={1}>{p.label}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
+
                 <View style={styles.shutterRow}>
                   <TouchableOpacity style={styles.flashBtn} onPress={() => setFlashOn(f => !f)} activeOpacity={0.7}>
                     <Zap size={20} stroke={flashOn ? '#FFD700' : '#FFFFFF'} strokeWidth={2} fill={flashOn ? '#FFD700' : 'none'} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(captureLabel, 4)} activeOpacity={0.85}>
+                  <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(captureLabel, 0)} activeOpacity={0.85}>
                     <View style={styles.shutterInner} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(captureLabel, 4)} activeOpacity={0.7}>
+                  <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(captureLabel, 0)} activeOpacity={0.7}>
                     <ImageIcon size={20} stroke="#FFFFFF" strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
 
-                {/* Only offer "done" once there's a photo — first capture required; after that one is enough. */}
+                {/* Scanning is now reachable WITHOUT the hub — the hub became a place you choose to
+                    go (add an area, check your shots) rather than a toll booth between every photo.
+                    "More areas" keeps the coverage nudge, which is the one genuinely useful thing
+                    the hub does: more ingredients is the app's quality lever, and nobody asks for a
+                    freezer photo unaided. */}
                 {photos.length > 0 && (
-                  <TouchableOpacity onPress={() => setStep(4)} activeOpacity={0.7}>
-                    <Text style={styles.cameraDoneText}>Done — review {photos.length} photo{photos.length !== 1 ? 's' : ''} →</Text>
-                  </TouchableOpacity>
+                  <View style={styles.cameraActions}>
+                    <TouchableOpacity
+                      style={styles.cameraScanBtn}
+                      onPress={() => setStep(5)}
+                      activeOpacity={0.85}
+                    >
+                      <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />
+                      <Text style={styles.cameraScanBtnText}>Scan {photos.length} photo{photos.length !== 1 ? 's' : ''}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setPendingLabel(null); setStep(4) }} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Text style={styles.cameraDoneText}>More areas</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </LinearGradient>
             </View>
@@ -1784,12 +1825,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cameraPhotoRow: {
-    position: 'absolute',
-    left: 16,
-    flexDirection: 'row',
-    gap: 8,
-  },
   bracket: {
     position: 'absolute',
     width: 30,
@@ -1880,35 +1915,47 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 16,
   },
-  thumbnail: { alignItems: 'center', gap: 4 },
-  thumbnailImg: {
-    width: 52,
-    height: 52,
+  // Camera filmstrip (bottom of the capture screen). 56pt image keeps the tap-to-review target
+  // at Apple's 44pt minimum; the ✕ is pushed outside that square so the two don't overlap.
+  filmstrip: { alignSelf: 'stretch', maxHeight: 84, marginBottom: 2 },
+  filmstripContent: { gap: 12, paddingHorizontal: 4, paddingTop: 8, paddingRight: 10 },
+  filmItem: { alignItems: 'center', gap: 4, width: 56 },
+  filmImg: {
+    width: 56,
+    height: 56,
     borderRadius: 10,
     backgroundColor: '#1A1A1A',
     borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: 'rgba(74,222,128,0.35)',
   },
-  thumbnailCheck: {
+  filmImgEmpty: { alignItems: 'center', justifyContent: 'center' },
+  filmRemove: {
     position: 'absolute',
-    top: -4,
-    right: -4,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#4ADE80',
+    top: -6,
+    right: -6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
   },
-  thumbnailLabel: {
-    fontSize: 10,
-    color: '#888888',
-    fontWeight: '500',
-    maxWidth: 56,
-    textAlign: 'center',
+  filmLabel: { fontSize: 10, color: '#AAAAAA', fontWeight: '500', maxWidth: 56, textAlign: 'center' },
+  cameraActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  cameraScanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 22,
+    paddingVertical: 13,
+    borderRadius: 30,
   },
+  cameraScanBtnText: { fontSize: 15, fontWeight: '700', color: '#000000' },
 
   // Extra grid (step 4)
   extraGrid: {
