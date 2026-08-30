@@ -23,7 +23,10 @@ app-code number (27), not the total.
   pipeline. Read before any pipeline pass.
 - **`~/my-briefing/todos/active.md` is CONTESTED.** A concurrent session overwrote it wholesale
   **five times** today, losing appended content each time. That is why the two files above live in
-  the repo. It is also ~20 commits ahead of its origin and unpushed.
+  the repo. Its GitHub remote is **archived and read-only on purpose** — commits pile up locally
+  and that is fine; Logan confirmed on 2026-08-30 that he wants it left alone. Do NOT flag the
+  unpushed count as a problem (I did, and it was a deliberate state, not neglect). Local git
+  history is what recovers the overwrites, and it works fine while archived.
 
 ---
 
