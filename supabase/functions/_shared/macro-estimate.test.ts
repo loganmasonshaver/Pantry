@@ -193,6 +193,10 @@ const CANONICAL: Array<[string, number]> = [
   ['pistachios', 20.2],
   ['self rising flour', 10.3], ['all purpose flour', 10.3], ['coconut flour', 18],
   ['orzo', 5], ['elbow macaroni', 5], ['dry fettuccine', 5], ['sourdough loaf', 9],
+  // High-protein pasta must beat the generic pasta row, or a recipe built on it reads as a
+  // protein overclaim. Plain pasta above must stay at 5 — that is the half this can break.
+  ['high-protein macaroni', 9], ['protein pasta', 9], ['protein penne', 9], ['protein noodles', 9],
+  ['chickpea pasta', 11], ['lentil pasta', 11], ['edamame spaghetti', 11], ['banza rotini', 11],
   // ── produce & sauces
   ['capsicum', 1], ['frozen mixed vegetables', 3], ['frozen peas', 5.4], ['dates', 2.5],
   ['medjool dates', 2.5], ['mango', 0.8], ['pineapple', 0.5],

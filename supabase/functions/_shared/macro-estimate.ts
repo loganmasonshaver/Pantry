@@ -56,6 +56,19 @@ const TABLE: Row[] = [
   // the shadowing test, not by reading. diet-tags.ts keeps 'milk chocolate' in COMPOUND_DAIRY for
   // the mirror-image reason.
   { re: /\bmilk chocolate\b/i, kcal: 535, p: 7.6, c: 59.4, f: 29.7 },
+  // High-protein pasta is a DIFFERENT FOOD from pasta, and the generic pasta row below matches
+  // macaroni/penne/noodles regardless of any qualifier — so all six live rows built on it were
+  // priced at plain pasta's 5g. The understatement does not merely blur the estimate: verifyMacros
+  // reads it, so a recipe legitimately built on protein pasta reads as a protein OVERCLAIM.
+  // "One-Pot Pasta & Peas" (chickpea pasta) was flagged at 1.72x for exactly this reason.
+  //
+  // Cooked basis, matching the generic pasta row these precede. Legume and protein-enriched wheat
+  // are split because they differ enough to be worth it: Banza is ~11g cooked, Barilla Protein+ ~9.
+  //
+  // Brand names cannot be caught generically — "Carb Diem elbow pasta" is a real stored ingredient
+  // and still resolves as plain pasta. Noted rather than guessed at.
+  { re: /\b(chickpea|lentil|edamame|black bean|legume|banza)[\s-]*(pasta|penne|macaroni|noodles?|rotini|fusilli|spaghetti|shells?|elbows?)\b/i, kcal: 155, p: 11, c: 27, f: 2.5 },
+  { re: /\b(high[\s-]?protein|protein)[\s-]*(pasta|penne|macaroni|noodles?|rotini|fusilli|spaghetti|shells?|elbows?)\b/i, kcal: 160, p: 9, c: 28, f: 1.5 },
   // A ready-to-drink shake is mostly water. Must precede the chocolate rows or "chocolate protein
   // shake" (a real 330g stored ingredient) gets priced as a bar of chocolate — 5x its calories.
   { re: /\bprotein (shake|drink|milkshake)\b/i, kcal: 60, p: 8, c: 3, f: 1.5 },
