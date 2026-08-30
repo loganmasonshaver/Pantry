@@ -21,7 +21,6 @@ import {
 import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
-import { ToggleProbe } from '@/components/ToggleProbe'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
 import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
@@ -732,11 +731,6 @@ export default function HomeScreen() {
   // LAYOUT prop has to round-trip through a shadow-tree commit, and those do not happen per
   // frame — so a height animation physically cannot be smooth, whichever thread drives it.
   // LayoutAnimation interpolates layout natively instead, which is what it exists for.
-  // __DEV__ counters feeding ToggleProbe. A render-per-frame count is the signature of the
-  // animation driving a setState loop; a low count with high frame times means layout instead.
-  const homeRenderCount = useRef(0)
-  homeRenderCount.current++
-  const layoutFireCount = useRef(0)
 
   // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
   // this 2400-line component between the tap and the first frame, which is what made the toggle
@@ -1331,15 +1325,14 @@ export default function HomeScreen() {
                 (armed in the toggle below) interpolates the reflow natively. */}
             {macrosExpanded && (
               <Reanimated.View
-                entering={FadeIn.duration(180)}
-                exiting={FadeOut.duration(120)}
+                entering={FadeIn.duration(280)}
+                exiting={FadeOut.duration(200)}
                 style={{ gap: 10, paddingTop: 10 }}
               >
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
               </Reanimated.View>
             )}
-            {__DEV__ && <ToggleProbe renderCount={homeRenderCount.current} layoutCount={layoutFireCount.current} />}
             <TouchableOpacity
               onPress={() => {
                 const next = !macrosExpanded
@@ -1570,7 +1563,7 @@ export default function HomeScreen() {
             ) : heroMeal ? (
               // Fixed height. Was glided with the macros card, but a height animation steps at
               // ~20fps (see the note at the state declarations) so the glide was never smooth.
-              <Reanimated.View layout={LinearTransition.duration(260)} style={{ height: heroExpandedH }}>
+              <Reanimated.View layout={LinearTransition.duration(420)} style={{ height: heroExpandedH }}>
                 <ScrollView
                   ref={heroScrollRef}
                   horizontal
