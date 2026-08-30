@@ -150,6 +150,46 @@ test('a dish named for the broth itself is not reported as a gap', () => {
     [{ name: 'beef stock' }, { name: 'rice noodles' }]), [])
 })
 
+test('a rendered fat does not satisfy the meat the dish is named after', () => {
+  // The real 2026-08-19 row: claims 750 kcal and 76g protein for one serving, while its
+  // ingredients total ~344 kcal and ~9.2g. The steak was dropped; only beef tallow remained,
+  // and it reached the name through the steak->beef synonym.
+  assert.deepEqual(
+    nameIngredientGaps('Garlic Butter Steak Sweet Potato', [
+      { name: 'baked sweet potato' }, { name: 'beef tallow' }, { name: 'light butter' },
+      { name: 'garlic cloves' }, { name: 'Parmesan' }, { name: 'asparagus spears' },
+    ]),
+    ['steak'],
+  )
+  for (const fat of ['beef tallow', 'beef dripping', 'beef suet', 'lard', 'beef gelatin']) {
+    assert.deepEqual(nameIngredientGaps('Steak Bowl', [{ name: fat }, { name: 'rice' }]), ['steak'], fat)
+  }
+  // But "fat" as a descriptor is not a derivative — this is real beef and must stay.
+  assert.deepEqual(nameIngredientGaps('Beef Chili', [{ name: 'low fat beef mince' }]), [])
+})
+
+test('over-generic synonyms no longer stand in for the food', () => {
+  // 'ground' let a beef dish be satisfied by ground TURKEY; 'strip' would have been satisfied by
+  // bacon strips; corn syrup is not honey and caesar dressing is not ranch.
+  assert.deepEqual(nameIngredientGaps('Beef Chili', [{ name: 'ground turkey' }, { name: 'beans' }]), ['beef'])
+  assert.deepEqual(nameIngredientGaps('Steak Salad', [{ name: 'bacon strips' }, { name: 'lettuce' }]), ['steak'])
+  assert.deepEqual(nameIngredientGaps('Hot Honey Chicken', [{ name: 'corn syrup' }, { name: 'chicken breast' }]), ['honey'])
+  assert.deepEqual(nameIngredientGaps('Maple Pecan Bites', [{ name: 'golden syrup' }, { name: 'pecans' }]), ['maple'])
+  assert.deepEqual(nameIngredientGaps('Ranch Chicken Bowl', [{ name: 'caesar dressing' }, { name: 'chicken' }]), ['ranch'])
+})
+
+test('the synonyms that were actually load-bearing still work', () => {
+  // Measured over 161 live rows, these were the ONLY names a synonym ever rescued.
+  assert.deepEqual(nameIngredientGaps('Yogurt Chocolate Cheesecake', [{ name: 'Cocoa powder' }]), [])
+  assert.deepEqual(nameIngredientGaps('Cottage Cheese Chocolate Lava Cake', [{ name: 'cacao powder' }]), [])
+  assert.deepEqual(nameIngredientGaps('Chocolate Chip Baked Oats', [{ name: 'sugar free choc chips' }, { name: 'oats' }]), [])
+  assert.deepEqual(nameIngredientGaps('Air Fryer Salmon Pasta', [{ name: 'dry fettuccine' }, { name: 'salmon fillet' }]), [])
+  // And the ordinary spellings of the meats keep passing.
+  assert.deepEqual(nameIngredientGaps('Beef Chili', [{ name: 'ground beef' }, { name: 'beans' }]), [])
+  assert.deepEqual(nameIngredientGaps('Steak Bowl', [{ name: 'sirloin' }, { name: 'rice' }]), [])
+  assert.deepEqual(nameIngredientGaps('Steak Bowl', [{ name: 'beef strips' }, { name: 'rice' }]), [])
+})
+
 test('flavour-led foods are NOT held to the meat rule', () => {
   // A chocolate protein powder really does make the dish chocolate; a stock made from an animal
   // is not that animal. Restricting the rule to meat is what keeps these passing.

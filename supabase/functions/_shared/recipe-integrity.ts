@@ -121,22 +121,37 @@ const DEFINING_FOODS = [
 // Words a creator legitimately uses for the same thing. Without these the check reports drops that
 // are really synonyms — "cocoa powder" for chocolate, "curd"/"skyr" for yogurt, "fettuccine" for
 // pasta. Each entry here is a false positive observed in the live pool.
+//
+// EVERY entry must be a word that names the food SPECIFICALLY. A synonym is matched as a bare
+// token against the whole ingredient list, so a generic word here silently disables the gate for
+// that food: 'ground' let a "Beef Chili" made with ground TURKEY satisfy its beef promise, and
+// 'strip' would have been satisfied by bacon strips.
+//
+// Measured before cutting, so this is subtraction with evidence rather than tidying: across 161
+// live rows only FIVE names were rescued by a synonym at all — cocoa/cacao/choc for chocolate,
+// fettuccine for pasta, and beef for steak. Every generic below was doing no work whatsoever,
+// so removing them costs nothing measurable and closes the hole.
+//
+// Also removed as redundant rather than dangerous: 'rolled' (a "rolled oat" line already contains
+// oat), and the multi-word forms one might reach for — "ground beef" and "beef mince" both contain
+// 'beef', so they are satisfied by the food itself and never need a synonym.
+//
+// maple/honey both mapped to 'syrup', and ranch to 'dressing'. Those are not synonyms, they are
+// categories: corn syrup is not honey and caesar dressing is not ranch. A dish named for one of
+// them is promising that one.
 const SYNONYMS: Record<string, string[]> = {
   chocolate: ['cocoa', 'cacao', 'choc', 'chocolat'],
   pasta: ['fettuccine', 'spaghetti', 'penne', 'macaroni', 'linguine', 'rigatoni', 'bowtie', 'farfalle', 'orzo', 'lasagna'],
   noodle: ['ramen', 'udon', 'soba', 'fettuccine', 'spaghetti'],
-  oat: ['oatmeal', 'porridge', 'haferflocken', 'rolled'],
+  oat: ['oatmeal', 'porridge', 'haferflocken'],
   coffee: ['espresso', 'mocha', 'flexpresso'],
   espresso: ['coffee', 'mocha'],
-  steak: ['sirloin', 'ribeye', 'strip', 'flank', 'beef'],
-  beef: ['steak', 'sirloin', 'ribeye', 'mince', 'ground'],
+  steak: ['sirloin', 'ribeye', 'flank', 'beef'],
+  beef: ['steak', 'sirloin', 'ribeye', 'chuck', 'brisket'],
   chicken: ['poultry'],
   peanut: ['pb'],
-  maple: ['syrup'],
-  honey: ['syrup'],
   corn: ['mais', 'sweetcorn'],
   blueberry: ['borówki', 'borówka'],
-  ranch: ['dressing'],
   date: ['medjool'],
 }
 
@@ -161,7 +176,11 @@ const MEAT_LIKE = new Set([
 ])
 
 // Forms in which a meat appears as seasoning rather than as the meat itself.
-const MEAT_DERIVATIVE = /\b(broth|stock|bouillon|consomm[eé]|seasoning|spice|rub|powder|flavou?r(?:ing|ed)?|extract|essence|base|granules?|cubes?)\b/i
+// Rendered fats and gelling agents belong here for the same reason broth does: beef tallow is not
+// beef. "Garlic Butter Steak Sweet Potato" is in the live pool with no steak in it — the only meat
+// reference is `beef tallow`, which reached the name through the steak->beef synonym. Bare "fat"
+// is deliberately absent: "low fat beef mince" is real beef and must not read as a derivative.
+const MEAT_DERIVATIVE = /\b(broth|stock|bouillon|consomm[eé]|seasoning|spice|rub|powder|flavou?r(?:ing|ed)?|extract|essence|base|granules?|cubes?|tallow|lard|dripping|suet|gelatin[e]?|collagen)\b/i
 
 export function nameIngredientGaps(name: string, ingredients: any[] | undefined): string[] {
   const nameTokens = tokens(name)
