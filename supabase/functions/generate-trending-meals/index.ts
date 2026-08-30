@@ -346,6 +346,15 @@ Deno.serve(async (req: Request) => {
 
   const url = new URL(req.url)
   const forceRefresh = url.searchParams.get('refresh') === 'true'
+  // Dry run: do everything up to the point of writing, then return the funnel and stop. No insert,
+  // no retention delete, no image generation.
+  //
+  // Yield questions can only be answered by running the real pipeline against real YouTube results,
+  // and every such run SWAPS the day's rows — so measuring the feed degraded it, and six runs in
+  // one session churned it six times. Output also varies widely between identical runs (5 and 17
+  // recipes from the same prompt and the same code), so one run cannot validate a change and the
+  // repeats were the expensive part. This makes them free.
+  const dryRun = url.searchParams.get('dryRun') === 'true'
   stageLog('start')
 
   // Return cached only if today's YouTube batch was already generated. Scoping to
@@ -614,6 +623,11 @@ Deno.serve(async (req: Request) => {
     // (MIN_TRENDING_MEALS keeps the previous run, so Discover would just go stale). Step down
     // instead: take the highest tier that still yields a workable pool, and log which one ran so a
     // persistently-degraded floor is visible rather than silent.
+    // Funnel telemetry, returned in the RESPONSE as well as logged. The console logs are only
+    // reachable from the Supabase dashboard, so from the CLI — and from the cron, which stores its
+    // response in net._http_response — "where did the meals go" has been unanswerable. Three
+    // separate attempts to reason it out from source were wrong before this existed.
+    const funnel: Record<string, unknown> = {}
     const VIEW_FLOOR_TIERS = [100_000, 50_000, 25_000, 0]
     const MIN_POOL = 25  // the LLM needs headroom above STORE_CAP (18) after its own name dedup
     let uniqueVideos = deduped
@@ -638,6 +652,11 @@ Deno.serve(async (req: Request) => {
     const beforeGate = uniqueVideos.length
     uniqueVideos = uniqueVideos.filter(v => parseIngredientBlock(v.description || '').length >= 3)
     console.log(`[funnel] ingredient-list gate: ${uniqueVideos.length}/${beforeGate} videos have a readable list`)
+    funnel.rawCandidates = allVideos.length
+    funnel.afterDedup = deduped.length
+    funnel.viewFloorUsed = usedFloor
+    funnel.afterViewFloor = beforeGate
+    funnel.afterIngredientGate = uniqueVideos.length
 
     // Best-LIKED first, not most-viewed. Measured on a real batch: the highest-viewed video
     // (7.2M, "2-Ingredient Chia Pita") had the WORST like rate in the pool at 1.17% against a
@@ -648,6 +667,7 @@ Deno.serve(async (req: Request) => {
       .sort((a, b) => likeRate(b) - likeRate(a))
       .slice(0, 60)
 
+    funnel.sentToLLM = Math.min(uniqueVideos.length, 60)
     const medianViews = uniqueVideos.length
       ? uniqueVideos[Math.floor(uniqueVideos.length / 2)].viewCount
       : 0
@@ -718,8 +738,8 @@ VARIETY — extract broadly, we curate downstream:
 - The one same-recipe rule: don't output two recipes that are genuinely the same dish/format (e.g. two plain oatmeal bowls, two basic smoothies). Different protein, different format, or a clearly different flavor profile = keep both.
 
 ALSO MANDATORY:
-- No two recipes may share the same base dish or format (e.g. don't return two oatmeal recipes, two smoothies, two salads, two pancake recipes)
-- If multiple candidate videos are too similar, pick at most one and skip the rest
+- At most TWO recipes may share a base format (two pancake recipes is fine, five is not). This mirrors what the code enforces after you — it caps each format at 2 and keeps the rest as spares — so returning only one per format does not make the feed more varied, it just leaves the ranker short. Prefer the two most different examples of a format over one.
+- Two recipes that are genuinely the SAME dish (same format, same protein, same flavour profile) — return only one.
 - Recipe names must all be distinct after normalization
 
 PORTION + MACRO DETAILS:
@@ -728,11 +748,12 @@ PORTION + MACRO DETAILS:
   - "meal" — a sit-down meal (anywhere from 400 to 1200+ kcal — bigger meal-prep portions are fine for bulkers/athletes)
   - "snack" — a quick bite between meals (typically 150-400 kcal, but can go higher if protein-dense)
   - "dessert" — a sweet treat (typically 150-500 kcal, can go higher)
-- Density worked examples (these are SKIP THRESHOLDS, not targets to hit by adding ingredients):
-  - 500 kcal meal needs at least 31g protein to qualify (else SKIP)
-  - 800 kcal meal needs at least 50g protein (else SKIP)
-  - 300 kcal snack needs at least 19g protein (else SKIP)
-  - 250 kcal dessert needs at least 13g protein (else SKIP)
+- Density reference points. These are NOT skip rules — include the recipe either way and report its
+  real macros; ranking happens downstream in code. They only tell you what "protein-dense" means here:
+  - a 500 kcal meal is dense at ~31g protein
+  - an 800 kcal meal is dense at ~50g protein
+  - a 300 kcal snack is dense at ~19g protein
+  - a 250 kcal dessert is dense at ~13g protein
 - APPEAL: Prefer recipes a food photographer would be excited to shoot and someone would want to try mid-scroll. Treat this as a soft preference, not a reason to drop candidates — include the recipe; we rank on appeal downstream.
 - NAMING (trending-specific voice): Pantry's user lives on TikTok/Instagram food content — they know what's trending and want names that reflect WHY a dish is having a moment, NOT generic restaurant prose AND NOT YouTube clickbait. The dish's format usually IS the trend (cottage cheese in unexpected places, viral folded sandwich, dense bean salad, etc.) — name it honestly and let the novelty carry the energy.
   ✅ Allowed:
@@ -757,7 +778,11 @@ ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-
   Scale step count to dish complexity — simple recipes 4-6 steps, complex 7-12 steps. Don't pad.
   This applies to the FORMAT of the steps, not the content — still respect the creator's recipe faithfully. Just break their consolidated instructions into individual actions.
 
-OUTPUT TARGET: Return 15-20 DISTINCT recipes — this is a floor of effort, not an aspiration. Extract every appetizing, faithful recipe you can from the ${uniqueVideos.length} videos. Do NOT self-filter for density, variety, appeal, or balance — downstream scoring + variety-aware selection picks the final 6 from YOUR pool, so a bigger pool directly means a better, more varied final feed. Returning fewer than ~12 risks the whole feed coming up short. Never invent recipes to pad, but with ${uniqueVideos.length} real source videos you should comfortably clear 15.
+OUTPUT TARGET: Return a recipe for EVERY video below that is genuinely a recipe — aim for 30-40 from the ${uniqueVideos.length} provided, and treat that as a floor of effort rather than a quota to stop at. Every one of these videos was pre-screened and carries a published ingredient list, so the great majority CAN yield a faithful recipe; skipping is for a video that is not a recipe at all, not for one you judge unexciting.
+
+Do NOT self-filter for density, variety, appeal or balance. Downstream code stores up to 18 and ranks by density, source-video like rate, uniqueness and macro agreement, so a bigger pool directly produces a better feed and a small one silently starves it — returning ~17 is how a day ends up showing 11. Skipping on quality grounds does not raise the bar, it just hands the ranker fewer options.
+
+Never invent a recipe to pad, and never merge two videos into one entry. If a video genuinely is not food, skip it and move on.
 
 SHELF_TAG — REQUIRED, and it must be copied EXACTLY from this list. Any other value is discarded
 and the recipe loses its shelf, so never invent one, never leave it out, and never pluralise or
@@ -816,7 +841,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // reliable enough that a single-provider setup is fine; if it fails outright we'll
     // see 0 yield that day and the cron retries naturally tomorrow.
     const providers = [
-      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google", maxTokens: 32000 },
+      googleAiKey && { url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", key: googleAiKey, model: "gemini-3.1-flash-lite", name: "Google", maxTokens: 48000 },
       // OpenAI fallback. openaiApiKey was already declared at the top of this file and never
       // wired in, so this was the ONLY Gemini-primary function with no second provider — a Gemini
       // outage or rate-limit meant the whole trending pipeline produced nothing, and with 30-day
@@ -1038,6 +1063,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return true
           }).slice(0, 30)
           console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated})`)
+          funnel[`llm_${provider.name}`] = {
+            raw: parsed.length, sanitized: sanitized.length,
+            rejected: { noName: rejNoName, noMacros: rejNoMacros, dupName: rejDupName, nearDup: rejNearDup,
+              fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
+              nameGap: rejNameGap, untranslated: rejUntranslated },
+          }
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
@@ -1246,7 +1277,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     if (overflow.length > 0) {
       console.log(`[funnel] format cap: ${overflow.length} deprioritized (${overCapped.join(', ')} hit the cap of ${FORMAT_CAP})`)
     }
+    funnel.formatCapDeprioritised = overflow.length
     recipes = [...kept, ...overflow].slice(0, STORE_CAP)
+    funnel.storeCap = STORE_CAP
+    funnel.stored = recipes.length
 
     // A recipe that survives with 3 or fewer ingredients usually means the extractor collapsed the
     // creator's list to its "main" items and dropped the toppings/sauce — which is what makes a
@@ -1300,7 +1334,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         reason: 'min_threshold_not_met',
         survivors: recipes.length,
         min: MIN_TRENDING_MEALS,
+        funnel,
       }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+
+    if (dryRun) {
+      return new Response(JSON.stringify({ dryRun: true, wouldStore: recipes.length, funnel }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
     }
 
     // Step 4: Match recipes back to YouTube thumbnails + persist video_id so future
@@ -1459,7 +1500,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Re-fetch from DB so the response includes AI-generated image URLs (not YouTube thumbnails)
     const { data: finalMeals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
     console.log(`Success: ${meals.length} trending meals from YouTube + Groq`)
-    return new Response(JSON.stringify({ generated: true, count: meals.length, meals: finalMeals ?? meals }), {
+    return new Response(JSON.stringify({ generated: true, count: meals.length, funnel, meals: finalMeals ?? meals }), {
       headers: { 'Content-Type': 'application/json' },
     })
   } catch (e) {
