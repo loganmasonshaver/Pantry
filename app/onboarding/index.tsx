@@ -34,6 +34,7 @@ const AnimatedLine = Animated.createAnimatedComponent(Line)
 import { ActivityIndicator } from 'react-native'
 import { supabase } from '../../lib/supabase'
 import { templates as recipeTemplates } from '../../lib/recipeTemplates'
+import { scaleVisual } from '../../lib/ingredientDisplay'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
@@ -2624,7 +2625,9 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         const unit = String(ing.grams).replace(/[0-9. ]/g, '') || 'g'
         return {
           name: ing.name,
-          visual: ing.visual,
+          // visual and grams are a PAIR describing one amount — scale both or the recipe
+          // contradicts itself, since the Measured/Eyeball toggle reads different halves of it.
+          visual: scaleVisual(ing.visual, scale),
           grams: `${Math.round(baseGrams * scale)}${unit}`,
         }
       })

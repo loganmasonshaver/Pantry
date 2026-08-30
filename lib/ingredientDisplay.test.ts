@@ -11,6 +11,7 @@ import {
   cleanIngredientName, formatHalf, getMeasuredDisplay, getWholeUnitDisplay,
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball,
+  formatQuarter, scaleVisual,
 } from './ingredientDisplay.ts'
 
 // ── the two already-fixed bugs, pinned so they cannot come back ────────────────────────────────
@@ -254,4 +255,111 @@ test('genuinely tool-free descriptions are still passed through', () => {
   assert.equal(toEyeball('a drizzle', 'olive oil'), 'a drizzle')
   assert.equal(toEyeball('large egg', 'egg'), 'large egg')
   assert.equal(toEyeball('2 slices', 'bread'), '2 slices')
+})
+
+// ── formatQuarter ─────────────────────────────────────────────────────────────────────────────
+test('formatQuarter snaps to quarter steps and never rounds a real amount to nothing', () => {
+  assert.equal(formatQuarter(1), '1')
+  assert.equal(formatQuarter(1.68), '1\u00BE')
+  assert.equal(formatQuarter(0.75), '\u00BE')
+  assert.equal(formatQuarter(0.5), '\u00BD')
+  assert.equal(formatQuarter(0.25), '\u00BC')
+  assert.equal(formatQuarter(2), '2')
+  assert.equal(formatQuarter(2.5), '2\u00BD')
+  // A tiny amount floors at a quarter rather than vanishing — the formatHalf lesson.
+  assert.equal(formatQuarter(0.02), '\u00BC')
+  assert.equal(formatQuarter(0), '0')
+  assert.equal(formatQuarter(NaN), '0')
+  assert.equal(formatQuarter(-3), '0')
+})
+
+// ── scaleVisual ───────────────────────────────────────────────────────────────────────────────
+test('scaleVisual scales a leading whole number and keeps the rest of the string', () => {
+  assert.equal(scaleVisual('1 cup', 1.68), '1\u00BE cup')
+  assert.equal(scaleVisual('2 medium', 1.5), '3 medium')
+  assert.equal(scaleVisual('1 clove, minced', 2), '2 clove, minced')
+  assert.equal(scaleVisual('1 large potato, sliced lengthwise', 0.5), '\u00BD large potato, sliced lengthwise')
+})
+
+test('scaleVisual handles the fraction forms the templates actually use', () => {
+  // The fraction branch must be tried FIRST — matching \d+ first would eat the "1" of "1/2" and
+  // leave "/2 tsp" dangling.
+  assert.equal(scaleVisual('1/2 tsp', 2), '1 tsp')
+  assert.equal(scaleVisual('1/4 cup', 2), '\u00BD cup')
+  assert.equal(scaleVisual('3/4 cup', 2), '1\u00BD cup')
+  assert.equal(scaleVisual('1/3 cup', 3), '1 cup')
+  assert.equal(scaleVisual('1.5 cup', 2), '3 cup')
+  assert.equal(scaleVisual('0.5 tsp', 3), '1\u00BD tsp')
+})
+
+test('scaleVisual scales both ends of a range', () => {
+  assert.equal(scaleVisual('3-4 slices', 2), '6-8 slices')
+  assert.equal(scaleVisual('15-18 leaves', 2), '30-36 leaves')
+})
+
+test('scaleVisual leaves qualitative visuals alone — they carry no number to scale', () => {
+  for (const v of ['pinch', 'a handful', 'half', 'small', 'to taste', 'crumbled', '1 generous handful'.replace('1 ', '')]) {
+    assert.equal(scaleVisual(v, 2), v, `"${v}" should be untouched`)
+  }
+})
+
+test('scaleVisual is a no-op at scale 1 and on nonsense scales', () => {
+  assert.equal(scaleVisual('1 cup', 1), '1 cup')
+  assert.equal(scaleVisual('1 cup', 0), '1 cup')
+  assert.equal(scaleVisual('1 cup', -2), '1 cup')
+  assert.equal(scaleVisual('1 cup', NaN), '1 cup')
+  assert.equal(scaleVisual(undefined, 2), undefined)
+})
+
+// ── Eyeball / Measured composition ────────────────────────────────────────────────────────────
+// The helpers were each tested; the COMPOSITION the recipe screen actually renders was not. This
+// is the exact pipeline of app/meal/[id].tsx renderRow, over a scaled template ingredient.
+
+// Mirrors the scaling both call sites perform on a template ingredient.
+const scaleIng = (ing: { name: string; visual: string; grams: string }, scale: number) => {
+  const baseGrams = parseFloat(String(ing.grams).replace(/[^0-9.]/g, '')) || 0
+  const unit = String(ing.grams).replace(/[0-9. ]/g, '') || 'g'
+  return { name: ing.name, visual: scaleVisual(ing.visual, scale), grams: `${Math.round(baseGrams * scale)}${unit}` }
+}
+// Mirrors renderRow's portion selection.
+const portionFor = (ing: any, mode: 'Eyeball' | 'Measured') => {
+  const whole = getWholeUnitDisplay(ing.name, ing.grams)
+  if (whole) return whole.count
+  return mode === 'Eyeball' ? toEyeball(ing.visual ?? ing.grams, ing.name) : getMeasuredDisplay(ing.name, ing.grams, ing.visual)
+}
+
+test('REGRESSION: Measured mode reflects the scaled amount, not the base recipe', () => {
+  // getMeasuredDisplay tier 1 returns a liquid's `visual` verbatim. When only grams were scaled,
+  // a 1.68x pudding still listed "1 cup" of coconut milk while the card claimed the scaled macros.
+  const milk = { name: 'unsweetened light coconut milk', visual: '1 cup', grams: '240g' }
+  assert.equal(portionFor(scaleIng(milk, 1), 'Measured'), '1 cup')
+  assert.equal(portionFor(scaleIng(milk, 1.68), 'Measured'), '1\u00BE cup')
+  assert.equal(portionFor(scaleIng(milk, 0.75), 'Measured'), '\u00BE cup')
+
+  const syrup = { name: 'maple syrup', visual: '1 tbsp', grams: '21g' }
+  assert.equal(portionFor(scaleIng(syrup, 2), 'Measured'), '2 tbsp')
+
+  const vanilla = { name: 'vanilla extract', visual: '1/2 tsp', grams: '2g' }
+  assert.equal(portionFor(scaleIng(vanilla, 2), 'Measured'), '1 tsp')
+})
+
+test('REGRESSION: an Eyeball count scales too', () => {
+  // toEyeball passes counts through unchanged, so a stale visual showed the base count forever.
+  const cloves = { name: 'garlic, minced', visual: '2 cloves', grams: '10g' }
+  assert.equal(portionFor(scaleIng(cloves, 2), 'Eyeball'), '4 cloves')
+})
+
+test('Eyeball stays qualitative for descriptor rows regardless of scale', () => {
+  // "a drizzle" is the point of Eyeball mode — it must NOT sprout a number.
+  const syrup = { name: 'maple syrup', visual: '1 tbsp', grams: '21g' }
+  assert.equal(portionFor(scaleIng(syrup, 1.68), 'Eyeball'), 'a drizzle')
+  const berries = { name: 'mixed berries', visual: '1 cup', grams: '150g' }
+  assert.equal(portionFor(scaleIng(berries, 1.68), 'Eyeball'), 'a big handful')
+})
+
+test('whole-unit foods take their count from the scaled grams in BOTH modes', () => {
+  const eggs = { name: 'large eggs', visual: '2 large', grams: '100g' }
+  const scaled = scaleIng(eggs, 2) // 200g = 4 eggs
+  assert.equal(portionFor(scaled, 'Measured'), '4')
+  assert.equal(portionFor(scaled, 'Eyeball'), '4')
 })

@@ -151,6 +151,56 @@ export function formatHalf(n: number): string {
   return String(whole)
 }
 
+// Like formatHalf but on quarter steps. Halves are too coarse for volume measures — a cup snapped
+// to the nearest half is off by up to 60 ml, which is a visible amount of milk. Used for scaling
+// template "visual" quantities, where ¼/¾ cup are real amounts the source recipes already use.
+export function formatQuarter(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0'
+  // Floor at a quarter for the same reason formatHalf floors at a half: a real quantity must
+  // never round away to nothing.
+  const snapped = Math.max(0.25, Math.round(n * 4) / 4)
+  const whole = Math.floor(snapped)
+  const frac = snapped - whole
+  const glyph = frac === 0.25 ? '\u00BC' : frac === 0.5 ? '\u00BD' : frac === 0.75 ? '\u00BE' : ''
+  if (!glyph) return String(whole)
+  return whole === 0 ? glyph : `${whole}${glyph}`
+}
+
+// Scale the leading quantity of a template `visual` string: "1 cup" x1.68 -> "1\u00BE cup".
+//
+// Templates ship a base ~500 kcal recipe as a (visual, grams) PAIR describing the same amount, and
+// the two scaling sites multiply grams by the user's calorie ratio. Scaling only grams silently
+// broke that pairing, and getMeasuredDisplay's tier 1 prefers `visual` verbatim for liquids and
+// seasonings — so a 840 kcal pudding listed its coconut milk as the base "1 cup" while the card
+// claimed the scaled macros. Eyeball counts ("2 medium") went stale the same way.
+//
+// Only a LEADING numeric quantity is scaled. Qualitative visuals ("a drizzle", "pinch", "half an
+// avocado") carry no number to scale and are returned untouched — they stay qualitative, which is
+// correct, and the grams tiers drive Measured mode for those rows.
+export function scaleVisual(visual: string | undefined, scale: number): string | undefined {
+  if (!visual) return visual
+  if (!Number.isFinite(scale) || scale <= 0 || scale === 1) return visual
+  // Fraction alternative MUST come first: matching \d+ first would eat the "1" of "1/2" and leave
+  // "/2 tsp" behind.
+  const m = visual.match(/^\s*(\d+\/\d+|\d+(?:\.\d+)?)(\s*[-\u2013]\s*(\d+\/\d+|\d+(?:\.\d+)?))?/)
+  if (!m) return visual
+  const toNum = (t: string) => {
+    if (!t.includes('/')) return parseFloat(t)
+    const [a, b] = t.split('/').map(Number)
+    return b ? a / b : NaN
+  }
+  const lo = toNum(m[1])
+  if (!Number.isFinite(lo) || lo <= 0) return visual
+  const rest = visual.slice(m[0].length)
+  if (m[3] !== undefined) {
+    // Ranges ("3-4 slices") scale at both ends so the span stays proportional.
+    const hi = toNum(m[3])
+    if (!Number.isFinite(hi) || hi <= 0) return visual
+    return `${formatQuarter(lo * scale)}-${formatQuarter(hi * scale)}${rest}`
+  }
+  return `${formatQuarter(lo * scale)}${rest}`
+}
+
 // Whey/casein/plant protein universally scooped, not measured in tbsp or
 // weighed at home. One scoop ≈ 30g across major brands (5-10% variance is
 // fine — close-enough for the user's mental model).

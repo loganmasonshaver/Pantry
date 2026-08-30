@@ -49,7 +49,7 @@ type PortionMode = 'Eyeball' | 'Measured'
 
 import {
   cleanIngredientName, isNeedToBuy, getWholeUnitDisplay, getMeasuredDisplay, toEyeball,
-  stripAdjectives, isAlreadyInList, stripStepNumber,
+  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual,
 } from '@/lib/ingredientDisplay'
 
 function renderStepContent(step: string | { title: string; detail: string }) {
@@ -312,7 +312,8 @@ export default function MealDetailScreen() {
           rawIngredients = template.ingredients.map(ing => {
             const baseGrams = parseFloat(String(ing.grams).replace(/[^0-9.]/g, '')) || 0
             const unit = String(ing.grams).replace(/[0-9. ]/g, '') || 'g'
-            return { name: ing.name, visual: ing.visual, grams: `${Math.round(baseGrams * scale)}${unit}` }
+            // Scale visual with grams — they describe the same amount (see scaleVisual).
+            return { name: ing.name, visual: scaleVisual(ing.visual, scale), grams: `${Math.round(baseGrams * scale)}${unit}` }
           })
         }
         if (rawSteps.length === 0) rawSteps = template.steps
