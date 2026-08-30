@@ -429,8 +429,20 @@ Deno.serve(async (req: Request) => {
     // with 'Chicken' as first word" gets rejected). 60 days is enough recency for
     // "feels fresh" while keeping the comparison set bounded.
     // Name-comparison window MUST be >= RETENTION_DAYS, or meals still on screen stop being
-    // compared against and near-duplicates creep back in. Kept deliberately wider than retention
-    // so a recipe doesn't reappear the moment its twin ages out.
+    // compared against and near-duplicates creep back in.
+    //
+    // NOTE, measured 2026-08-30: the second half of that intent — "kept wider than retention so a
+    // recipe doesn't reappear the moment its twin ages out" — does NOT hold, and cannot. This
+    // reads history out of trending_meals, and retention DELETES YouTube rows past RETENTION_DAYS,
+    // so asking for 60 days of names from a table pruned at 30 yields at most 30. On the day this
+    // was written the table held 21 days of YouTube rows, so the effective window was 21. The same
+    // is true of the 90-day video_id guard below.
+    //
+    // Left at 60 deliberately: it is harmless, it is correct for creator rows (which retention
+    // does not delete), and lowering it would change nothing. Implementing the stated guarantee
+    // needs a ledger that outlives the rows — a name/video_id table, or a soft-delete flag — not a
+    // bigger number here. Do not "fix" this by widening the window; it is already wider than the
+    // data can fill.
     const nameWindowDays = Math.max(60, RETENTION_DAYS * 2)
     const nameWindowCutoff = new Date(Date.now() - nameWindowDays * 86400000).toISOString().split('T')[0]
     const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
@@ -837,7 +849,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -927,7 +939,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // positives; every one of the seven was hand-checked as a genuine drop.
             const gaps = nameIngredientGaps(name, counted)
             if (gaps.length > 0) {
-              rejDropped++
+              rejNameGap++
               console.log(`[funnel] rejected "${name}" — named for ${gaps.join(', ')}, absent from ingredients`)
               return false
             }
@@ -939,7 +951,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // is the pairing that makes this precise. Absent language metadata counts as English,
             // so this can only ever fire on a video that declared itself foreign.
             if (isNonEnglishSource(srcVideo?.sourceLang) && looksUntranslated(counted)) {
-              rejDropped++
+              rejUntranslated++
               console.log(`[funnel] rejected "${name}" — source is ${srcVideo?.sourceLang} and the ingredients were not translated`)
               return false
             }
@@ -953,7 +965,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated})`)
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
