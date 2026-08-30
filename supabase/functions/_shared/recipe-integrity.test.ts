@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { isNonIngredientLine, realIngredients, countedIngredients, nameIngredientGaps,
-         looksUntranslated, isNonEnglishSource } from './recipe-integrity.ts'
+         looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from './recipe-integrity.ts'
+import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
 test('section headings, macro lines and boilerplate are not ingredients', () => {
@@ -256,4 +257,59 @@ test('an all-brand English list is why this is never used alone', () => {
 test('source language: only an explicit non-English tag counts', () => {
   for (const l of ['de', 'pl', 'es', 'fr-CA', 'hi']) assert.equal(isNonEnglishSource(l), true, String(l))
   for (const l of ['en', 'en-US', 'en-GB', '', null, undefined]) assert.equal(isNonEnglishSource(l as any), false, String(l))
+})
+
+// ── Fractional discrete items ────────────────────────────────────────────────────────────────
+test('a scaled-down batch is caught', () => {
+  // The stored cheesecake this gate exists for.
+  // Reports the visual+name pairing, which is what the creator's line actually says — the raw
+  // concatenation would read "0.5 large 25g eggs" and match nothing.
+  assert.equal(hasFractionalIndivisible([{ visual: '0.5 large', grams: '25g', name: 'eggs' }]), '0.5 large eggs')
+  assert.ok(hasFractionalIndivisible([{ name: '0.5 large eggs' }]))
+  assert.ok(hasFractionalIndivisible(['1.5 eggs']))
+  assert.ok(hasFractionalIndivisible([{ visual: '.5 slice', grams: '15g', name: 'bread' }]))
+})
+
+test('REGRESSION: the gate is not silently inert', () => {
+  // It was, for 19 days. A literal backspace byte (0x08) inside its String.raw template made the
+  // compiled regex demand a backspace after the item name, so it never matched anything — while
+  // still reading correctly in an editor, a review and a diff. This asserts it actually fires.
+  assert.notEqual(hasFractionalIndivisible([{ name: '0.5 large eggs' }]), null)
+})
+
+test('common kitchen fractions are NOT scaling artefacts', () => {
+  // Measured over the 161-row live pool: accepting "1/2" and "½" rejected three recipes, all
+  // legitimate, and caught nothing real. Halving a can, a packet or an onion is what cooking is.
+  for (const ok of [
+    { visual: '1/2 can', grams: '100g', name: 'corn' },
+    { visual: '1/2 packet', grams: '14g', name: 'jello powder' },
+    { visual: '1/4 sliced', grams: '30g', name: 'onion' },
+    { visual: '½ bar', grams: '50g', name: 'dark chocolate' },
+    { visual: '1 large', grams: '50g', name: 'egg' },
+    { visual: '2 slices', grams: '60g', name: 'bread' },
+    // A decimal followed by a UNIT is a weight, not a scaled count. This was the last false
+    // positive over the live pool.
+    { visual: '1.5 lb', grams: '680g', name: 'chicken breast' },
+    { visual: '0.5 kg', grams: '500g', name: 'chicken thigh' },
+    { visual: '2.5 oz', grams: '70g', name: 'dark chocolate bar' },
+  ]) assert.equal(hasFractionalIndivisible([ok]), null, JSON.stringify(ok))
+})
+
+test('no source file carries a stray control character', () => {
+  // The class of bug above, guarded generally: an invisible byte inside a String.raw template or a
+  // string literal changes behaviour while looking correct everywhere a human would check.
+  const bad: string[] = []
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`
+      if (e.isDirectory()) { if (e.name !== 'node_modules') walk(p); continue }
+      if (!/\.(ts|tsx|js|mjs)$/.test(e.name)) continue
+      const text = readFileSync(p, 'latin1')
+      // Tab, LF and CR are legitimate; nothing else below 0x20 belongs in source.
+      const m = text.match(/[\x00-\x08\x0b\x0c\x0e-\x1f]/)
+      if (m) bad.push(`${p}: byte 0x${m[0].charCodeAt(0).toString(16).padStart(2, '0')}`)
+    }
+  }
+  walk('supabase/functions')
+  assert.deepEqual(bad, [])
 })

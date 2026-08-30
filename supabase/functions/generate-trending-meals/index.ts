@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { countedIngredients, realIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource } from '../_shared/recipe-integrity.ts'
+import { countedIngredients, realIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
@@ -198,26 +198,6 @@ function parseIngredientBlock(desc: string): string[] {
   return out.length >= 3 ? out : []
 }
 
-
-// Items that cannot be fractional. A fraction here is proof the recipe was scaled down from a
-// batch, which is what produced a stored cheesecake calling for "0.5 large eggs" and "0.25 scoop".
-// Deliberately excludes onion, clove and scoop — a quarter onion, half a clove and half a scoop are
-// all things people genuinely measure, and flagging them cost 10+ false positives in the audit.
-const INDIVISIBLE_ITEM = "(egg|slice|can|bar|tortilla|bun|packet|container|bottle|patty|link|cookie|muffin|fillet|breast|thigh)"
-// Leading fraction: 0.5 / .5 / 1/2 / ½, then up to two adjective words, then the item.
-// (?<![\\d/.]) stops "1/2 cup" being read as the "2" in "2 cup" — that exact bug produced 26
-// false positives when auditing stored rows, so it is load-bearing, not defensive noise.
-const FRACTIONAL_INDIVISIBLE = new RegExp(
-  String.raw`(?<![\d/.])(?:0?\.\d+|\d+\.\d+|\d+\s*/\s*\d+|[¼½¾⅓⅔⅛])\s*(?:[a-z-]+\s+){0,2}` + INDIVISIBLE_ITEM + String.raw`s?`,
-  'i',
-)
-function hasFractionalIndivisible(ingredients: any[]): string | null {
-  for (const ing of ingredients ?? []) {
-    const text = typeof ing === 'string' ? ing : `${ing?.visual ?? ''} ${ing?.grams ?? ''} ${ing?.name ?? ''}`
-    if (FRACTIONAL_INDIVISIBLE.test(text)) return text.trim()
-  }
-  return null
-}
 
 // Likes as a percentage of views. A quality proxy that view count actively can't provide: the
 // most-viewed video in a batch is often the most gimmicky one, since novelty drives the click.

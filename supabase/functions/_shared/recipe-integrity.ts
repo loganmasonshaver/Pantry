@@ -239,6 +239,59 @@ export function countedIngredients(ingredients: any[] | undefined): any[] {
   return out
 }
 
+// ── Fractional discrete items ────────────────────────────────────────────────────────────────
+//
+// A recipe asking for half an egg was not written that way; it was SCALED, and scaling a batch to
+// match per-serving macros is the failure that produced a stored cheesecake calling for
+// "0.5 large eggs" and "0.25 scoop".
+//
+// Lives here, exported and tested, because the version that lived inside the pipeline was DEAD for
+// 19 days and nothing noticed. Its source contained a literal backspace byte (0x08) inside a
+// String.raw template — `String.raw`s?\x08`` — so the compiled regex demanded a backspace
+// character after the item name and could never match anything. Invisible in an editor, invisible
+// in review, and invisible in a diff. An untested gate is indistinguishable from no gate.
+//
+// DECIMALS ONLY, and that is measured rather than assumed. The failure mode is ARITHMETIC — a model
+// dividing a batch emits 0.5 and 0.25 — while a human writing a recipe uses "1/2" and "½". Over the
+// 161-row live pool the fraction-accepting version would have rejected three recipes, all of them
+// legitimate ("1/2 can corn", "1/2 packet jello powder", "1/4 sliced onion"), and caught nothing
+// real. The decimal version rejects none of them and still catches "0.5 large eggs".
+//
+// The item list already excludes onion, clove and scoop: a quarter onion and half a scoop are
+// things people genuinely measure, and including them cost 10+ false positives in an earlier audit.
+const INDIVISIBLE_ITEM = "(egg|slice|can|bar|tortilla|bun|packet|container|bottle|patty|link|cookie|muffin|fillet|breast|thigh)"
+// A decimal followed by a UNIT is a weight, not a scaled count: "1.5 lb chicken breast" is how
+// anyone writes one and a half pounds of chicken, and it was the only false positive left over the
+// live pool. "0.5 large eggs" has no unit, which is exactly what makes it a scaling artefact.
+const MEASURE_UNIT = String.raw`(?:lbs?|pounds?|kgs?|kilos?|kilograms?|g|grams?|oz|ounces?|ml|l|liters?|litres?|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|quarts?|pints?)\b`
+const FRACTIONAL_INDIVISIBLE = new RegExp(
+  String.raw`(?<![\d/.])(?:0?\.\d+|\d+\.\d+)\s*(?!` + MEASURE_UNIT + String.raw`)(?:[a-z-]+\s+){0,2}` + INDIVISIBLE_ITEM + String.raw`s?`,
+  'i',
+)
+
+/** The offending text when a recipe asks for a fractional count of a discrete item, else null. */
+export function hasFractionalIndivisible(ingredients: any[] | undefined): string | null {
+  for (const ing of ingredients ?? []) {
+    if (typeof ing === 'string') {
+      if (FRACTIONAL_INDIVISIBLE.test(ing)) return ing.trim()
+      continue
+    }
+    const visual = String(ing?.visual ?? '')
+    const grams = String(ing?.grams ?? '')
+    const name = String(ing?.name ?? '')
+    // Each field pairing is tested SEPARATELY rather than concatenating all three. The stored
+    // cheesecake this gate exists for is {visual:"0.5 large", grams:"25g", name:"eggs"}, and
+    // "0.5 large 25g eggs" does not match: the pattern allows two adjective words between the
+    // number and the item, and "25g" is neither an adjective nor the item. So the one-string form
+    // missed the very example it was written for, on top of being inert. Pairing visual with name
+    // reads it as "0.5 large eggs", which is what the creator's line actually says.
+    for (const text of [`${visual} ${name}`, `${grams} ${name}`, `${visual} ${grams} ${name}`]) {
+      if (FRACTIONAL_INDIVISIBLE.test(text)) return text.trim()
+    }
+  }
+  return null
+}
+
 // ── Untranslated output ──────────────────────────────────────────────────────────────────────
 //
 // English recipe writing is built out of modifiers, units and connectives that appear whatever the
