@@ -1,7 +1,10 @@
 import { Tabs } from 'expo-router'
-import { View, StyleSheet } from 'react-native'
+import { useEffect } from 'react'
+import { View, StyleSheet, AppState } from 'react-native'
 import * as Haptics from 'expo-haptics'
 import { COLORS } from '@/constants/colors'
+import { useAuth } from '@/context/AuthContext'
+import { prefetchDiscover } from '@/lib/discoverFeed'
 import {
   Home,
   UtensilsCrossed,
@@ -36,6 +39,23 @@ function TabIcon({ Icon, focused, size = 20 }: TabIconProps) {
 }
 
 export default function TabLayout() {
+  const { user } = useAuth()
+
+  // Warm the Discover cache from here rather than from inside the Discover screen, because that
+  // screen isn't mounted until it's first opened — nothing in it can run ahead of the user. This
+  // layout mounts once with the tab bar, so by the time anyone taps Compass the cache holds
+  // today's feed and the tab paints instantly instead of starting a 2-3s fetch on arrival.
+  // Re-warmed on foreground: the trending cron runs overnight, so an app resumed the next morning
+  // is the exact case where the cached day is stale.
+  useEffect(() => {
+    if (!user) return
+    prefetchDiscover(user.id)
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active') prefetchDiscover(user.id)
+    })
+    return () => sub.remove()
+  }, [user])
+
   return (
     <Tabs
       screenOptions={{

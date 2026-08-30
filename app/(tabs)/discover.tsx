@@ -16,9 +16,12 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
 import { Flame, Compass, Utensils, Plus, Search, X } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
-import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
 import { countMissingIngredients } from '@/lib/ingredientDisplay'
+import {
+  loadTrendingMeals, readDiscoverCache, writeDiscoverCache, prefetchDiscover,
+  type DiscoverMeal,
+} from '@/lib/discoverFeed'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
 import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
@@ -42,7 +45,6 @@ const CREATOR_SHELF_ENABLED = false
 
 const GRID_CELL_W = Math.floor((SCREEN_W - 40 - 14) / 2)
 
-const TRENDING_FETCH_LIMIT = 600
 // 6 per section, not 30. This is what makes an all-grid page work at scale: eight sections at 30
 // would be 240 cards of scrolling, while eight at 6 is ~48 with everything one tap from expanding.
 // It buys rail-like compactness without hiding anything behind a sideways gesture nobody performs.
@@ -57,33 +59,6 @@ const PILL_ROW_AVAIL = GRID_CELL_W - 20 + 8
 function fitsPillRow(labels: string[]): boolean {
   const w = labels.reduce((acc, l) => acc + l.length * 6.6 + 14, 0) + (labels.length - 1) * 3
   return w <= PILL_ROW_AVAIL
-}
-
-// Lifecycle filters mirror the home-tab logic so Discover shows the same trending
-// pool. They live here as a temporary duplicate; Phase 3b moves Trending out of
-// Home entirely and these become the single source of truth.
-// Creator recipes get a longer shelf life than YouTube (14d guaranteed, up to 30d if
-// engagement is strong) — creators earn revenue share, so we honor their content longer.
-function isCreatorRecipeVisible(m: any): boolean {
-  const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000 // ms → days
-  if (ageDays <= 14) return true
-  if (ageDays <= 30 && ((m.vote_score ?? 0) >= 3 || (m.log_count ?? 0) >= 10)) return true
-  return false
-}
-// MUST match RETENTION_DAYS in supabase/functions/generate-trending-meals — if they drift, either
-// the feed hides rows that exist or the pipeline deletes rows the feed wanted. Was 7; freshness is
-// now conveyed by the "New today" section rather than by throwing meals away, which is what kept
-// the browsable pool tiny.
-const YOUTUBE_VISIBLE_DAYS = 30
-function isYouTubeRecipeVisible(m: any): boolean {
-  const ageDays = (Date.now() - new Date(m.generated_at).getTime()) / 86400000
-  return ageDays <= YOUTUBE_VISIBLE_DAYS
-}
-function filterTrendingByLifecycle(rows: any[]): any[] {
-  return rows.filter(m => {
-    if (m.trend_source === 'creator' || m.creators) return isCreatorRecipeVisible(m)
-    return isYouTubeRecipeVisible(m)
-  })
 }
 
 // Mirrors the pipeline's PROTEIN_KEYWORDS — order matters (specific first).
@@ -201,30 +176,6 @@ function detectPrimaryProtein(meal: any): string {
 // detectPrimaryProtein above is still used, but only for "Because you cooked X" similarity now,
 // not for grouping.
 
-type DiscoverMeal = {
-  id: string
-  name: string
-  calories: number
-  protein: number
-  carbs: number
-  fat: number
-  prepTime: number
-  servings: number
-  shelf_tag: string | null
-  source_verified: boolean
-  ingredients: any[]
-  steps: any[]
-  image: string | null
-  trend_source: string | null
-  creator: any | null
-  vote_score: number
-  log_count: number
-  generated_at: string
-  compatible_diets: string[] | null
-  is_dairy_free: boolean | null
-  is_gluten_free: boolean | null
-  is_nut_free: boolean | null
-}
 
 // Filter chips narrow the trending pool against derived signals. "All" is a no-op.
 const FILTERS = ['All', 'Breakfast', 'Lunch', 'Dinner', 'High Protein', 'Quick', 'Desserts', 'Vegetarian'] as const
@@ -414,7 +365,6 @@ function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
 // Per-user cache so the rail paints instantly on tab focus / app launch (stale-while-revalidate),
 // the same pattern the Saved tab uses. Without it Discover fetched trending_meals cold on every
 // mount and showed a spinner each time. Capped to 60 to keep the stored payload light.
-const discoverCacheKey = (uid: string) => `pantry_discover_${uid}`
 
 export default function DiscoverScreen() {
   // Dev-only screen trace. Black frames were reported ONLY on transitions between
@@ -525,78 +475,30 @@ export default function DiscoverScreen() {
   const lastFetchRef = useRef(0)
   const TRENDING_TTL_MS = 5 * 60 * 1000
 
-  // Instant paint: hydrate the last-cached rail on mount so the tab never flashes a spinner;
-  // fetchTrending below revalidates in the background and re-caches.
+  // Instant paint from the cache — but only if it was written TODAY. readDiscoverCache enforces
+  // that. Painting a stale day was the whole bug: yesterday's shelves appeared instantly, then the
+  // fetch landed 2-3s later and the page visibly rearranged itself, because on a new day both the
+  // meals AND the rotation change at once. A skeleton is better than a feed that reshuffles.
   useEffect(() => {
     if (!user) return
-    AsyncStorage.getItem(discoverCacheKey(user.id)).then(raw => {
-      if (!raw) return
-      try {
-        const cached = JSON.parse(raw)
-        if (Array.isArray(cached) && cached.length) {
-          setTrending(cached); hasContentRef.current = true; setLoading(false)
-          prefetchMealImages(cached.slice(0, 8).map((m: DiscoverMeal) => m.image)) // warm the rail before scroll
-        }
-      } catch {}
+    let cancelled = false
+    readDiscoverCache(user.id).then(cached => {
+      if (cancelled || !cached) return
+      setTrending(cached); hasContentRef.current = true; setLoading(false)
+      prefetchMealImages(cached.slice(0, 8).map(m => m.image)) // warm the rail before scroll
     })
+    return () => { cancelled = true }
   }, [user])
 
   const fetchTrending = useCallback(async (force = false) => {
     if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]
-    // 30-day window is the absolute upper bound (creator lifecycle ceiling).
-    // Lifecycle filtering below trims YouTube to YOUTUBE_VISIBLE_DAYS and creators by engagement.
-    // The !creator_id syntax is PostgREST's foreign-key embed — joins one creator per meal.
-    const { data } = await supabase.from('trending_meals')
-      .select('*, creators!creator_id(name, handle, avatar_url, instagram_url, tiktok_url, youtube_url)')
-      .gte('generated_at', thirtyDaysAgo)
-      .order('generated_at', { ascending: false })
-      .order('id')
-      // Newest-first, capped. At ~15 meals/day and 30-day retention the pool tops out near 450, so
-      // 600 leaves headroom. This is a CEILING, not pagination: if rows ever comes back equal to
-      // the limit, the tail is silently unreachable and this needs a real generated_at cursor.
-      // The warn below is the tripwire for that day.
-      .limit(TRENDING_FETCH_LIMIT)
-
-    if (!data) { setLoading(false); return }
-
-    const mapped = filterTrendingByLifecycle(data)
-      .map(m => ({
-        id: m.id, name: m.name, calories: m.calories, protein: m.protein,
-        carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1, shelf_tag: m.shelf_tag ?? null, source_verified: m.source_verified === true,
-        ingredients: m.ingredients, steps: m.steps, image: m.image,
-        trend_source: m.trend_source,
-        creator: (m as any).creators ?? null,
-        vote_score: (m as any).vote_score ?? 0,
-        log_count: (m as any).log_count ?? 0,
-        generated_at: m.generated_at,
-        compatible_diets: (m as any).compatible_diets ?? null,
-        is_dairy_free: (m as any).is_dairy_free ?? null,
-        is_gluten_free: (m as any).is_gluten_free ?? null,
-        is_nut_free: (m as any).is_nut_free ?? null,
-      }))
-      // Sort by recency first (newest day → oldest), then by vote_score within each
-      // day. So today's freshly-curated batch sits at the front of the rail and
-      // yesterday's leftovers shift to the end.
-      .sort((a, b) => {
-        const dateDiff = new Date(b.generated_at).getTime() - new Date(a.generated_at).getTime()
-        if (dateDiff !== 0) return dateDiff
-        return (b.vote_score ?? 0) - (a.vote_score ?? 0)
-      })
-    // Store the FULL ranked pool. Variety-fill now runs AFTER the per-user diet
-    // filter (in `filtered` below) so a vegetarian's 6 are picked from the
-    // diet-compatible pool with backfill — not capped to 6 before filtering.
-    // Tripwire: hitting the ceiling means older meals are silently unreachable and this needs a
-    // real cursor rather than a bigger number.
-    if ((data?.length ?? 0) >= TRENDING_FETCH_LIMIT) {
-      console.warn(`[discover] fetch hit the ${TRENDING_FETCH_LIMIT}-row ceiling — tail unreachable, add generated_at pagination`)
-    }
+    const mapped = await loadTrendingMeals()
+    if (!mapped) { setLoading(false); return }
     setTrending(mapped)
     hasContentRef.current = true
     lastFetchRef.current = Date.now() // mark fresh only on success — a failed fetch retries next focus
     setLoading(false)
-    // Cache a light slice for instant paint on the next focus / app launch (stale-while-revalidate).
-    if (user) AsyncStorage.setItem(discoverCacheKey(user.id), JSON.stringify(mapped.slice(0, 60))).catch(() => {})
+    if (user) writeDiscoverCache(user.id, mapped) // stale-while-revalidate for the next open
     prefetchMealImages(mapped.slice(0, 8).map(m => m.image)) // warm the visible rail's photos
   }, [user])
 
