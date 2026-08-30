@@ -43,9 +43,12 @@ candidate gate from 61 videos to 8.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
-- [ ] Delete or wire the dead review screen first — `setStep(6)` is never called anywhere in
-      `PantryScanModal`, so the "Found N ingredients / review and confirm" screen (~80 lines) is
-      unreachable. Live path is 1 → 4 → 5 → 55. Don't QA around a ghost.
+- [x] ~~Delete or wire the dead review screen first~~ — DELETED 2026-08-30. It was not a
+      delete-vs-wire fork: step 55 is a strictly better version of the same review-and-confirm
+      screen (photo grid, dedup'd list, search-doubles-as-add, keyboard handling), so step 6 was a
+      superseded draft, not a missing feature. Removed the JSX block plus `toggleItem`,
+      `checkedCount`, `grouped` and 8 orphaned style keys — 125 lines, no behaviour change.
+      Live path is unchanged: 1 → 4 → 5 → 55.
 - [ ] Re-test the camera on device: it has not been checked since the 16-photo cap and the
       full-width scan pill landed, and the bottom bar now carries filmstrip + shutter + full-width
       button. If the viewfinder feels cramped, hide the tips pill after the first photo.

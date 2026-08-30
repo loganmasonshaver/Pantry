@@ -811,19 +811,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     }
   }
 
-  const toggleItem = (id: string) => {
-    setDetectedItems(prev =>
-      prev.map(i => i.id === id ? { ...i, checked: !i.checked } : i)
-    )
-  }
-
-  const checkedCount = detectedItems.filter(i => i.checked).length
-
-  const grouped = RESULT_CATEGORIES.map(cat => ({
-    category: cat,
-    items: detectedItems.filter(i => i.category === cat),
-  })).filter(g => g.items.length > 0)
-
   // The modal's SafeAreaView intentionally excludes 'top' so the camera steps
   // can be full-bleed. Every NON-camera step must compensate manually or the
   // top-left close button renders behind the status bar / Dynamic Island.
@@ -1519,73 +1506,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           )
         })()}
 
-        {/* ── Step 6: Results ── */}
-        {step === 6 && (
-          <View style={stepWithSafeTop}>
-            <View style={styles.topBar}>
-              {/* X on LEFT, spacer takes remaining width — consistent with every other step. */}
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
-                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }} />
-            </View>
-            <Text style={styles.title}>Found {detectedItems.length} ingredients</Text>
-            <Text style={[styles.subtitle, { marginBottom: 20, marginTop: 6 }]}>
-              Review and confirm what to add
-            </Text>
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-              {grouped.map(group => (
-                <View key={group.category} style={styles.resultGroup}>
-                  <Text style={styles.resultGroupLabel}>{group.category}</Text>
-                  <View style={styles.resultCard}>
-                    {group.items.map((item, i) => (
-                      <View key={item.id}>
-                        {i > 0 && <View style={styles.resultDivider} />}
-                        <TouchableOpacity style={styles.resultRow} onPress={() => toggleItem(item.id)} activeOpacity={0.7}>
-                          <Text style={styles.resultName}>{item.name}</Text>
-                          <View style={[styles.checkbox, item.checked && styles.checkboxChecked]}>
-                            {item.checked && <Check size={11} stroke="#000" strokeWidth={2.5} />}
-                          </View>
-                        </TouchableOpacity>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              ))}
-              <View style={{ height: 8 }} />
-            </ScrollView>
-            <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-              <TouchableOpacity
-                style={[styles.primaryBtn, saving && { opacity: 0.6 }]}
-                disabled={saving}
-                activeOpacity={0.85}
-                onPress={async () => {
-                  if (!user) { handleClose(); return }
-                  if (savingRef.current) return // synchronous guard against double-tap
-                  const selected = detectedItems.filter(i => i.checked)
-                  if (selected.length === 0) { handleClose(); return }
-                  savingRef.current = true
-                  setSaving(true)
-                  // Deduped insert — see addPantryItemsDeduped; prevents duplicate rows on re-scan.
-                  const { error } = await addPantryItemsDeduped(user.id, selected.map(item => ({ name: item.name, category: item.category })))
-                  setSaving(false)
-                  savingRef.current = false
-                  // Surface insert failures instead of silently dropping the scanned items
-                  // (the user would otherwise think their whole scan saved when nothing did).
-                  if (error) { Alert.alert('Could not save items', 'Please try again.'); return }
-                  onItemsAdded?.()
-                  handleClose()
-                }}
-              >
-                {saving
-                  ? <ActivityIndicator color="#000000" />
-                  : <Text style={styles.primaryBtnText}>Add {checkedCount} Ingredient{checkedCount !== 1 ? 's' : ''}</Text>
-                }
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
         {/* Fullscreen pinch-to-zoom for a tapped review photo. In-tree absolute overlay (not a
             nested Modal) so it layers over the scan modal on iOS. */}
         {zoomUri && (
@@ -2078,51 +1998,6 @@ const styles = StyleSheet.create({
   scanBeam: { position: 'absolute', left: 6, right: 6, height: 2, backgroundColor: '#4ADE80', shadowColor: '#4ADE80', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8 },
 
   // Results (step 6)
-  resultGroup: { marginBottom: 20 },
-  resultGroupLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#666666',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-    marginLeft: 4,
-  },
-  resultCard: {
-    backgroundColor: '#111111',
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  resultDivider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    marginLeft: 16,
-  },
-  resultName: {
-    flex: 1,
-    fontSize: 15,
-    color: '#FFFFFF',
-    fontWeight: '400',
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: '#4ADE80',
-    borderColor: '#4ADE80',
-  },
 
   // Zone-based visual review
   zoneImageWrap: {
