@@ -1,3 +1,5 @@
+import { isAssumedStaple } from '../constants/staples.ts'
+
 // Ingredient display helpers for the recipe screen.
 //
 // Extracted from app/meal/[id].tsx so they can be unit-tested. Every function here is pure
@@ -411,4 +413,32 @@ export function stripStepNumber(text: string): string {
     .replace(/^step\s*\d+\s*[:.)]?\s*/i, '')
     .replace(/^\d+\s*[.):\-]+\s*/, '')
     .trim()
+}
+
+// The single answer to "how many ingredients does this person still need?", shared by the recipe
+// screen's YOU'LL NEED list and Discover's "Missing N" badge.
+//
+// It exists because those two disagreed on screen. Discover ran its own substring matcher —
+// exactly the logic isAlreadyInList was written to REPLACE, and whose bug is described in the
+// comment there: a pantry holding "yogurt" swallowed "high-protein Greek yogurt", so a card read
+// "Have it all" over a recipe whose detail screen listed something to buy. Discover also had no
+// concept of assumed staples, so it counted salt and oil as missing when the recipe screen did
+// not. The two errors point in opposite directions, which made the badge not merely wrong but
+// unpredictably wrong.
+//
+// Anything that shows a missing-ingredient count MUST come through here.
+export function countMissingIngredients(
+  ingredients: any[] | undefined,
+  pantryNames: Set<string>,
+  excludedStaples: Set<string> = new Set(),
+): number {
+  const names = (ingredients || [])
+    .map(i => String(i?.name ?? i ?? '').trim())
+    .filter(Boolean)
+  if (names.length === 0) return 0
+  return names.filter(name => {
+    if (isAlreadyInList(name, pantryNames)) return false          // already in the pantry
+    if (isAssumedStaple(name, excludedStaples)) return false      // a basic we assume they keep
+    return true
+  }).length
 }

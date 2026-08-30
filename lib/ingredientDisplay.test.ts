@@ -11,7 +11,7 @@ import {
   cleanIngredientName, formatHalf, getMeasuredDisplay, getWholeUnitDisplay,
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball,
-  formatQuarter, scaleVisual,
+  formatQuarter, scaleVisual, countMissingIngredients,
 } from './ingredientDisplay.ts'
 
 // ── the two already-fixed bugs, pinned so they cannot come back ────────────────────────────────
@@ -362,4 +362,48 @@ test('whole-unit foods take their count from the scaled grams in BOTH modes', ()
   const scaled = scaleIng(eggs, 2) // 200g = 4 eggs
   assert.equal(portionFor(scaled, 'Measured'), '4')
   assert.equal(portionFor(scaled, 'Eyeball'), '4')
+})
+
+// ── countMissingIngredients: the badge and the recipe list must agree ─────────────────────────
+const pantry = (...names: string[]) => new Set(names.map(n => n.toLowerCase().trim()))
+
+test('REGRESSION: a substring of a pantry item is NOT owned', () => {
+  // The old Discover matcher compared substrings both ways, so these all counted as owned and the
+  // card read "Have it all" over a recipe that listed them under YOU'LL NEED.
+  assert.equal(countMissingIngredients(['high-protein Greek yogurt'], pantry('yogurt')), 1)
+  assert.equal(countMissingIngredients(['coconut oil'], pantry('oil')), 1)
+  assert.equal(countMissingIngredients(['chicken broth'], pantry('chicken')), 1)
+  assert.equal(countMissingIngredients(['rice vinegar'], pantry('rice')), 1)
+  assert.equal(countMissingIngredients(['milk of choice'], pantry('milk')), 1)
+})
+
+test('a genuine match still counts as owned, before and after adjective stripping', () => {
+  assert.equal(countMissingIngredients(['Greek yogurt'], pantry('greek yogurt')), 0)
+  assert.equal(countMissingIngredients(['grilled chicken breast'], pantry('chicken breast')), 0)
+  assert.equal(countMissingIngredients(['chicken breast'], pantry('boneless chicken breast')), 0)
+})
+
+test('assumed staples are not missing — the badge stops counting salt', () => {
+  assert.equal(countMissingIngredients(['salt', 'black pepper', 'olive oil'], pantry()), 0)
+  // ...unless the user's diet rules them out.
+  assert.equal(countMissingIngredients(['butter'], pantry(), new Set(['butter'])), 1)
+})
+
+test('accepts both object and plain-string ingredient shapes', () => {
+  assert.equal(countMissingIngredients([{ name: 'Greek yogurt' }, 'salt', { name: 'mango' }], pantry('greek yogurt')), 1)
+})
+
+test('a meal with no ingredient data reports 0, not a sentinel', () => {
+  // The old code returned 99 here, which would render as a literal "Missing 99" badge.
+  assert.equal(countMissingIngredients([], pantry('milk')), 0)
+  assert.equal(countMissingIngredients(undefined, pantry('milk')), 0)
+  assert.equal(countMissingIngredients([{ name: '  ' }, ''], pantry('milk')), 0)
+})
+
+test('the screenshot case: the smoothie really needs all three', () => {
+  // Card said "Missing 1"; the recipe screen listed three. With a pantry that merely CONTAINS the
+  // words, substring matching hid two of them.
+  const p = pantry('mango', 'pineapple', 'milk')
+  assert.equal(countMissingIngredients(
+    ['frozen mango chunks', 'fresh pineapple chunks', 'milk of choice'], p), 3)
 })

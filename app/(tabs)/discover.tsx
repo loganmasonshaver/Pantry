@@ -18,6 +18,8 @@ import { Flame, Compass, Utensils, Plus, Search, X } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { COLORS } from '@/constants/colors'
+import { countMissingIngredients } from '@/lib/ingredientDisplay'
+import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
 import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
 import { supabase } from '@/lib/supabase'
@@ -116,16 +118,19 @@ const rotateByDay = <T,>(arr: T[], day: number, key: string, stride: number): T[
   return [...arr.slice(n), ...arr.slice(0, n)]
 }
 
-// How many of a meal's ingredients the user doesn't already have. Substring both ways so
-// "chicken breast" in a recipe matches a pantry entry of "chicken", and vice versa — pantry names
-// are free text and will never match a recipe's phrasing exactly.
-function missingCount(meal: DiscoverMeal, pantry: Set<string>): number {
-  const ings = (meal.ingredients || []).map((i: any) => String(i?.name ?? i ?? '').toLowerCase().trim()).filter(Boolean)
-  if (ings.length === 0) return 99
-  return ings.filter(ing => {
-    for (const have of pantry) if (ing.includes(have) || have.includes(ing)) return false
-    return true
-  }).length
+// "Missing N" on a card must be the same number the recipe screen's YOU'LL NEED list shows, so
+// both go through countMissingIngredients.
+//
+// This used to be a local substring matcher — the exact logic isAlreadyInList was written to
+// replace. Substring both ways means a pantry holding "yogurt" swallows "high-protein Greek
+// yogurt" and "oil" swallows "coconut oil", so cards read "Have it all" over recipes whose detail
+// screen listed things to buy. It also knew nothing about assumed staples, so it counted salt as
+// missing where the recipe screen did not. Two errors pointing opposite ways.
+//
+// A meal with no ingredient data returns 0 rather than the old sentinel 99, which rendered as a
+// literal "Missing 99" badge if such a row ever reached the grid.
+function missingCount(meal: DiscoverMeal, pantry: Set<string>, excluded: Set<string>): number {
+  return countMissingIngredients(meal.ingredients, pantry, excluded)
 }
 
 // SHELF TAGS. One per meal, assigned by the model at extraction (trending_meals.shelf_tag).
@@ -444,6 +449,9 @@ export default function DiscoverScreen() {
   const [maxPrep, setMaxPrep] = useState<number | null>(null)
   // Lowercased pantry item names, for the missing-ingredient count.
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
+  // Same set the recipe screen builds: manual opt-outs plus diet-derived exclusions. Without it a
+  // vegan would see butter counted as owned on a card and as needed on the recipe.
+  const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
   // Most recently cooked meal. Drives the "Because you cooked X" shelf — needs only THIS user's
   // history, not a cohort, so it works from their first cook rather than at some future scale.
   const [lastCooked, setLastCooked] = useState<string | null>(null)
@@ -473,10 +481,14 @@ export default function DiscoverScreen() {
   useEffect(() => {
     if (!user) return
     supabase.from('profiles')
-      .select('food_dislikes, dietary_restrictions, diet_type, calorie_goal, protein_goal, max_prep_minutes')
+      .select('food_dislikes, dietary_restrictions, diet_type, calorie_goal, protein_goal, max_prep_minutes, staples_excluded')
       .eq('id', user.id)
       .single()
       .then(async ({ data }) => {
+        setExcludedStaples(new Set([
+          ...((data?.staples_excluded ?? []) as string[]).map(x => String(x).toLowerCase()),
+          ...dietExcludedStaples(data?.dietary_restrictions ?? []),
+        ]))
         if (data?.food_dislikes) setFoodDislikes(data.food_dislikes ?? [])
         if (data?.dietary_restrictions) {
           setDietaryRestrictions((data.dietary_restrictions ?? []).filter((r: string) => r !== 'None'))
@@ -818,7 +830,7 @@ export default function DiscoverScreen() {
     // an outright lie, so unverified recipes are excluded here even though they ship elsewhere.
     const nearlyRanked = pantryNames.size > 0
       ? browseGrid.filter(m => m.source_verified)
-          .map(m => ({ m, missing: missingCount(m, pantryNames) }))
+          .map(m => ({ m, missing: missingCount(m, pantryNames, excludedStaples) }))
           .sort((a, b) => a.missing - b.missing)
       : []
     // 8, not 12. Three personalised shelves at 12 claim 36 meals before any intent shelf runs —
@@ -881,7 +893,7 @@ export default function DiscoverScreen() {
   // inputs as the section itself so the two can't disagree.
   const missingByMeal = useMemo(() => {
     if (pantryNames.size === 0) return new Map<string, number>()
-    return new Map(browseGrid.map(m => [m.id, missingCount(m, pantryNames)]))
+    return new Map(browseGrid.map(m => [m.id, missingCount(m, pantryNames, excludedStaples)]))
   }, [browseGrid, pantryNames])
 
   // Per-section paging: each section reveals GRID_PAGE at a time. Keeps a 400-meal pool from

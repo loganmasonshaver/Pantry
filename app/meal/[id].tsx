@@ -139,7 +139,9 @@ export default function MealDetailScreen() {
   useEffect(() => {
     if (!user) return
     supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true)
-      .then(({ data }) => setPantryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
+      // .trim() matters: Discover trims its pantry set and this one didn't, so a row stored with
+      // stray whitespace matched there and never here — a third way the two screens disagreed.
+      .then(({ data }) => setPantryNames(new Set(data?.map(i => i.name.toLowerCase().trim()) ?? [])))
     supabase.from('grocery_items').select('name').eq('user_id', user.id)
       .then(({ data }) => setGroceryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
     // Excluded set = the user's manual opt-outs PLUS diet-conflicting basics (butter for vegan,
