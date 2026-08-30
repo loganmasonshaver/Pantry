@@ -1298,7 +1298,9 @@ export default function HomeScreen() {
         </View>
 
         {/* ── Hero Dashboard Card ── */}
-        <View style={styles.heroCard}>
+        {/* The card's own height changes with the rows, so it needs its own layout animation —
+            otherwise its dark background snaps to the new size while the contents animate. */}
+        <Reanimated.View layout={LinearTransition.duration(420)} style={styles.heroCard}>
           <View style={{ alignItems: 'center', marginBottom: 8 }}>
             <CalorieGauge consumed={totalCal} goal={calorieGoal} />
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
@@ -1354,7 +1356,7 @@ export default function HomeScreen() {
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </Reanimated.View>
 
         {/* ── Snap & Log hero — AI photo-to-macros entry. CUT FROM v1 (see
             ENABLE_AI_PHOTO_LOG at top). Will return in v2 once accuracy is
