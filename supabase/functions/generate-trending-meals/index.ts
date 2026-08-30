@@ -110,9 +110,42 @@ const SHELF_TAGS = ['mexican', 'indian', 'asian', 'italian', 'mediterranean', 'a
 // bullet — "🍳 Recipe Steps" is emoji-prefixed, so an unstripped ^ anchor never matched it and 21
 // step lines were being swallowed into one recipe's ingredient list.
 const BULLET_CHARS = "[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌🔸🔹🥚🥦🧄🧅🧀🍗🍚🥩🌶🫒🍋🥔🧈🍯🥜🍫🍓🍌🍳🥄🍽🥣🧊🔥]"
-const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy)\b/i
+// Where the ingredient block ends. The second group is load-bearing now that the parse window is
+// the whole description rather than 500 chars: creators close with a promo block of OTHER recipes,
+// and those are bulleted exactly like ingredients. Measured on a real-shaped description, a
+// 4-ingredient bagel recipe followed by "MORE RECIPES YOU'LL LOVE:" parsed to 8 items — which
+// would then fail the 100%-retention check and reject a perfectly good recipe for being "short".
+// The first group already stopped at METHOD/DIRECTIONS; this stops at the promo block when the
+// creator never wrote a method heading.
+const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy|more\s+recipes?|other\s+(?:recipes?|videos?)|recipes?\s+you|watch\s+next|related|playlist|chapters?|timestamps?)\b/i
 const NOISE_LINE = /(https?:\/\/|www\.|@[\w.]+|#\w+|comment |subscribe|follow me|link in bio|discount|instagram|tiktok)/i
 const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
+
+// How much of a YouTube description we KEEP, and how much of it the model is SHOWN.
+//
+// These were one number (500) and it was doing real damage in two directions at once.
+// Creators put their socials, links and discount codes above the recipe, so 500 chars routinely
+// ends mid-list — measured on a representative 728-char description whose list starts at char 398:
+// the full text parses to 15 ingredients, the 500-char slice parses to 5.
+//
+// Five still clears the >= 3 gate, and that is the dangerous part. The 100%-retention contract is
+// built from parseIngredientBlock's output, so a truncated parse silently REWRITES the spec down
+// to 5 — the model returns 5, `got >= srcList.length` passes, and the row is stamped
+// source_verified while missing ten of the creator's ingredients. Both sides of the comparison
+// agree on a wrong answer. Whole descriptions that start their list past char 500 parse to 0 and
+// are dropped as "no readable list", which is the other half of the ~28% gate rate.
+//
+// PARSE gets the whole thing (5000 is YouTube's own description ceiling, so this is effectively
+// "no truncation"). Parsing is local string work — it costs nothing to read all of it, and the
+// gate and the retention contract are exactly the things that must see everything the creator
+// published.
+//
+// PROMPT stays bounded because the model's copy is not free: 60 videos of link-spam is prompt
+// noise, and the model no longer needs the description to find the ingredients — it is handed the
+// parsed checklist separately. 2000 is kept generous rather than minimal because creators often
+// print their macros BELOW the ingredient list, and the prompt tells the model to read them there.
+const DESC_PARSE_CHARS = 5000
+const DESC_PROMPT_CHARS = 2000
 
 function stripBullet(raw: string): string {
   return raw
@@ -520,7 +553,7 @@ Deno.serve(async (req: Request) => {
             // videos.list already returns this and it was being discarded. Authoritative source
             // language beats guessing at it from the extracted text — see recipe-integrity.
             const sourceLang = item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null
-            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount, sourceLang })
+            allVideos.push({ videoId, title, thumbnail, description: description.substring(0, DESC_PARSE_CHARS), viewCount, likeCount, sourceLang })
           }
         }
       } catch (e) {
@@ -548,7 +581,7 @@ Deno.serve(async (req: Request) => {
           if (!videoId || !title || !thumbnail) continue
           if (!isFoodTitle(title) || isNotRecipeContent(title)) continue
           const sourceLang = item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null
-          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, 500), viewCount, likeCount, sourceLang })
+          allVideos.push({ videoId, title, thumbnail, description: description.substring(0, DESC_PARSE_CHARS), viewCount, likeCount, sourceLang })
         }
       }
     } catch (e) {
@@ -631,7 +664,9 @@ Deno.serve(async (req: Request) => {
 
     // Step 2: Send video titles + descriptions to Groq to generate accurate recipes
     const videoList = uniqueVideos.map((v, i) => {
-      const desc = v.description ? `\n   Description: ${v.description}` : ''
+      // Shown-to-the-model slice only. The full text is still what parseIngredientBlock reads
+      // below, so widening the parse window never costs prompt budget — see DESC_PROMPT_CHARS.
+      const desc = v.description ? `\n   Description: ${v.description.substring(0, DESC_PROMPT_CHARS)}` : ''
       // Naming the language turns the general "translate" rule into a specific instruction about
       // THIS video, which is the difference between the model noticing and not.
       const langNote = isNonEnglishSource(v.sourceLang)
