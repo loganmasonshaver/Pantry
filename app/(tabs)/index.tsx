@@ -1525,8 +1525,10 @@ export default function HomeScreen() {
         {/* ── Compact "Cook from your pantry" tease — Phase 2a of the IA refactor.
             Full suggested-meal browse will live in the Pantry tab (Phase 2b). For now we
             show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
+        {/* The whole section shifts when the macros card grows. Without a layout animation here the
+            header and "See all" snapped into place while everything else glided. */}
         {pantryFetched && pantryNames.size > 0 && (
-          <View
+          <Reanimated.View layout={LinearTransition.duration(420)}
             style={{ marginBottom: 36 }}
             onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
           >
@@ -1666,7 +1668,7 @@ export default function HomeScreen() {
               // gets here; it is handled by its own block above, gated on pantryNames.size === 0.
               <MealCardResting pantryCount={pantryNames.size} onPress={retry} />
             ) : null}
-          </View>
+          </Reanimated.View>
         )}
 
         {/* The old persistent "Missing kitchen basics?" home card was removed —
