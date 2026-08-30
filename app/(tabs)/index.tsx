@@ -21,6 +21,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import Reanimated, { useSharedValue, useAnimatedStyle, withTiming, Easing as ReaEasing } from 'react-native-reanimated'
+import { ToggleProbe } from '@/components/ToggleProbe'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
 import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
@@ -727,6 +728,11 @@ export default function HomeScreen() {
   // the "Cook from pantry" line skip. JS-driven (height can't use the native driver), 280ms.
   const macrosAnim = useSharedValue(0)
   const [extraRowsH, setExtraRowsH] = useState(0) // measured height of the carbs+fat rows
+  // __DEV__ counters feeding ToggleProbe. A render-per-frame count is the signature of the
+  // animation driving a setState loop; a low count with high frame times means layout instead.
+  const homeRenderCount = useRef(0)
+  homeRenderCount.current++
+  const layoutFireCount = useRef(0)
   const extraRowsHRef = useRef(0)
   // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
   // this 2400-line component between the tap and the first frame, which is what made the toggle
@@ -1332,13 +1338,14 @@ export default function HomeScreen() {
                 is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
             <Reanimated.View style={[{ overflow: 'hidden', opacity: extraRowsH > 0 ? 1 : 0 }, extraRowsH > 0 && macrosRowsHeight]}>
               <View
-                onLayout={e => { const h = e.nativeEvent.layout.height; if (h && Math.abs(h - extraRowsHRef.current) > 0.5) { extraRowsHRef.current = h; setExtraRowsH(h) } }}
+                onLayout={e => { layoutFireCount.current++; const h = e.nativeEvent.layout.height; if (h && Math.abs(h - extraRowsHRef.current) > 0.5) { extraRowsHRef.current = h; setExtraRowsH(h) } }}
                 style={{ gap: 10, paddingTop: 10 }}
               >
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
               </View>
             </Reanimated.View>
+            {__DEV__ && <ToggleProbe renderCount={homeRenderCount.current} layoutCount={layoutFireCount.current} />}
             <TouchableOpacity
               onPress={() => {
                 const next = !macrosExpanded
