@@ -49,6 +49,28 @@ test('equipment and packaging are not ingredients', () => {
   ]) assert.equal(isNonIngredientLine(kit), true, `"${kit}" should be rejected`)
 })
 
+test('non-Latin ingredient lines are not punctuation', () => {
+  // \W is ASCII-only, so the old punctuation-only rule classified every Cyrillic, Devanagari and
+  // CJK line as junk and deleted it. A real Russian source list collapsed from 12 items to 1.
+  for (const good of [
+    'творог — 200 г', 'щепотка соли', 'мука — 200 г', 'яйцо — 1 шт',
+    'मैदा — 100 ग्राम', '片栗粉 大さじ1', 'ζάχαρη 100 γρ',
+  ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+  // ...but genuinely letterless lines still are junk.
+  for (const junk of ['— — —', '   ', '···', '1/2', '###']) {
+    assert.equal(isNonIngredientLine(junk), true, `"${junk}" should be rejected`)
+  }
+})
+
+test('emptying a non-Latin list used to blind the untranslated gate', () => {
+  // looksUntranslated returns false when there is nothing to judge. Before the fix realIngredients
+  // deleted every Cyrillic line first, so the gate saw an empty list and passed the recipe — blind
+  // to exactly the scripts it exists to catch.
+  const russian = [{ name: 'творог — 200 г' }, { name: 'мука — 200 г' }, { name: 'яйцо — 1 шт' }]
+  assert.equal(realIngredients(russian).length, 3)
+  assert.equal(looksUntranslated(russian), true)
+})
+
 test('realIngredients strips junk and accepts both shapes', () => {
   const ings = [{ name: 'Greek yogurt' }, { name: 'Składniki' }, 'blueberries', { name: 'Kalorien: 504 kcal' }]
   assert.deepEqual(realIngredients(ings).map((i: any) => i.name ?? i), ['Greek yogurt', 'blueberries'])

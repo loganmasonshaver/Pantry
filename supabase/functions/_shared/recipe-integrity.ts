@@ -33,7 +33,12 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /(składniki|makroskładniki|łap\s+przepis|zutaten|przepis)/i,
   /https?:\/\/|www\.|\B@\w+/i,                                            // links and handles
   /\b(description tag|ingredients? label|full recipe|subscribe|follow me|link in bio|shop my|use code)\b/i,
-  /^[\s\W\d]*$/,                                                          // punctuation/numbers only
+  // Punctuation/numbers only — "no letter in ANY script", not "no ASCII letter".
+  // \W is [^A-Za-z0-9_], so Cyrillic, Devanagari, CJK, Greek and Arabic all count as punctuation
+  // and the old /^[\s\W\d]*$/ deleted every line of a non-Latin ingredient list. A real Russian
+  // source list collapsed from 12 items to 1. Exactly the ASCII-only trap already recorded above
+  // for \b — that one was fixed, this one was missed.
+  /^[^\p{L}]*$/u,
   // Instruction text. Creators write steps inside the ingredient block ("Season with: salt, black
   // pepper, and garlic powder.", "Cook eggs") and the model carries them through as ingredients.
   // Instruction text. Creators write steps inside the ingredient block and the model carries them

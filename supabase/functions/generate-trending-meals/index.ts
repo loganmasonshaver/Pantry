@@ -156,6 +156,28 @@ function stripBullet(raw: string): string {
     .replace(/[:\s]+$/, '')
 }
 
+// The creator's list, normalised EXACTLY the way the model's answer is normalised.
+//
+// This asymmetry was the single biggest false-rejection source in the pipeline. The model's side
+// went through countedIngredients (junk stripped, duplicates collapsed) while the source side was
+// raw parser output, so the retention gate compared a cleaned count against an uncleaned one and
+// the recipe lost every time the description contained a repeat or a stray instruction line.
+// Hand-checked against real rejections: 6 of 7 were false, from exactly two shapes —
+//
+//   * a repeated line. "1/4 cup (60ml) yogurt" listed twice for two components counts as 2 here
+//     and as 1 after countedIngredients, so the model cannot satisfy it by any answer. The irony
+//     is that countedIngredients dedupes SPECIFICALLY so a repeat cannot buy a free point; the
+//     comparison just forgot to treat both sides alike.
+//   * an instruction swept into the block. "Grill on a tawa till crisp", "190-195°C — 30-35 мин",
+//     and in one case a whole method used as the ingredient list.
+//
+// Using it for the CHECKLIST matters as much as for the gate: the prompt hands the model this list
+// and says its array must contain all N, so an uncleaned list was actively instructing the model
+// to copy instructions in as ingredients — which is exactly what several of them did.
+function sourceIngredients(desc: string): string[] {
+  return countedIngredients(parseIngredientBlock(desc)) as string[]
+}
+
 function parseIngredientBlock(desc: string): string[] {
   if (!desc) return []
   const heading = desc.match(/ingredients?\s*:?\s*\n/i)
@@ -650,7 +672,7 @@ Deno.serve(async (req: Request) => {
     // candidates that were about to be discarded. Gating first means the 60 we keep are 60 usable
     // ones. Same cap, ~3.5x the usable pool.
     const beforeGate = uniqueVideos.length
-    uniqueVideos = uniqueVideos.filter(v => parseIngredientBlock(v.description || '').length >= 3)
+    uniqueVideos = uniqueVideos.filter(v => sourceIngredients(v.description || '').length >= 3)
     console.log(`[funnel] ingredient-list gate: ${uniqueVideos.length}/${beforeGate} videos have a readable list`)
     funnel.rawCandidates = allVideos.length
     funnel.afterDedup = deduped.length
@@ -696,7 +718,7 @@ Deno.serve(async (req: Request) => {
       // When the creator published an explicit list, restate it as a checklist with its exact
       // count. "Return all 14" is a far harder instruction to quietly ignore than "keep every
       // ingredient", which was already in the prompt and was being ignored half the time.
-      const parsed = parseIngredientBlock(v.description || '')
+      const parsed = sourceIngredients(v.description || '')
       const checklist = parsed.length >= 3
         ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
         : ''
@@ -946,7 +968,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0
+          const droppedDetail: any[] = []
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -1009,7 +1032,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // few survive, MIN_TRENDING_MEALS aborts the run and yesterday's feed stays up — stale
             // beats wrong.
             const srcVideo = uniqueVideos[(r.video_index || 1) - 1]
-            const srcList = srcVideo ? parseIngredientBlock(srcVideo.description || '') : []
+            const srcList = srcVideo ? sourceIngredients(srcVideo.description || '') : []
             // Junk stripped and duplicates collapsed BEFORE counting. Both inflated `got` and so
             // bought a free pass at this threshold: five stored meals counted section headings
             // ("Składniki") or macro lines ("Kalorien: 504 kcal") as ingredients, and seven listed
@@ -1017,11 +1040,24 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // a retention check by echoing more of it.
             const counted = countedIngredients(r.ingredients)
             const got = counted.length
-            if (srcList.length < 3) { rejDropped++; return false }
+            // Split from `dropped`, which conflated two unrelated failures. Every candidate cleared
+            // the ingredient-list gate, so a missing source list here does NOT mean the description
+            // had none — it means video_index pointed at the wrong video (or off the end), which is
+            // a model indexing error, not an incomplete recipe. Counting them together made an
+            // indexing bug look like an ingredient-retention problem.
+            if (srcList.length < 3) { rejNoSrcList++; return false }
             console.log(`[funnel] ingredient retention "${name}": ${got}/${srcList.length}`)
             if (got < srcList.length) {
               rejDropped++
               console.log(`[funnel] rejected "${name}" — kept ${got} of ${srcList.length} ingredients`)
+              // `dropped` is the largest single sanitize loss (~29% of raw output) and it got
+              // larger when the parser stopped truncating descriptions at 500 chars. That is
+              // expected — complete source lists make the contract stricter — but it is only
+              // CORRECT if srcList is really the creator's list. A parser that over-extracts
+              // (absorbing a promo block, a macro line, a second recipe) invents a specification
+              // the model cannot meet and rejects good food. Capturing both sides is the only way
+              // to tell those apart, and it has to be hand-checked, not counted.
+              if (droppedDetail.length < 12) droppedDetail.push({ name, got: counted.map((i: any) => i?.name ?? i), src: srcList })
               return false
             }
             // The count above is blind to IDENTITY: three ingredients satisfy "three or more"
@@ -1062,12 +1098,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList})`)
           funnel[`llm_${provider.name}`] = {
             raw: parsed.length, sanitized: sanitized.length,
             rejected: { noName: rejNoName, noMacros: rejNoMacros, dupName: rejDupName, nearDup: rejNearDup,
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
-              nameGap: rejNameGap, untranslated: rejUntranslated },
+              nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList },
+            droppedDetail,
           }
           if (!recipes || sanitized.length > recipes.length) recipes = sanitized
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
