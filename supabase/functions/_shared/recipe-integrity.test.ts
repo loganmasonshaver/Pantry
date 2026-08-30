@@ -9,6 +9,10 @@ test('section headings, macro lines and boilerplate are not ingredients', () => 
     'Kalorien: 504 kcal', '425 kcal', 'Protein: 51,3 g', 'Eiweiß: 51,3 g',
     'description tag', 'full recipe on my site', 'link in bio', 'https://example.com', '@creator',
     '— — —', '   ', 'Season with: salt, black pepper, and garlic powder.', 'Cook eggs',
+    // Found in stored rows after the first pass: a German macro line, a bare macro header with
+    // neither colon nor number, and more instruction verbs.
+    'Kohlenhydrate: 40,6 g', 'Fett: 12 g', 'kcal/protein/fat/carbs',
+    'Place tortilla on a board', 'Layer the salmon', 'Fold in the berries', 'Serve with rice',
   ]) assert.equal(isNonIngredientLine(junk), true, `"${junk}" should be rejected`)
 })
 
@@ -17,6 +21,13 @@ test('real ingredients are never mistaken for junk', () => {
     'Eggs', '125g High-protein Greek yogurt', 'frozen strawberries', 'Ore-Ida Potatoes O’Brien',
     'bone-in, skin-on chicken thighs', "Frank’s Mild Wing Sauce", 'reduced-fat feta cheese',
     'Whey Protein 360 Platinum Vanilla', 'Zero Sugar Cool Whip', 'cocoa powder', 'Medjool dates',
+    // These begin with an instruction verb but are foods — the rule needs a following word AND
+    // must not fire on a bare noun.
+    'Top Ramen', 'Rolls', 'Roll', 'Cooking spray', 'Heavy cream', 'Season salt',
+    // "spread" is NOT treated as an instruction verb: "Chicken Spread" and "Chocolate Spread" are
+    // real dishes in this pool. Missing the odd "Spread cream cheese" line is far cheaper than
+    // deleting a real ingredient, since a false positive here silently shortens a recipe.
+    'Spread cream cheese', 'Chocolate spread', 'Wrap', 'Slice of sourdough',
   ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
 })
 

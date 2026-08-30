@@ -24,7 +24,9 @@
 // anything matching here is DISCARDED, so a false positive silently shortens a real recipe.
 const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /\b\d+\s*(kcal|kj|calories|cals)\b/i,                                  // "504 kcal"
-  /\b(protein|carbs?|carbohydrates?|fats?|kalorien|eiweiß|eiweiss|makro\w*)\s*[:=]/i, // "Protein: 51g"
+  /\b(protein|carbs?|carbohydrates?|fats?|kalorien|kohlenhydrate?|eiwei(ß|ss)|fett|makro\w*)\s*[:=]/i, // "Protein: 51g", "Kohlenhydrate: 40,6 g"
+  // A bare macro header with no number or colon — "kcal/protein/fat/carbs" as its own line.
+  /^[\s\W]*(kcal|calories)\s*[\/|,].*(protein|fat|carb)/i,
   /^(zutaten|ingredienti|ingr[ée]dients?|ingredients?|składniki|makroskładniki|przepis|recept\w*)\b/i, // headings, incl. localized
   // No \b here: JS word boundaries are ASCII-only, so \b never matches before "Ł" or after "ś"
   // and the guard silently did nothing on the very rows it was written for.
@@ -34,7 +36,13 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /^[\s\W\d]*$/,                                                          // punctuation/numbers only
   // Instruction text. Creators write steps inside the ingredient block ("Season with: salt, black
   // pepper, and garlic powder.", "Cook eggs") and the model carries them through as ingredients.
-  /^\s*(season|mix|add|preheat|combine|stir|whisk|bake|cook|serve|top|garnish|blend|pour|heat|repeat|optional)\b/i,
+  // Instruction text. Creators write steps inside the ingredient block and the model carries them
+  // through. The verb list deliberately EXCLUDES words that begin real food names — top (Top
+  // Ramen), season (Season salt), roll/wrap/slice/spread (all foods) — and requires a following
+  // word, so a bare noun is never caught. "Season with:" and "Serve with:" are handled separately
+  // because those two are unambiguous as phrases even though the bare verbs are not.
+  /^\s*(preheat|combine|stir|whisk|bake|blend|pour|repeat|garnish|transfer|sprinkle|drizzle|chop|fold|layer|place|cook|mix|heat)\b\s+\w/i,
+  /^\s*(season|serve|top)\s+(with|the)\b/i,
 ]
 
 /** True when a line is plainly not a food item — a heading, a macro summary, a link, boilerplate. */
