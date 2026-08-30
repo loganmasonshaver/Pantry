@@ -856,6 +856,27 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       openaiApiKey && { url: "https://api.openai.com/v1/chat/completions", key: openaiApiKey, model: "gpt-4o-mini", name: "OpenAI", maxTokens: 16000 },
     ].filter(Boolean) as { url: string; key: string; model: string; name: string; maxTokens: number }[]
 
+    // ?provider=openai — force one provider for this run.
+    //
+    // The fallback is only ever reached when Gemini fails, which is rare, so in practice it never
+    // runs and nothing observes it. That is not a hypothetical: it shipped with TWO independent
+    // breaks that survived for weeks — a split-emoji surrogate that made the request body
+    // unparseable to a strict JSON parser, and a max_tokens above gpt-4o-mini's ceiling. Both were
+    // only found when Gemini happened to fail on the same day, and neither would have been caught
+    // by any amount of reading. A provider you cannot exercise is a provider you do not have.
+    //
+    // Combine with ?dryRun=true to exercise it without touching the day's rows.
+    const forceProvider = (url.searchParams.get('provider') ?? '').toLowerCase()
+    const selected = forceProvider
+      ? providers.filter(p => p.name.toLowerCase() === forceProvider)
+      : providers
+    if (forceProvider && selected.length === 0) {
+      return new Response(JSON.stringify({
+        error: `unknown provider "${forceProvider}"`,
+        available: providers.map(p => p.name.toLowerCase()),
+      }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+    }
+
     let recipes: any[] | null = null
     // Why each provider failed. The 500 below used to say only "Failed to generate recipes from
     // video titles", which is true of a provider outage, a rate limit, an oversized prompt and a
@@ -868,7 +889,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // one number that is free to compute here.
     console.log(`[funnel] prompt: ${prompt.length} chars across ${uniqueVideos.length} videos`)
 
-    for (const provider of providers) {
+    for (const provider of selected) {
       stageLog(`LLM call start: ${provider.name}`)
       try {
         // 90s hard timeout. Without this the fetch hangs indefinitely if the provider
@@ -1086,7 +1107,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList },
             droppedDetail,
           }
-          if (!recipes || sanitized.length > recipes.length) recipes = sanitized
+          if (!recipes || sanitized.length > recipes.length) { recipes = sanitized; funnel.providerUsed = provider.name }
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
       } catch (e) {
