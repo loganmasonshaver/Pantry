@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { escapeLike } from './sqlLike'
 
 export type PantryInsertRow = { name: string; category: string }
 
@@ -39,7 +40,8 @@ export async function addPantryItemsDeduped(userId: string, rows: PantryInsertRo
   // Re-stock existing rows that may have been out. ilike is case-insensitive — historical rows
   // have inconsistent casing, so equality would miss them.
   for (const name of restockNames) {
-    await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', userId).ilike('name', name)
+    // escapeLike: a raw "2% Milk" here is a wildcard pattern that also re-stocks other rows.
+    await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', userId).ilike('name', escapeLike(name))
   }
 
   return { error: null }

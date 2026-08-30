@@ -28,6 +28,7 @@ import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
+import { escapeLike } from '@/lib/sqlLike'
 import { categorizeItem } from '@/lib/categories'
 import { MOCK_MEAL_DETAILS, MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
@@ -259,7 +260,7 @@ export default function MealDetailScreen() {
     await supabase.from('grocery_items')
       .delete()
       .eq('user_id', user.id)
-      .ilike('name', ingredientName)
+      .ilike('name', escapeLike(ingredientName)) // raw name would be a LIKE pattern — this is a DELETE
       .eq('meal', meal?.name ?? '')
       .eq('checked', false)
   }

@@ -20,6 +20,7 @@ import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { haptic } from '@/lib/haptics'
+import { escapeLike } from '@/lib/sqlLike'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
 
@@ -363,7 +364,7 @@ export default function GroceryScreen() {
     // ilike (case-insensitive) is safer than equality — historical entries have inconsistent casing.
     const existingItems = checked.filter(i => existingNames.has(i.name.toLowerCase()))
     for (const item of existingItems) {
-      await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', user.id).ilike('name', item.name)
+      await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', user.id).ilike('name', escapeLike(item.name))
     }
 
     // Remove from grocery_items
