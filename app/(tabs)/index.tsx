@@ -770,7 +770,12 @@ export default function HomeScreen() {
       ? heroFit + (heroExpandedH - heroFit) * macrosAnim.value
       : heroExpandedH, // hold the smaller size so nothing clips when the accordion is open
   }))
-  const macrosRowsOpacity = useAnimatedStyle(() => ({ opacity: macrosAnim.value }))
+  // No opacity ANIMATION: height 0 + overflow hidden already hides the rows completely, so the
+  // fade was pure compositing cost. It also explains why opening felt worse than closing — a
+  // fully transparent subtree can be skipped by the compositor, so opening had to rasterise the
+  // rows from scratch on exactly the frames where the layout was also moving. Opacity is still
+  // pinned to 0 until the rows have been measured, because the height style isn't applied yet
+  // then and they would otherwise flash at full size on first render.
   // Height is applied only once the rows have been measured; before that the view needs its
   // natural height so onLayout has something to report. Opacity still hides them meanwhile.
   const macrosRowsHeight = useAnimatedStyle(() => ({ height: macrosAnim.value * extraRowsH }))
@@ -1325,7 +1330,7 @@ export default function HomeScreen() {
             <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized={!macrosExpanded} />
             {/* Carbs+Fat accordion — height glides 0↔measured with macrosAnim so the reflow below
                 is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
-            <Reanimated.View style={[{ overflow: 'hidden' }, macrosRowsOpacity, extraRowsH > 0 && macrosRowsHeight]}>
+            <Reanimated.View style={[{ overflow: 'hidden', opacity: extraRowsH > 0 ? 1 : 0 }, extraRowsH > 0 && macrosRowsHeight]}>
               <View
                 onLayout={e => { const h = e.nativeEvent.layout.height; if (h && Math.abs(h - extraRowsHRef.current) > 0.5) { extraRowsHRef.current = h; setExtraRowsH(h) } }}
                 style={{ gap: 10, paddingTop: 10 }}
