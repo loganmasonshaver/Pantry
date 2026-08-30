@@ -4,6 +4,7 @@ import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCapWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { rejectOversizeImage } from '../_shared/image.ts'
+import { cleanupResult, confScore } from '../_shared/scan-cleanup.ts'
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
@@ -33,15 +34,6 @@ const MAX_PHOTOS_PER_SCAN = 8
 // with dark contents", "round tub of food"), and NO real ingredient drops until floor 40 — so 30
 // strips noise with a 10-pt safety buffer. Override per-env in the Supabase dashboard if needed.
 const SCAN_CONFIDENCE_FLOOR = Number(Deno.env.get('SCAN_CONFIDENCE_FLOOR') ?? 30)
-
-// Normalize whatever the model put in `confidence` to a 0-100 number. Tolerates the old
-// string form ('high'/'low') and omission so a mixed/older response never crashes the floor.
-function confScore(c: unknown): number {
-  if (typeof c === 'number' && isFinite(c)) return c
-  if (c === 'low') return 30
-  if (c === 'high') return 90
-  return 100 // absent → treat as fully confident (never floor-drop an unscored item)
-}
 
 // One vision call with a hard timeout. Throws on error/timeout/empty so the caller can fall back.
 // 30s: the model returns in ~10s; 30s leaves headroom for a slow response while keeping the
@@ -90,48 +82,6 @@ async function scanVision(messages: any[], maxTokens: number): Promise<string> {
     console.log(`[scan-pantry] gpt-5.4 failed (${(e as Error).message}); falling back to Gemini Flash-Lite`)
     return await visionCall(GEMINI_URL, googleAiKey, "gemini-3.1-flash-lite", messages, maxTokens)
   }
-}
-
-// ── Post-generation cleanup (deterministic safety net over whatever the model returns) ──
-const NONFOOD_EXACT = new Set([
-  'plate', 'plates', 'dinner plate', 'dinner plates', 'bowl', 'bowls', 'cup', 'cups', 'mug', 'mugs',
-  'glass', 'glasses', 'pot', 'pots', 'pan', 'pans', 'skillet', 'kettle', 'tray', 'trays', 'utensil',
-  'utensils', 'fork', 'knife', 'spoon', 'spatula', 'container', 'containers', 'plastic container',
-  'plastic food container', 'food container', 'prepared food container', 'toaster', 'blender',
-  'coffee maker', 'appliance', 'sponge', 'sponges', 'napkin', 'napkins', 'foil', 'aluminum foil',
-  'battery', 'batteries', 'cookbook', 'cookbooks',
-])
-const NONFOOD_CONTAINS = [
-  'nail polish', 'dish soap', 'hand soap', 'paper towel', 'cutting board', 'trash bag', 'garbage bag',
-  'dog food', 'dog biscuit', 'dog treat', 'cat food', 'cat treat', 'kibble', 'toothpaste', 'shampoo',
-  'toiletr', 'dishware', 'cookware', 'kitchenware', 'plastic wrap', 'tissue', 'q-tip', 'cotton',
-]
-const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
-function isNonFood(name: string): boolean {
-  const n = normName(name)
-  if (NONFOOD_EXACT.has(n)) return true
-  return NONFOOD_CONTAINS.some((t) => n.includes(t))
-}
-
-// Drop hallucinated non-food, strip parenthetical qualifiers ("Hot Sauce (Red Cap)" → "Hot
-// Sauce"), and collapse exact dupes — across the WHOLE result, per zone. Mutates result.zones.
-function cleanupResult(result: any): void {
-  const seen = new Set<string>()
-  for (const zone of (result.zones || [])) {
-    const kept: any[] = []
-    for (const item of (zone.items || [])) {
-      if (!item?.name || typeof item.name !== 'string') continue
-      if (isNonFood(item.name)) continue
-      if (confScore(item.confidence) < SCAN_CONFIDENCE_FLOOR) continue // below the tunable quality floor
-      const canon = item.name.replace(/\s*\([^)]*\)/g, '').trim()
-      const key = normName(canon)
-      if (!key || seen.has(key)) continue
-      seen.add(key)
-      kept.push({ ...item, name: canon })
-    }
-    zone.items = kept
-  }
-  result.zones = (result.zones || []).filter((z: any) => (z.items?.length ?? 0) > 0)
 }
 
 Deno.serve(async (req: Request) => {
@@ -423,7 +373,7 @@ Return ONLY the JSON, no markdown. If nothing was missed, return { "missed": [] 
     // nail polish, pet food), strip parenthetical qualifiers, and collapse dupes across the
     // whole result. Catches what even a good model occasionally slips through.
     const beforeCleanup = (result.zones || []).reduce((a: number, z: any) => a + (z.items?.length || 0), 0)
-    cleanupResult(result)
+    cleanupResult(result, SCAN_CONFIDENCE_FLOOR)
     const afterCleanup = (result.zones || []).reduce((a: number, z: any) => a + (z.items?.length || 0), 0)
     if (beforeCleanup !== afterCleanup) console.log(`[scan-pantry] cleanup: ${beforeCleanup} -> ${afterCleanup} items`)
 
