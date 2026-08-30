@@ -25,9 +25,21 @@ significant findings on every pass — 13 fixes on 2026-08-30 alone, including t
 3x and 8x protein overclaims and a gate that had been silently dead for 19 days. Assume more remain.
 - [ ] Keep re-running the cron and re-auditing the pool. Full standing procedure, open items and
       the measurement methods live in **`docs/TRENDING-OPEN.md`** — read it before each pass.
-- [ ] Settle whether daily yield is variance or a defect (blocked on YouTube quota).
-- [ ] Finish the OpenAI fallback verification (one call, blocked on quota).
+- [ ] Settle whether daily yield is variance or a defect. Identical code, sequential runs gave raw
+      24 vs 5 and stored 17 vs 4 — so a once-daily cron takes ONE sample from that spread and the
+      swap makes it permanent. Needs ~10 SEQUENTIAL `?dryRun=true` runs. If variance confirms, the
+      fix is architectural (run 2-3x, keep the best batch) and no amount of prompt work helps.
+- [ ] Finish the OpenAI fallback verification — one call:
+      `...generate-trending-meals?refresh=true&dryRun=true&provider=openai`
 - [ ] Treat "it looks fine" as untested. Hand-verify every count before believing it.
+
+**QUOTA BUDGET — the binding constraint on all of the above.** YouTube allows 10,000 units/day,
+resetting at MIDNIGHT PACIFIC. A run costs ~1,314 units (13 search.list @ 100 + 14 videos.list @ 1),
+so the day holds exactly **7 runs**. `?dryRun=true` costs the same — it skips DB writes and image
+generation, not the YouTube calls. The cron was moved to 08:00 UTC (01:00 Pacific) on 2026-08-30 so
+it draws from a fresh bucket instead of the previous day's leftovers; budget **1 run for the cron,
+6 for testing**. Run tests SEQUENTIALLY — 3 fired concurrently starved each other and dropped the
+candidate gate from 61 videos to 8.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
@@ -62,6 +74,15 @@ significant findings on every pass — 13 fixes on 2026-08-30 alone, including t
 
 ## 10. TestFlight beta
 - [ ] Everything above must be in the build.
+- [ ] **Prove the email system end to end here, not at launch.** It had NEVER worked before
+      2026-08-30 (`4c016c2`) — loops-sync selected `email`/`full_name` from `profiles`, which have
+      never been columns there, so every call failed on the unknown column and no contact or event
+      ever reached Loops. Now reads identity from `auth.users`. Needs a real signup + purchase to
+      confirm.
+- [ ] **Verify the engagement counters move.** `touchLastActive`, `trackCookTonightUsed`,
+      `trackMealSavedEngagement` and `trackGoalsCustomized` had never been called by anything
+      (`8977f41`). Use the app — save a meal, open a Cook Tonight pick, change a goal — then re-read
+      the profiles row. Until this is checked the Loops sequences are unproven.
 
 ## 11. App Store submission
 - [ ] App Review demo account: `appreview@heypantry.app`, `promo_active=true`, entered in App Store
@@ -73,19 +94,23 @@ significant findings on every pass — 13 fixes on 2026-08-30 alone, including t
 
 ## Unresolved — surfaced 2026-08-30
 
-Four of the five originals are now fixed (orphan Discover row deleted, grocery evening date bug,
-mock data removed from the bundle, `last_active` schema drift). What remains:
+Four of the five originals are fixed (orphan Discover row deleted, grocery evening date bug, mock
+data removed from the bundle, `last_active` schema drift). The email and engagement items moved into
+step 10, since TestFlight is where they can actually be proven. What is left unowned:
 
-- **`CODE_REVIEW.md` holds 87 confirmed findings.** Its paywall findings were verified stale on
-  2026-08-30; the other ~80 have not been checked. Worth one triage pass — some are certainly
-  already fixed, some may not be.
-- **Email system needs one real end-to-end test.** It had NEVER worked: loops-sync selected
-  `email` and `full_name` from profiles, which have never been columns there, so every call
-  failed on the unknown column and no contact or event ever reached Loops (fixed `4c016c2`).
-  Subscription lifecycle now recorded server-side by superwall-webhook. Proving it needs a real
-  purchase or expiration through Superwall — worth doing during TestFlight rather than at launch.
-- **Engagement trackers wired but not device-verified.** `touchLastActive`,
-  `trackCookTonightUsed`, `trackMealSavedEngagement` and `trackGoalsCustomized` had never been
-  called by anything; they are now wired (`8977f41`). They fire on real interactions and write
-  server-side, so confirm by using the app and re-reading the profiles row. Until that is checked,
-  treat the Loops email sequences as unproven.
+- **`CODE_REVIEW.md` holds 87 confirmed findings and ~80 are unchecked.** Its paywall findings were
+  verified stale on 2026-08-30 (`handleStartTrial` no longer exists; Restore Purchase, Privacy and
+  Terms all have live handlers in `profile.tsx`), and its "canonical pricing" note was itself the
+  stale thing — it flagged the live $9.99 as a defect. The report predates a lot of security work.
+  Worth one triage pass; expect a mix of already-fixed and genuinely open.
+
+## Deliberately NOT on this list
+
+Decided with Logan on 2026-08-30 — do not re-add without asking:
+
+- **Stripe web checkout** (3 items) — Apple IAP alone is sufficient to launch.
+- **Paywall A/B tests** (pricing, hard-vs-soft, placement) — cannot be run without traffic.
+- **Creator recipes** — a v2 feature. The single orphan row was deleted so it does not render.
+- **2FA**, Instagram import, Whisper transcripts, share extension, custom vision/macro models,
+  dessert and trending feature scoping, content-lead hiring and UGC scaling.
+- The 13 content-idea screen recordings are launch marketing, not submission blockers.
