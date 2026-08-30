@@ -18,6 +18,7 @@ import {
   RefreshControl,
   Keyboard,
 } from 'react-native'
+import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { ToggleProbe } from '@/components/ToggleProbe'
@@ -737,25 +738,6 @@ export default function HomeScreen() {
   homeRenderCount.current++
   const layoutFireCount = useRef(0)
 
-  // Layout measurements are PAUSED while the macros accordion animates.
-  //
-  // These onLayout handlers feed state that feeds layout: the hero reports its y, heroFit is
-  // derived from it, and heroFit sets the hero's height. Growing the accordion moves the hero,
-  // which fires onLayout, which sets state, which re-renders this whole screen, which relayouts,
-  // which moves the hero again. Measured at 8 renders for a single toggle.
-  //
-  // Nothing here is an animation input — they exist so the hero lands above the fold on any
-  // screen. So the last value seen during the animation is stashed and applied once at the end,
-  // which keeps the sizing correct without re-rendering per frame.
-  const layoutPaused = useRef(false)
-  const pendingLayout = useRef<{ heroY?: number; heroH?: number }>({})
-  const flushLayout = useCallback(() => {
-    layoutPaused.current = false
-    const p = pendingLayout.current
-    pendingLayout.current = {}
-    if (p.heroY !== undefined) setHeroSectionY(p.heroY)
-    if (p.heroH !== undefined) setHeroHeaderH(p.heroH)
-  }, [])
   // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
   // this 2400-line component between the tap and the first frame, which is what made the toggle
   // feel slow to respond. The press handler kicks the animation off directly instead.
@@ -1348,10 +1330,14 @@ export default function HomeScreen() {
             {/* Carbs+Fat rows. Mounted/unmounted rather than height-animated — LayoutAnimation
                 (armed in the toggle below) interpolates the reflow natively. */}
             {macrosExpanded && (
-              <View style={{ gap: 10, paddingTop: 10 }}>
+              <Reanimated.View
+                entering={FadeIn.duration(180)}
+                exiting={FadeOut.duration(120)}
+                style={{ gap: 10, paddingTop: 10 }}
+              >
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
                 <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
-              </View>
+              </Reanimated.View>
             )}
             {__DEV__ && <ToggleProbe renderCount={homeRenderCount.current} layoutCount={layoutFireCount.current} />}
             <TouchableOpacity
@@ -1360,18 +1346,9 @@ export default function HomeScreen() {
                 // Animation FIRST: this writes a shared value and starts on the UI thread
                 // immediately, so motion begins on touch instead of after React has reconciled
                 // this whole screen. setState still runs, but it no longer gates the first frame.
-                // Hold the hero's layout measurements until the reflow settles — they feed
-                // heroFit, which feeds the hero's height, which would otherwise loop.
-                layoutPaused.current = true
-                setTimeout(flushLayout, 400)
-                // Native layout interpolation. This is the only mechanism that animates a reflow
-                // per-frame; a JS- or UI-thread-driven height cannot.
-                LayoutAnimation.configureNext({
-                  duration: 260,
-                  update: { type: LayoutAnimation.Types.easeInEaseOut },
-                  create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-                  delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-                })
+                // No LayoutAnimation here: it is a no-op under the New Architecture, which Expo 55
+                // enables by default — configureNext silently did nothing and everything snapped.
+                // Reanimated's LinearTransition/FadeIn on the views below is the Fabric equivalent.
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
                 AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
@@ -1558,11 +1535,11 @@ export default function HomeScreen() {
         {pantryFetched && pantryNames.size > 0 && (
           <View
             style={{ marginBottom: 36 }}
-            onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.heroY = y; return } setHeroSectionY(y) }}
+            onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
           >
             {/* Header height feeds the hero fit calculation — the card starts where this ends. */}
             <View
-              onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.heroH = h; return } setHeroHeaderH(h) }}
+              onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) > 0.5) setHeroHeaderH(h) }}
               style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}
             >
               <Text style={styles.sectionTitle}>Cook from your pantry</Text>
@@ -1593,7 +1570,7 @@ export default function HomeScreen() {
             ) : heroMeal ? (
               // Fixed height. Was glided with the macros card, but a height animation steps at
               // ~20fps (see the note at the state declarations) so the glide was never smooth.
-              <View style={{ height: heroExpandedH }}>
+              <Reanimated.View layout={LinearTransition.duration(260)} style={{ height: heroExpandedH }}>
                 <ScrollView
                   ref={heroScrollRef}
                   horizontal
@@ -1685,7 +1662,7 @@ export default function HomeScreen() {
                     ))}
                   </View>
                 )}
-              </View>
+              </Reanimated.View>
             ) : cacheChecked ? (
               // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
               // never flashes during the ~100ms disk read on a day that DOES have meals — showing
