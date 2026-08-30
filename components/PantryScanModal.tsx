@@ -131,10 +131,14 @@ const STAPLES_BY_CONTAINER: Record<string, string[]> = {
   counter: ['Onion', 'Garlic', 'Potatoes', 'Bananas', 'Bread', 'Tomatoes', 'Apples', 'Avocado'],
 }
 
-// Max photos per scan — bounds the per-call GPT-4o vision cost. Mirrored server-side in
-// scan-pantry/index.ts (which truncates) so a modified client can't exceed it. A full
-// fridge + pantry fits comfortably in this many.
-const MAX_PHOTOS_PER_SCAN = 8
+// Max photos per scan — bounds the per-call vision cost. MUST be kept in step with the constant
+// of the same name in scan-pantry/index.ts, which silently slice()s anything above it: if the two
+// ever drift, the extra photos are dropped server-side and the user is told nothing.
+//
+// Was 8, on the assumption that "a full fridge + pantry fits comfortably". A real pass through a
+// five-person household — several counters, each drawer, multiple storage areas — came to 14, so
+// the old ceiling would have blocked a legitimate first scan two photos from the end.
+const MAX_PHOTOS_PER_SCAN = 16
 
 // Time-anchored loading stages — each maps to a real server-side step in
 // supabase/functions/scan-pantry/index.ts. Picked by elapsed-ms so the message
@@ -177,7 +181,11 @@ const CAMERA_TIPS = [
   'Open the door all the way',
   'Stand back 3–4 feet',
   'Tap the screen to focus',
-  'One photo per area',
+  // Was 'One photo per area'. That was written for the old flow, where the shutter kicked you to
+  // the areas hub after every shot — and it's the opposite of the truth: recall scales with
+  // coverage, so a deep drawer or a wide counter wants several shots, not one.
+  'Several shots per area is fine',
+  'Shoot drawers and shelves separately',
 ]
 
 const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
@@ -352,6 +360,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [savedCount, setSavedCount] = useState(0)
   // Tapped review photo → fullscreen pinch-to-zoom overlay (in-tree, not a nested Modal).
   const [zoomUri, setZoomUri] = useState<string | null>(null)
+  // The filmstrip appends, so without this the newest photo lands off-screen the moment the strip
+  // is longer than the viewport — which at a 16-photo ceiling is most of a real first scan.
+  const filmstripRef = useRef<ScrollView>(null)
   // Live-feel item counter: ramps up WHILE scanning (simulated — GPT returns all
   // items at once, so there's nothing real to stream), then settles to the true
   // total when results land. countRef mirrors it so the effects can read the latest
@@ -718,6 +729,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     setEditingText('')
   }
 
+  // Ride the photo count rather than the capture call, so gallery imports scroll too.
+  useEffect(() => {
+    if (photos.length === 0) return
+    const t = setTimeout(() => filmstripRef.current?.scrollToEnd({ animated: true }), 60) // let layout settle first
+    return () => clearTimeout(t)
+  }, [photos.length])
+
   const capturePhoto = async (label: string, next: number) => {
     if (!cameraRef.current) return
     if (photos.length >= MAX_PHOTOS_PER_SCAN) {
@@ -961,9 +979,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               {/* Bottom scrim carries the copy + shutter so text is always readable over the camera */}
               <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)']} style={[styles.cameraBottomOverlay, { paddingBottom: insets.bottom + 14 }]}>
                 <View style={styles.stepTextCompact}>
-                  {/* Fades in as the centered hero fades out — same words, one continuous beat. */}
-                  <Animated.Text style={[styles.cameraTitle, { opacity: titleAnim }]}>{captureTitle}</Animated.Text>
-                  {photos.length === 0 && <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>}
+                  {/* Fades in as the centered hero fades out — same words, one continuous beat.
+                      Both title and subtitle are FIRST-SHOT instruction. Once a photo exists they
+                      stop being true ("Start with your fridge" while you hold four fridge photos)
+                      and they're just eating viewfinder, so the whole block goes. */}
+                  {photos.length === 0 && (
+                    <>
+                      <Animated.Text style={[styles.cameraTitle, { opacity: titleAnim }]}>{captureTitle}</Animated.Text>
+                      <Text style={styles.cameraSubtitle}>{stepConfig.subtitle}</Text>
+                    </>
+                  )}
                   {/* The tip was a dead line of text. It's now the entry point to the full
                       best-scan guide — bordered pill + chevron so it reads as "there's more here",
                       which a bare lightbulb + sentence did not. */}
@@ -988,6 +1013,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     because you're stood in front of the thing with the camera already open. */}
                 {photos.length > 0 && (
                   <ScrollView
+                    ref={filmstripRef}
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     style={styles.filmstrip}
@@ -1917,8 +1943,10 @@ const styles = StyleSheet.create({
   },
   // Camera filmstrip (bottom of the capture screen). 56pt image keeps the tap-to-review target
   // at Apple's 44pt minimum; the ✕ is pushed outside that square so the two don't overlap.
-  filmstrip: { alignSelf: 'stretch', maxHeight: 84, marginBottom: 2 },
-  filmstripContent: { gap: 12, paddingHorizontal: 4, paddingTop: 8, paddingRight: 10 },
+  // Negative margins cancel cameraBottomOverlay's 24pt padding so the strip bleeds to both screen
+  // edges — a row that stops short of the edge reads as a finished list, not a scrollable one.
+  filmstrip: { alignSelf: 'stretch', maxHeight: 84, marginBottom: 2, marginHorizontal: -24 },
+  filmstripContent: { gap: 12, paddingHorizontal: 24, paddingTop: 8 },
   filmItem: { alignItems: 'center', gap: 4, width: 56 },
   filmImg: {
     width: 56,

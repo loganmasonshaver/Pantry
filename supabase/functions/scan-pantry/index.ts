@@ -23,7 +23,7 @@ const SCAN_CAP_PER_WEEK = Number(Deno.env.get('SCAN_CAP_WEEK') ?? 7)
 const SCAN_WINDOW_DAYS = 7
 // Hard backstop on payload size — a single scan can't exceed this many photos, which
 // bounds the per-call token cost the count cap can't (client enforces the same limit).
-const MAX_PHOTOS_PER_SCAN = 8
+const MAX_PHOTOS_PER_SCAN = 16 // keep in step with components/PantryScanModal.tsx — this one truncates silently
 
 // Confidence floor: drop items the model scored below this (0-100) before they reach the user.
 // Kills genuine-guess noise ("unidentifiable blob", opaque unmarked container) that varies
