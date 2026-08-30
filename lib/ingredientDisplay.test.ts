@@ -177,3 +177,62 @@ test('stripStepNumber does not eat a leading number that is part of the instruct
   // "350F oven" and "2 minutes per side" are content, not numbering.
   assert.match(stripStepNumber('350F oven, 20 minutes'), /350/)
 })
+
+// ── second sweep: four more bugs of the same family ────────────────────────────────────────────
+// All four are the same shape as the egg-whites one — a transformation over model-written text
+// that is right for the case it was written for and wrong for a neighbouring one.
+
+test('REGRESSION: a percentage in the name survives', () => {
+  // The unicode-fraction strip used a [\d…] class, so it re-stripped the bare digit the
+  // leading-quantity rule had correctly left alone: "2% milk" -> "% milk".
+  assert.equal(cleanIngredientName('2% milk'), '2% milk')
+  assert.equal(cleanIngredientName('1% milk'), '1% milk')
+  assert.equal(cleanIngredientName('100% whey protein'), '100% whey protein')
+  assert.equal(cleanIngredientName('2% greek yogurt'), '2% greek yogurt')
+})
+
+test('quantity stripping still works after that fix', () => {
+  assert.equal(cleanIngredientName('4 eggs'), 'eggs')
+  assert.equal(cleanIngredientName('½ avocado'), 'avocado')
+  assert.equal(cleanIngredientName('1½ cups flour'), 'cups flour')
+  assert.equal(cleanIngredientName('chicken breast *'), 'chicken breast')
+})
+
+test('REGRESSION: the SPICE cloves is not a garlic clove', () => {
+  // /\bcloves?\b/ caught the powdered spice: "ground cloves" rendered "1 ground garlic clove".
+  assert.equal(getWholeUnitDisplay('ground cloves', '2g'), null)
+  assert.equal(getWholeUnitDisplay('whole cloves', '3g'), null)
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '3', name: 'garlic cloves' })
+})
+
+test('REGRESSION: a trace amount is not rounded up to a whole unit', () => {
+  // Math.max(1, round(g/weight)) turned 5g of egg into "1 egg" — a 10x overstatement.
+  assert.equal(getWholeUnitDisplay('eggs', '5g'), null, '5g is not an egg')
+  assert.equal(getWholeUnitDisplay('eggs', '10g'), null)
+  assert.equal(getWholeUnitDisplay('chicken breast', '40g'), null)
+  assert.equal(getWholeUnitDisplay('garlic cloves', '1g'), null)
+  // but a real portion still counts
+  assert.deepEqual(getWholeUnitDisplay('eggs', '100g'), { count: '2', name: 'eggs' })
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '3', name: 'garlic cloves' })
+})
+
+test('REGRESSION: owning an ingredient does not hide a different one that contains its name', () => {
+  // The old substring matching dropped genuinely missing items from the grocery list.
+  assert.equal(isAlreadyInList('rice vinegar', new Set(['rice'])), false)
+  assert.equal(isAlreadyInList('coconut oil', new Set(['oil'])), false)
+  assert.equal(isAlreadyInList('almond milk', new Set(['milk'])), false)
+  assert.equal(isAlreadyInList('chicken broth', new Set(['chicken'])), false)
+})
+
+test('real duplicates are still caught', () => {
+  assert.equal(isAlreadyInList('chicken', new Set(['chicken'])), true)
+  assert.equal(isAlreadyInList('grilled chicken', new Set(['chicken'])), true)
+  assert.equal(isAlreadyInList('chicken', new Set(['diced chicken'])), true)
+  assert.equal(isAlreadyInList('4 eggs', new Set(['eggs'])), true)
+})
+
+test('the name-final guard survives a pattern with alternation', () => {
+  // The guard builds a regex from the row's source; without grouping, `$` would bind to only the
+  // last branch of an alternation and silently stop guarding. The garlic row now has one.
+  assert.equal(getWholeUnitDisplay('garlic cloves in oil', '15g'), null)
+})

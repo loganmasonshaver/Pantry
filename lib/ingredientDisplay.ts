@@ -17,8 +17,12 @@ const POST_MODIFIERS = new Set([
 export function cleanIngredientName(name: string): string {
   const cleaned = name
     .replace(/\s*\*\s*$/, '')          // strip trailing asterisk
-    .replace(/^\d+[\s/.-]*/g, '')       // strip leading numbers ("4 eggs" → "eggs")
-    .replace(/^[\d½¼¾⅓⅔]+\s*/g, '')   // strip unicode fractions
+    // Requires a SEPARATOR after the number. The old /^\d+[\s\/.-]*/ matched the bare digit, so
+    // "2% milk" became "% milk" and "100% whey protein" became "% whey protein".
+    .replace(/^\d+(?:[./]\d+)?\s+/, '')  // strip a leading quantity ("4 eggs" -> "eggs", "1/2 cup x" -> "cup x")
+    // Unicode fractions only. This character class used to include \d, so it re-stripped the bare
+    // digit the rule above deliberately left alone — which is what turned "2% milk" into "% milk".
+    .replace(/^\d*[½¼¾⅓⅔]+\s*/, '')   // strip unicode fractions ("½ avocado", "1½ cups")
     .trim()
 
   // Swap inverted modifier phrases: "juice lemon" → "lemon juice",
@@ -50,7 +54,9 @@ const WHOLE_UNIT_FOODS: Array<{ match: RegExp; weight: number; singular: string;
   { match: /\blemons?\b/i,          weight: 60,  singular: 'lemon',       plural: 'lemons' },
   { match: /\blimes?\b/i,           weight: 67,  singular: 'lime',        plural: 'limes' },
   { match: /\bavocados?\b/i,        weight: 200, singular: 'avocado',     plural: 'avocados' },
-  { match: /\bcloves?\b/i,          weight: 5,   singular: 'garlic clove', plural: 'garlic cloves' },
+  // Must name garlic, or be the bare word. A plain /\bcloves?\b/ also caught the SPICE — "ground
+  // cloves" rendered as "1 ground garlic clove" instead of a couple of grams of a powdered spice.
+  { match: /\bgarlic\s+cloves?\b|^\s*cloves?\s*$/i, weight: 5, singular: 'garlic clove', plural: 'garlic cloves' },
   { match: /\btortillas?\b/i,       weight: 60,  singular: 'tortilla',    plural: 'tortillas' },
   // Protein fillets — typical home portion is one fillet/breast/chop. Without
   // these entries the AI's visual (e.g. "1 small fillet") gets rendered next
@@ -100,7 +106,12 @@ export function getWholeUnitDisplay(name: string, gramsStr: string | undefined):
   // Only rebuild as "{adj} {noun}" when the matched noun ENDS the name. Pulling it out of the
   // middle reorders the phrase — stripping "egg" from "liquid egg whites" leaves "liquid whites",
   // which then had "eggs" appended and shipped as "7 liquid whites eggs".
-  if (!new RegExp(`${match.match.source}\\s*$`, 'i').test(name.trim())) return null
+  // Grouped: an alternation in the row's pattern would otherwise let `$` bind to only the last
+  // branch, silently disabling this guard.
+  if (!new RegExp(`(?:${match.match.source})\\s*$`, 'i').test(name.trim())) return null
+  // Below ~40% of one unit this is not a whole-unit quantity at all — Math.max(1, ...) turned 5g
+  // of egg into "1 egg", a 10x overstatement. Fall through to grams instead.
+  if (grams < match.weight * 0.4) return null
   const c = Math.max(1, Math.round(grams / match.weight))
   const noun = c === 1 ? match.singular : match.plural
   // Strip the matched noun (e.g., "eggs") from the original name to get the
@@ -326,10 +337,16 @@ export function stripAdjectives(name: string): string {
 export function isAlreadyInList(itemName: string, existingNames: Set<string>): boolean {
   const lower = cleanIngredientName(itemName).toLowerCase()
   const stripped = stripAdjectives(lower)
+  // Exact match only, before and after adjective stripping. The old substring checks matched any
+  // shared fragment, so "rice vinegar" counted as already-owned when the pantry held "rice",
+  // "coconut oil" when it held "oil", and "chicken broth" when it held "chicken" — each silently
+  // dropping a genuinely missing item from the grocery list.
+  //
+  // Erring the other way is the safe direction: an extra line on the list is a minor annoyance,
+  // a missing one means standing in the kitchen unable to cook.
   for (const existing of existingNames) {
     if (lower === existing || stripped === existing) return true
-    if (lower.includes(existing) || existing.includes(lower)) return true
-    if (stripped.includes(existing) || existing.includes(stripped)) return true
+    if (stripAdjectives(existing) === stripped) return true
   }
   return false
 }
