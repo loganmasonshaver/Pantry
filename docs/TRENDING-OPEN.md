@@ -6,7 +6,7 @@ Reasoning for every fix is in `git log`; this file holds only what is still open
 
 ## Standing: re-run and re-audit EVERY session
 
-Every time this pipeline has been examined it has produced significant findings — 12 fixes on
+Every time this pipeline has been examined it has produced significant findings — 13 fixes on
 2026-08-30 alone, two of them live rows serving 3x and 8x protein overclaims, and one a gate that
 had been silently dead for 19 days. Treat "it looks fine" as untested.
 
@@ -40,9 +40,6 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
       reached the LLM. Run:
       `...generate-trending-meals?refresh=true&dryRun=true&provider=openai`
       then read `funnel.llm_OpenAI` and `providerErrors`.
-- [ ] **Non-English instruction lines inflate the retention contract.** The instruction-verb filter
-      in `recipe-integrity.ts` is English-only, so a Russian "put the dough in the fridge" line
-      counts as an ingredient and the model is then rejected for not copying it.
 - [ ] `SYNONYMS` narrowing left `maple`, `honey` and `ranch` with no synonyms. Watch for false
       "missing maple" gaps on recipes listing only "syrup".
 - [ ] Two stored rows carry `1/2 can` / `1/2 packet` ingredients. Harmless — the gate now correctly
