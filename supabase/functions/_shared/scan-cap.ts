@@ -2,9 +2,11 @@
 // client can't bypass it. Backs the abuse/cost ceiling on GPT-4o vision calls.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import { verifyUser } from "./auth.ts"
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!
+const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 
 function authHeaderOf(req: Request) {
   return req.headers.get("Authorization") ?? req.headers.get("authorization") ?? ""
@@ -86,9 +88,20 @@ export async function checkScanCapWindow(
 }
 
 // Best-effort: give the slot back after a transient OpenAI failure. Never throws.
+//
+// Deliberately NOT bound to the caller's JWT. When refund_scan derived its target from
+// auth.uid() it had to be granted to `authenticated`, which let any signed-in client call it
+// straight through PostgREST and decrement its own counter after every scan — making all seven
+// AI cost caps unenforceable. Refunding is a server decision, so the server supplies the
+// identity: verify the token here, then call the RPC with the service role, which is the only
+// role that may execute it.
 export async function refundScan(req: Request, scanType: string): Promise<void> {
   try {
-    await userClient(req).rpc("refund_scan", { p_scan_type: scanType })
+    // Local JWKS fast path — no network round-trip on the common case.
+    const user = await verifyUser(req)
+    if (!user) return
+    const admin = createClient(supabaseUrl, supabaseServiceKey)
+    await admin.rpc("refund_scan", { p_user_id: user.id, p_scan_type: scanType })
   } catch (e) {
     console.log(`[scan-cap] refund failed (ignored): ${(e as Error).message}`)
   }

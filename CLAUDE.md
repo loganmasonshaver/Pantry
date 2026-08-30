@@ -149,9 +149,11 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 149** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **45** in
-  app code (`app/ lib/ components/ hooks/ context/`) and **104** Deno-global noise from
-  `supabase/functions` being inside the tsconfig. Watch the DELTA, not the total — a +1 caught a
+- **TS baseline = 150** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **45** in
+  app code (`app/ lib/ components/ hooks/ context/`) and **105** Deno-global noise from
+  `supabase/functions` being inside the tsconfig. (Was 149/104 until 2026-08-29: adding one
+  `Deno.env.get` line to `_shared/scan-cap.ts` adds one `Cannot find name 'Deno'` — expected,
+  and the reason to watch the app-code number rather than the total.) Watch the DELTA, not the total — a +1 caught a
   real ReferenceError once, and a −4 on 2026-08-29 was the TDZ bug in `app/meal/[id].tsx` that
   made every meal render the previously-viewed meal's photo. The app-code number is the one that
   matters.

@@ -13,6 +13,11 @@ async function sha256(s: string): Promise<Uint8Array> {
 }
 async function secretMatches(provided: unknown): Promise<boolean> {
   if (typeof provided !== "string") return false
+  // Fail CLOSED when the secret isn't configured. Deno.env.get returns undefined, and
+  // TextEncoder().encode(undefined) encodes the literal string "undefined" — so without this
+  // guard a request carrying {"secret":"undefined"} would authenticate against a service-role
+  // client. seed-recipe-template and superwall-webhook already guard this way.
+  if (!adminSecret) return false
   const [a, b] = await Promise.all([sha256(provided), sha256(adminSecret)])
   let diff = 0
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i] // fixed-length digests → constant-time XOR
