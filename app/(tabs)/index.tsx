@@ -1354,7 +1354,14 @@ export default function HomeScreen() {
             {/* Default compact = Protein only, shown emphasized (thicker bar +
                 bigger text). When expanded to all 3, protein drops back to
                 standard size so there's no glitchy size delta between bars. */}
-            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized={!macrosExpanded} />
+            {/* Always emphasized. This used to be `emphasized={!macrosExpanded}`, which resized the
+                Protein row INSTANTLY on tap — bar 10->5px, dot 9->6, fonts 15->13 — while the
+                accordion below it glided over 280ms. Measured at a perfect 8ms worst frame on a
+                120Hz display in both directions, so what read as "choppy on open" was never
+                dropped frames: it was this one un-animated jump inside an otherwise smooth
+                transition. Protein is the headline macro on Home regardless of the other two
+                being visible, so keeping it emphasized is also the more honest hierarchy. */}
+            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized />
             {/* Carbs+Fat accordion — height glides 0↔measured with macrosAnim so the reflow below
                 is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
             <Reanimated.View style={[{ overflow: 'hidden', opacity: extraRowsH > 0 ? 1 : 0 }, extraRowsH > 0 && macrosRowsHeight]}>
