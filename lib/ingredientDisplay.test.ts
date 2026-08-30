@@ -72,12 +72,38 @@ test('"pepper" the vegetable and the cheese are not spices', () => {
 test('a packet is a measurement, and the actionable one', () => {
   // "1 packet ranch seasoning" became "5 tbsp": arithmetically fine, useless in a kitchen and
   // wrong on a grocery list. Six live rows.
-  assert.equal(getMeasuredDisplay('ranch seasoning', '30g', '1 packet'), '1 packet')
-  assert.equal(getMeasuredDisplay('fajita seasoning', '60g', '2 packets'), '2 packets')
-  assert.equal(getMeasuredDisplay('chili seasoning', '30g', '1 pack'), '1 pack')
+  // Count AND size, the way recipe publishers print packaged goods.
+  assert.equal(getMeasuredDisplay('ranch seasoning', '30g', '1 packet'), '1 packet (30g)')
+  assert.equal(getMeasuredDisplay('fajita seasoning', '60g', '2 packets'), '2 packets (60g)')
+  assert.equal(getMeasuredDisplay('chili seasoning', '30g', '1 pack'), '1 pack (30g)')
   // A vague descriptor still falls through to a computed spoon measure — that is why tier 2 exists.
   assert.equal(getMeasuredDisplay('paprika', '6g', 'a pinch'), '1 tbsp')
   assert.equal(getMeasuredDisplay('cumin', '2g', 'to taste'), '1 tsp')
+})
+
+test('a container shows the count AND the size, like a recipe site', () => {
+  // "1 (24-ounce) jar marinara sauce" (NYT Cooking, Serious Eats), "1 (15-ounce) can black beans"
+  // (AllRecipes), "1 x 400g can chopped tomatoes" (BBC Good Food). Count is what you buy, size is
+  // what disambiguates, and jar sizes vary between brands — printing one alone forces a choice
+  // that printing both does not.
+  assert.equal(getMeasuredDisplay('Vodka Sauce', '700g', '1 jar'), '1 jar (700g)')
+  assert.equal(getMeasuredDisplay('cream of chicken soup', '300g', '1 can'), '1 can (300g)')
+  assert.equal(getMeasuredDisplay('corn', '100g', '1/2 can'), '1/2 can (100g)')
+  // Not gated on liquid/seasoning: canned goods and boxed pasta are the most shoppable rows on the
+  // list and were rendering as bare grams while the creator had written "1 can".
+  assert.equal(getMeasuredDisplay('drained and rinsed black beans', '250g', '1 can'), '1 can (250g)')
+  assert.equal(getMeasuredDisplay('Carb Diem elbow pasta', '454g', '2 boxes'), '2 boxes (455g)')
+  assert.equal(getMeasuredDisplay('konjac noodles', '200g', '1 pack'), '1 pack (200g)')
+
+  // A creator who already stated the size gets nothing appended, or it reads "1 400g can (400g)".
+  assert.equal(getMeasuredDisplay('tomato sauce', '400g', '1 400g can'), '1 400g can')
+  assert.equal(getMeasuredDisplay('Sliced jalapeños', '340g', '12 oz jar'), '12 oz jar')
+
+  // NATURAL units get no size. "1 cinnamon stick" and "2 cloves garlic" are how recipes are
+  // written; nobody prints a gram weight for a clove.
+  assert.equal(getMeasuredDisplay('Cinnamon', '5g', '1 stick'), '1 stick')
+  // Plain measures are untouched.
+  assert.equal(getMeasuredDisplay('buffalo wing sauce', '355g', '1.5 cups'), '1½ cups')
 })
 
 test('decimals render as the fractions a kitchen actually has', () => {

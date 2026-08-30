@@ -302,6 +302,14 @@ export function toCookingFraction(s: string): string {
   })
 }
 
+// Units that name a PACKAGE whose size varies between brands — the ones recipe publishers print a
+// size for. Natural units are deliberately absent: "1 cinnamon stick" and "2 cloves garlic" are how
+// recipes are actually written, and nobody prints a gram weight for a clove.
+const CONTAINER_UNIT = /\b(jars?|cans?|tins?|bottles?|packets?|packs?|sachets?|tubs?|cartons?|boxes)\b/i
+const MEASURE_OR_CONTAINER = /\b(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ounces?|sticks?)\b|\b(jars?|cans?|tins?|bottles?|packets?|packs?|sachets?|tubs?|cartons?|boxes)\b/i
+// A creator who already wrote the size ("1 400g can", "1 jar (500g)") needs nothing added.
+const SIZE_ALREADY = /\d\s*(g|kg|ml|l|oz|ounces?|lbs?|pounds?)\b/i
+
 export function getMeasuredDisplay(name: string, gramsStr: string | undefined, visualStr: string | undefined): string {
   const n = name.toLowerCase()
   const isLiquid = /\b(oil|vinegar|sauce|dressing|honey|syrup|extract|juice|milk|broth|stock|wine|tahini|mayo|mustard|cream)\b/.test(n)
@@ -342,8 +350,28 @@ export function getMeasuredDisplay(name: string, gramsStr: string | undefined, v
   // Packets are a real measurement and the ACTIONABLE one: a creator writing "1 packet ranch
   // seasoning" is naming what you buy. Converting that to "5 tbsp" was arithmetically fine and
   // useless — nobody spoons out a seasoning packet. Six live rows read that way.
-  if ((isLiquid || isSeasoning) && visualStr &&
-      /(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ounces?|packets?|packs?|sachets?|sticks?|cans?|jars?|bottles?)/i.test(visualStr)) {
+  //
+  // For a CONTAINER we print the count AND the size, which is what recipe publishers do:
+  // "1 (24-ounce) jar marinara sauce" (NYT Cooking, Serious Eats), "1 (1-ounce) packet ranch
+  // seasoning" (AllRecipes), "1 x 400g can chopped tomatoes" (BBC Good Food). Count vs size looks
+  // like a trade-off — the count is what you buy, the size is what disambiguates, and jar sizes
+  // genuinely vary — and printing both is what dissolves it. Showing only "1 jar" for 700g of
+  // vodka sauce makes the reader guess; showing only "700g" makes them weigh a jar.
+  // A CONTAINER count applies to ANY ingredient, not just liquids and seasonings. Canned corn,
+  // black beans, tuna and boxed pasta are the most shoppable items on the list and were rendering
+  // as bare grams while the creator had written "1 can" — 16 live rows. "1 (15-ounce) can black
+  // beans, drained" is how every recipe publisher writes that, and the count is the half you act on.
+  if (visualStr && CONTAINER_UNIT.test(visualStr)) {
+    const shown = toCookingFraction(visualStr)
+    // Only when the visual does not already carry a size, or it reads "1 400g can (400g)".
+    if (!SIZE_ALREADY.test(shown) && gramsStr) {
+      const grams = parseFloat(String(gramsStr).replace(/[^0-9.]/g, '')) || 0
+      if (grams > 0) return `${shown} (${roundDisplayGrams(grams)}g)`
+    }
+    return shown
+  }
+
+  if ((isLiquid || isSeasoning) && visualStr && MEASURE_OR_CONTAINER.test(visualStr)) {
     return toCookingFraction(visualStr)
   }
 
