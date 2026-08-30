@@ -1,155 +1,156 @@
-# Handoff — 2026-08-30
+# Handoff — 2026-08-30 (evening)
 
-Yesterday's file is in git history (`aeaf61f`) if you need it. 9 commits today, plus 2 late on
-2026-08-29. **`git log --since="2026-08-29 20:00"` carries the reasoning for every one** — what was
-measured, what was rejected and why. This file holds only what git does not.
+Replaces the morning handoff (in git history at `3f609ac`). **26 commits this session.**
+`git log --since="2026-08-30 14:00"` carries the reasoning for every one — what was measured, what
+was rejected and why. This file holds only what git does not.
 
-State: preflight green except `SCAN_CAP_WEEK`, which is failing **on purpose** (see §2). Everything
-committed, pushed and deployed. 170 tests (`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`).
-TS baseline **150** total / **45** app-code — the app number is the one that matters.
+State: everything committed, pushed and deployed. **192 tests**
+(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). Preflight green except
+`SCAN_CAP_WEEK`, which Logan is holding raised **on purpose** until app fixes and filming are done.
+
+**TS baseline moved twice today: 150/45 → 132/27 → 134/27.** Deleting a dead `MOCK_DETECTED` array
+removed 18 errors in one go; two new `Deno.env.get` lines added one Deno-global each. Watch the
+app-code number (27), not the total.
 
 ---
 
-## 1. NEXT TASK — read the funnel logs before touching anything
+## 0. READ THESE FIRST — they replace parts of this file
 
-Logan asked why trending runs look thin (5–14 meals/day against `STORE_CAP` 18). **Do not answer
-that from the code.** Three separate attempts to reason about it from source today produced wrong
-answers that only measurement caught. The cron runs 05:00 UTC; after it, read
-Dashboard → Edge Functions → `generate-trending-meals` → Logs for:
+- **`docs/PRELAUNCH.md`** — the OFFICIAL pre-launch checklist. Logan declared it canonical on
+  2026-08-30 after triaging a 60-item list down to 11. **When he asks "what's next for pre-launch",
+  answer from that file.**
+- **`docs/TRENDING-OPEN.md`** — standing re-audit procedure and open items for the trending
+  pipeline. Read before any pipeline pass.
+- **`~/my-briefing/todos/active.md` is CONTESTED.** A concurrent session overwrote it wholesale
+  **five times** today, losing appended content each time. That is why the two files above live in
+  the repo. It is also ~20 commits ahead of its origin and unpushed.
 
-```
-[funnel] raw YouTube candidates: N
-[funnel] ingredient-list gate: N/M videos have a readable list     <- the dominant filter, ~28%
-[funnel] view floor … → N videos
-[funnel] Google LLM: N raw → M sanitized (rejected: noName, noMacros, dupName, nearDup,
-         fractional, dupIngredients, dropped, nameGap, untranslated)
-[funnel] rejected "X" — named for blueberry, absent from ingredients
-[funnel] rejected "X" — source is de and the ingredients were not translated
-```
+---
 
-The last two lines are new gates shipped today; **they have never been observed in production.**
-`nameGap` and `untranslated` got their own counters precisely so this read is unambiguous — they
-used to share `dropped`.
+## 1. NEXT TASK — both blocked on YouTube quota, which resets midnight Pacific
 
-The two candidate conclusions point at completely different work, which is why guessing is
-expensive: if volume dies at the ingredient-list gate the lever is candidate volume or parser
-precision; if it dies at dedup it is something else entirely. Measured rejection rate for the new
-name-gap gate over the stored pool was 4% with zero false positives, so it should be a rounding
-error — if it is large, suspect the gate, not the model.
+**Quota was exhausted today by ~16 measurement runs.** The 05:00 UTC cron fires at 22:00 PDT the
+*previous* day, i.e. inside the same quota window — so **tomorrow's cron will likely add nothing**.
+Not damaging (18 rows for 08-30, 30-day retention), but expect one empty day and do not diagnose it
+as a new bug.
 
-### The method that worked all day, in order of yield
+1. **Is trending yield variance or a defect?** Identical code, sequential runs produced raw 24 vs 5
+   and stored 17 vs 4. A once-daily cron takes ONE sample from that spread and the swap makes it
+   permanent — a better explanation of "thin days" than any single defect. Method: ~10 **sequential**
+   `?dryRun=true` runs. If it confirms, the fix is architectural: run the cron 2-3x and keep the best
+   batch, or merge instead of replace.
+2. **Finish the OpenAI fallback check.** One call:
+   `...generate-trending-meals?refresh=true&dryRun=true&provider=openai`, then read
+   `funnel.llm_OpenAI` and `providerErrors`.
 
-1. **Query the real data and count.** Every finding today came from running a function over the
-   live pool and reading output. Nothing came from reading code alone.
-2. **Then hand-verify every hit before believing the number.** The first pass at name/ingredient
-   mismatches said 28/168; the real answer was 7. The difference was three bugs in the *analysis
-   script* (a stemmer turning "potatoes" into "potatoe", `\b` being ASCII-only so it never matched
-   before "Ł", and subtracting stems from unstemmed words). An unverified count is a guess wearing
-   a number's clothes.
-3. **Check the direction of the error.** Two of today's near-misses were fixes that would have made
-   things *less* safe. See §4.
+### New tooling built today — use it
+- **`?dryRun=true`** runs the whole pipeline and returns the funnel WITHOUT inserting, deleting or
+  generating images. Every yield measurement before this swapped the day's rows; six runs churned
+  the feed six times. Dry runs still spend YouTube quota.
+- **`?provider=openai|google`** forces one provider. The fallback is otherwise unobservable, which
+  is exactly how it shipped with two breaks.
+- **The `funnel` object now rides in the RESPONSE**, not just logs (which need the dashboard). It
+  carries rawCandidates → dedup → viewFloor → ingredientGate → sentToLLM → llm raw/sanitized →
+  stored, every rejection counter, `droppedDetail` and `providerUsed`. The cron's response lands in
+  `net._http_response`.
 
 ---
 
 ## 2. NEEDS LOGAN
 
-- **`SCAN_CAP_WEEK` is set to 50** for the trailer shoot. Preflight FAILS until it goes back:
-  `npx supabase secrets unset SCAN_CAP_WEEK` (unset is correct — scan-pantry falls back to 7).
-  This is now a blocking preflight check rather than a note, because the file's own comment calls
-  leaving it raised "the forgot-to-revert-before-launch footgun".
-- **The trailer.** Corrected shot list: `https://claude.ai/code/artifact/766f88c0-a922-463a-ad84-09059a351b14`
-  It supersedes rev 2 ("Eight Seconds") beats 1–2 and its footage list — those described a live
-  detection overlay that **does not exist** (verified in `PantryScanModal`: during a scan you get
-  process-only status lines, the count is 0 until results land, chips-on-photo is the review step).
-  Blocked on one question Logan has not answered: **is any cached meal image hero-grade enough to
-  hold 2.4 seconds?** That frame is a third of the film.
-- **App Store screenshots** after the trailer.
-- **Two chats are writing `~/my-briefing/todos/active.md`.** Its content from this session was lost
-  twice — once to an uncommitted reset, once to commit `eabc399` overwriting the whole file.
-  Recovered both times from git. If the other chat keeps writing the file wholesale rather than
-  editing it, this will keep happening.
+- **`SCAN_CAP_WEEK`** — deliberate hold. `npx supabase secrets unset SCAN_CAP_WEEK` after filming.
+- **The trailer** is blocked on ONE decision: is any cached meal image hero-grade enough to hold
+  2.4 seconds? That frame is a third of the film.
+- **Pantry scan flow QA** — Logan added this as a gate: the flow must be walked end to end on device
+  and the UI must look right **before the trailer is filmed**. Delete or wire the dead review screen
+  first (below).
+- **App Store Connect products (#1 on the checklist)** — he recalls a "not approved" state.
+  Banking/Mercury is confirmed complete, so that is NOT the cause. Check: products in "Missing
+  Metadata", not attached to a version (a first-time IAP is reviewed WITH a version, never alone),
+  or a Superwall mapping pointing at product IDs that no longer exist. I cannot check this — the
+  Superwall CLI needs an interactive login to his account.
 
 ---
 
-## 3. WATCH — shipped today, never seen in production
+## 3. WATCH — shipped today, never observed working
 
-- **`nameGap` / `untranslated` rejections** (above). Measured 4% and 0% respectively against stored
-  data; unknown live.
-- **The Discover prefetch** now runs from `app/(tabs)/_layout.tsx`, not from the Discover screen —
-  that screen isn't mounted until you open it, so nothing inside it can run ahead of the user.
-  Symptom if it regresses: opening Discover on a new day shows yesterday's shelves for 2–3s and
-  then visibly re-lays-out.
-- **The scan camera keeps you on the shutter now.** Not re-tested on device since the 16-photo cap
-  and the full-width scan pill landed. The bottom bar carries more than it used to (tips pill moved
-  up top, filmstrip, shutter, full-width button); if the viewfinder feels cramped, the tips pill is
-  the next thing to hide after the first photo.
+Everything here is unverified in the direction that matters. Do not report any of it as working.
 
----
-
-## 4. DEAD ENDS — measured and rejected, do not rebuild
-
-Each of these looked obviously right and was killed by data.
-
-- **Macro-based drop detection.** `verifyMacros` already exists, is tested, and gates
-  `generate-meals` but not trending — it looks like free coverage. It is not. A dropped ingredient
-  makes the claim EXCEED the estimate, and that check only fires on protein overstated or calories
-  understated. Applied naively it also fails 42% of the pool, because trending stores **batch**
-  ingredients with **per-serving** macros and the check knows nothing about `servings`. Normalised
-  for servings, known-bad meals land at 0.98–2.03x — inside the clean distribution (p50 1.07,
-  p75 1.53). Catching half of them costs a third of the feed.
-- **Food-table coverage as a language detector.** Does not separate: the lowest scorers are
-  English-language INDIAN recipes ("Lauki Galouti Kebab" scores 0.00, identical to a Polish list)
-  because the macro table is Western-biased. It would have deleted a cuisine.
-- **English marker words alone.** Every foreign fixture scores 0.00 — and so does one real English
-  meal whose ingredients are all brand nouns ("Quest Salted Caramel Milkshake, Xanthan Gum, Monk
-  Fruit Sweetener"). That is why the shipped check requires YouTube's `defaultAudioLanguage` to
-  agree before it drops anything.
-- **Widening the trending dedup window.** The 60-day name window and 90-day video window read from
-  `trending_meals`, which retention prunes at 30 days — so they can never exceed 30 (measured: 21).
-  The stated guarantee ("won't reappear when its twin ages out") is unimplemented and a bigger
-  number cannot implement it; it needs a ledger outliving the rows.
-- **Re-running `classifyDietTags` over stored rows and writing the result back.** Nearly shipped.
-  The stored tag is `classifyDietTags` AND the model's own `contains_*` answer, and that answer is
-  **not a column** — so a stored `false` may be the model catching dairy the keywords cannot see
-  (Oreo Fluff: Cool Whip and pudding mix). A wholesale rewrite would have made 20 rows MORE
-  permissive. Tag corrections must only ever AND toward `false` and remove diets, never add.
+- **The Loops email integration had NEVER worked.** loops-sync selected `email` and `full_name` from
+  `profiles`; neither has ever been a column there, and PostgREST fails the whole query on an
+  unknown column. Every call, every user, since the file was written, returned
+  `column profiles.email does not exist`. No contact was ever created, no event ever fired. Identity
+  lives in `auth.users` (email on the user, full_name in metadata) and is now read from there.
+  **Needs one real end-to-end test — do it in TestFlight, not at launch.**
+- **Four engagement trackers were never called by anything.** `touchLastActive`,
+  `trackCookTonightUsed`, `trackMealSavedEngagement`, `trackGoalsCustomized`. The data was stark:
+  32 saved meals and 12 meal logs existed while 0 users had any counter above zero. Now wired.
+  Verify by using the app and re-reading the profiles row.
+- **Subscription lifecycle moved server-side.** `subscribed_at`/`churned_at` are now written by
+  `superwall-webhook` on `initial_purchase` / `expiration`. The client versions were DELETED — do
+  not re-add them; Superwall's SDK only reports ACTIVE/INACTIVE and cannot tell a conversion from a
+  trial start. Needs a real purchase or expiration to prove.
+- **loops-sync now accepts a trusted server caller** (CRON_SECRET / service-role) so the webhook can
+  reach it. `delete` stays user-only deliberately — its email comes from the verified session
+  precisely so a caller cannot name someone else's contact.
 
 ---
 
-## 5. NOT DONE, deliberately
+## 4. DEAD ENDS — measured and rejected today, do not rebuild
 
-- **`setStep(6)` is never called.** The entire "Found N ingredients / review and confirm" screen in
-  `PantryScanModal` (~80 lines) is unreachable; the live path is 1 → 4 → 5 → 55. Same shape as the
-  dead second-pass code deleted today. Left for its own commit.
-- **`app/(tabs)/grocery.tsx:265`** compares `created_at` (a timestamp) against a bare UTC date
-  string, so "today's order" goes unfound in the evening. Needs a local-midnight instant.
-- **Schema drift: onboarding upserts `last_active`, and no migration creates it** (only
-  `last_active_at` exists). Prod must have it from a manual dashboard add — meaning **migrations
-  alone cannot rebuild this database**, and a fresh environment would hard-fail onboarding on the
-  one upsert CLAUDE.md calls the #1 bug source. Verify against the live schema and add a migration.
-- **The pipeline ingests non-English videos.** Now instructed to translate and gated on it, but
-  nothing verifies the *name*. A fully-foreign recipe with a foreign name would still pass. Left
-  until it recurs rather than guessed at.
-- **One HIGH audit finding remains:** "Fidget avacaodo brownie" (2026-05-12) has a null image and a
-  mangled name. It is the only `trend_source = 'creator'` row and retention does not delete those,
-  so it will not age out on its own.
-- **~50 MED audit findings**, mostly `shelf_tag` null on older rows (they fall to the catch-all
-  shelf) plus a few protein overstatements. Not user-blocking.
+- **Reordering the view floor to run after the ingredient gate.** This was my plan and the
+  measurement killed it: 634 raw → 171 past the 100k floor → 61 gated, against a 60-video cap. The
+  candidate pool is NOT the bottleneck at any stage; the model returning ~17 of 60 is.
+- **A digit-plus-time-unit rule for instruction detection** ("30 минут", "for 5-7 minutes"). Caught
+  nothing the temperature and word-count rules miss, AND deletes real food — "10 minute rice" and
+  "5 minute oats" are products.
+- **Letting the fractional gate accept `1/2` and `½`.** Un-broken as written it would reject three
+  live recipes, all legitimate ("1/2 can corn", "1/2 packet jello", "1/4 sliced onion"), and catch
+  nothing real. Decimals only — the failure mode is arithmetic, humans write fractions.
+- **Raising the LLM output target from 15-20 to 30-40 as a yield fix.** Unproven. Raw output went
+  17 → 5 → 17 → 24 → 5 on identical code. I briefly concluded "it did nothing" from a 17→17 pair;
+  that conclusion was worthless at this noise level. Do not claim a yield win without ~10 runs.
 
 ---
 
-## Useful tools built today
+## 5. METHOD — three ways I got burned today
 
-- `supabase db query --linked "<sql>"` — runs SQL against prod. `--linked` is required; it defaults
-  to local and fails with a Docker error. `compatible_diets` is `text[]`, **not** jsonb; a jsonb
-  literal aborts the whole statement.
-- The pool audit script pattern: fetch `trending_meals` with the anon key (it has public SELECT),
-  then run `_shared/recipe-integrity.ts` + `_shared/diet-tags.ts` + `_shared/macro-estimate.ts` over
-  it under `node --experimental-strip-types`. That is how every number in this file was produced.
-- **Secrets are confirmable without reading them.** Supabase stores an unsalted SHA-256 per secret,
-  so `supabase secrets list` plus `printf '%s' 'on' | shasum -a 256` proves a short known value.
-  That is how `PREMIUM_ENFORCEMENT=on` was verified rather than assumed. Useless against real API
-  keys, which is the point.
-- **CLI 2.116 changed both output formats preflight parsed.** `functions list` is JSON now;
-  `migration list` is JSON by DEFAULT while `-o json` returns the OLD table. Both parsers were
-  fixed; preflight also no longer hides drift inside its 3-minute grace.
+1. **Shell loops lie.** `git show <ref>:<path> | grep -c` inside a `for` loop returned 0 where the
+   file plainly had 2 matches, and I nearly concluded a gate had been removed. Redo any such
+   trace in Python before believing it.
+2. **Concurrent dry runs are not repeats.** Three fired at once starved each other's YouTube quota
+   and dropped the gate from 61 videos to 8. Run them sequentially.
+3. **Retyping code to "reproduce" a bug can invent a clean version.** The fractional gate contained
+   a literal backspace byte (0x08) inside a `String.raw` template, making it inert for 19 days. My
+   hand-typed reproduction matched; the real source could never match. A test now asserts no source
+   file carries a stray control character.
+
+---
+
+## 6. NOT DONE, deliberately
+
+- **`CODE_REVIEW.md` holds 87 confirmed findings; ~80 are unchecked.** Its paywall findings were
+  verified stale today (`handleStartTrial` no longer exists; Restore/Privacy/Terms all have live
+  handlers). The rest deserve one triage pass and will likely surface real work.
+- **`setStep(6)` is still never called.** The whole "Found N ingredients / review and confirm"
+  screen in `PantryScanModal` (~80 lines) is unreachable; the live path is 1 → 4 → 5 → 55. Delete or
+  wire it BEFORE the scan-flow QA, or you will be testing around a ghost.
+- **The scan camera has not been re-tested on device** since the 16-photo cap and full-width scan
+  pill landed. The bottom bar now carries filmstrip + shutter + full-width button. If the viewfinder
+  feels cramped, hiding the tips pill after the first photo is the next lever.
+- **Two stored rows still carry `1/2 can` / `1/2 packet` ingredients.** Harmless — the gate now
+  correctly ignores common kitchen fractions. Noted so they are not re-flagged as findings.
+- **`SYNONYMS` narrowing left `maple`, `honey` and `ranch` with no synonyms.** Watch for false
+  "missing maple" gaps on recipes listing only "syrup".
+
+---
+
+## 7. Corrections to earlier claims — believe these, not the transcript
+
+- "21% of multi-serving rows have incoherent servings" was **wrong**. The macro table's gaps let
+  calorie-dense misses through a gram-weighted coverage filter. Strict basis: **~6%**, median 0.93.
+- "Six engagement trackers, three wired" was **wrong**. Eight exports; two were still unwired after
+  the first pass (`markSubscribed` imported-never-called, `markChurned` never imported).
+- Two stored rows violating the fractional gate were **not** a deploy lag. Deployed source is
+  byte-identical to HEAD (verified with `supabase functions download`, 102,011 bytes, zero diff).
+  The gate was inert.
