@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
-import { useFrameCallback } from 'react-native-reanimated'
+import { useFrameCallback, useSharedValue } from 'react-native-reanimated'
 
 // __DEV__ readout for the macros accordion. Exists because open-vs-close choppiness has several
 // causes that look identical on a device, and three rounds of reasoning about it were wrong.
@@ -13,36 +13,36 @@ import { useFrameCallback } from 'react-native-reanimated'
 //              Anything over ~33 is a visibly dropped frame. If RENDERS is low but WORST is high,
 //              the JS thread is fine and the cost is layout/compositing.
 export function ToggleProbe({ renderCount, layoutCount }: { renderCount: number; layoutCount: number }) {
-  const [worst, setWorst] = useState(0)
   const [snapshot, setSnapshot] = useState({ renders: 0, layouts: 0, worst: 0 })
-  const last = useRef(0)
   const baseRenders = useRef(renderCount)
   const baseLayouts = useRef(layoutCount)
-  const worstRef = useRef(0)
+  // SHARED values, not refs. The callback below is a worklet running on the UI runtime, which has
+  // no access to React refs — mutating them there silently did nothing and reported WORST 0ms.
+  const lastFrame = useSharedValue(0)
+  const worstFrame = useSharedValue(0)
 
   // Frame deltas come from the UI thread, so a stall shows up here even when JS is blocked.
   useFrameCallback((info) => {
     'worklet'
     const t = info.timeSinceFirstFrame
-    if (last.current > 0) {
-      const d = t - last.current
-      if (d > worstRef.current) worstRef.current = d
+    if (lastFrame.value > 0) {
+      const d = t - lastFrame.value
+      if (d > worstFrame.value) worstFrame.value = d
     }
-    last.current = t
+    lastFrame.value = t
   }, true)
 
   // A toggle bumps renderCount; sample ~600ms later, comfortably past the 280ms animation.
   useEffect(() => {
-    worstRef.current = 0
+    worstFrame.value = 0
     const id = setTimeout(() => {
       setSnapshot({
         renders: renderCount - baseRenders.current,
         layouts: layoutCount - baseLayouts.current,
-        worst: Math.round(worstRef.current),
+        worst: Math.round(worstFrame.value), // shared values are readable from JS
       })
       baseRenders.current = renderCount
       baseLayouts.current = layoutCount
-      setWorst(Math.round(worstRef.current))
     }, 600)
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps

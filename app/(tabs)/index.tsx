@@ -733,6 +733,27 @@ export default function HomeScreen() {
   const homeRenderCount = useRef(0)
   homeRenderCount.current++
   const layoutFireCount = useRef(0)
+
+  // Layout measurements are PAUSED while the macros accordion animates.
+  //
+  // These onLayout handlers feed state that feeds layout: the hero reports its y, heroFit is
+  // derived from it, and heroFit sets the hero's height. Growing the accordion moves the hero,
+  // which fires onLayout, which sets state, which re-renders this whole screen, which relayouts,
+  // which moves the hero again. Measured at 8 renders for a single toggle.
+  //
+  // Nothing here is an animation input — they exist so the hero lands above the fold on any
+  // screen. So the last value seen during the animation is stashed and applied once at the end,
+  // which keeps the sizing correct without re-rendering per frame.
+  const layoutPaused = useRef(false)
+  const pendingLayout = useRef<{ heroY?: number; heroH?: number; rowsH?: number }>({})
+  const flushLayout = useCallback(() => {
+    layoutPaused.current = false
+    const p = pendingLayout.current
+    pendingLayout.current = {}
+    if (p.heroY !== undefined) setHeroSectionY(p.heroY)
+    if (p.heroH !== undefined) setHeroHeaderH(p.heroH)
+    if (p.rowsH !== undefined) { extraRowsHRef.current = p.rowsH; setExtraRowsH(p.rowsH) }
+  }, [])
   const extraRowsHRef = useRef(0)
   // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
   // this 2400-line component between the tap and the first frame, which is what made the toggle
@@ -1338,7 +1359,7 @@ export default function HomeScreen() {
                 is smooth. Rows stay mounted (measured via onLayout); overflow hides them when closed. */}
             <Reanimated.View style={[{ overflow: 'hidden', opacity: extraRowsH > 0 ? 1 : 0 }, extraRowsH > 0 && macrosRowsHeight]}>
               <View
-                onLayout={e => { layoutFireCount.current++; const h = e.nativeEvent.layout.height; if (h && Math.abs(h - extraRowsHRef.current) > 0.5) { extraRowsHRef.current = h; setExtraRowsH(h) } }}
+                onLayout={e => { layoutFireCount.current++; const h = e.nativeEvent.layout.height; if (!h || Math.abs(h - extraRowsHRef.current) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.rowsH = h; return } extraRowsHRef.current = h; setExtraRowsH(h) }}
                 style={{ gap: 10, paddingTop: 10 }}
               >
                 <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
@@ -1352,6 +1373,9 @@ export default function HomeScreen() {
                 // Animation FIRST: this writes a shared value and starts on the UI thread
                 // immediately, so motion begins on touch instead of after React has reconciled
                 // this whole screen. setState still runs, but it no longer gates the first frame.
+                // Hold measurements until the glide is done — see layoutPaused above.
+                layoutPaused.current = true
+                setTimeout(flushLayout, 320) // 280ms animation + a frame of settle
                 macrosAnim.value = withTiming(next ? 1 : 0, { duration: 280, easing: ReaEasing.inOut(ReaEasing.ease) })
                 setMacrosExpanded(next)
                 // Fire and forget — a disk write has no business in a tap handler's critical path.
@@ -1539,11 +1563,11 @@ export default function HomeScreen() {
         {pantryFetched && pantryNames.size > 0 && (
           <View
             style={{ marginBottom: 36 }}
-            onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
+            onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.heroY = y; return } setHeroSectionY(y) }}
           >
             {/* Header height feeds the hero fit calculation — the card starts where this ends. */}
             <View
-              onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) > 0.5) setHeroHeaderH(h) }}
+              onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) <= 0.5) return; if (layoutPaused.current) { pendingLayout.current.heroH = h; return } setHeroHeaderH(h) }}
               style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}
             >
               <Text style={styles.sectionTitle}>Cook from your pantry</Text>
