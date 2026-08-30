@@ -22,7 +22,34 @@ test('REGRESSION: a liquid never gets a whole-unit count', () => {
 })
 
 test('REGRESSION: the label never repeats the adjective', () => {
-  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '3', name: 'garlic cloves' })
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '5', name: 'garlic cloves' })
+})
+
+test("the creator's stated count beats the grams-derived one", () => {
+  // The live defect: "Seasoned Sheet Pan Chicken" stored 900g with visual "6 pieces" and the
+  // screen told the cook to use 5. The weights in WHOLE_UNIT_FOODS are population averages;
+  // chicken breasts across the live pool run 142-300g each, so grams/average cannot reproduce a
+  // count the creator already wrote down.
+  assert.deepEqual(getWholeUnitDisplay('chicken breasts', '900g', '6 pieces'), { count: '6', name: 'chicken breasts' })
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '20g', '7 cloves'), { count: '7', name: 'garlic cloves' })
+  assert.deepEqual(getWholeUnitDisplay('chicken breast', '300g', '1 large breast'), { count: '1', name: 'chicken breast' })
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '20g', '12'), { count: '12', name: 'garlic cloves' })
+  // A range takes the low end.
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g', '4-5'), { count: '4', name: 'garlic cloves' })
+})
+
+test('a WEIGHT visual is not read as a count', () => {
+  // "2 lbs" starts with a digit but is 907g of chicken, not two breasts. Reading it as a count
+  // would be a 3x understatement, so these must fall through to the grams-derived path.
+  assert.deepEqual(getWholeUnitDisplay('chicken breast', '907g', '2 lb'), { count: '5', name: 'chicken breasts' })
+  assert.deepEqual(getWholeUnitDisplay('chicken breast', '900g', '2 lbs'), { count: '5', name: 'chicken breasts' })
+  assert.deepEqual(getWholeUnitDisplay('chicken breast', '680g', '1.5 lb'), { count: '4', name: 'chicken breasts' })
+  // No visual at all still derives from grams.
+  assert.deepEqual(getWholeUnitDisplay('eggs', '150g', undefined), { count: '3', name: 'eggs' })
+  // The sub-40% guard still applies to the derived path...
+  assert.equal(getWholeUnitDisplay('eggs', '5g'), null)
+  // ...but a stated count is the creator's own number and is not second-guessed.
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '2g', '1 clove'), { count: '1', name: 'garlic clove' })
 })
 
 test('whole-unit counting still works where it should', () => {
@@ -203,7 +230,7 @@ test('REGRESSION: the SPICE cloves is not a garlic clove', () => {
   // /\bcloves?\b/ caught the powdered spice: "ground cloves" rendered "1 ground garlic clove".
   assert.equal(getWholeUnitDisplay('ground cloves', '2g'), null)
   assert.equal(getWholeUnitDisplay('whole cloves', '3g'), null)
-  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '3', name: 'garlic cloves' })
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '5', name: 'garlic cloves' })
 })
 
 test('REGRESSION: a trace amount is not rounded up to a whole unit', () => {
@@ -214,7 +241,7 @@ test('REGRESSION: a trace amount is not rounded up to a whole unit', () => {
   assert.equal(getWholeUnitDisplay('garlic cloves', '1g'), null)
   // but a real portion still counts
   assert.deepEqual(getWholeUnitDisplay('eggs', '100g'), { count: '2', name: 'eggs' })
-  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '3', name: 'garlic cloves' })
+  assert.deepEqual(getWholeUnitDisplay('garlic cloves', '15g'), { count: '5', name: 'garlic cloves' })
 })
 
 test('REGRESSION: owning an ingredient does not hide a different one that contains its name', () => {

@@ -836,7 +836,7 @@ export default function MealDetailScreen() {
             const renderRow = (ing: any, kind: 'need' | 'have' | 'basic') => {
               // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
               // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
-              const wholeUnit = getWholeUnitDisplay(ing.name, ing.grams)
+              const wholeUnit = getWholeUnitDisplay(ing.name, ing.grams, ing.visual)
               const portion = wholeUnit
                 ? wholeUnit.count
                 : (portionMode === 'Eyeball'

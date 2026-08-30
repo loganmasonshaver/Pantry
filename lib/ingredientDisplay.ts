@@ -58,7 +58,7 @@ const WHOLE_UNIT_FOODS: Array<{ match: RegExp; weight: number; singular: string;
   { match: /\bavocados?\b/i,        weight: 200, singular: 'avocado',     plural: 'avocados' },
   // Must name garlic, or be the bare word. A plain /\bcloves?\b/ also caught the SPICE — "ground
   // cloves" rendered as "1 ground garlic clove" instead of a couple of grams of a powdered spice.
-  { match: /\bgarlic\s+cloves?\b|^\s*cloves?\s*$/i, weight: 5, singular: 'garlic clove', plural: 'garlic cloves' },
+  { match: /\bgarlic\s+cloves?\b|^\s*cloves?\s*$/i, weight: 3, singular: 'garlic clove', plural: 'garlic cloves' },
   { match: /\btortillas?\b/i,       weight: 60,  singular: 'tortilla',    plural: 'tortillas' },
   // Protein fillets — typical home portion is one fillet/breast/chop. Without
   // these entries the AI's visual (e.g. "1 small fillet") gets rendered next
@@ -69,7 +69,7 @@ const WHOLE_UNIT_FOODS: Array<{ match: RegExp; weight: number; singular: string;
   { match: /\btilapia\s*fillets?\b/i,   weight: 120, singular: 'tilapia fillet',   plural: 'tilapia fillets' },
   { match: /\bhalibut\s*fillets?\b/i,   weight: 150, singular: 'halibut fillet',   plural: 'halibut fillets' },
   { match: /\btrout\s*fillets?\b/i,     weight: 140, singular: 'trout fillet',     plural: 'trout fillets' },
-  { match: /\bchicken\s*breasts?\b/i,   weight: 170, singular: 'chicken breast',   plural: 'chicken breasts' },
+  { match: /\bchicken\s*breasts?\b/i,   weight: 190, singular: 'chicken breast',   plural: 'chicken breasts' },
   { match: /\bchicken\s*thighs?\b/i,    weight: 110, singular: 'chicken thigh',    plural: 'chicken thighs' },
   { match: /\bpork\s*chops?\b/i,        weight: 175, singular: 'pork chop',        plural: 'pork chops' },
   { match: /\blamb\s*chops?\b/i,        weight: 90,  singular: 'lamb chop',        plural: 'lamb chops' },
@@ -77,10 +77,23 @@ const WHOLE_UNIT_FOODS: Array<{ match: RegExp; weight: number; singular: string;
   { match: /\bfillets?\b/i,             weight: 150, singular: 'fillet',           plural: 'fillets' },
 ]
 
+// Units that make a leading number a WEIGHT rather than a count. "2 lbs" of chicken starts with a
+// digit but is not two chicken breasts, and reading it as one is a 3x understatement.
+const WEIGHT_UNIT_START = /^(lbs?|pounds?|kgs?|kilos?|kilograms?|g|grams?|oz|ounces?|ml|l|liters?|litres?|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|quarts?|pints?)\b/i
+
+// The count the creator actually wrote, when the visual states one ("6 pieces", "7 cloves", "12").
+// A range ("4-5") takes the low end. Returns null when the visual is a weight or states no number.
+function statedCount(visual: string | undefined): number | null {
+  const m = String(visual ?? '').match(/^\s*(\d+(?:\.\d+)?)\s*(.*)$/)
+  if (!m || WEIGHT_UNIT_START.test(m[2])) return null
+  const n = parseFloat(m[1])
+  return Number.isFinite(n) && n >= 1 ? Math.round(n) : null
+}
+
 // Returns { count, name } when the ingredient is a whole-unit food (so the
 // render can show "5" + "large eggs" without doubling up the noun), or null
 // to fall back to the standard portion + ing.name pair.
-export function getWholeUnitDisplay(name: string, gramsStr: string | undefined): { count: string; name: string } | null {
+export function getWholeUnitDisplay(name: string, gramsStr: string | undefined, visual?: string): { count: string; name: string } | null {
   if (!gramsStr) return null
   const grams = parseFloat(String(gramsStr).replace(/[^0-9.]/g, '')) || 0
   if (grams <= 0) return null
@@ -111,10 +124,18 @@ export function getWholeUnitDisplay(name: string, gramsStr: string | undefined):
   // Grouped: an alternation in the row's pattern would otherwise let `$` bind to only the last
   // branch, silently disabling this guard.
   if (!new RegExp(`(?:${match.match.source})\\s*$`, 'i').test(name.trim())) return null
+  // The creator's OWN count beats grams/weight whenever they stated one. The weights above are
+  // population averages and the real food varies enormously — chicken breasts across the live pool
+  // run 142-300g each — so deriving the count from grams contradicted the creator on 10 of the 79
+  // live rows that state one: "6 pieces" of chicken (900g) rendered as "5", and "7 cloves" of
+  // garlic (20g) as "4". `visual` is the closer of the two fields to what the creator wrote;
+  // `grams` is the model's estimate derived FROM it.
+  const stated = statedCount(visual)
   // Below ~40% of one unit this is not a whole-unit quantity at all — Math.max(1, ...) turned 5g
-  // of egg into "1 egg", a 10x overstatement. Fall through to grams instead.
-  if (grams < match.weight * 0.4) return null
-  const c = Math.max(1, Math.round(grams / match.weight))
+  // of egg into "1 egg", a 10x overstatement. Fall through to grams instead. Only guards the
+  // DERIVED path: a stated count is the creator's own number and needs no sanity band.
+  if (stated === null && grams < match.weight * 0.4) return null
+  const c = stated ?? Math.max(1, Math.round(grams / match.weight))
   const noun = c === 1 ? match.singular : match.plural
   // Strip the matched noun (e.g., "eggs") from the original name to get the
   // adjective ("large"). If the noun match consumed the whole name, just show
