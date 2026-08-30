@@ -236,3 +236,22 @@ test('the name-final guard survives a pattern with alternation', () => {
   // last branch of an alternation and silently stop guarding. The garlic row now has one.
   assert.equal(getWholeUnitDisplay('garlic cloves in oil', '15g'), null)
 })
+
+test('REGRESSION: Eyeball mode never names a measuring tool', () => {
+  // The "already descriptive" guard fired on the leading article alone, so any visual starting
+  // with "a"/"an" returned unchanged — including ones naming a cup or a tablespoon, which is
+  // precisely what Eyeball mode exists to avoid.
+  const TOOL = /\b(tbsp|tablespoons?|tsp|teaspoons?|cups?|ounces?|oz|grams?)\b/i
+  for (const [v, n] of [['a cup of rice', 'rice'], ['a tablespoon of oil', 'olive oil'],
+                        ['a tsp of salt', 'salt'], ['an ounce of cheese', 'cheddar']] as const) {
+    const out = toEyeball(v, n)
+    assert.ok(!TOOL.test(out), `"${v}" still names a tool: "${out}"`)
+  }
+})
+
+test('genuinely tool-free descriptions are still passed through', () => {
+  assert.equal(toEyeball('a handful', 'spinach'), 'a handful')
+  assert.equal(toEyeball('a drizzle', 'olive oil'), 'a drizzle')
+  assert.equal(toEyeball('large egg', 'egg'), 'large egg')
+  assert.equal(toEyeball('2 slices', 'bread'), '2 slices')
+})

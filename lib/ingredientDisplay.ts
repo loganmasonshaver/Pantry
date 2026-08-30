@@ -269,8 +269,12 @@ export function toEyeball(visualStr: string | undefined, ingredientName: string)
 
   // Already no-tool — counts of slices, cloves, pieces, etc.
   if (/^\d+(\.\d+)?\s*(slices?|cloves?|pieces?|sticks?|stalks?|sprigs?|leaves?|cubes?|wedges?)/i.test(v)) return v
-  // "small/medium/large X" — already descriptive
-  if (/^(a|an|small|medium|large|big|tiny)\b/i.test(v)) return v
+  // "small/medium/large X" — already descriptive, UNLESS it still names a measuring tool. This
+  // guard used to fire on the leading article alone, so "a cup of rice" and "a tablespoon of oil"
+  // returned unchanged and Eyeball mode — whose entire purpose is needing no tools — told the user
+  // to fetch a cup.
+  const namesATool = /\b(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|milliliters?|oz|ounces?|lbs?|pounds?|grams?)\b/i.test(v)
+  if (!namesATool && /^(a|an|small|medium|large|big|tiny)\b/i.test(v)) return v
 
   // tablespoons
   if (/\btbsp\b|\btablespoons?\b/i.test(v)) {
