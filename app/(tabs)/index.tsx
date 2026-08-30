@@ -763,7 +763,12 @@ export default function HomeScreen() {
   // Both of these run on the UI thread now. As RN Animated with useNativeDriver:false every frame
   // was computed in JS and shipped over the bridge — on Home, which auto-generates meals on focus,
   // those frames queued behind whatever JS was already running and the glide stuttered.
+  // Full height when the macros card is compact; gives back 76pt when it expands, so the photo,
+  // title and pills stay framed above the tab bar in both states. This was frozen at the smaller
+  // size during the choppiness investigation because gliding it via an animated `height` stepped
+  // at ~20fps. LinearTransition on the container animates the change natively, so it can come back.
   const heroExpandedH = Math.max(HERO_MIN, heroFit - 76)
+  const heroHeight = macrosExpanded ? heroExpandedH : heroFit
 
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
@@ -1565,9 +1570,10 @@ export default function HomeScreen() {
                 </View>
               </RNAnimated.View>
             ) : heroMeal ? (
-              // Fixed height. Was glided with the macros card, but a height animation steps at
-              // ~20fps (see the note at the state declarations) so the glide was never smooth.
-              <Reanimated.View layout={LinearTransition.duration(420)} style={{ height: heroExpandedH }}>
+              // Height gives back 76pt when the macros expand so the card stays above the fold.
+              // Driven by state and animated by LinearTransition — NOT by an animated height value,
+              // which committed at ~20fps and was the original cause of the choppiness.
+              <Reanimated.View layout={LinearTransition.duration(420)} style={{ height: heroHeight }}>
                 <ScrollView
                   ref={heroScrollRef}
                   horizontal
