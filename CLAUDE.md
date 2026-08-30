@@ -161,8 +161,12 @@ npx expo run:ios   # build and run on iOS simulator
   edge functions and `./foo.ts` imports in unit tests no longer raise the count. Adding one is no
   longer free noise — if the number moves, something real moved.
 - **Unit tests run under plain node, no Deno CLI and no jest:**
-  `node --test lib/tilt.test.ts supabase/functions/_shared/macro-estimate.test.ts`
-  Node 25 strips types natively. Test files are typechecked by `tsc` too — keep them compiling.
+  `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts` — **138 tests** as of 2026-08-29.
+  Node strips types natively; re-verified on **26.8.1** after `brew upgrade supabase` pulled node
+  25→26 in as a dependency, so the type-stripping workflow survives that bump. Test files are
+  typechecked by `tsc` too — keep them compiling.
+  (The command documented here previously named `lib/tilt.test.ts`, deleted with the tilt revert
+  in `7785f81` — it had been erroring rather than running anything.)
 - `bash scripts/preflight.sh` reports the three places state drifts: uncommitted files,
   unapplied migrations, and functions whose source is newer than their deploy. Run it at session
   start instead of trusting any written claim about deploy state.
