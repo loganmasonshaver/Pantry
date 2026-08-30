@@ -1,137 +1,140 @@
-# Handoff — 2026-08-28
+# Handoff — 2026-08-29
 
-14 commits today. **`git log` carries the full reasoning for every one of them** — what was tried,
-what was rejected, why. This file deliberately holds only what git and the code do NOT: unfinished
-work, dead ends worth not repeating, and things that need a human.
+38 commits. **`git log --since="2026-08-29"` carries the reasoning for every one** — what was
+tried, what was rejected, why. This file holds only what git does not: the next task's method,
+where the hunt has and hasn't reached, dead ends worth not repeating, and what needs Logan.
 
-Read `git log --since="2026-08-28"` first. Nothing below repeats it.
-
----
-
-## 1. BLOCKING — clean these up before shipping
-
-### Debug instrumentation is still in four screens
-20 `perfMark()` trace calls (`MOUNT`/`UNMOUNT`/`FOCUS`/`BLUR`/`RENDER`) in `app/(tabs)/index.tsx`,
-`discover.tsx`, `saved.tsx`, `pantry.tsx`. They are `__DEV__`-gated so **nothing reaches
-production** — safe to leave, noisy to keep. They exist for the unsolved black-screen bug below;
-delete them when that closes, not before.
-
-### `generate-meals` is committed but not deployed
-Last deploy Aug 12, last commit today. `npx supabase functions deploy generate-meals`.
-(Only the dead-Groq-line removal — harmless if it waits, but preflight will keep flagging it.)
-
-### `deno.lock` is untracked
-A byproduct of `deno check` runs. Either commit it or gitignore it; it just makes preflight noisy.
+Preflight is green: tree clean, everything pushed, migrations match, every edge function deployed
+at or after its last source commit.
 
 ---
 
-## 2. UNSOLVED — the black screen, and the five things it is NOT
+## 1. NEXT TASK — keep hunting the same bug family
 
-Switching tabs occasionally renders a black screen. Intermittent, cosmetic, clears on navigation.
-**I recommended cutting it for launch and Logan has not overruled that.**
+Logan's stated next step. **14 bugs found today, none of which had a test before this morning.**
+They are all one shape:
 
-Do not re-run these. All were tested and eliminated:
+> A string/number transformation over **model- or user-written food text**, correct for the case it
+> was written for and wrong for a neighbouring one.
 
-| Excluded | Evidence |
-|---|---|
-| Screen teardown | No `UNMOUNT` ever fires on a tab switch |
-| Focus handover | `FOCUS` fires every time |
-| Rendering | `RENDER` fires and the screen is *still* black |
-| Network stalls | Home's 3 focus queries measured 135–250ms every time |
-| Background render leak | Real bug, fixed (see git), black screen persisted |
-| Expo Go memory ceiling | Reproduces on a real dev build |
-| Memory pressure | Native log: 0 jetsam events, 0 Pantry faults while black |
-| `react-native-draggable-flatlist` | Pantry-only; Discover and Saved go black too |
-| Tab-distance / `animation: 'shift'` | Pantry↔Saved (2 apart) fails, Home↔Discover (2 apart) does not |
+### The method that actually worked
 
-**Everything JS-side is excluded by measurement.** React renders and the native view does not show
-it — a compositing problem. The only remaining lead is **20 packages out of sync** (`expo 55.0.6`
-vs expected `55.0.30`, `expo-router` 13 patches behind, RN 0.83.2 vs 0.83.10). `expo install --fix`
-ERESOLVEs on an `expo-router` / `@expo/log-box` peer conflict — it needs a deliberate session, not a
-patch. **I attempted it, it half-applied, and `npm ci` was needed to restore node_modules.** Do not
-retry casually.
+Reasoning about the code found almost nothing. What found bugs, in order of yield:
 
----
+1. **Run the function over realistic inputs and read the output.** Every single bug was visible in
+   one line of output and invisible in review. `2% milk` → `% milk`.
+2. **Ask what the neighbouring case is.** The clove row was written for garlic; the neighbour is
+   the spice. The egg row was written for whole eggs; the neighbour is liquid whites.
+3. **Check ordering in any first-match-wins table** (below).
+4. Only then read the code.
 
-## 3. NEEDS LOGAN — cannot proceed without input
+### Already swept — don't redo
 
-### The onboarding trailer
-Flagged as needing "a good amount" of tweaking. **The specifics were never captured — ask before
-touching anything.** The fix may be a new recording rather than code.
-Asset: `assets/onboarding-preview.mov`, played via `expo-video` in `app/onboarding/index.tsx`
-(~L2917), framed in a phone shell on the welcome step. That file is the repo's #1 bug source; read
-the CLAUDE.md gotcha before editing.
+- `lib/ingredientDisplay.ts` — all 13 helpers, 31 tests
+- `lib/categoryMatch.ts` — 7 tests
+- `supabase/functions/_shared/dish-key.ts` — 9 tests
+- `supabase/functions/_shared/macro-estimate.ts` — 17 tests
 
-### The remaining billing migrations
-Done: FAL, Supabase, Apple (membership + payouts), OpenAI, Northwest.
-Left: **Google AI** (this is the primary meal generator on Tier 1 Prepay — not a side service),
-PostHog, Cloudflare (the `.app` domain renews annually), Loops, FatSecret, YouTube Data.
+64 tests total: `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`
 
----
+### NOT swept — the actual leads
 
-## 4. WATCH AFTER LAUNCH — numbers, not code
+- **`constants/staples.ts`** — `isAssumedStaple` normalises then does an exact `Set.has`. Read but
+  not tested. It is called as `isAssumedStaple(ing.name, …)` at `app/meal/[id].tsx:815` with the
+  RAW ingredient name — check what happens when that name still carries a quantity or a
+  parenthetical, since the alias set only holds bare forms.
+- **`components/PantryScanModal.tsx`** — the scan→pantry path. Names arrive straight from GPT
+  vision here, the least curated text in the app, and it already has 4 pre-existing TS errors
+  (missing `zone`).
+- **`supabase/functions/scan-pantry`** — the other end of that pipe.
+- **`lib/recipeTemplates.ts`** — the backfill path used when a saved meal has no recipe data.
+  Scales ingredient grams by a calorie ratio; scaling bugs are this family.
+- **The Eyeball/Measured toggle end to end** — helpers are tested individually, the composition
+  is not.
+- **`lib/fatsecret.ts` `parseMacros` / `pickDefaultServing`** — unit conversion over third-party
+  data.
 
-- **Generations per DAU and FAL spend.** Auto-generation was restored today; the commit that
-  originally removed it said to watch this. That number has never actually been observed, because
-  Pantry auto-generated the whole time the "manual" gate existed on Home.
-- **`[funnel]` lines** in `generate-trending-meals` logs. Two matter: `ingredient-list gate` (~28%
-  survive — the biggest loss, upstream of everything) and `dropped` (recipes that kept <100% of the
-  creator's ingredients). Those are the only real yield levers.
-- **The health-check push.** It was dead from the day it shipped — `profiles.expo_push_token` did
-  not exist. Column added today. **Logan must open the app once on his phone with notification
-  permission granted to populate the token**, then confirm:
-  `select id, expo_push_token from profiles where expo_push_token is not null;`
-  Until a row comes back, missed trending runs are still silent.
-- **`shelf_tag` distribution.** Today's manual run stored 9 meals, 9/9 tagged, but skewed heavily
-  Indian/South Asian. If that persists across a few days the query stride is sampling adjacent
-  phrases; widen the spread in `buildCategoryConfigs`.
+### The recurring structural hazard
+
+**Three separate first-match-wins keyword tables were all bitten by declaration order today:**
+`WHOLE_UNIT_FOODS`, the macro reference table, and `CATEGORY_KEYWORDS`. If a fourth turns up,
+assume it is broken until a shadowing test says otherwise. The test shape that catches it: pin a
+canonical example to the row that should own it, for every row.
 
 ---
 
-## 5. TOOLS BUILT TODAY — re-runnable, don't rebuild
+## 2. NEEDS LOGAN — nothing can proceed without these
 
-Two eval harnesses. Both concluded **keep the current model** — that is a real result, not a null
-one, and it means the model question is settled until new models ship.
-
-```bash
-# vision — pantry scan. 17 photos incl. 14 of Logan's own kitchen at 24MP.
-# FULL=1 restores the 3 reference rows (gpt-4.1 control, 5.4-mini, Gemini).
-OPENAI_API_KEY=sk-... node scripts/pantry-eval/run.mjs
-
-# text — generate-recipe, verbatim production prompt
-OPENAI_API_KEY=sk-... node scripts/text-eval/run.mjs
-```
-
-**The lesson worth carrying:** list price lies. `gpt-5.6-terra` advertised 20% cheaper than
-production and measured **85% more expensive**, because it emitted 2531 output tokens where
-gpt-5.4 emitted 582. Always measure real usage tokens.
-
-`gpt-5-nano` is disqualified for any drop-in text swap: it spends the entire `max_tokens` budget on
-reasoning and returns empty content at production's 2000 cap.
+- **The trailer.** Direction is settled (app-forward, ~8s, five beats — plan artifact:
+  `https://claude.ai/code/artifact/f1b2d236-1923-407b-864e-34c954b464d7`). Blocked on: reshoot vs
+  work from existing footage. **Before any shoot, raise `SCAN_CAP_WEEK` in Supabase secrets —
+  pantry scans are 7 per rolling 7 days, not 5/day, and 7 takes will not survive a session. Put it
+  back afterwards.**
+- **square_hd.** Every meal image is 512×512 and the recipe hero renders it at ~1500 physical px —
+  a 2.9× upscale. Flipping `image_size` in `generate-meal-image` costs ~4× the pixels per image and
+  that pipeline is marked don't-touch for cost reasons, so it is a pricing decision. Existing images
+  will not change regardless: filenames derive from the meal key and are served
+  `max-age=31536000` (verified on a GET; a HEAD misleadingly reports `no-cache`). Logan asked to go
+  over this properly and it has not happened.
+- **The black screen on tab switch.** Untouched today. Still unsolved, still recommended for cutting
+  from launch, 9 hypotheses excluded — see the 2026-08-28 handoff in git history before re-testing
+  anything.
 
 ---
 
-## 6. PROCESS NOTES — two mistakes worth not repeating
+## 3. WATCH — deployed today, needs real-world numbers
 
-- **Never `git add ... 2>/dev/null`.** A commit today claimed two file changes and contained
-  neither: one pathspec no longer existed, `git add` aborts entirely on a bad pathspec, and the
-  suppressed stderr hid it. Check `git status` between staging and committing.
-- **`git stash`/`git stash pop` during a TS baseline check rewrites files**, which Fast Refresh
-  turns into a remount on the connected device. It corrupted a debugging session by producing
-  MOUNT/UNMOUNT pairs that looked like an app bug. Don't stash while Logan is testing on device.
+`generate-meals` is deployed with two new gates. Both log; neither has been observed in production.
+
+- **`[macro-check]`** — one line per candidate: `ok` / `skip` / `DROP` with the ratio. A meal is
+  dropped only when its ingredients cannot support its claimed macros, and only while ≥3 candidates
+  survive. **If `DROP` is common, suspect the reference table before suspecting the model** — a
+  false positive deletes good food and the user never learns why.
+- **`Repeat filter: dropped N repeat(s)`** — the reworded-repeat detector. **If duplicates still
+  appear tomorrow and this line is absent, the similarity threshold needs another look.** The
+  evidence that motivated it: 18 remembered meal names, 18 distinct `dishKey`s, zero repeats
+  detected, while all three meals shown that day had a near-duplicate in the list.
+- **`Macro rank: … N repeat(s) had to fill the deck`** — means the fresh pool was genuinely
+  exhausted, not that the filter misbehaved.
+
+Logan generates sporadically (7 active days in a month), so `RECENT_MEMORY = 30` spans **weeks** of
+calendar time for him. If the generator starts running out of ideas on a narrow pantry, that window
+is the first thing to loosen.
 
 ---
 
-## 7. NOT DONE, deliberately
+## 4. DEAD ENDS — do not repeat
 
-- **782 stale meal images.** Regenerating in place reaches nobody: filenames derive from the meal
-  key and are served `cache-control: max-age=31536000`, so a regenerated image lands at a URL every
-  client has cached for a year. A real backfill needs **versioned filenames** first.
-- **Blurhash placeholders.** Biggest remaining perceived-speed win. Requires computing the hash at
-  generation time — inside the image pipeline, marked do-not-touch — plus a backfill of ~1000
-  images. Logan's call.
-- **Parallelising the trending search loop.** 13 configs × 2 fetches ≈ 10s of a ~150s budget. Fits
-  today. Next lever if wall-clock gets tight.
-- **Widening the ~28% ingredient-list gate** by reading captions or pinned comments instead of only
-  the video description. Structurally the largest yield win available, and a project rather than a
-  patch.
+- **Hero tilt parallax: reverted.** It stepped, not stuttered. Animating a **layout** prop commits
+  through the shadow tree and does not update per frame; `WORST 8ms` proved the UI thread never
+  dropped one. If revisited, the sensor must write a *target* and a frame-synced spring must follow
+  it. Full post-mortem in commit `7785f81`.
+- **`LayoutAnimation` does nothing.** Expo 55 enables the New Architecture; `configureNext` is a
+  no-op under Fabric. Reanimated's `LinearTransition` / `FadeIn` are the equivalent.
+- **Reanimated layout animations are per-component.** A parent animating does not carry a child's
+  position change, a child does not cover its container resizing. Three separate elements needed
+  their own `layout=` on Home before the reflow stopped snapping.
+- **Do not tune an animation you cannot see.** Six fixes went into the macros toggle aimed at the
+  wrong layer. What solved it was a device screen recording extracted at 60fps and measured per
+  frame — 3 visual updates in 117ms on a 120Hz display. Ask for a recording early.
+- **`/index.bundle` is the wrong Metro entry** for this app and returns a 4.6MB runtime-only bundle
+  with no app code. Use `/.expo/.virtual-metro-entry.bundle` (~18MB) to check what the device is
+  actually being served.
+
+---
+
+## 5. NOT DONE, deliberately
+
+- **The "Fresh today" badge is unearned.** `app/(tabs)/pantry.tsx:389` shows it whenever
+  `meals.length > 0`; the only other input is whether the *user* has viewed today. It never checks
+  whether the meals are new. Now that repeats are actually detected, gating it on a genuinely fresh
+  generation is a small honest change.
+- **Meal naming** ("Savory Cottage Cheese and Egg Scramble" is a hash — step 1 sautés 150g of
+  potatoes). Cosmetic, model output, and meal names feed the image cache key so changing naming
+  conventions has cost implications. Argued against; Logan has not overruled.
+- **Home still re-renders 5× per macros toggle** (was 8). The hero's `onLayout` feeds `heroFit`
+  which feeds the hero's height, so measuring drives layout drives measuring. Invisible now that
+  the reflow is native. The fix is to stop deriving the hero's height from a live-measured `y` —
+  **not** to defer the measurement, which was tried today and produced a visible delayed jump.
+- **782 stale meal images.** Unchanged from yesterday: regenerating in place reaches nobody without
+  versioned filenames.
