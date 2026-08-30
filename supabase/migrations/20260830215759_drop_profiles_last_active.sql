@@ -1,0 +1,17 @@
+-- Remove profiles.last_active — a column that existed only in production.
+--
+-- It was never created by any migration. Onboarding upserted it and NOTHING read it, so it was a
+-- write-only orphan: 11 of 20 profiles carried a date nobody consumed. The column the rest of the
+-- system actually uses is last_active_at (timestamptz), created in 20260521000000_email_marketing
+-- and read by lib/engagement.ts and the Loops sync.
+--
+-- This matters beyond tidiness. Its absence from migrations meant migrations alone could not
+-- rebuild this database, and a fresh environment would have hard-failed the onboarding upsert —
+-- the exact write CLAUDE.md calls the #1 bug source. Onboarding now writes last_active_at.
+--
+-- Verified safe before dropping: no view, function, RLS policy or index references it (checked
+-- against pg_proc, pg_class, pg_policy and pg_index in production), and no code outside that single
+-- onboarding line mentions it.
+--
+-- `if exists` so a fresh environment, which never had the column, applies this cleanly.
+alter table profiles drop column if exists last_active;

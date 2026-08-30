@@ -3984,7 +3984,11 @@ export default function Onboarding() {
           meals_per_day: parseInt(finalData.meals),
           cooking_skill: finalData.cookingSkill || null,
           max_prep_minutes: prepToMinutes(finalData.prep),
-          last_active: new Date().toISOString().split('T')[0],
+          // last_active_at, not last_active. `last_active` was a date column that existed only in
+          // prod (no migration created it), was written here and read by NOTHING — so completing
+          // onboarding recorded activity into a dead field. The column the rest of the system uses
+          // is last_active_at (timestamptz), read by lib/engagement.ts and synced to Loops.
+          last_active_at: new Date().toISOString(),
           food_dislikes: allDislikes,
           food_prefs_banner_dismissed: true,
           food_intro_popup_dismissed: true,
