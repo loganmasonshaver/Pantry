@@ -43,6 +43,12 @@ const TABLE: Row[] = [
   // applies to any future seasoning whose name is a substring of a whole food.
   { re: /\b(salt|(black|white|red|ground) pepper|peppercorns?|spices?|seasoning|herbs?|cumin|paprika|oregano|basil|thyme|rosemary|cinnamon|turmeric|chili powder|cayenne|garlic powder|onion powder|baking (powder|soda)|vanilla extract|water|ice)\b/i, kcal: 0, p: 0, c: 0, f: 0 },
 
+  // Shirataki / konjac is ~97% water and glucomannan fibre — about 10 kcal/100g. The pasta row
+  // below matches "konjac noodles" on \bnoodles\b and priced a 200g serving at 262 kcal instead of
+  // 20, a 13x overstatement. Must precede the pasta row for the same reason "almond milk" precedes
+  // almonds.
+  { re: /\b(konjac|shirataki)\b/i, kcal: 10, p: 0.2, c: 3, f: 0 },
+
   // ── COMPOUND NAMES. These must resolve before the generic food they contain, or the broader
   // row below steals them: "almond milk" is not almonds (21g protein vs 1.2) and "chicken broth"
   // is not chicken (31g vs 0.9). Both were caught by the shadowing test, not by review.

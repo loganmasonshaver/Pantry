@@ -193,6 +193,8 @@ const CANONICAL: Array<[string, number]> = [
   ['pistachios', 20.2],
   ['self rising flour', 10.3], ['all purpose flour', 10.3], ['coconut flour', 18],
   ['orzo', 5], ['elbow macaroni', 5], ['dry fettuccine', 5], ['sourdough loaf', 9],
+  // Konjac is a noodle by shape only — ~10 kcal/100g against pasta's 131.
+  ['konjac noodles', 0.2], ['shirataki noodles', 0.2],
   // High-protein pasta must beat the generic pasta row, or a recipe built on it reads as a
   // protein overclaim. Plain pasta above must stay at 5 — that is the half this can break.
   ['high-protein macaroni', 9], ['protein pasta', 9], ['protein penne', 9], ['protein noodles', 9],
