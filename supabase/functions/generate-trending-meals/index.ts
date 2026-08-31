@@ -654,6 +654,10 @@ Deno.serve(async (req: Request) => {
       const methodList = method.length >= 3
         ? `\n   SOURCE METHOD (${method.length} steps — follow these IN ORDER and keep every time, temperature, heat level and technique. Do not merge or summarise them):\n${method.map(x => `     - ${x}`).join('\n')}`
         : ''
+      const parsed = sourceIngredients(v.description || '')
+      const checklist = parsed.length >= 3
+        ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
+        : ''
       // Ingredients the creator listed with NO quantity — "Green Onion", "Cilantro", "Cream
       // cheese". parseIngredientBlock needs a leading quantity, so these were invisible: measured
       // across 15 real descriptions, ~27 real ingredients are lost this way.
@@ -665,10 +669,6 @@ Deno.serve(async (req: Request) => {
       const extras = parseUnquantifiedExtras(v.description || '')
       const extraList = extras.length
         ? `\n   ALSO LISTED, without quantities (include these too, estimating a sensible amount; they do NOT count toward the ${parsed.length} above):\n${extras.map(x => `     - ${x}`).join('\n')}`
-        : ''
-      const parsed = sourceIngredients(v.description || '')
-      const checklist = parsed.length >= 3
-        ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
         : ''
       return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${extraList}${methodList}`
     }).join('\n\n')
