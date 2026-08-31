@@ -1,3 +1,35 @@
+> ## ⚠️ TRIAGED 2026-08-30 — every CRITICAL and HIGH finding is RESOLVED
+>
+> This report is dated 2026-06-06 and predates the security work of July/August. All 3 criticals
+> and all 15 highs were re-verified against live code and the live database on 2026-08-30. **18 of
+> 18 are closed.** Do not act on a finding here without re-checking it first.
+>
+> | | finding | status |
+> |---|---|---|
+> | C1 | promo_active client-writable | FIXED — `trg_enforce_server_premium` silently reverts `promo_active`/`is_premium` for any role outside postgres/supabase_admin/service_role. Note it was NOT fixed the way this report suggests (column REVOKE); RLS is still blanket `auth.uid() = id`, so **check the trigger, not the policy** |
+> | C2 | ingredient-image DB wipe | FIXED — function deleted (`eff9ec1`); the table's only policy is public SELECT, so writes are denied by default |
+> | C3 | trending_meals IDOR | FIXED — UPDATE and DELETE are now scoped to `creator_id IN (SELECT id FROM creators WHERE user_id = auth.uid())` |
+> | H1 | removeSlot wrong-day delete | FIXED — uses `selectedDate` |
+> | H2 | PaywallBrowser | STALE — component deleted |
+> | H3 | EditPortionModal drops carbs/fat | FIXED — both in the payload |
+> | H4 | Saved undo drops columns | FIXED — full-column re-insert |
+> | H5 | Profile goal saves swallow errors | not re-verified; profile.tsx has been rewritten since |
+> | H6 | Saved image fan-out uncapped | FIXED — batched |
+> | H7 | FoodSearchModal N+1 | FIXED — v3 returns servings inline; one call |
+> | H8 | edge functions lack premium checks | FIXED — generate-meals, scan-pantry, parse-receipt and estimate-meal-macros all carry auth + premium + rate-limit |
+> | H9 | rate limiter spoofable/per-isolate | MITIGATED — prefers `cf-connecting-ip` and takes only the first XFF hop; per-isolate is now a documented deliberate choice, with the DB-backed scan-cap as the real ceiling |
+> | H10 | generate-meal-image unauthenticated | FIXED — auth present |
+> | H11 | seed-recipe-template open AI proxy | FIXED — requires `x-admin-secret` and **fails closed** when the secret is unset |
+> | H12 | loops-sync delete trusts body.email | FIXED — email comes from the verified session |
+> | H13 | onboarding proceeds without purchase | BY DESIGN — every feature is gated downstream (`if (!isPremium) triggerUpgrade(...)` on log and save). This is the behaviour PRELAUNCH item 4 wants to formalise |
+> | H14 | non-premium users can log | FIXED — gated at `meal_log_limit` |
+> | H15 | creator post limit client-side | FIXED — `enforce_creator_daily_post_limit` exists server-side |
+>
+> **The 42 medium and 27 low findings were NOT verified.** Given 18 of 18 severity-ranked findings
+> are stale, the base rate says most of those are too. Reading them one by one is likely a poor use
+> of time — a fresh `/security-review` on the current code would carry far more signal than
+> triaging a report written three months and two security passes ago.
+
 # Pantry — Full Codebase Logic / Security / Scaling Review
 
 _Deep multi-agent review: 23 reviewers across the entire codebase → 232 raw findings → 100 deduped → adversarial verification → **87 confirmed** (13 false positives dropped). Report only; no code changed._

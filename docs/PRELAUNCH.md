@@ -105,11 +105,15 @@ Four of the five originals are fixed (orphan Discover row deleted, grocery eveni
 data removed from the bundle, `last_active` schema drift). The email and engagement items moved into
 step 10, since TestFlight is where they can actually be proven. What is left unowned:
 
-- **`CODE_REVIEW.md` holds 87 confirmed findings and ~80 are unchecked.** Its paywall findings were
-  verified stale on 2026-08-30 (`handleStartTrial` no longer exists; Restore Purchase, Privacy and
-  Terms all have live handlers in `profile.tsx`), and its "canonical pricing" note was itself the
-  stale thing — it flagged the live $9.99 as a defect. The report predates a lot of security work.
-  Worth one triage pass; expect a mix of already-fixed and genuinely open.
+- **`CODE_REVIEW.md` — TRIAGED 2026-08-30, and it is CLEAN where it matters.** All 3 criticals and
+  all 15 highs were re-verified against live code and the live database: **18 of 18 are closed**.
+  The results table is at the top of that file. Two are worth knowing: C1 (promo_active bypass) is
+  fixed by a TRIGGER and not by RLS — the policy is still blanket `auth.uid() = id`, so anyone
+  auditing this must check `trg_enforce_server_premium`, not the policy. And H13 is by design:
+  onboarding proceeds without a purchase because every feature is gated downstream, which is the
+  behaviour item 4 formalises.
+  The 42 medium and 27 low findings were NOT checked. Given an 18-of-18 stale rate on the severe
+  ones, a fresh `/security-review` would carry more signal than triaging the rest.
 
 ## Deliberately NOT on this list
 
