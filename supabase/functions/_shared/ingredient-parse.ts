@@ -1,4 +1,4 @@
-// Pulling a creator's OWN ingredient list out of a YouTube description, mechanically.
+// Pulling a creator's OWN ingredient list AND method out of a YouTube description, mechanically.
 //
 // Split out of generate-trending-meals/index.ts so it can be unit-tested without booting the Deno
 // runtime. That is not tidiness: the numbered-list marker below silently mangled every decimal
@@ -116,6 +116,52 @@ export function truncatedAgainstSource(names: string[], srcList: string[]): stri
     }
   }
   return null
+}
+
+
+// ── The creator's METHOD ────────────────────────────────────────────────────────────────────────
+//
+// parseIngredientBlock STOPS at the method heading and throws the rest away. That text is the
+// single most valuable thing in the description and it was being discarded.
+//
+// Measured on 14 sampled source videos: 8 of them (57%) publish a numbered method, all of it well
+// inside the 2000-char prompt window — so the model could already SEE it. It was summarising it
+// anyway. "Kala Chana Dosa" published 9 steps and we stored 5, losing "drain the water", "lightly
+// grease it", "medium heat", "flip and cook for another 1-2 minutes" and the serving suggestion.
+// That is the same failure the INGREDIENT checklist was built to fix: a model asked to summarise
+// drops things, and a model handed a list to copy does not.
+const METHOD_HEADING = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|how to (?:make|prepare)|preparation|procedure)\b\s*:?\s*$/i
+
+// A trailing block that is not method any more — socials, hashtags, promos, a macro summary.
+const METHOD_END = /^(?:macros?|nutrition|calories|ingredients?|notes?|more\s+recipes?|other\s+(?:recipes?|videos?)|watch\s+next|related|playlist|chapters?|timestamps?|follow|subscribe)\b/i
+
+// Marketing prose that follows the method in longer descriptions — health claims, disclaimers, a
+// nutrition table. Unanchored, because these lines are emoji-led ("‼️ Consult your doctor before
+// use…", "❤️ Supports Heart and Vascular Health") and an anchored pattern slides straight past the
+// emoji. One sampled description ran 16 real steps and then 12 lines of this.
+const METHOD_PROSE = /\b(consult your (?:doctor|physician|healthcare)|nutritional values?|not medical advice|disclaimer)\b/i
+
+// No recipe method is longer than this. A backstop for a description whose marketing block uses
+// wording none of the rules above anticipate.
+const MAX_METHOD_STEPS = 20
+
+/** The creator's published method as ordered steps, or [] when the description carries none. */
+export function parseMethodBlock(desc: string): string[] {
+  if (!desc) return []
+  const lines = desc.split('\n')
+  const start = lines.findIndex(l => METHOD_HEADING.test(stripBullet(l)))
+  if (start === -1) return []
+  const out: string[] = []
+  for (const raw of lines.slice(start + 1)) {
+    const line = stripBullet(raw)
+    if (!line) continue
+    if (METHOD_END.test(line) || NOISE_LINE.test(line) || METHOD_PROSE.test(line)) break
+    if (out.length >= MAX_METHOD_STEPS) break
+    // A method step is a sentence, not a two-word heading, and not a wall of text.
+    if (line.length <= 6 || line.length >= 400) continue
+    out.push(line)
+  }
+  return out
 }
 
 export { parseIngredientBlock, stripBullet }

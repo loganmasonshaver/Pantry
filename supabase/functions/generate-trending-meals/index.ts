@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { parseIngredientBlock, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
+import { parseIngredientBlock, parseMethodBlock, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
@@ -645,11 +645,20 @@ Deno.serve(async (req: Request) => {
       // When the creator published an explicit list, restate it as a checklist with its exact
       // count. "Return all 14" is a far harder instruction to quietly ignore than "keep every
       // ingredient", which was already in the prompt and was being ignored half the time.
+      // The creator's own METHOD, when the description carries one. Same treatment as the
+      // ingredient checklist and for the same measured reason: handed a list to COPY the model
+      // keeps it, asked to summarise it drops things. "Kala Chana Dosa" published 9 steps and we
+      // stored 5, losing "drain the water", "medium heat" and "flip and cook for another 1-2
+      // minutes" — every one of which was inside the description the model was already shown.
+      const method = parseMethodBlock(v.description || '')
+      const methodList = method.length >= 3
+        ? `\n   SOURCE METHOD (${method.length} steps — follow these IN ORDER and keep every time, temperature, heat level and technique. Do not merge or summarise them):\n${method.map(x => `     - ${x}`).join('\n')}`
+        : ''
       const parsed = sourceIngredients(v.description || '')
       const checklist = parsed.length >= 3
         ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
         : ''
-      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}`
+      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${methodList}`
     }).join('\n\n')
 
     const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
@@ -725,6 +734,11 @@ ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-
   ✓ GOOD: "Heat oil in pan." → "Add chicken." → "Sear 5 minutes." (3 separate steps)
   Combine ONLY when actions happen simultaneously without a state change (e.g. "Season with salt and pepper" is one step).
   Scale step count to dish complexity — simple recipes 4-6 steps, complex 7-12 steps. Don't pad.
+  EXCEPTION, and it overrides the range above: when a video carries a SOURCE METHOD, follow ITS
+  step count. The creator already decided how many steps their recipe takes. Compressing 9 published
+  steps into 5 is how "cook on medium heat, then flip and cook another 1-2 minutes" becomes "cook
+  until golden" — the timing and the technique are lost, and they are exactly what a cook needs.
+  Never drop a time, a temperature, a heat level or a doneness cue that the creator stated.
   This applies to the FORMAT of the steps, not the content — still respect the creator's recipe faithfully. Just break their consolidated instructions into individual actions.
 
 OUTPUT TARGET: Return a recipe for EVERY video below that is genuinely a recipe — aim for 30-40 from the ${uniqueVideos.length} provided, and treat that as a floor of effort rather than a quota to stop at. Every one of these videos was pre-screened and carries a published ingredient list, so the great majority CAN yield a faithful recipe; skipping is for a video that is not a recipe at all, not for one you judge unexciting.

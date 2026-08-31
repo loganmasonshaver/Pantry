@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseIngredientBlock, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
+import { parseIngredientBlock, parseMethodBlock, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
 
 test('a decimal quantity is not a numbered-list marker', () => {
   // \d+[.)] matched the DECIMAL POINT: "1.5 tsp Salt" was read as list item "1." followed by
@@ -81,4 +81,53 @@ test('a real ingredient is never mistaken for a fragment', () => {
   // Nothing to compare against is not evidence of a cut.
   assert.equal(truncatedAgainstSource(['Roas'], []), null)
   assert.equal(truncatedAgainstSource([], ['1 tsp Salt']), null)
+})
+
+test("the creator's published method is captured, numbering stripped", () => {
+  // Verbatim shape from video JozX89H7GdE ("Kala Chana Dosa"). The creator published 9 numbered
+  // steps; the stored recipe had 5, losing "drain the water", "medium heat" and "flip and cook for
+  // another 1-2 minutes" — all of it inside the description the model was already shown.
+  const desc = [
+    '2 tbsp curd', '1 tsp oil or ghee per dosa', '',
+    'Method', '',
+    '1. Soak the kala chana overnight and drain the water.',
+    '2. Grind until smooth to make a lump-free batter.',
+    '3. Rest the batter for 10–15 minutes so the suji absorbs the moisture.',
+    '4. Cook on medium heat until golden and crisp, then flip and cook for another 1–2 minutes.',
+    '', '#kalachanadosa #highproteindosa',
+  ].join('\n')
+  const out = parseMethodBlock(desc)
+  assert.equal(out.length, 4)
+  assert.equal(out[0], 'Soak the kala chana overnight and drain the water.')
+  // The detail that matters survives verbatim — this is the whole point of the checklist.
+  assert.match(out[3], /medium heat/)
+  assert.match(out[3], /1–2 minutes/)
+  // The hashtag block is not method.
+  assert.ok(!out.some(x => x.includes('#')))
+})
+
+test('marketing prose after the method is not method', () => {
+  // One sampled description ran 16 real steps then 12 lines of health claims. These lines are
+  // EMOJI-LED, so an anchored pattern slides straight past the emoji and keeps consuming.
+  const desc = [
+    'Instructions',
+    '1 Soak the lentils and quinoa in water overnight.',
+    '2 Blend until completely smooth.',
+    '3 Cook on both sides until golden brown.',
+    '‼️ Consult your doctor before use, especially if you have chronic conditions',
+    '❤️ Supports Heart and Vascular Health',
+    'Nutritional values per 100 g of the finished dish',
+  ].join('\n')
+  const out = parseMethodBlock(desc)
+  assert.equal(out.length, 3)
+  assert.ok(!out.some(x => /consult|Supports Heart|Nutritional/i.test(x)))
+})
+
+test('a description with no method yields nothing', () => {
+  // 8 of 14 sampled videos publish no method at all — the empty result must be clean, not noisy,
+  // because an empty checklist is simply omitted from the prompt.
+  assert.deepEqual(parseMethodBlock('2 eggs\n100g flour\n1 tsp salt'), [])
+  assert.deepEqual(parseMethodBlock(''), [])
+  // "Preparation time 10-15 minutes" is NOT a method heading, though a looser rule read it as one.
+  assert.deepEqual(parseMethodBlock('Preparation time 10-15 minutes\nCooking time 10 minutes'), [])
 })
