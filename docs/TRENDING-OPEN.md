@@ -148,3 +148,21 @@ correct behaviour.
       What is left costs money — a third-party transcript API (per-video fee, needs pricing) or
       Whisper on the audio, which is already on the PRELAUNCH "deliberately NOT" list. Do not spend
       another session rediscovering that the free route is closed.
+
+### CORRECTION to the section above (same day)
+
+"Most descriptions carry an ingredient list and NO method" was **half wrong**, and the wrong half
+was the actionable one. Measured on 14 sampled source descriptions: **6 publish a full numbered
+method**, all of it inside the 2000-char prompt window. The model could already see it and was
+summarising it away — "Kala Chana Dosa" published 9 steps, we stored 5, losing "drain the water",
+"medium heat" and "flip and cook for another 1-2 minutes".
+
+Fixed by `parseMethodBlock` + a SOURCE METHOD checklist in the prompt, and by removing the
+"simple recipes 4-6 steps" instruction that was *causing* the compression. Same remedy as the
+ingredient checklist, for the same reason.
+
+- [ ] **Unverified: does the method checklist actually raise the time/temperature rate?** Affects
+      new recipes only, so it needs a pipeline run to measure. Re-run the 27% / 14% figures against
+      rows generated after 2026-08-30 and compare. Costs YouTube quota — budget one run.
+- [ ] The video-link approach was built and then **reverted on Logan's call** (`8afcb04`, reverted
+      in the commit after). He does not want users sent out of the app. Do not re-propose it.
