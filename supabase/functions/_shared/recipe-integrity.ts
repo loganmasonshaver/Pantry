@@ -25,6 +25,15 @@
 const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /\b\d+\s*(kcal|kj|calories|cals)\b/i,                                  // "504 kcal"
   /\b(protein|carbs?|carbohydrates?|fats?|kalorien|kohlenhydrate?|eiwei(ß|ss)|fett|makro\w*)\s*[:=]/i, // "Protein: 51g", "Kohlenhydrate: 40,6 g"
+  // A macro line does NOT always carry a colon. The existing rule above requires ":" or "=", which
+  // is an English-formatting assumption: German creators print bare lines — "82,1 g Eiweiß",
+  // "44,5 g Kohlenhydrate", "39,2 g Fett" — and all three were entering the ingredient list. On one
+  // real recipe that inflated the retention contract from the creator's 7 items to 11, demanding
+  // ingredients that do not exist and rejecting the recipe.
+  //
+  // Anchored to END OF LINE, which is the whole safety of it: "30 g protein powder" is a real
+  // ingredient and must survive, and it only does because "powder" follows the macro word.
+  /^\s*[\d.,]+\s*(?:g|kcal|kj)?\s*(protein|eiwei(ß|ss)|kohlenhydrate?|carbs?|fett|fat|calories|kalorien)\s*$/i,
   // A bare macro header with no number or colon — "kcal/protein/fat/carbs" as its own line.
   /^[\s\W]*(kcal|calories)\s*[\/|,].*(protein|fat|carb)/i,
   /^(zutaten|ingredienti|ingr[ée]dients?|ingredients?|składniki|makroskładniki|przepis|recept\w*)\b/i, // headings, incl. localized
@@ -33,6 +42,9 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /(składniki|makroskładniki|łap\s+przepis|zutaten|przepis)/i,
   /https?:\/\/|www\.|\B@\w+/i,                                            // links and handles
   /\b(description tag|ingredients? label|full recipe|subscribe|follow me|link in bio|shop my|use code)\b/i,
+  // The same boilerplate in the languages this pool actually carries. "Speicher dir das Rezept"
+  // ("save this recipe") was being stored as an ingredient.
+  /\b(speicher dir|folge mir|abonnier\w*|rezept ab|guarda esta receta|s[ií]gueme|salva questa ricetta)\b/i,
   // Punctuation/numbers only — "no letter in ANY script", not "no ASCII letter".
   // \W is [^A-Za-z0-9_], so Cyrillic, Devanagari, CJK, Greek and Arabic all count as punctuation
   // and the old /^[\s\W\d]*$/ deleted every line of a non-Latin ingredient list. A real Russian

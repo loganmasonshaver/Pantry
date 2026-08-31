@@ -32,7 +32,7 @@ const BULLET_CHARS = "[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌�
 // would then fail the 100%-retention check and reject a perfectly good recipe for being "short".
 // The first group already stopped at METHOD/DIRECTIONS; this stops at the promo block when the
 // creator never wrote a method heading.
-const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy|more\s+recipes?|other\s+(?:recipes?|videos?)|recipes?\s+you|watch\s+next|related|playlist|chapters?|timestamps?)\b/i
+const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy|zubereitung|anleitung|przygotowanie|preparaci[oó]n|preparazione|more\s+recipes?|other\s+(?:recipes?|videos?)|recipes?\s+you|watch\s+next|related|playlist|chapters?|timestamps?)\b/i
 const NOISE_LINE = /(https?:\/\/|www\.|@[\w.]+|#\w+|comment |subscribe|follow me|link in bio|discount|instagram|tiktok)/i
 const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
 
@@ -66,7 +66,11 @@ function stripBullet(raw: string): string {
 
 function parseIngredientBlock(desc: string): string[] {
   if (!desc) return []
-  const heading = desc.match(/ingredients?\s*:?\s*\n/i)
+  // Where the ingredient list begins. Non-English headings included for the same reason the junk
+  // patterns carry Składniki and Zutaten: this pipeline accepts non-English sources on purpose, and
+  // a German description puts "Nährwerte" (macros) ABOVE "Zutaten" (ingredients) — so without
+  // knowing the heading, the parse starts at the top and reads the macro block as ingredients.
+  const heading = desc.match(/(?:ingredients?|zutaten|składniki|ingredienti|ingr[ée]dients?|ingredientes|材料)\s*:?\s*\n/i)
   const body = heading ? desc.slice(heading.index! + heading[0].length) : desc
   const bulleted: string[] = []
   const quantified: string[] = []
@@ -132,7 +136,11 @@ export function truncatedAgainstSource(names: string[], srcList: string[]): stri
 // grease it", "medium heat", "flip and cook for another 1-2 minutes" and the serving suggestion.
 // That is the same failure the INGREDIENT checklist was built to fix: a model asked to summarise
 // drops things, and a model handed a list to copy does not.
-const METHOD_HEADING = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|how to (?:make|prepare)|preparation|procedure)\b\s*:?\s*$/i
+// Non-English method headings. The pipeline deliberately accepts non-English sources and
+// translates them, so an English-only heading list means their method is never captured at all:
+// "XXL Tuna Mais Wrap" publishes four numbered steps under "Zubereitung:" and parsed to zero.
+// Same lesson this repo already learned for ingredient headings (Składniki, Zutaten).
+const METHOD_HEADING = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|how to (?:make|prepare)|preparation|procedure|zubereitung|anleitung|przygotowanie|preparaci[oó]n|preparazione|modo de preparo|pr[ée]paration)\b\s*:?\s*$/i
 
 // A trailing block that is not method any more — socials, hashtags, promos, a macro summary.
 const METHOD_END = /^(?:macros?|nutrition|calories|ingredients?|notes?|more\s+recipes?|other\s+(?:recipes?|videos?)|watch\s+next|related|playlist|chapters?|timestamps?|follow|subscribe)\b/i

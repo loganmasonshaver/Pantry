@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { isNonIngredientLine } from './recipe-integrity.ts'
 import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
 
 test('a decimal quantity is not a numbered-list marker', () => {
@@ -257,4 +258,53 @@ test('cook settings stated outside the method are captured', () => {
   const withMethod = ['T', 'Method', '1. Bake at 350°F for 30 minutes.'].join('\n')
   assert.deepEqual(parseCookSettings(withMethod), [])
   assert.deepEqual(parseCookSettings(''), [])
+})
+
+test('a NON-ENGLISH description parses like an English one', () => {
+  // umFTto2rCoc, German. The pipeline accepts non-English sources on purpose and translates them,
+  // so English-only heading rules silently break every one of them. Before this: the parse started
+  // at the top of the description because "Zutaten" was not a known heading, so the macro block
+  // above it became ingredients; the retention contract read 11 items where the creator listed 7,
+  // demanding ingredients that do not exist; and the method parsed to ZERO steps because
+  // "Zubereitung" was not a known method heading.
+  const desc = [
+    'Tag 1 – XXL High Protein MAIS WRAP',
+    '',
+    'Nährwerte (gesamter Wrap):',
+    '• 883 kcal',
+    '• 82,1 g Eiweiß',
+    '• 44,5 g Kohlenhydrate',
+    '• 39,2 g Fett',
+    '',
+    'Zutaten:',
+    '* 1 Dose Mais (285 g, abgetropft)',
+    '* 2 Eier',
+    '* 150 g Thunfisch (eigener Saft)',
+    '* 1 kleine rote Zwiebel',
+    '',
+    'Speicher dir das Rezept direkt ab, damit du es später nicht lange suchen musst.',
+    '',
+    'Zubereitung:',
+    '1. Mais, Eier und Light Käse vermengen und backen.',
+    '2. Thunfisch und Mayonnaise verrühren.',
+  ].join('\n')
+
+  const ing = parseIngredientBlock(desc)
+  // "Nährwerte" sits ABOVE "Zutaten", so the block-start heading is what keeps macros out. It must
+  // NOT be a STOP_LINE — stopping there killed the entire parse and yielded zero ingredients.
+  assert.ok(!ing.some(x => /Eiwei|Kohlenhydrate|Fett|kcal/i.test(x)), 'macro lines are not ingredients')
+  assert.ok(!ing.some(x => /Speicher dir/i.test(x)), 'German boilerplate is not an ingredient')
+  assert.ok(ing.some(x => /Thunfisch/.test(x)))
+  assert.equal(ing.length, 4)
+
+  assert.equal(parseMethodBlock(desc).length, 2, '"Zubereitung" is a method heading')
+})
+
+test('a macro line without a colon is still a macro line', () => {
+  // The existing rule required ":" or "=", which is an English-formatting assumption.
+  for (const junk of ['82,1 g Eiweiß', '44,5 g Kohlenhydrate', '39,2 g Fett', '883 kcal', '70 g protein'])
+    assert.equal(isNonIngredientLine(junk), true, `"${junk}" should be rejected`)
+  // Anchored to END OF LINE, and that is the whole safety of it — these are real ingredients.
+  for (const good of ['30 g protein powder', '100 g Light Käse', '20g fat free yogurt', '15 g protein bar'])
+    assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
 })
