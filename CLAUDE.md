@@ -107,6 +107,19 @@ npx expo run:ios   # build and run on iOS simulator
 - Meal cache is keyed by date + timezone; image-loading writes have corrupted it once.
   Any cache change needs verification at a day boundary, not just same-day.
 
+### Tab bar `animation` must stay `'none'`
+- This is the fix for the intermittent black screen on tab switch (`2bd6a62`). With ANY animation,
+  `BottomTabView` drives react-native-screens' `activityState` — the prop that attaches `RNSScreen`
+  to the UIKit hierarchy — through a native-driver interpolation whose detach threshold is the last
+  `1e-5` of the range. Desync with the JS commit and the incoming tab is focused and rendered in
+  React but detached natively: nothing draws, and on a `#000000` app that is a black screen.
+- Home is route index 0, so its animated value is never `+1` and Home is the one tab that never
+  detaches. That, not tab distance, is why every working pair contained Home.
+- Do not "restore the polish". `'fade'` is the same broken path. Nine other hypotheses were measured
+  and excluded first — see the commit body and the 2026-08-28 handoff in git history.
+- If it ever recurs, the next single variable is `detachInactiveScreens={false}` on `<Tabs>`, which
+  costs memory (all six screens pinned in the hierarchy) on a device that already logs pressure.
+
 ### Don't touch
 - **Image generation** — globally cached across users; per-user "optimizations" break the cost model.
 - **Yearly IAP ($29.99)** — works. When debugging Monthly, leave Yearly alone.
