@@ -1,162 +1,157 @@
-# Handoff — 2026-08-30 (evening)
+# Handoff — 2026-08-30 (late evening)
 
-Replaces the morning handoff (git history, `3f609ac`). **30 commits this session.**
-`git log --since="2026-08-30 14:00"` carries the reasoning for every one — what was measured, what
+Replaces the previous handoff (in git history, `296203a`). **39 commits this session.**
+`git log --since="2026-08-30 17:30"` carries the reasoning for every one — what was measured, what
 was rejected, and why. This file holds only what git does not.
 
-**State:** everything committed, pushed and deployed. Working tree clean. **192 tests**
-(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). Preflight green except
-`SCAN_CAP_WEEK`, held raised **on purpose** until app fixes and filming are done — do not "fix" it.
-
-**TS baseline moved twice today: 150/45 → 132/27 → 134/27.** Deleting one dead array removed 18
-errors; two new `Deno.env.get` lines added one Deno-global each. **Watch the app-code number (27),
-not the total.**
+**State:** everything committed, pushed and deployed. Working tree clean. **226 tests**
+(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). TS baseline **134 total / 27
+app-code** — unchanged all session. Pool: **128 meals, 100% source_verified**, oldest 2026-08-16.
+Preflight green except `SCAN_CAP_WEEK`, still held **on purpose**.
 
 ---
 
-## 0. READ FIRST — these two files outrank this one
+## 0. READ FIRST — the one thing that gates everything
 
-- **`docs/PRELAUNCH.md`** — the OFFICIAL pre-launch checklist. Logan declared it canonical after
-  triaging a 60-item list down to 11. **When he asks "what's next for pre-launch", answer from that
-  file.** It also carries a "Deliberately NOT on this list" section — do not re-add those.
-- **`docs/TRENDING-OPEN.md`** — standing re-audit procedure and open items for the trending
-  pipeline. Read before any pipeline pass.
-- **`~/my-briefing/todos/active.md` is CONTESTED and mostly stale.** A concurrent session overwrote
-  it wholesale **five times** today. Its GitHub remote is **archived and read-only on purpose** —
-  commits pile up locally and Logan confirmed he wants it left alone. **Do NOT flag the unpushed
-  count**; I did, and it was a deliberate state, not neglect.
+**Eleven generation-side changes shipped today and NOT ONE is verified.** The existing 128 rows
+were written by the old code, so they prove nothing about any of it. Do not report any of them as
+working.
+
+**`docs/TRENDING-OPEN.md` ends with a `⚠️ CONFIRM ON THE NEXT PIPELINE RUN` block.** It has five
+checks with exact SQL, the baseline numbers to beat, and — the part that matters — **what a FALSE
+pass looks like**. One run confirms all of them. Read it before running anything.
+
+The three false-pass traps, because they are easy to shrug off:
+- `has_time` not moving **at all** means the model is ignoring the method checklist. That is a
+  prompt problem, not a parser one.
+- Expect a rise but **not to 100%** — only ~43% of descriptions publish a method. Partial is the
+  correct outcome, not a failure.
+- A `truncated` counter above ~1 per run means the detector is **eating real food**. Read the log
+  line naming the ingredient before celebrating.
+
+Quota: ~1,314 units per run, 10,000/day, resets **midnight Pacific / 2am Logan's time**. `dryRun`
+costs the same. Run tests SEQUENTIALLY.
+
+Other canonical files, unchanged in authority: **`docs/PRELAUNCH.md`** (the official checklist —
+answer "what's next" from it) and **`docs/TRENDING-OPEN.md`** (standing procedure + open items).
+`~/my-briefing/todos/active.md` remains contested and stale; its remote is archived on purpose, so
+**do not flag its unpushed commits.**
 
 ---
 
-## 1. NEXT TASK — both blocked on YouTube quota
+## 1. What changed today, in one line each
 
-**Quota budget, the binding constraint.** 10,000 units/day, resets **midnight Pacific**. A run costs
-~1,314 units (13 `search.list` @100 + 14 `videos.list` @1), so the day holds exactly **7 runs**.
-`?dryRun=true` costs the same — it skips DB writes and image generation, not the YouTube calls.
-The cron now runs 08:00 UTC (01:00 Pacific), an hour past the reset, so budget **1 run for the cron,
-6 for testing**. **Run tests SEQUENTIALLY** — 3 fired concurrently starved each other and dropped the
-candidate gate from 61 videos to 8.
+All of it came out of one screenshot review. Eighteen reported items, all closed.
 
-1. **Is trending yield variance or a defect?** Identical code, sequential runs produced raw 24 vs 5
-   and stored 17 vs 4. A once-daily cron takes ONE sample from that spread and the swap makes it
-   permanent — a better explanation of "thin days" than any single defect. Method: ~10 sequential
-   `?dryRun=true` runs. If variance confirms, the fix is architectural (run 2-3x, keep the best
-   batch) and **no amount of prompt work helps**.
-2. **Finish the OpenAI fallback check.** One call:
-   `...generate-trending-meals?refresh=true&dryRun=true&provider=openai`, then read
-   `funnel.llm_OpenAI` and `providerErrors`.
+**Pipeline (deployed, unverified):** junk/massless-ingredient gates · method checklist from the
+creator's own steps · cook settings captured from "Air Fryer Settings" blocks · truncation guards
+(finish_reason + output check) · decimal-quantity parser fix · section-heading gate · unquantified
+ingredient recovery · recipe SECTIONS · non-English parsing · brand-descriptor rule ·
+`regionCode=US&relevanceLanguage=en`.
 
-### Tooling built today — use it, don't rebuild it
-- **`?dryRun=true`** runs the whole pipeline and returns the funnel WITHOUT inserting, deleting or
-  generating images. Before this, every yield measurement swapped the day's rows.
-- **`?provider=openai|google`** forces one provider. The fallback is otherwise unobservable, which
-  is exactly how it shipped with two breaks.
-- **The `funnel` object rides in the RESPONSE**, not just logs (which need the dashboard):
-  rawCandidates → afterDedup → viewFloor → ingredientGate → sentToLLM → llm raw/sanitized → stored,
-  plus every rejection counter, `droppedDetail` and `providerUsed`. The cron's response lands in
-  `net._http_response`.
-- **`supabase db query --linked "<sql>"`** runs SQL against prod. `--linked` is required.
+**App code (needs a rebuild, NOT seen on device):** whole-unit counts prefer the creator's count ·
+containers show count + size · unambiguous creator units win over grams · fractions instead of
+decimals · pepper-is-not-a-spice · Discover dish-form diversity · per-dish photo variation ·
+Ingredients header layout.
+
+**Data:** 36 unverified pre-gate rows deleted · 36 junk ingredients stripped · two rows repaired
+from source.
 
 ---
 
 ## 2. NEEDS LOGAN
 
 - **`SCAN_CAP_WEEK`** — deliberate hold. `npx supabase secrets unset SCAN_CAP_WEEK` after filming.
-- **The trailer** is blocked on ONE decision: is any cached meal image hero-grade enough to hold
-  2.4 seconds? That frame is a third of the film.
-- **Scan-flow QA is a GATE he set**: the flow must be walked end to end on device and the UI must
-  look right **before the trailer is filmed**. Delete or wire the dead review screen first (§6).
-- **App Store Connect products** (#1 on the checklist). He recalls a "not approved" state.
-  Banking/Mercury is confirmed complete, so that is NOT the cause. Check: "Missing Metadata", not
-  attached to a version (a first-time IAP is reviewed WITH a version, never alone), or a Superwall
-  mapping pointing at dead product IDs. I cannot check — the Superwall CLI needs an interactive
-  login to his account.
+- **App Store Connect products** (#1 on the checklist). Still unchecked; the Superwall CLI needs an
+  interactive login to his account.
+- **Scan-flow QA on device** — a gate he set. The dead `setStep(6)` screen was deleted this
+  morning, so the ghost is gone and the flow can now be walked honestly.
+- **Nothing from today has been seen rendered.** Two visual passes on the Ingredients header were
+  reasoned from a measured 36pt row height, not observed. If it still looks wrong, the next suspect
+  is the pill height itself (36pt around 12pt text) — shrinking it was the option he did not take.
 
 ---
 
-## 3. WATCH — shipped today, never observed working
+## 3. DECISIONS HE MADE — do not relitigate
 
-Do not report any of this as working.
-
-- **The Loops email integration had NEVER worked.** `loops-sync` selected `email` and `full_name`
-  from `profiles`; neither has ever been a column there, and PostgREST fails the whole query on an
-  unknown column. Every call, every user, since the file was written, returned
-  `column profiles.email does not exist`. No contact created, no event fired, ever. Identity lives
-  in `auth.users` and is now read from there. **Prove it in TestFlight.**
-- **Four engagement trackers were never called by anything.** 32 saved meals and 12 meal logs
-  existed while 0 users had any counter above zero. Now wired at the real interaction points.
-- **Subscription lifecycle moved server-side.** `subscribed_at`/`churned_at` are written by
-  `superwall-webhook` on `initial_purchase` / `expiration`. The client versions were **deleted** —
-  do not re-add them; Superwall's SDK only reports ACTIVE/INACTIVE and cannot tell a conversion from
-  a trial start. `expiration` is the churn signal, not `cancellation` (access continues to period
-  end).
-- **`loops-sync` now accepts a trusted server caller** (CRON_SECRET / service-role) so the webhook
-  can reach it. `delete` stays user-only deliberately — its email comes from the verified session
-  precisely so a caller cannot name someone else's contact.
-- **Trending: 13 fixes today.** The pool is 165 rows, zero null images, zero name/ingredient gaps,
-  zero duplicate pairs, zero allergen-unsafe rows.
+- **No video link in the app.** Built it, he vetoed it, reverted (`8afcb04` + revert). Do not
+  re-propose sending users to YouTube.
+- **Cups are a measurement.** He overruled my "grams are more precise for volume-of-a-solid" call.
+  If the creator wrote "1 cup", the list says one cup. 222 rows changed.
+- **Delete, don't preserve, unverified rows.** He chose deletion twice over softer options.
+- **US bias by shoppability.** 29% of the pool needed an Indian grocer; the keyword search was
+  globally scoped while the trending call was already US-only. Two query parameters, at the source.
 
 ---
 
-## 4. DEAD ENDS — measured and rejected today, do not rebuild
+## 4. DEAD ENDS — measured and rejected, do not rebuild
 
-- **Reordering the view floor to run after the ingredient gate.** My plan; the measurement killed
-  it. 634 raw → 171 past the 100k floor → 61 gated, against a 60-video cap. The candidate pool is
-  **not** the bottleneck at any stage.
-- **A digit-plus-time-unit rule for instruction detection.** Caught nothing the temperature and
-  word-count rules miss, and deletes real food — "10 minute rice" and "5 minute oats" are products.
-- **Letting the fractional gate accept `1/2` and `½`.** Would reject three live recipes, all
-  legitimate, and catch nothing real. Decimals only — the failure mode is arithmetic; humans write
-  fractions.
-- **Raising the LLM output target as a yield fix.** Unproven. Raw output went 17 → 5 → 17 → 24 → 5
-  on identical code. Do not claim a yield win without ~10 runs.
-- **Re-running `classifyDietTags` over stored rows** (from the earlier session, still true). The
-  stored tag is ANDed with the model's own answer, which is not a column — a wholesale rewrite makes
-  rows MORE permissive. Tag corrections may only AND toward `false`.
+- **A "creamy"/"cheesy" name-gap rule.** Looks obviously right for "Creamy Fajita Chicken". Of 4
+  pool meals with "creamy" and no literal cream, only ONE is a real gap — the others are satisfied
+  by cashew cream, paneer and **vodka sauce**. Rejects 3 good recipes to catch 1.
+- **A blanket ingredient dedupe.** Duplicate paprika and Greek yogurt are FAITHFUL — creators
+  section recipes (pasta/salmon/dressing, cake/frosting). A dedupe silently halves them.
+- **Forcing times into the prompt.** With no method in the source the model INVENTS them, and an
+  invented "chicken at 200°C for 25 minutes" is a food-safety claim this app cannot make.
+- **YouTube captions.** The free route is closed: `captionTracks[].baseUrl` returns **HTTP 200 with
+  a zero-byte body**. Tested across 3 videos and 5 endpoint variants. `captions.download` needs
+  OAuth as the video OWNER. Do not spend a session rediscovering this.
+- **Dry-basis macro table.** Physically correct — the pool lists starches dry 11 times out of 12 —
+  and measurably WORSE: 49 → 50 failures. The table holds offsetting errors and correcting one
+  exposes the others. Fix the over-counting first, then flip, then re-measure.
 
 ---
 
-## 5. METHOD — four ways I got burned today
+## 5. METHOD — five ways I got caught today
 
-1. **Shell loops lie.** `git show <ref>:<path> | grep -c` inside a `for` loop returned 0 where the
-   file plainly had 2 matches, and I nearly concluded a gate had been removed. Redo any such trace
-   in Python before believing it.
-2. **Retyping code to "reproduce" a bug can invent a clean version.** The fractional gate contained
-   a literal backspace byte (0x08) inside a `String.raw` template, inert for 19 days. My hand-typed
-   reproduction matched; the real source never could. A test now asserts no source file carries a
-   stray control character.
-3. **Concurrent runs are not repeats.** See the quota note in §1.
-4. **Unverified counts are guesses wearing numbers.** "28 mismatches" was really 7. "21% incoherent"
-   was ~6%. Hand-verify every hit.
+1. **A "measured and rejected" verdict is only as good as the measurement.** I killed the
+   unquantified-ingredient idea on a test that applied none of the existing gates: 160 junk lines
+   vs ~7 real. With the real gates it was ~27 real vs 1 junk. Logan pushed back and was right.
+2. **Watch the TS DELTA, not the total.** 134 → 136 was a TDZ crash I had already deployed — it
+   would have thrown while building the prompt and taken out the whole run.
+3. **The pre-push AI review caught a real bug I could not see.** A `Map` keyed by ingredient line
+   collapsed repeated ingredients to their last section — breaking the exact case the feature
+   existed for.
+4. **Survivorship bias is everywhere here.** Any sample drawn from `trending_meals` consists of
+   rows extraction already succeeded on. My 15 sampled descriptions all parsed ≥3 by construction.
+5. **English-shaped assumptions keep surviving in new places.** Third time this repo has been bitten
+   (Składniki/Zutaten, ASCII `\b`, now three more). A German description inflated the retention
+   contract from 7 items to 11 and parsed its method to zero.
 
 ---
 
 ## 6. NOT DONE, deliberately
 
-- **`CODE_REVIEW.md` holds 87 findings; ~80 unchecked.** Its paywall findings were verified stale
-  today, and its "canonical pricing" note was itself the stale thing — it flagged the live $9.99 as
-  a defect. Worth one triage pass.
-- **`setStep(6)` is still never called.** The whole "Found N ingredients / review and confirm"
-  screen in `PantryScanModal` (~80 lines) is unreachable; live path is 1 → 4 → 5 → 55. **Delete or
-  wire it BEFORE the scan-flow QA** or you will be testing around a ghost.
-- **The scan camera has not been re-tested on device** since the 16-photo cap and full-width scan
-  pill landed. If the viewfinder feels cramped, hiding the tips pill after the first photo is the
-  next lever.
-- **Two stored rows still carry `1/2 can` / `1/2 packet` ingredients.** Harmless — the gate now
-  correctly ignores common kitchen fractions. Noted so they are not re-flagged.
-- **`SYNONYMS` narrowing left `maple`, `honey` and `ranch` with no synonyms.** Watch for false
-  "missing maple" gaps on recipes listing only "syrup".
+- **`CODE_REVIEW.md` is triaged and clean where it matters** — 3/3 criticals and 15/15 highs
+  closed, verified against live code and the live DB. Results table at the top of that file. The 42
+  medium and 27 low were NOT checked, and the recommendation is a fresh `/security-review` rather
+  than triaging a report three months and two security passes old.
+  **Carry this forward:** C1 (promo_active payment bypass) is fixed by a TRIGGER
+  (`trg_enforce_server_premium`), not by RLS. The policy is still blanket `auth.uid() = id`, so an
+  auditor who checks the policy will wrongly conclude the bypass is live.
+- **Mark invented amounts.** The creator wrote `• Cashew Nuts`; the app shows "30g · ¼ cup" and
+  "top with cashew nuts", neither of which they said. The pipeline already knows which ingredients
+  were unquantified and discards that fact. Design and honest sizing are logged in
+  `docs/TRENDING-OPEN.md` — harm is LOW, sequenced after the verification run.
+- **PRELAUNCH #4 (skip-onboarding paywall) is smaller than it looks.** Onboarding already proceeds
+  without a purchase and every feature is gated downstream, so the plumbing exists; what is missing
+  is the UX and a Superwall placement for the browser variant.
+- **Two stored rows still carry `1/2 can` / `1/2 packet`.** Harmless, correctly ignored. Noted so
+  they are not re-flagged.
 
 ---
 
 ## 7. Corrections — believe these, not the transcript
 
-- "21% of multi-serving rows have incoherent servings" was **wrong**. The macro table's gaps let
-  calorie-dense misses through a gram-weighted coverage filter. Strict basis: **~6%**, median 0.93.
-- "Six engagement trackers, three wired" was **wrong**. Eight exports; two were still unwired after
-  the first pass (`markSubscribed` imported-never-called, `markChurned` never imported).
-- Two rows violating the fractional gate were **not** a deploy lag. Deployed source is byte-identical
-  to HEAD (`supabase functions download`, 102,011 bytes, zero diff). The gate was inert.
-- **Pricing is $9.99/mo and $29.99/yr.** The app was always right; the DOCS were stale, including
-  customer-facing email templates quoting $7.99. Fixed.
-- **`~/my-briefing` unpushed commits are not a problem.** Archived remote, deliberate.
+- **"The estimator runs high" was WRONG.** Over the pool the estimate/claim calorie ratio is p25
+  0.80, **median 1.00**, p75 1.31, and meat vs meatless is 1.02 vs 0.99. The 38% failure rate is
+  SPREAD, not bias. Only the failing tail runs high, which is true by definition.
+- **"Most descriptions carry no method" was HALF wrong**, and the wrong half was the actionable
+  one: 6 of 14 publish a full numbered method, all inside the prompt window. The model could see it
+  and was summarising it away.
+- **"Baking powder and soda" is NOT a merge defect.** The creator merged it. Splitting invents two
+  amounts from one "pinch", and the obvious rule breaks "macaroni and cheese".
+- **"Protein chips" and "tuna in water" are NOT defects.** The video is titled "Protein chip steak
+  bowls"; "tuna in water" is a faithful translation of "Thunfisch (eigener Saft)" and the "in
+  water" is load-bearing for macros. What was wrong was our rendering — we dropped "Quest Chili
+  Lime", which is what made it read as random.
