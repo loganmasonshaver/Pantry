@@ -799,6 +799,16 @@ PORTION + MACRO DETAILS:
   readable: 2 tsp garlic powder for the pasta and 1 tsp for the dressing are two entries that a
   reader can tell apart only if each says which part it belongs to. Never invent a part that the
   source did not label, and never merge two entries because they share a name.
+- BRANDS: drop the brand NAME, keep every descriptor. The descriptors are what make an ingredient
+  make sense and what a shopper actually needs; the brand is the part that varies by store.
+  ✓ "Quest Chili Lime Protein Chips"        -> "chili lime protein chips"
+  ✓ "Sargento Natural Pepper Jack Cheese"   -> "pepper jack cheese"
+  ✓ "Hormel 60% Less Fat Turkey Pepperoni"  -> "reduced fat turkey pepperoni"
+  ✓ "Mid's Pizza Sauce"                     -> "pizza sauce"
+  ✗ NEVER strip to the bare category: "protein chips" alone reads as a random addition, while
+    "chili lime protein chips" reads as the deliberate crunchy topping the creator intended.
+  KEEP the brand when it IS the food and has no generic name — Oreo, Biscoff, Nutella, Skyr, and
+  branded supplements with no equivalent. Dropping those loses the ingredient itself.
 - NAME EACH INGREDIENT BY ITS FOOD, never by its role or by the section heading above it. Creators
   structure descriptions in parts ("Cake", "Frosting", "Topping", "For serving") and the food is the
   line UNDER the heading, not the heading.
