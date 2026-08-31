@@ -64,7 +64,12 @@ export default function TabLayout() {
         tabBarStyle: styles.tabBar,
         tabBarActiveTintColor: '#FFFFFF',
         tabBarInactiveTintColor: '#AAAAAA',
-        animation: 'shift', // subtle directional shift+fade between tabs (v7); 'none' was the abrupt default
+        // 'none' is load-bearing, not a downgrade. Any animation makes BottomTabView drive
+        // react-native-screens' `activityState` (what attaches RNSScreen to the UIKit hierarchy)
+        // through a native-driver interpolation, so a UI-thread/JS desync leaves the incoming tab
+        // focused and rendered in React but detached natively — the intermittent black screen.
+        // A literal 0/2 commits atomically with the tree. See the commit for the 9 excluded causes.
+        animation: 'none',
       }}
     >
       <Tabs.Screen
