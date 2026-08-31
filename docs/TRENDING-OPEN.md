@@ -215,6 +215,48 @@ where t.generated_at > '2026-08-30'
     or i->>'name' ~* '(^(total )?(calories|protein|carbs?|fats?)$|step$|^(dry|wet|batter) mix$)');
 ```
 
+---
+
+## Next up, AFTER the verification run above
+
+- [ ] **Mark amounts the model INVENTED, so they don't read as the creator's.**
+
+      The creator of `blm9ES-AjaM` ("Air Fryer Chocolate Oats Cake") listed exactly `• Cashew Nuts`
+      — no quantity, no placement, and no method section at all. The app displays **"30g · ¼ cup
+      cashew nuts"** and the step *"Pour into a cake tin and top with cashew nuts"*. Both are the
+      model's inventions and neither is distinguishable from something the creator stated. The
+      generated hero image then shows a dense mound of whole cashews, illustrating a topping the
+      recipe never specified at an amount nobody gave.
+
+      The invention itself is NECESSARY — macros need grams, and a recipe needs some instruction.
+      The defect is that nothing marks it as an estimate.
+
+      **Why this is buildable now and wasn't this morning:** the unquantified case is already
+      detected. `parseUnquantifiedExtras` finds bare lines, and the bulleted branch of
+      `parseIngredientBlock` keeps a bulleted line whether or not it carries a quantity — which is
+      exactly how `• Cashew Nuts` reached the checklist. So the pipeline already KNOWS which
+      ingredients the creator left unquantified; that fact is simply thrown away.
+
+      Design: an `estimated: true` flag on the ingredient, set when the source line carried no
+      quantity, rendered as "~30g" rather than "30g". Threading is parser -> prompt -> storage ->
+      `getMeasuredDisplay`.
+
+      It matches a convention this app already holds: never "Dairy-free", always "No dairy in the
+      listed ingredients."
+
+      **Honest sizing before anyone picks this up:** the harm is LOW. An invented 30g of cashews
+      misleads nobody into a bad outcome. The dangerous version — invented cook times and
+      temperatures on meat — was deliberately NOT built, and must not be: with no method in the
+      source the model would fabricate them, and an invented "chicken at 200°C for 25 minutes" is a
+      food-safety claim this app cannot stand behind. So this is an honesty improvement, not a
+      safety one. Sequenced after the verification run because that run is already gating six
+      shipped changes, and this would add a seventh unverified one to the pile.
+
+- [ ] **NOT a defect, recorded so it is not "fixed" by someone later:** `"Baking powder and soda"`
+      as one ingredient row is FAITHFUL — the creator wrote "A pinch of Baking Powder & Baking
+      Soda" on one line. Splitting it means inventing two amounts from one "pinch". And the obvious
+      split rule is a trap: "salt and pepper" splits correctly, "macaroni and cheese" does not.
+
 **Quota:** ~1,314 units per run against 10,000/day, resetting midnight Pacific. `dryRun` costs the
 same — it skips DB writes and image generation, not the YouTube calls. Run tests SEQUENTIALLY.
 
