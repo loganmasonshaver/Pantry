@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
+import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
 
 test('a decimal quantity is not a numbered-list marker', () => {
   // \d+[.)] matched the DECIMAL POINT: "1.5 tsp Salt" was read as list item "1." followed by
@@ -234,4 +234,27 @@ test('sections: "FOR X" headings, and no sections at all', () => {
   const plain = parseIngredientSections('Title\n2 eggs\n100g flour\n1 tsp salt')
   assert.ok(plain.length >= 3)
   assert.ok(plain.every(r => r.section === null))
+})
+
+test('cook settings stated outside the method are captured', () => {
+  // blm9ES-AjaM puts its only cook data in its own block. The model got this one right by reading
+  // the description, but MMZLNzNdmzE published "Cooking time 10-15 minutes" and its stored step
+  // reads "steam until cooked" — the number lost.
+  const cake = ['Healthy Chocolate Oats Cake in Air Fryer', '', 'Ingredients:', '• 100g Oats',
+                '', 'Air Fryer Settings:', '🌡️ 140°C', '⏱️ 35 Minutes'].join('\n')
+  assert.deepEqual(parseCookSettings(cake), ['140°C', '35 Minutes'])
+
+  const momo = ['No Maida Momo', 'Preparation time 10-15 minutes', 'Cooking time 10-15 minutes'].join('\n')
+  assert.deepEqual(parseCookSettings(momo), ['Preparation time 10-15 minutes', 'Cooking time 10-15 minutes'])
+
+  // A TITLE sells on time — "in just 5 minutes!" is a hook, not a setting. Line 0 is skipped and
+  // so is any sentence with an exclamation mark; without both, this was a false positive.
+  const hook = ['Crispy Salmon Wrap in just 5 minutes! 🥑', 'Ingredients:', 'Cream cheese'].join('\n')
+  assert.deepEqual(parseCookSettings(hook), [])
+  assert.deepEqual(parseCookSettings('Title\nMake it in 10 minutes!'), [])
+
+  // Data already carried by the method checklist is not repeated.
+  const withMethod = ['T', 'Method', '1. Bake at 350°F for 30 minutes.'].join('\n')
+  assert.deepEqual(parseCookSettings(withMethod), [])
+  assert.deepEqual(parseCookSettings(''), [])
 })

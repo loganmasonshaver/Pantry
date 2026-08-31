@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
+import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
@@ -650,6 +650,15 @@ Deno.serve(async (req: Request) => {
       // keeps it, asked to summarise it drops things. "Kala Chana Dosa" published 9 steps and we
       // stored 5, losing "drain the water", "medium heat" and "flip and cook for another 1-2
       // minutes" — every one of which was inside the description the model was already shown.
+      // Temperatures and times the creator stated OUTSIDE any method section — an "Air Fryer
+      // Settings" block, a bare "Cooking time 10-15 minutes". Nothing captured these, so the model
+      // summarised them away: "Chicken Semolina Momos" published "Cooking time 10-15 minutes" and
+      // its stored step reads "steam until cooked". Only 27% of stored meals state any cook time,
+      // and a stated one is the difference between a recipe you can follow and a guess.
+      const cookData = parseCookSettings(v.description || '')
+      const cookList = cookData.length
+        ? `\n   SOURCE COOK SETTINGS (the creator stated these — put them IN the steps, do not drop them):\n${cookData.map(x => `     - ${x}`).join('\n')}`
+        : ''
       const method = parseMethodBlock(v.description || '')
       const methodList = method.length >= 3
         ? `\n   SOURCE METHOD (${method.length} steps — follow these IN ORDER and keep every time, temperature, heat level and technique. Do not merge or summarise them):\n${method.map(x => `     - ${x}`).join('\n')}`
@@ -695,7 +704,7 @@ Deno.serve(async (req: Request) => {
       const extraList = extras.length
         ? `\n   ALSO LISTED, without quantities (include these too, estimating a sensible amount; they do NOT count toward the ${parsed.length} above):\n${extras.map(x => `     - ${x}`).join('\n')}`
         : ''
-      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${extraList}${methodList}`
+      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${extraList}${methodList}${cookList}`
     }).join('\n\n')
 
     const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.

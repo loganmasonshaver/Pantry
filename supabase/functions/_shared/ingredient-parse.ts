@@ -270,4 +270,36 @@ export function parseIngredientSections(desc: string): { line: string; section: 
   return out
 }
 
+
+// ── Cook temperatures and times stated outside the method ──────────────────────────────────────
+//
+// Creators often put the numbers in their own block — "Air Fryer Settings: 🌡️ 140°C ⏱️ 35 Minutes",
+// "Cooking time 10-15 minutes" — which is neither an ingredient nor a method step, so nothing
+// captured it and the model summarised it away. "Chicken Semolina Momos" published "Cooking time
+// 10-15 minutes" and the stored step reads "steam until cooked".
+//
+// This matters more than its size suggests: only 27% of stored meals state any cook time at all,
+// and a stated one is the difference between a recipe you can follow and a guess.
+const TEMP_OR_TIME = /\d\s*°|\b\d{2,3}\s*°?\s*[cf]\b|\b\d+\s*(?:-\s*\d+\s*)?(?:min(?:ute)?s?|hours?|hrs?|seconds?|secs?)\b/i
+
+/** Lines where the creator stated a temperature or a duration. Deduped against the method. */
+export function parseCookSettings(desc: string): string[] {
+  if (!desc) return []
+  const inMethod = new Set(parseMethodBlock(desc))
+  const out: string[] = []
+  const raws = desc.split('\n')
+  // Line 0 is the video title, and titles sell on time: "Crispy Salmon Wrap in just 5 minutes!"
+  // is a hook, not a cook time. Same skip the other parsers here make, for the same reason.
+  for (let i = 1; i < raws.length; i++) {
+    const line = stripBullet(raws[i]).replace(/^[^\p{L}\p{N}]+/u, '').trim()
+    if (!line || line.length > 80) continue
+    if (/!/.test(line)) continue   // a sentence selling the recipe, not stating a setting
+    if (!TEMP_OR_TIME.test(line)) continue
+    if (NOISE_LINE.test(line) || inMethod.has(line)) continue   // already carried by the method list
+    if (!out.includes(line)) out.push(line)
+    if (out.length >= 6) break
+  }
+  return out
+}
+
 export { parseIngredientBlock, stripBullet }
