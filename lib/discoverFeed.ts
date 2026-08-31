@@ -21,6 +21,8 @@ export type DiscoverMeal = {
   steps: any[]
   image: string | null
   trend_source: string | null
+  /** YouTube id of the source video. Stored since the pipeline began and surfaced nowhere. */
+  video_id: string | null
   creator: any | null
   vote_score: number
   log_count: number
@@ -89,6 +91,7 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
       shelf_tag: m.shelf_tag ?? null, source_verified: m.source_verified === true,
       ingredients: m.ingredients, steps: m.steps, image: m.image,
       trend_source: m.trend_source,
+      video_id: m.video_id ?? null,
       creator: m.creators ?? null,
       vote_score: m.vote_score ?? 0,
       log_count: m.log_count ?? 0,
