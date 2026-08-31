@@ -163,7 +163,7 @@ const CAMERA_TIPS = [
   // the areas hub after every shot — and it's the opposite of the truth: recall scales with
   // coverage, so a deep drawer or a wide counter wants several shots, not one.
   'Several shots per area is fine',
-  'Shoot drawers and shelves separately',
+  'Drawers and shelves separately',
 ]
 
 const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
@@ -915,24 +915,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
               {/* Top scrim keeps the X / help / count legible over a bright frame */}
               <LinearGradient colors={['rgba(0,0,0,0.55)', 'transparent']} style={styles.cameraTopScrim} pointerEvents="none" />
-              <View style={[styles.cameraTopBar, { top: insets.top + 12 }]}>
-                {/* Once a photo exists, this camera was opened FROM the areas hub — so the top-left
-                    control is Back (to the hub), not Close. It used to be ✕ = kill the whole scan,
-                    so tapping into "Fridge" by mistake and backing out threw the scan away. ✕ only
-                    survives on the very first shot, where there's nothing to go back to. */}
-                {photos.length > 0 ? (
-                  <TouchableOpacity
-                    style={styles.cameraCloseBtn}
-                    onPress={() => { setPendingLabel(null); setStep(4) }}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <ChevronLeft size={22} stroke="#FFFFFF" strokeWidth={2} />
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
-                    <X size={20} stroke="#FFFFFF" strokeWidth={2} />
-                  </TouchableOpacity>
-                )}
+              <View style={[styles.cameraTopBar, { top: insets.top + 4 }]}>
+                {/* ✕ always, photos or not — Logan's call. This briefly swapped to a Back chevron
+                    once a photo existed (to the areas hub) because ✕ here calls handleClose, which
+                    resets photos with no confirmation. That trade is accepted: one control with one
+                    meaning beats a control that changes what it does under you. NOTE the live edge —
+                    ✕ with photos in hand discards them silently. */}
+                <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                  <X size={20} stroke="#FFFFFF" strokeWidth={2} />
+                </TouchableOpacity>
                 {/* The photo count lived here. It duplicated the filmstrip below — which shows the
                     same number as actual pictures — so the tips pill gets the slot instead. */}
                 <View style={styles.cameraTopCenter} />
@@ -945,8 +936,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
               {/* Tips pill, moved up out of the bottom stack. It's guidance you want BEFORE framing
                   a shot, and down there it was competing with the filmstrip and the shutter for
-                  the space the viewfinder needs. */}
-              <View style={[styles.cameraTipWrap, { top: insets.top + 58 }]} pointerEvents="box-none">
+                  the space the viewfinder needs. Now shares the back-arrow's line: it owned a
+                  whole band of its own for one 30pt pill, and that band is viewfinder. */}
+              <View style={[styles.cameraTipWrap, { top: insets.top + 4 }]} pointerEvents="box-none">
                 <TouchableOpacity
                   style={styles.cameraTipRow}
                   onPress={() => setShowPrep(true)}
@@ -1026,7 +1018,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         >
                           <X size={11} stroke="#FFFFFF" strokeWidth={3} />
                         </TouchableOpacity>
-                        <Text style={styles.filmLabel} numberOfLines={1}>{p.label}</Text>
                       </View>
                     ))}
                   </ScrollView>
@@ -1770,14 +1761,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.6)',
     borderWidth: 3,
   },
-  bracketTL: { top: '13%', left: '4%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
-  bracketTR: { top: '13%', right: '4%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
-  // Bottom brackets sit well above the copy/shutter scrim (was 20% → collided with the title).
-  // Raised from 27%: the bottom stack grew a filmstrip and a full-width button, and the corner
-  // brackets were being drawn straight through the first thumbnail. They frame the shot, so they
-  // have to sit above everything that isn't the shot.
-  bracketBL: { bottom: '40%', left: '4%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
-  bracketBR: { bottom: '40%', right: '4%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
+  bracketTL: { top: '12%', left: '4%', borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 8 },
+  bracketTR: { top: '12%', right: '4%', borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 8 },
+  // Bottom brackets must clear the filmstrip — they frame the shot, so they have to sit above
+  // everything that isn't the shot, and at 27% they were drawn straight through the first
+  // thumbnail. 40% overcorrected and left ~100pt of dead frame; dropping the per-photo labels
+  // lowered the strip another ~20pt. 30% leaves roughly a 30pt gap above the thumbnails' ✕ badges.
+  bracketBL: { bottom: '30%', left: '4%', borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 8 },
+  bracketBR: { bottom: '30%', right: '4%', borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 8 },
   cameraBottom: {
     paddingTop: 12,
     paddingBottom: 4,
@@ -1862,7 +1853,7 @@ const styles = StyleSheet.create({
   // edges — a row that stops short of the edge reads as a finished list, not a scrollable one.
   filmstrip: { alignSelf: 'stretch', maxHeight: 84, marginBottom: 2, marginHorizontal: -24 },
   filmstripContent: { gap: 12, paddingHorizontal: 24, paddingTop: 8 },
-  filmItem: { alignItems: 'center', gap: 4, width: 56 },
+  filmItem: { alignItems: 'center', width: 56 },
   filmImg: {
     width: 56,
     height: 56,
@@ -1886,7 +1877,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 2,
   },
-  filmLabel: { fontSize: 10, color: '#AAAAAA', fontWeight: '500', maxWidth: 56, textAlign: 'center' },
   cameraScanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1899,7 +1889,10 @@ const styles = StyleSheet.create({
     borderRadius: 30,
   },
   cameraScanBtnBusy: { opacity: 0.65 },
-  cameraTipWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
+  // Height matches cameraCloseBtn so the pill centres on the back arrow whatever the pill's own
+  // height is. left/right clear the 36pt top-bar controls (which start at 16) — without that a long
+  // tip grows under the back arrow, since the pill is centred and free to widen in both directions.
+  cameraTipWrap: { position: 'absolute', left: 56, right: 56, height: 36, alignItems: 'center', justifyContent: 'center' },
   cameraScanBtnText: { fontSize: 15, fontWeight: '700', color: '#000000' },
 
   // Extra grid (step 4)
@@ -2062,7 +2055,7 @@ const styles = StyleSheet.create({
   // Camera capture hint
   // Bordered pill = "this is tappable"; the bare row read as static caption text.
   cameraTipRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 6,
     alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 7,
     borderRadius: 20, borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)', backgroundColor: 'rgba(74,222,128,0.10)',
   },
