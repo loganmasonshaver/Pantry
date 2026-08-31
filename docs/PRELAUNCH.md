@@ -31,6 +31,10 @@ significant findings on every pass — 13 fixes on 2026-08-30 alone, including t
       fix is architectural (run 2-3x, keep the best batch) and no amount of prompt work helps.
 - [ ] Finish the OpenAI fallback verification — one call:
       `...generate-trending-meals?refresh=true&dryRun=true&provider=openai`
+- [ ] **Four fixes shipped 2026-08-30 affect GENERATION only and are still unproven** — the method
+      checklist, the truncation guards, the decimal parser fix and the junk gates. One run confirms
+      all four; the exact SQL and pass criteria are in the "CONFIRM ON THE NEXT PIPELINE RUN"
+      section at the end of `docs/TRENDING-OPEN.md`. Do not claim any of them work until then.
 - [ ] Treat "it looks fine" as untested. Hand-verify every count before believing it.
 
 **QUOTA BUDGET — the binding constraint on all of the above.** YouTube allows 10,000 units/day,

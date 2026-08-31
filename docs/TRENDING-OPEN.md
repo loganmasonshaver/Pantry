@@ -161,8 +161,59 @@ Fixed by `parseMethodBlock` + a SOURCE METHOD checklist in the prompt, and by re
 "simple recipes 4-6 steps" instruction that was *causing* the compression. Same remedy as the
 ingredient checklist, for the same reason.
 
-- [ ] **Unverified: does the method checklist actually raise the time/temperature rate?** Affects
-      new recipes only, so it needs a pipeline run to measure. Re-run the 27% / 14% figures against
-      rows generated after 2026-08-30 and compare. Costs YouTube quota — budget one run.
 - [ ] The video-link approach was built and then **reverted on Logan's call** (`8afcb04`, reverted
       in the commit after). He does not want users sent out of the app. Do not re-propose it.
+
+---
+
+# ⚠️ CONFIRM ON THE NEXT PIPELINE RUN
+
+Everything shipped on 2026-08-30 below affects GENERATION only, so none of it is proven yet — the
+existing pool was written by the old code. **One run confirms all four.** Do this before claiming
+any of them work.
+
+Run it as a dry run first so it does not swap the day's rows:
+
+```
+.../generate-trending-meals?refresh=true&dryRun=true
+```
+
+**1. Method checklist — does it raise instruction depth?** (`ec4a1d1`)
+Baseline to beat, measured 2026-08-30 over 128 rows: **27% state a cook time, 14% a temperature**,
+4.2 steps, 351 chars average. Re-measure against rows written by the new code:
+
+```sql
+select count(*) as meals,
+       count(*) filter (where steps::text ~* '[0-9]+\s*(minute|min|hour|hr|second|sec)') as has_time,
+       count(*) filter (where steps::text ~* '[0-9]+\s*(°|degree)') as has_temp,
+       round(avg(jsonb_array_length(steps)),1) as avg_steps
+from trending_meals where generated_at > '2026-08-30';
+```
+
+Expect a rise, NOT to 100%: only ~43% of source descriptions publish a method at all (6 of 14
+sampled). A run where `has_time` does not move at all means the model is ignoring the checklist,
+which is a prompt problem, not a parser one.
+
+**2. Truncation guards — do they fire, and do they over-fire?** (`6cb039d`)
+The funnel now carries a `truncated` counter. Read `funnel.rejected.truncated` in the response.
+Zero is the expected healthy value. Anything above ~1 per run means `truncatedAgainstSource` is
+rejecting real food — check the log line naming the ingredient before assuming it is working.
+Also watch for `finish_reason=length` in the logs; it drops the trailing recipe.
+
+**3. Decimal parser fix — do ingredient counts go up?** (`561360e`)
+`1.5 tsp Salt` used to be discarded or mangled to `5 tsp Salt`. Any description with a decimal
+quantity should now yield one more ingredient than before. Confirm no row stores a quantity that
+is exactly the decimal's fractional part.
+
+**4. Junk gates — does anything massless or scaffolding-shaped come back?** (`50e29c0`)
+Should be zero:
+
+```sql
+select t.name, i->>'name', i->>'grams' from trending_meals t, lateral jsonb_array_elements(t.ingredients) i
+where t.generated_at > '2026-08-30'
+  and (coalesce(nullif(regexp_replace(i->>'grams','[^0-9.]','','g'),''),'1')::numeric = 0
+    or i->>'name' ~* '(^(total )?(calories|protein|carbs?|fats?)$|step$|^(dry|wet|batter) mix$)');
+```
+
+**Quota:** ~1,314 units per run against 10,000/day, resetting midnight Pacific. `dryRun` costs the
+same — it skips DB writes and image generation, not the YouTube calls. Run tests SEQUENTIALLY.
