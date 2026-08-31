@@ -119,3 +119,32 @@ own** — the length is not a defect. Two real problems, one fixed in code, one 
       while the card displays a confident "30 min". For the kebab the missing step is squeezing the
       boiled soya, which is the difference between a kebab and a pile: "drained" is not "squeezed".
       Note the source description carried NO method at all, so every step was inferred.
+
+## Instruction depth — why the steps are thin, and what actually fixes it (2026-08-30)
+
+Measured over all 128 meals: **35 (27%) state any cook time, 18 (14%) any temperature**, at 4.2
+steps and 351 characters average — while every card displays a confident prep_time.
+
+**The prompt is not the cause.** It already demands atomic steps, scales step count to complexity,
+says "PRESERVE THE PREPARATION METHOD exactly as described", and its own worked example carries
+timings. The steps are thin because most YouTube descriptions carry an ingredient list and NO
+method — the Soya Kebab's carried none — so the model is inferring, and inferring conservatively is
+correct behaviour.
+
+- [x] **DEAD END — do not "just require times in the prompt".** With no method in the source the
+      model would INVENT them, and an invented "bake chicken at 200°C for 25 minutes" is a
+      food-safety claim this app cannot stand behind. Vague beats confidently wrong on meat.
+- [x] **Shipped instead: link the source video.** `video_id` had been stored on every row since the
+      pipeline began and surfaced nowhere. The video IS the method.
+- [ ] **DEAD END (for now) — YouTube captions cannot be fetched.** The obvious next step is to feed
+      the caption track to the model so steps come from what the creator actually said. It does not
+      work: the watch page still exposes `captionTracks[].baseUrl`, but fetching it returns **HTTP
+      200 with a ZERO-BYTE body**. Tested 2026-08-30 across 3 videos (FRyfG33qReo hi/asr,
+      ob_rJcS3gOI en/asr, hREGP15njIg en/asr) and 5 endpoint variants (raw, fmt=json3, fmt=srv3,
+      fmt=vtt, legacy video.google.com/timedtext). Every one empty. YouTube gates timedtext behind
+      session context.
+      The official route is worse: `captions.download` needs OAuth as the video OWNER, which is
+      impossible for other creators' videos.
+      What is left costs money — a third-party transcript API (per-video fee, needs pricing) or
+      Whisper on the audio, which is already on the PRELAUNCH "deliberately NOT" list. Do not spend
+      another session rediscovering that the free route is closed.
