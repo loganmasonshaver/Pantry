@@ -152,6 +152,37 @@ export function realIngredients<T>(ingredients: T[] | undefined): T[] {
   })
 }
 
+// A recipe SECTION HEADING is not an ingredient.
+//
+// Creators structure descriptions in parts, and the model stores the part name instead of the food
+// under it. Two live rows, both confirmed against the source video:
+//
+//   "Topping\n * 20g sprinkles"                -> stored as "toppings", sprinkles gone (CHDU7aKdcBs)
+//   "Egg yolk & sesame seeds for topping"       -> stored as "topping", both foods gone (tPBBlyX-mtQ)
+//
+// The retention gate cannot see this: it compares COUNTS, and one heading substituted for one
+// ingredient still counts as one. So a row passes 100% retention while naming something nobody can
+// buy, cook or shop for.
+//
+// A rejection rather than a strip, deliberately. Dropping the entry would leave the recipe SHORT of
+// a real ingredient the creator published — the exact loss the retention contract exists to
+// prevent. Rejecting sends it back to be generated again with the food named.
+//
+// Kept tight on purpose. "milk", "oil", "flour", "cheese" and "sweetener" are ALSO generic and are
+// deliberately absent: they are standard recipe wording, they name something you can buy, and 20 of
+// the 25 bare-generic names in the live pool are exactly those. Only words naming a ROLE in the
+// dish rather than a food belong here.
+const SECTION_HEADING_NAME = /^\s*(toppings?|frosting|icing|filling|garnishe?s?|coating|glaze|drizzle|assembly|for serving|to serve|seasonings?|spices)\s*$/i
+
+/** The first ingredient named for its ROLE instead of the food, or null. */
+export function sectionHeadingIngredient(ingredients: any[] | undefined): string | null {
+  for (const i of ingredients ?? []) {
+    const name = typeof i === 'string' ? i : String((i as any)?.name ?? '')
+    if (SECTION_HEADING_NAME.test(name)) return name
+  }
+  return null
+}
+
 // An ingredient the model gave no mass is not an ingredient.
 //
 // Measured over the live 164-meal pool: 32 entries across 14 meals carry 0 grams and every one is

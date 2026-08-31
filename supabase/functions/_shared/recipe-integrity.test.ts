@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isNonIngredientLine, realIngredients, countedIngredients, massBearingIngredients, nameIngredientGaps,
+import { isNonIngredientLine, realIngredients, countedIngredients, massBearingIngredients, sectionHeadingIngredient, nameIngredientGaps,
          looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
@@ -401,4 +401,26 @@ test('long ingredient lines and emoji names survive the word count', () => {
     // A time unit is NOT a rejection signal — these are real products.
     '10 minute rice', '5 minute oats', 'Minute Rice',
   ]) assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
+})
+
+test('a section heading stored as an ingredient is rejected', () => {
+  // Both confirmed against their source videos. The creator sectioned the description and the model
+  // stored the SECTION NAME instead of the food under it:
+  //   "Topping\n * 20g sprinkles"          -> "toppings", sprinkles gone      (CHDU7aKdcBs)
+  //   "Egg yolk & sesame seeds for topping" -> "topping", both foods gone      (tPBBlyX-mtQ)
+  // The retention gate cannot see it: one heading substituted for one food still counts as one.
+  assert.equal(sectionHeadingIngredient([{ name: 'oat flour' }, { name: 'toppings' }]), 'toppings')
+  assert.equal(sectionHeadingIngredient([{ name: 'topping' }]), 'topping')
+  assert.equal(sectionHeadingIngredient([{ name: 'Frosting' }]), 'Frosting')
+  assert.equal(sectionHeadingIngredient([{ name: 'seasoning' }]), 'seasoning')
+
+  // GENERIC IS NOT THE TEST — nameable-and-buyable is. These are equally generic and all legitimate
+  // recipe wording; 20 of the 25 bare-generic names in the live pool are exactly these, so a rule
+  // that caught them would reject most of the feed to fix three rows.
+  for (const ok of ['milk', 'oil', 'flour', 'cheese', 'sweetener', 'water', 'salt',
+                    'sesame seeds', 'sprinkles', 'taco seasoning', 'chocolate frosting'])
+    assert.equal(sectionHeadingIngredient([{ name: ok }]), null, `"${ok}" must be kept`)
+
+  assert.equal(sectionHeadingIngredient([]), null)
+  assert.equal(sectionHeadingIngredient(undefined), null)
 })

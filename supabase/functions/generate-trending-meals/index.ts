@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { parseIngredientBlock, parseMethodBlock, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
-import { countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
+import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
@@ -727,6 +727,15 @@ PORTION + MACRO DETAILS:
 - If the video isn't clearly a recipe or food, skip it.
 - "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual.
 - "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only.
+- NAME EACH INGREDIENT BY ITS FOOD, never by its role or by the section heading above it. Creators
+  structure descriptions in parts ("Cake", "Frosting", "Topping", "For serving") and the food is the
+  line UNDER the heading, not the heading.
+  ✗ BAD: "toppings"   ✓ GOOD: "sprinkles"        (source: "Topping\n * 20g sprinkles")
+  ✗ BAD: "topping"    ✓ GOOD: "egg yolk, sesame seeds"  (source: "Egg yolk & sesame seeds for topping")
+  A name nobody can buy, cook or shop for is a rejected recipe. The same goes for "frosting",
+  "filling", "garnish", "coating", "glaze" and bare "seasoning" — name what it is made of.
+  An ingredient legitimately repeated across two sections STAYS repeated: 50g yogurt in the cake and
+  100g in the frosting is two entries, not one.
 - INGREDIENT COMPLETENESS (blocking): EVERY item referenced in any step — including oil, butter, salt, pepper, garlic, lemon juice, broth, spices, pasta, rice, sauces, anything — MUST appear in the "ingredients" array with grams and visual. If a step says "add garlic", garlic MUST be in ingredients. No exceptions.
 
 ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-do-advance while cooking.
@@ -943,7 +952,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0
           const droppedDetail: any[] = []
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
@@ -1048,6 +1057,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // Independent of finish_reason, because a provider that misreports it would put us
             // straight back where we started. This reads the answer itself: a name that appears in
             // the creator's list ONLY as a mid-word prefix was cut off mid-generation.
+            // A section heading stored as an ingredient. Invisible to the retention gate, which
+            // compares counts — one heading substituted for one food still counts as one.
+            const roleName = sectionHeadingIngredient(counted)
+            if (roleName) {
+              rejRoleName++
+              console.log(`[funnel] rejected "${name}" — "${roleName}" names a section, not a food`)
+              return false
+            }
             const cutName = truncatedAgainstSource(counted.map((i: any) => String(i?.name ?? '')), srcList)
             if (cutName) {
               rejTruncated++
@@ -1088,12 +1105,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName})`)
           funnel[`llm_${provider.name}`] = {
             raw: parsed.length, sanitized: sanitized.length,
             rejected: { noName: rejNoName, noMacros: rejNoMacros, dupName: rejDupName, nearDup: rejNearDup,
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
-              nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated },
+              nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName },
             droppedDetail,
           }
           if (!recipes || sanitized.length > recipes.length) { recipes = sanitized; funnel.providerUsed = provider.name }
