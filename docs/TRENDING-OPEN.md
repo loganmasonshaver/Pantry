@@ -257,6 +257,26 @@ where t.generated_at > '2026-08-30'
       Soda" on one line. Splitting it means inventing two amounts from one "pinch". And the obvious
       split rule is a trap: "salt and pepper" splits correctly, "macaroni and cheese" does not.
 
+**5. Region bias — did the candidate pool shrink?** (`regionCode=US&relevanceLanguage=en`)
+The keyword search was scoped GLOBALLY while the trending call had always been US-only, so Indian
+fitness YouTube flooded the pool: **37 of 128 meals (29%) need besan, poha, suji, atta, chana dal
+or maida**, against an audience that is ~90% American. That is not a taste problem — pantry
+matching is the core loop and cannot work on ingredients nobody stocks, so "Almost in your kitchen"
+never fires for those rows.
+
+Read `funnel.rawCandidates` and compare against the last known figures (634 raw -> 171 past the
+view floor -> 61 gated, from 2026-08-30). A modest drop is expected and fine. If it drops
+MATERIALLY, widen the query pool rather than reverting — the problem this fixes is real, and yield
+is already the binding constraint here (raw output has swung 5 to 24 on identical code).
+
+Then re-measure the mix:
+
+```sql
+select count(distinct t.id) from trending_meals t, lateral jsonb_array_elements(t.ingredients) i
+where t.generated_at > '2026-08-30'
+  and i->>'name' ~* '\m(besan|poha|suji|atta|maida|chana|dal|methi|moong|rajma)\M';
+```
+
 **Quota:** ~1,314 units per run against 10,000/day, resetting midnight Pacific. `dryRun` costs the
 same — it skips DB writes and image generation, not the YouTube calls. Run tests SEQUENTIALLY.
 

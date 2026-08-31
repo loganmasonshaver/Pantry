@@ -479,7 +479,28 @@ Deno.serve(async (req: Request) => {
         // i.e. recipes the extractor had already succeeded on, which correlates with having a clean
         // list. That's survivorship bias; 28% is the real rate on raw candidates.)
         // Step 1a: Search for video IDs with this query/sort/window combo
-        const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=50&publishedAfter=${publishedAfter}&key=${youtubeKey}`
+        //
+        // regionCode + relevanceLanguage, and their absence was doing real damage. This search
+        // produces most of the candidate pool and was scoped GLOBALLY, while the algorithmic
+        // trending call below it has always been regionCode=US. Indian fitness YouTube is enormous
+        // and heavily engaged, so it wins on view count and floods the results: measured over the
+        // live 128-meal pool, 37 meals (29%) need besan, poha, suji, atta, chana dal or maida —
+        // none of which a US supermarket stocks, against an audience that is ~90% American.
+        //
+        // The reason this matters is not taste. PANTRY MATCHING is the app's core loop, and it
+        // cannot work on ingredients nobody has: "Almost in your kitchen" will never fire for a
+        // besan recipe, so those rows are structurally incompatible with the main feature rather
+        // than merely unfamiliar.
+        //
+        // Both are BIASES, not filters — YouTube still returns other-region results that rank
+        // strongly, which is the intent. Cuisine variety is worth keeping; unshoppable staples are
+        // not.
+        //
+        // WATCH THE YIELD. This necessarily narrows the candidate pool, and yield is already the
+        // binding constraint here (raw output has swung 5 to 24 on identical code). If
+        // rawCandidates drops materially, widen the query pool rather than reverting this — the
+        // problem it fixes is real.
+        const ytUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(config.query)}&type=video&order=${config.order}&maxResults=50&publishedAfter=${publishedAfter}&regionCode=US&relevanceLanguage=en&key=${youtubeKey}`
         const ytRes = await fetchWithTimeout(ytUrl)
         const ytData = await ytRes.json()
 
