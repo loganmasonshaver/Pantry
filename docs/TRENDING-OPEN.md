@@ -232,12 +232,20 @@ same — it skips DB writes and image generation, not the YouTube calls. Run tes
       "1 Tsp Paprika" (it sits directly under "2 Tsp Garlic Powder" in the source — the model
       carried the neighbouring quantity down). Retention compares NAMES, so a wrong amount on a
       right ingredient passes every gate. Repaired. No detector exists for this class.
-- [ ] **DEAD END — do not accept unquantified lines into the ingredient checklist.** The creator
-      lists "Green Onion", "Cooking Spray" and "Salt and Pepper to Taste" with no quantity, so
-      QTY_START skips them and Green Onion is genuinely lost. Fixing that looks obvious and is
-      wrong: measured across 15 real descriptions, accepting unquantified non-heading lines admits
-      **160 lines, almost all junk** — titles, "Follow for more", macro lines, method sentences,
-      and sub-labels without colons ("For the Pancakes"). Roughly 7 are real ingredients. It would
-      inflate a 14-item checklist to ~30, inventing a specification the model cannot meet and
-      rejecting good food wholesale — the over-extraction failure this parser's comments already
-      warn about. The lost ingredient is the price of a precise gate.
+- [x] **REVERSED — unquantified lines ARE recoverable.** I first called this a dead end on a bad
+      measurement: accepting every unquantified non-heading line admitted 160 lines across 15
+      descriptions, almost all junk, to recover ~7 ingredients. That test applied NONE of the gates
+      that already exist. Logan pushed back on the call and was right.
+      Re-measured with `isNonIngredientLine`, the method-heading stop, and two new rules, the same
+      corpus gives **~27 real ingredients against 1 junk line**. Shipped as
+      `parseUnquantifiedExtras`.
+      The two rules that did the work, both from the data rather than a wordlist:
+      **the ingredient block starts at the first QUANTIFIED line** (everything unquantified above it
+      is the title/hook/promo — this alone removed every stylised-unicode title, which no keyword
+      list would have caught), and **strip a leading emoji before any ^-anchored test** (same trap
+      already recorded for "🍳 Recipe Steps" and for `\b` being ASCII-only).
+      **They are NOT part of the retention contract** — handed to the model as things to include,
+      never as things it is rejected for omitting, because "Water for soaking" and "Cooking Spray"
+      are lines a faithful recipe may legitimately drop.
+      Lesson worth keeping: a "measured and rejected" verdict is only as good as the measurement.
+      That one tested the crudest possible version of the idea and killed the idea with it.
