@@ -217,3 +217,27 @@ where t.generated_at > '2026-08-30'
 
 **Quota:** ~1,314 units per run against 10,000/day, resetting midnight Pacific. `dryRun` costs the
 same — it skips DB writes and image generation, not the YouTube calls. Run tests SEQUENTIALLY.
+
+## 2026-08-30 — item 11 reviewed against source (hPCcDaUmGKw, Bang Bang Salmon Salad)
+
+- [x] **The duplicate paprika and garlic powder are FAITHFUL, not a bug.** The creator publishes
+      three sections — Ingredients, Salmon Seasonings, Bang Bang Dressing — and garlic powder
+      appears in all three, paprika in two. Same as the duplicate Greek yogurt in "Funfetti Protein
+      Cake" (cake vs frosting). **Never add a blanket ingredient dedupe**; it would silently halve
+      recipes like these. `countedIngredients` already dedupes for COUNTING only, which is correct.
+- [x] **"5g ga" was the Dressing's "1 Tsp Garlic Powder", truncated.** `truncatedAgainstSource`
+      catches it — verified against this exact row, which is the first real-data confirmation the
+      detector works. Row repaired by hand; backup in the session scratchpad.
+- [x] **A 2x quantity error the gates cannot see.** Stored "2 tsp paprika" where the creator wrote
+      "1 Tsp Paprika" (it sits directly under "2 Tsp Garlic Powder" in the source — the model
+      carried the neighbouring quantity down). Retention compares NAMES, so a wrong amount on a
+      right ingredient passes every gate. Repaired. No detector exists for this class.
+- [ ] **DEAD END — do not accept unquantified lines into the ingredient checklist.** The creator
+      lists "Green Onion", "Cooking Spray" and "Salt and Pepper to Taste" with no quantity, so
+      QTY_START skips them and Green Onion is genuinely lost. Fixing that looks obvious and is
+      wrong: measured across 15 real descriptions, accepting unquantified non-heading lines admits
+      **160 lines, almost all junk** — titles, "Follow for more", macro lines, method sentences,
+      and sub-labels without colons ("For the Pancakes"). Roughly 7 are real ingredients. It would
+      inflate a 14-item checklist to ~30, inventing a specification the model cannot meet and
+      rejecting good food wholesale — the over-extraction failure this parser's comments already
+      warn about. The lost ingredient is the price of a precise gate.
