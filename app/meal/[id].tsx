@@ -971,29 +971,6 @@ export default function MealDetailScreen() {
               </View>
             ))}
           </View>
-
-          {/* The creator's video IS the method, and until now it was unreachable: video_id has been
-              stored on every trending row since the pipeline began and surfaced nowhere in the app.
-              That matters more than it looks. Measured over the pool, only 27% of meals state a
-              cook time and 14% a temperature — not because the prompt is weak, but because most
-              YouTube descriptions carry an ingredient list and no method at all, so the steps are
-              inferred. Asking the model harder would make it INVENT times, which on chicken is a
-              food-safety claim we cannot stand behind. Linking the source is the honest fix: the
-              times, the technique and the things no summary captures ("squeeze the boiled soya, or
-              the kebabs fall apart") are all in the video. It also credits the creator, which is
-              the least we owe someone whose recipe we are showing. */}
-          {(meal as any).video_id && (
-            <TouchableOpacity
-              style={styles.sourceVideoRow}
-              onPress={() => Linking.openURL(`https://www.youtube.com/watch?v=${(meal as any).video_id}`)}
-              activeOpacity={0.8}
-            >
-              <View style={styles.sourceVideoIcon}>
-                <Youtube size={15} stroke="#fff" strokeWidth={2.4} fill="#fff" />
-              </View>
-              <Text style={styles.sourceVideoText}>Watch the original recipe</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </ScrollView>
 
@@ -1421,24 +1398,6 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   // Small caps label that segments the list — drives the eye to NEED first, HAVE second.
-  // Sits under the steps rather than in the header: it is where a cook looks when the summary runs
-  // out, not something to tap before starting.
-  sourceVideoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginTop: 20,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: 14,
-  },
-  sourceVideoIcon: {
-    width: 26, height: 26, borderRadius: 13,
-    backgroundColor: '#FF0000',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  sourceVideoText: { color: COLORS.textWhite, fontSize: 14, fontWeight: '600' },
   ingredientGroupLabel: {
     fontSize: 11,
     fontWeight: '700',
