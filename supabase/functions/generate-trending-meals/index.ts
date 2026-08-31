@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
+import { parseIngredientBlock } from '../_shared/ingredient-parse.ts'
 import { countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
@@ -94,33 +95,6 @@ function setJaccard(a: Set<string>, b: Set<string>): number {
 // evocative pull of "Indian night" over "Chicken".
 const SHELF_TAGS = ['mexican', 'indian', 'asian', 'italian', 'mediterranean', 'american-comfort', 'sweet-treat', 'high-protein-snack', 'breakfast']
 
-// Pull the creator's OWN ingredient list out of the description, mechanically.
-//
-// Measured against 10 source descriptions, the model kept only 50% of listed ingredients and 7 of
-// 10 recipes lost 3 or more. It wasn't just seasonings: a Soya Potato Masala arrived without ghee,
-// onion, green chilli or cumin (14 -> 4), and a pesto gnocchi lost two bags of spinach and two cups
-// of mozzarella. That destroys the taste of the dish, understates calories, and silently breaks the
-// allergen tags derived from the ingredient array.
-//
-// The fix is to stop leaving inclusion to the model's discretion. Where the description contains a
-// real list, it is parsed here and handed over as a checklist to COPY rather than a text to
-// summarise. Summarising is where things get dropped.
-// Measured on 37 real descriptions: the first version required an "Ingredients:" heading AND ascii
-// bullets and found a list in 35%. This finds one in 75%. The two things that mattered were emoji
-// bullets (creators use 🥦🥚🧄 as list markers) and stopping at the method AFTER stripping the
-// bullet — "🍳 Recipe Steps" is emoji-prefixed, so an unstripped ^ anchor never matched it and 21
-// step lines were being swallowed into one recipe's ingredient list.
-const BULLET_CHARS = "[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌🔸🔹🥚🥦🧄🧅🧀🍗🍚🥩🌶🫒🍋🥔🧈🍯🥜🍫🍓🍌🍳🥄🍽🥣🧊🔥]"
-// Where the ingredient block ends. The second group is load-bearing now that the parse window is
-// the whole description rather than 500 chars: creators close with a promo block of OTHER recipes,
-// and those are bulleted exactly like ingredients. Measured on a real-shaped description, a
-// 4-ingredient bagel recipe followed by "MORE RECIPES YOU'LL LOVE:" parsed to 8 items — which
-// would then fail the 100%-retention check and reject a perfectly good recipe for being "short".
-// The first group already stopped at METHOD/DIRECTIONS; this stops at the promo block when the
-// creator never wrote a method heading.
-const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy|more\s+recipes?|other\s+(?:recipes?|videos?)|recipes?\s+you|watch\s+next|related|playlist|chapters?|timestamps?)\b/i
-const NOISE_LINE = /(https?:\/\/|www\.|@[\w.]+|#\w+|comment |subscribe|follow me|link in bio|discount|instagram|tiktok)/i
-const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
 
 // How much of a YouTube description we KEEP, and how much of it the model is SHOWN.
 //
@@ -148,14 +122,6 @@ const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
 const DESC_PARSE_CHARS = 5000
 const DESC_PROMPT_CHARS = 2000
 
-function stripBullet(raw: string): string {
-  return raw
-    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS}|\\d+[.)]|\\d+️⃣)+\\s*`), '')
-    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS})+\\s*`), '')
-    .trim()
-    .replace(/[:\s]+$/, '')
-}
-
 // The creator's list, normalised EXACTLY the way the model's answer is normalised.
 //
 // This asymmetry was the single biggest false-rejection source in the pipeline. The model's side
@@ -178,25 +144,6 @@ function sourceIngredients(desc: string): string[] {
   return countedIngredients(parseIngredientBlock(desc)) as string[]
 }
 
-function parseIngredientBlock(desc: string): string[] {
-  if (!desc) return []
-  const heading = desc.match(/ingredients?\s*:?\s*\n/i)
-  const body = heading ? desc.slice(heading.index! + heading[0].length) : desc
-  const bulleted: string[] = []
-  const quantified: string[] = []
-  for (const raw of body.split('\n')) {
-    const line = stripBullet(raw)
-    if (STOP_LINE.test(line)) break
-    if (!line || NOISE_LINE.test(line) || line.length <= 2 || line.length >= 90) continue
-    const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|\\d+[.)]|\\d+️⃣)`).test(raw)
-    if (wasBulleted) bulleted.push(line)
-    else if (QTY_START.test(line)) quantified.push(line)
-  }
-  // When the block uses bullets, keep ONLY bulleted lines — the unbulleted lines between them are
-  // group headings ("Potatoes", "Burger Sauce") and counting them would inflate the expected total.
-  const out = bulleted.length >= 3 ? bulleted : quantified
-  return out.length >= 3 ? out : []
-}
 
 
 // Likes as a percentage of views. A quality proxy that view count actively can't provide: the
