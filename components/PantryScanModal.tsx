@@ -311,13 +311,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const HERO_HOLD_MS = 5000
   const titleAnim = useRef(new Animated.Value(0)).current
   useEffect(() => {
-    if (step !== 1) { titleAnim.setValue(1); return } // only the first shot gets the hero beat
+    // photos.length, not just step: the hero is FIRST-SHOT copy. Re-entering the camera from the
+    // areas hub re-runs this, and without the photo check it replayed "Start with your fridge"
+    // over a scan already three photos deep. Settling to 1 also retires the hero the instant the
+    // first shot lands, instead of leaving it up for the rest of HERO_HOLD_MS.
+    if (step !== 1 || photos.length > 0) { titleAnim.setValue(1); return }
     titleAnim.setValue(0)
     const t = setTimeout(() => {
       Animated.timing(titleAnim, { toValue: 1, duration: 550, easing: Easing.out(Easing.quad), useNativeDriver: true }).start()
     }, HERO_HOLD_MS)
     return () => clearTimeout(t)
-  }, [step])
+  }, [step, photos.length])
   // Per-photo review carousel state
   const [currentPhoto, setCurrentPhoto] = useState(0)
   // Natural pixel dims per photo uri (from Image onLoad) → render the review photo at its TRUE
@@ -696,11 +700,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // 768px short edge internally, so 2048px is the exact ceiling the model uses —
   // resizing to it loses ZERO model-visible detail while cutting the payload ~3-4x.
   // Quality 0.95 keeps re-compression near-lossless so small label text stays crisp.
-  const downscaleToBase64 = async (uri: string): Promise<string | undefined> => {
+  // Returns the manipulated URI as well as the base64, and callers must store BOTH. The output
+  // has EXIF rotation baked into its pixels; the input does not. Displaying the input while
+  // sending the output meant the review photo could sit sideways — and worse, the detection
+  // boxes are normalized against what the MODEL saw, so they were being mapped onto an image at
+  // a different orientation than the one they were computed from.
+  const downscaleToBase64 = async (uri: string): Promise<{ uri: string; base64: string | undefined }> => {
     const out = await manipulateAsync(uri, [{ resize: { width: 2048 } }], {
       compress: 0.95, format: SaveFormat.JPEG, base64: true,
     })
-    return out.base64 ?? undefined
+    return { uri: out.uri, base64: out.base64 ?? undefined }
   }
 
   // Commit an inline chip rename. Empty → keep the old name. Idempotent (onSubmit + onBlur both fire).
@@ -742,7 +751,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         const id = String(Date.now())
         setPhotos(prev => [...prev, { id, label, uri: photo.uri, base64: undefined }])
         downscaleToBase64(photo.uri)
-          .then(base64 => setPhotos(prev => prev.map(p => p.id === id ? { ...p, base64 } : p)))
+          .then(out => setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: out.uri, base64: out.base64 } : p)))
           // A failed encode leaves base64 undefined, which keeps the Scan button disabled rather
           // than letting the photo be silently dropped from the upload (scanPhotos filters on it).
           .catch(() => {})
@@ -775,12 +784,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       quality: 1,
     })
     if (!result.canceled && result.assets[0]) {
-      const base64 = await downscaleToBase64(result.assets[0].uri)
+      const out = await downscaleToBase64(result.assets[0].uri)
       setPhotos(prev => [...prev, {
         id: String(Date.now()),
         label,
-        uri: result.assets[0].uri,
-        base64,
+        uri: out.uri,
+        base64: out.base64,
       }])
       if (next !== 0) {
         setPendingLabel(null)
@@ -801,12 +810,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       quality: 1,
     })
     if (!result.canceled && result.assets[0]) {
-      const base64 = await downscaleToBase64(result.assets[0].uri)
+      const out = await downscaleToBase64(result.assets[0].uri)
       setPhotos(prev => [...prev, {
         id: String(Date.now()),
         label,
-        uri: result.assets[0].uri,
-        base64,
+        uri: out.uri,
+        base64: out.base64,
       }])
     }
   }
@@ -953,16 +962,20 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 </TouchableOpacity>
               </View>
 
-              {/* Hero beat: the instruction opens large and centered, then settles above the shutter. */}
-              <Animated.View
-                pointerEvents="none"
-                style={[styles.cameraHeroWrap, {
-                  opacity: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-                  transform: [{ scale: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.82] }) }],
-                }]}
-              >
-                <Text style={styles.cameraHeroTitle}>{captureTitle}</Text>
-              </Animated.View>
+              {/* Hero beat: the instruction opens large and centered, then settles above the shutter.
+                  Gated on photos.length like the bottom copy it cross-fades into — the two are the
+                  same sentence and must appear and disappear together. */}
+              {photos.length === 0 && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[styles.cameraHeroWrap, {
+                    opacity: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+                    transform: [{ scale: titleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0.82] }) }],
+                  }]}
+                >
+                  <Text style={styles.cameraHeroTitle}>{captureTitle}</Text>
+                </Animated.View>
+              )}
 
               {/* Bottom scrim carries the copy + shutter so text is always readable over the camera */}
               <LinearGradient colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.92)']} style={[styles.cameraBottomOverlay, { paddingBottom: insets.bottom + 14 }]}>
