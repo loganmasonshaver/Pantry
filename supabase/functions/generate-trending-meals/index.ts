@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { parseIngredientBlock, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
+import { parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
@@ -655,8 +655,16 @@ Deno.serve(async (req: Request) => {
         ? `\n   SOURCE METHOD (${method.length} steps — follow these IN ORDER and keep every time, temperature, heat level and technique. Do not merge or summarise them):\n${method.map(x => `     - ${x}`).join('\n')}`
         : ''
       const parsed = sourceIngredients(v.description || '')
+      // Which PART of the dish each line belongs to. Creators group a recipe ("Cake" / "Frosting" /
+      // "Topping", "Salmon Seasonings" / "Bang Bang Dressing") and the grouping is what makes a
+      // repeated ingredient readable: garlic powder three times is faithful when it seasons the
+      // pasta, the salmon and the dressing, and looks like a bug when the parts are flattened away.
+      const sections = new Map(parseIngredientSections(v.description || '').map(r => [r.line, r.section]))
       const checklist = parsed.length >= 3
-        ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
+        ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => {
+            const sec = sections.get(x)
+            return `     - ${x}${sec ? `   [part: ${sec}]` : ''}`
+          }).join('\n')}`
         : ''
       // Ingredients the creator listed with NO quantity — "Green Onion", "Cilantro", "Cream
       // cheese". parseIngredientBlock needs a leading quantity, so these were invisible: measured
@@ -739,6 +747,11 @@ PORTION + MACRO DETAILS:
 - If the video isn't clearly a recipe or food, skip it.
 - "visual" = intuitive kitchen portion (e.g. "1 palm-sized piece", "1 fist-sized scoop", "a small handful", "1/2 cup"). NEVER use grams in visual.
 - "grams" = exact weight in grams (e.g. "150g", "200g"). ALWAYS use grams only.
+- SECTION: copy the "[part: …]" label from the source list onto that ingredient, verbatim and
+  lowercase. Use null when a line carries no label. This is what makes a repeated ingredient
+  readable: 2 tsp garlic powder for the pasta and 1 tsp for the dressing are two entries that a
+  reader can tell apart only if each says which part it belongs to. Never invent a part that the
+  source did not label, and never merge two entries because they share a name.
 - NAME EACH INGREDIENT BY ITS FOOD, never by its role or by the section heading above it. Creators
   structure descriptions in parts ("Cake", "Frosting", "Topping", "For serving") and the food is the
   line UNDER the heading, not the heading.
@@ -802,7 +815,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "fat": 18,
     "prepTime": 25,
     "ingredients": [
-      { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "150g" },
+      { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "150g", "section": null },
+      { "name": "greek yogurt", "visual": "1/2 cup", "grams": "125g", "section": "bang bang dressing" },
       { "name": "olive oil", "visual": "1 tbsp", "grams": "15ml" },
       { "name": "garlic", "visual": "2 cloves", "grams": "6g" },
       { "name": "salt", "visual": "to taste", "grams": "2g" },

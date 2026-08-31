@@ -212,4 +212,62 @@ export function parseUnquantifiedExtras(desc: string): string[] {
   return out.slice(0, 12)
 }
 
+
+// ── Which SECTION each ingredient belongs to ───────────────────────────────────────────────────
+//
+// Creators group a recipe into parts and the grouping is load-bearing for the reader. Flattened
+// into one list it looks like a bug: "Crispy Pasta Bang Bang Salmon Salad" lists garlic powder
+// three times and paprika twice, which is FAITHFUL — the creator seasons the pasta, the salmon and
+// the dressing separately — but a flat list gives no way to tell that from a duplicate.
+//
+// Returned alongside the same lines parseIngredientBlock produces, deliberately as a separate
+// function: the retention contract is built from that one and must not change shape.
+const SECTION_LABEL = /^(?:for\s+(?:the\s+)?)?([a-z][a-z0-9 &'-]{1,38})\s*:?\s*$/i
+
+/** Tidy a heading into a label: "Bang Bang Dressing:" -> "bang bang dressing", "FOR KEBAB" -> "kebab". */
+function sectionLabel(line: string): string | null {
+  const m = SECTION_LABEL.exec(line.trim())
+  if (!m) return null
+  const label = m[1].trim().toLowerCase().replace(/\s+/g, ' ')
+  // "ingredients" is the list's own title, not a part of the dish. Neither is a method heading.
+  if (/^(ingredients?|recipe|method|directions?|instructions?|steps?|notes?)$/.test(label)) return null
+  if (label.length < 3) return null
+  return label
+}
+
+/**
+ * The creator's ingredient lines paired with the section each sits under.
+ * `section` is null for lines above any heading, which is the common single-part case.
+ */
+export function parseIngredientSections(desc: string): { line: string; section: string | null }[] {
+  const lines = parseIngredientBlock(desc)
+  if (lines.length === 0) return []
+  const wanted = new Set(lines)
+  const raws = (desc || '').split('\n')
+  const isBullet = (raw: string) => new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`).test(raw)
+
+  // Which shape is this description? When the ingredients are BULLETED, an unbulleted line between
+  // them is a heading — that is already why parseIngredientBlock keeps only bulleted lines. When
+  // nothing is bulleted, a heading has to announce itself with a colon or a leading "For", because
+  // otherwise it is indistinguishable from an ingredient listed without a quantity ("Cooking Spray"
+  // sits mid-list in a real description and was being read as the heading for everything below it).
+  const bulletedMode = raws.some(r => isBullet(r) && wanted.has(stripBullet(r)))
+
+  const out: { line: string; section: string | null }[] = []
+  let current: string | null = null
+  for (let i = 0; i < raws.length; i++) {
+    const line = stripBullet(raws[i])
+    // Line 0 is the video title. A recipe is not a section of itself.
+    if (i === 0 || !line) continue
+    if (METHOD_HEADING.test(line)) break
+    if (wanted.has(line)) { out.push({ line, section: current }); continue }
+    if (QTY_START.test(line)) continue
+    const announced = /:\s*$/.test(raws[i].trim()) || /^for\b/i.test(line)
+    if (!announced && !(bulletedMode && !isBullet(raws[i]))) continue
+    const label = sectionLabel(line)
+    if (label) current = label
+  }
+  return out
+}
+
 export { parseIngredientBlock, stripBullet }

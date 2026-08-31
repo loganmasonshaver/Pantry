@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseIngredientBlock, parseMethodBlock, parseUnquantifiedExtras, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
+import { parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
 
 test('a decimal quantity is not a numbered-list marker', () => {
   // \d+[.)] matched the DECIMAL POINT: "1.5 tsp Salt" was read as list item "1." followed by
@@ -169,4 +169,65 @@ test('the title zone and promo lines are not ingredients', () => {
   ].join('\n')
   const out = parseUnquantifiedExtras(desc)
   assert.deepEqual(out, ['Coriander leaves'])
+})
+
+test('sections: an UNBULLETED list needs a colon or a leading "For"', () => {
+  // hPCcDaUmGKw. Garlic powder appears three times and paprika twice — faithful, because the
+  // creator seasons the pasta, the salmon and the dressing separately.
+  const desc = [
+    'Crispy Pasta Bang Bang Salmon Salad',   // line 0: the title is not a section of itself
+    'Ingredients:',
+    '2 Large Cucumber',
+    '2 Tsp Garlic Powder',
+    'Salt and Pepper to Taste',
+    'Cooking Spray',                          // an unquantified INGREDIENT sitting mid-list
+    '150g Edamame',
+    '',
+    'Salmon Seasonings:',
+    '2 Tsp Garlic Powder',
+    '',
+    'Bang Bang Dressing:',
+    '125g Greek yogurt',
+    '1 Tsp Garlic Powder',
+  ].join('\n')
+  const got = parseIngredientSections(desc)
+  const by = (l: string) => got.find(r => r.line === l)?.section
+  assert.equal(by('2 Large Cucumber'), null)
+  assert.equal(by('150g Edamame'), null, '"Cooking Spray" is an ingredient, not a heading')
+  assert.equal(by('125g Greek yogurt'), 'bang bang dressing')
+  // The same ingredient in two parts keeps both entries, each with its own part.
+  assert.deepEqual(got.filter(r => /Garlic Powder/i.test(r.line)).map(r => r.section),
+    [null, 'salmon seasonings', 'bang bang dressing'])
+})
+
+test('sections: a BULLETED list treats any unbulleted line as the heading', () => {
+  // CHDU7aKdcBs. No colons and no blank lines — the only signal is that ingredients are bulleted
+  // and headings are not, which is already why parseIngredientBlock keeps only bulleted lines.
+  const desc = [
+    'High Protein Funfetti Cake', 'Ingredients', 'Cake',
+    '* 35g oat flour', '* 50g nonfat Greek yogurt',
+    'Frosting', '* 100g nonfat Greek yogurt',
+    'Topping', '* 20g sprinkles',
+  ].join('\n')
+  const got = parseIngredientSections(desc)
+  const by = (l: string) => got.find(r => r.line === l)?.section
+  assert.equal(by('35g oat flour'), 'cake')
+  assert.equal(by('100g nonfat Greek yogurt'), 'frosting')
+  assert.equal(by('20g sprinkles'), 'topping')
+  // The duplicate Greek yogurt is FAITHFUL — 50g in the cake, 100g in the frosting. A blanket
+  // ingredient dedupe would silently halve recipes like this one.
+  assert.deepEqual(got.filter(r => /Greek yogurt/.test(r.line)).map(r => r.section), ['cake', 'frosting'])
+})
+
+test('sections: "FOR X" headings, and no sections at all', () => {
+  // FRyfG33qReo uses "FOR BOILING" / "FOR KEBAB" with no colons.
+  const desc = ['SOYA KABAB', 'FOR BOILING', '1 Liter Water', '1 tsp Salt',
+                'FOR KEBAB', '2 Onions', '1.5 tsp Salt'].join('\n')
+  const got = parseIngredientSections(desc)
+  assert.equal(got.find(r => r.line === '1 Liter Water')?.section, 'boiling')
+  assert.equal(got.find(r => r.line === '2 Onions')?.section, 'kebab')
+  // A plain single-part list gets null throughout, which is what suppresses the label in the UI.
+  const plain = parseIngredientSections('Title\n2 eggs\n100g flour\n1 tsp salt')
+  assert.ok(plain.length >= 3)
+  assert.ok(plain.every(r => r.section === null))
 })

@@ -839,6 +839,19 @@ export default function MealDetailScreen() {
             //   NEED  → add/remove this item to the grocery list (the screen's whole job)
             //   BASIC → "I don't keep this" staple opt-out (low-stakes preference write)
             //   HAVE  → read-only; you already have it. Pantry corrections live in the Pantry tab.
+            // Creators group a recipe into parts, and the grouping is what makes a repeated
+            // ingredient readable. "Crispy Pasta Bang Bang Salmon Salad" lists garlic powder three
+            // times and paprika twice — FAITHFUL, because the creator seasons the pasta, the salmon
+            // and the dressing separately — but flattened into one list it reads as a duplicate
+            // with no way to tell which is which.
+            //
+            // Shown ONLY when the meal actually has more than one part. On a single-part recipe the
+            // label repeats the same word down the whole list, which is noise rather than context.
+            const sectionsPresent = new Set(
+              (meal.ingredients ?? []).map((i: any) => i?.section).filter(Boolean)
+            )
+            const showSections = sectionsPresent.size > 1
+
             const renderRow = (ing: any, kind: 'need' | 'have' | 'basic') => {
               // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
               // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
@@ -878,6 +891,9 @@ export default function MealDetailScreen() {
                     <Text style={[styles.ingredientPortionInline, isHaveRow && styles.ingredientPortionHave]}>{portion}</Text>
                     <Text>  </Text>
                     <Text style={[styles.ingredientNameInline, isHaveRow && styles.ingredientNameHave]}>{displayName}</Text>
+                    {showSections && ing.section && (
+                      <Text style={styles.ingredientSection}>{`  · for the ${ing.section}`}</Text>
+                    )}
                   </Text>
                   {kind === 'have' ? (
                     // HAVE row: just a quiet green check confirming state — no shopping action
@@ -1398,6 +1414,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   // Small caps label that segments the list — drives the eye to NEED first, HAVE second.
+  // Same size as the name but muted, so it reads as an aside on the row rather than part of the
+  // ingredient. It shares the row's single line and truncates with it.
+  ingredientSection: { color: COLORS.textMuted, fontWeight: '500' },
   ingredientGroupLabel: {
     fontSize: 11,
     fontWeight: '700',
