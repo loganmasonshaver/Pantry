@@ -6,6 +6,8 @@
 // was no way to run this code outside the edge function. Same lesson recipe-integrity.ts records
 // for hasFractionalIndivisible, which was dead for 19 days inside the pipeline.
 
+import { isNonIngredientLine } from './recipe-integrity.ts'
+
 // Pull the creator's OWN ingredient list out of the description, mechanically.
 //
 // Measured against 10 source descriptions, the model kept only 50% of listed ingredients and 7 of
@@ -162,6 +164,52 @@ export function parseMethodBlock(desc: string): string[] {
     out.push(line)
   }
   return out
+}
+
+
+// ── Ingredients the creator listed with NO quantity ─────────────────────────────────────────────
+//
+// parseIngredientBlock requires a leading quantity, so "Green Onion", "Cilantro", "Cream cheese"
+// and "Smoked salmon" are invisible to it. Measured across 15 real descriptions, roughly 27 real
+// ingredients are lost this way.
+//
+// A first pass at rescuing them looked hopeless — accepting every unquantified non-heading line
+// admitted 160 lines, almost all junk. That measurement was wrong because it applied none of the
+// gates that already exist. With isNonIngredientLine, the method-heading stop, and the two rules
+// below, the same corpus yields ~27 real against 1 junk line.
+//
+// The two rules that did the work:
+//   * The ingredient block STARTS at the first quantified line. Anything unquantified above it is
+//     the title, the hook or a promo — that single rule removed every stylised-unicode title.
+//   * A leading emoji or symbol defeats an ^-anchored rule, so the prefix is stripped before
+//     testing. Same trap already recorded for "🍳 Recipe Steps" and for \b being ASCII-only.
+//
+// DELIBERATELY NOT part of the retention contract. These are handed to the model as things to
+// include, never as things it will be REJECTED for omitting: "Water for soaking" and "Cooking
+// Spray" are real lines that a faithful recipe may legitimately leave out, and counting them would
+// invent a specification the model cannot meet — the over-extraction failure this parser's own
+// comments warn about.
+const PROMO_LINE = /\b(save this|follow for more|in my bio|recipe books?|full recipe|try it today|listed below|exact measurements)\b/i
+const META_LINE = /^(servings?|calories|macros?|protein|carbs?|fat|per serving|total)\b/i
+const SUB_HEADING = /^(for\b|.*:\s*$)/i
+
+export function parseUnquantifiedExtras(desc: string): string[] {
+  if (!desc) return []
+  const lines = desc.split('\n')
+  const out: string[] = []
+  let started = false
+  // Skip line 0: it is the video title, which is never an ingredient.
+  for (let i = 1; i < lines.length; i++) {
+    const line = stripBullet(lines[i]).replace(/^[^\p{L}\p{N}]+/u, '').trim()
+    if (METHOD_HEADING.test(line) || METHOD_END.test(line)) break
+    if (QTY_START.test(line)) { started = true; continue }
+    if (!started || !line) continue
+    if (SUB_HEADING.test(line) || PROMO_LINE.test(line) || META_LINE.test(line)) continue
+    if (isNonIngredientLine(line)) continue
+    if (line.length <= 2 || line.length >= 60) continue
+    if (!out.includes(line)) out.push(line)
+  }
+  return out.slice(0, 12)
 }
 
 export { parseIngredientBlock, stripBullet }

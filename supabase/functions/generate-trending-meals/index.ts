@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { parseIngredientBlock, parseMethodBlock, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
+import { parseIngredientBlock, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
@@ -654,11 +654,23 @@ Deno.serve(async (req: Request) => {
       const methodList = method.length >= 3
         ? `\n   SOURCE METHOD (${method.length} steps — follow these IN ORDER and keep every time, temperature, heat level and technique. Do not merge or summarise them):\n${method.map(x => `     - ${x}`).join('\n')}`
         : ''
+      // Ingredients the creator listed with NO quantity — "Green Onion", "Cilantro", "Cream
+      // cheese". parseIngredientBlock needs a leading quantity, so these were invisible: measured
+      // across 15 real descriptions, ~27 real ingredients are lost this way.
+      //
+      // Handed over SEPARATELY and deliberately NOT added to the retention contract. "Water for
+      // soaking" and "Cooking Spray" are real lines a faithful recipe may legitimately omit, and
+      // counting them would invent a specification the model cannot meet — which is how a parser
+      // that over-extracts rejects good food.
+      const extras = parseUnquantifiedExtras(v.description || '')
+      const extraList = extras.length
+        ? `\n   ALSO LISTED, without quantities (include these too, estimating a sensible amount; they do NOT count toward the ${parsed.length} above):\n${extras.map(x => `     - ${x}`).join('\n')}`
+        : ''
       const parsed = sourceIngredients(v.description || '')
       const checklist = parsed.length >= 3
         ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => `     - ${x}`).join('\n')}`
         : ''
-      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${methodList}`
+      return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${extraList}${methodList}`
     }).join('\n\n')
 
     const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseIngredientBlock, parseMethodBlock, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
+import { parseIngredientBlock, parseMethodBlock, parseUnquantifiedExtras, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
 
 test('a decimal quantity is not a numbered-list marker', () => {
   // \d+[.)] matched the DECIMAL POINT: "1.5 tsp Salt" was read as list item "1." followed by
@@ -130,4 +130,43 @@ test('a description with no method yields nothing', () => {
   assert.deepEqual(parseMethodBlock(''), [])
   // "Preparation time 10-15 minutes" is NOT a method heading, though a looser rule read it as one.
   assert.deepEqual(parseMethodBlock('Preparation time 10-15 minutes\nCooking time 10 minutes'), [])
+})
+
+test('ingredients listed without a quantity are recovered', () => {
+  // "Green Onion" was silently lost from hPCcDaUmGKw: QTY_START needs a leading quantity, so the
+  // line never reached the checklist and the retention gate never missed it.
+  const desc = [
+    'Crispy Pasta Bang Bang Salmon Salad',   // line 0 is the title, never an ingredient
+    '(Per Serving - 2 Total)',
+    '2 Large Cucumber',
+    '250g Salmon (raw weight)',
+    'Salt and Pepper to Taste',
+    'Cooking Spray',
+    'Green Onion',
+    'Instructions:',
+    'Prepare the pasta by following the instructions on the packaging.',
+  ].join('\n')
+  const out = parseUnquantifiedExtras(desc)
+  assert.ok(out.includes('Green Onion'))
+  assert.ok(out.includes('Cooking Spray'))
+  // The method is not an ingredient list.
+  assert.ok(!out.some(x => /Prepare the pasta/.test(x)))
+  // "(Per Serving - 2 Total)" sits ABOVE the first quantified line, so it is title-zone noise.
+  assert.ok(!out.some(x => /Per Serving/.test(x)))
+})
+
+test('the title zone and promo lines are not ingredients', () => {
+  // The ingredient block STARTS at the first quantified line. That one rule removed every
+  // stylised-unicode title from the sampled corpus, which no wordlist would have caught.
+  const desc = [
+    'HIGH PROTEIN MOMO',
+    '𝗥𝗘𝗖𝗜𝗣𝗘 𝗙𝗢𝗥 No Maida High Protein Momo',   // above any quantity -> not an ingredient
+    'Save this recipe and try it today!',
+    '100g semolina',
+    'Coriander leaves',                          // below a quantity -> a real ingredient
+    'Follow for more easy recipes.',
+    '📊 Macros (entire recipe)',
+  ].join('\n')
+  const out = parseUnquantifiedExtras(desc)
+  assert.deepEqual(out, ['Coriander leaves'])
 })
