@@ -94,3 +94,28 @@ produce one. Pool is now 128, all verified. Backup: scratchpad `deleted_36_unver
 - [ ] **Vague names WITH mass are still uncaught** — "20g topping", "5g ga", "1 tsp oil", "5g Roas".
       Neither signal reaches them: they are not 0g and not patternable. Open as items 9-12 of the
       screenshot review.
+
+## 2026-08-30 — "No-Fry Soya Kebab" reviewed against its source video (item 7)
+
+Verified line-by-line against video FRyfG33qReo. The 21-item list is **accurate and the creator's
+own** — the length is not a defect. Two real problems, one fixed in code, one still open.
+
+- [x] **A decimal quantity was parsed as a numbered-list marker.** `\d+[.)]` matched the decimal
+      point, so "1.5 tsp Salt" read as list item "1." + "5 tsp Salt". In a non-bulleted description
+      the line was discarded outright (the ingredient vanished from the checklist AND from the
+      retention contract built from it, so the gate never noticed); in a bulleted one it survived
+      with the quantity inflated 3.3x. Fixed with a lookahead, and the parser was moved to
+      `_shared/ingredient-parse.ts` because it could not be tested where it lived.
+- [ ] **Model-truncated ingredient names are undetected.** The stored row read "Roas" for the
+      creator's "1 tsp Roasted Jeera Powder". The PARSER produced the full name correctly — the
+      model truncated it. All three truncated names in the pool were the LAST ingredient of their
+      array, which is the signature of output truncation. `finish_reason` is currently read only
+      when `JSON.parse` FAILS; when the model closes the JSON gracefully at the token limit the
+      batch is accepted with a mangled tail. Candidate fixes: reject on `finish_reason === 'length'`,
+      and/or flag an ingredient name that is a mid-word prefix of a source-checklist item.
+      The Soya Kebab row was repaired by hand from the source; backup in the session scratchpad.
+- [ ] **Instructions are too thin to cook from.** Measured over all 128 meals: only **35 (27%)**
+      mention any time and **18 (14%)** any temperature, at 4.2 steps and 351 characters average —
+      while the card displays a confident "30 min". For the kebab the missing step is squeezing the
+      boiled soya, which is the difference between a kebab and a pile: "drained" is not "squeezed".
+      Note the source description carried NO method at all, so every step was inferred.
