@@ -195,9 +195,13 @@ test('sections: an UNBULLETED list needs a colon or a leading "For"', () => {
   assert.equal(by('2 Large Cucumber'), null)
   assert.equal(by('150g Edamame'), null, '"Cooking Spray" is an ingredient, not a heading')
   assert.equal(by('125g Greek yogurt'), 'bang bang dressing')
-  // The same ingredient in two parts keeps both entries, each with its own part.
+  // ONE ENTRY PER OCCURRENCE, not per unique line — the property every consumer depends on.
+  // Keying a Map by line text collapses these to the last section, which mislabels every repeat
+  // except one: exactly the case sections exist to explain. Caught in review, not by reading.
   assert.deepEqual(got.filter(r => /Garlic Powder/i.test(r.line)).map(r => r.section),
     [null, 'salmon seasonings', 'bang bang dressing'])
+  assert.equal(got.filter(r => r.line === '2 Tsp Garlic Powder').length, 2,
+    'an identical line under two parts must yield two entries')
 })
 
 test('sections: a BULLETED list treats any unbulleted line as the heading', () => {

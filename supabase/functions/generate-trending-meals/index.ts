@@ -659,11 +659,28 @@ Deno.serve(async (req: Request) => {
       // "Topping", "Salmon Seasonings" / "Bang Bang Dressing") and the grouping is what makes a
       // repeated ingredient readable: garlic powder three times is faithful when it seasons the
       // pasta, the salmon and the dressing, and looks like a bug when the parts are flattened away.
-      const sections = new Map(parseIngredientSections(v.description || '').map(r => [r.line, r.section]))
+      // Keyed to a LIST of parts, not one. An identical line can appear under several parts —
+      // "2 Tsp Garlic Powder" seasons both the pasta and the salmon — and a plain Map would keep
+      // only the last, mislabelling every repeat except one. That is the exact case this feature
+      // exists for, so getting it wrong would have been worse than not shipping it.
+      //
+      // The checklist is DEDUPED (countedIngredients), so a doubly-listed ingredient appears once.
+      // Naming both parts on that single line is what tells the model to emit two entries.
+      const sections = new Map<string, (string | null)[]>()
+      for (const r of parseIngredientSections(v.description || '')) {
+        const seen = sections.get(r.line)
+        if (seen) seen.push(r.section)
+        else sections.set(r.line, [r.section])
+      }
       const checklist = parsed.length >= 3
         ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => {
-            const sec = sections.get(x)
-            return `     - ${x}${sec ? `   [part: ${sec}]` : ''}`
+            const parts = sections.get(x) ?? []
+            const named = [...new Set(parts.filter(Boolean))] as string[]
+            if (parts.length > 1) {
+              // Listed more than once: the model must emit one entry PER occurrence.
+              return `     - ${x}   [appears ${parts.length}x — one entry each${named.length ? `, parts: ${named.join(', ')}` : ''}]`
+            }
+            return `     - ${x}${named.length ? `   [part: ${named[0]}]` : ''}`
           }).join('\n')}`
         : ''
       // Ingredients the creator listed with NO quantity — "Green Onion", "Cilantro", "Cream
