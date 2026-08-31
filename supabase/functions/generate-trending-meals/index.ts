@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { parseIngredientBlock } from '../_shared/ingredient-parse.ts'
+import { parseIngredientBlock, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
@@ -890,6 +890,19 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         if (!Array.isArray(parsed) || parsed.length === 0) {
           providerErrors.push(`${provider.name}: returned no recipes (finish_reason=${finish}, ${clean.length} chars)`)
         }
+        // A graceful close AT the token limit is invisible to JSON.parse. finish_reason was only
+        // consulted when the parse FAILED, so a response the model cut short but closed cleanly was
+        // accepted whole — and the recipe carrying the cut is the last one. Three stored rows had a
+        // fragment for their final ingredient name ("Roas", "ga", "Turmeric Powd"), each the last
+        // entry of its array.
+        //
+        // Drop the last recipe, not the batch: everything before the cut is complete, and the
+        // failure mode here is deliberately "fewer recipes, never incomplete recipes".
+        if (finish === 'length' && Array.isArray(parsed) && parsed.length > 0) {
+          const cut = parsed.pop()
+          console.log(`[funnel] finish_reason=length — dropped trailing recipe "${cut?.name ?? '?'}" as truncated`)
+          providerErrors.push(`${provider.name}: output hit max_tokens, dropped trailing recipe "${cut?.name ?? '?'}"`)
+        }
         if (Array.isArray(parsed) && parsed.length > 0) {
           // Within-batch name dedup — Groq sometimes ignores the variety prompt
           // and returns two recipes for the same dish (e.g. two oatmeal bowls)
@@ -916,7 +929,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0
           const droppedDetail: any[] = []
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
@@ -1018,6 +1031,15 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // A dish named after a food that appears nowhere in its ingredients is the direct
             // evidence of that. Measured over a 168-meal pool this rejects 4% with no false
             // positives; every one of the seven was hand-checked as a genuine drop.
+            // Independent of finish_reason, because a provider that misreports it would put us
+            // straight back where we started. This reads the answer itself: a name that appears in
+            // the creator's list ONLY as a mid-word prefix was cut off mid-generation.
+            const cutName = truncatedAgainstSource(counted.map((i: any) => String(i?.name ?? '')), srcList)
+            if (cutName) {
+              rejTruncated++
+              console.log(`[funnel] rejected "${name}" — ingredient name "${cutName}" is a truncated copy of a source item`)
+              return false
+            }
             const gaps = nameIngredientGaps(name, counted)
             if (gaps.length > 0) {
               rejNameGap++
@@ -1052,12 +1074,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated})`)
           funnel[`llm_${provider.name}`] = {
             raw: parsed.length, sanitized: sanitized.length,
             rejected: { noName: rejNoName, noMacros: rejNoMacros, dupName: rejDupName, nearDup: rejNearDup,
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
-              nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList },
+              nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated },
             droppedDetail,
           }
           if (!recipes || sanitized.length > recipes.length) { recipes = sanitized; funnel.providerUsed = provider.name }

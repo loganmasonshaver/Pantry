@@ -82,4 +82,40 @@ function parseIngredientBlock(desc: string): string[] {
   return out.length >= 3 ? out : []
 }
 
+// The first ingredient name that looks CUT OFF against the creator's own list, or null.
+//
+// A model that hits its token limit sometimes closes the JSON gracefully, so JSON.parse succeeds
+// and the response looks healthy while its last string is a fragment. Three stored rows carried
+// one — "Roas" for "1 tsp Roasted Jeera Powder", "ga" for "garlic powder", "Turmeric Powd" — and
+// every one was the LAST entry of its array, which is what a token-limit cut looks like from here.
+//
+// This checks the OUTPUT rather than trusting finish_reason, because a provider that misreports
+// that field would put us straight back where we started.
+//
+// Two conditions, and the first is what keeps it safe: a name that appears as a COMPLETE word-run
+// anywhere in the source is a real ingredient and is never flagged, however short. Only a name that
+// appears solely as a mid-word prefix at a word boundary is a cut. So "Salt" beside "Salted butter"
+// is fine as long as the creator also listed salt on its own, which is the case that would
+// otherwise produce a false positive.
+export function truncatedAgainstSource(names: string[], srcList: string[]): string | null {
+  const lower = (v: unknown) => String(v ?? '').toLowerCase().trim()
+  const escape = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const src = srcList.map(lower).filter(Boolean)
+  if (src.length === 0) return null
+  for (const raw of names) {
+    const n = lower(raw)
+    if (n.length < 2) continue
+    const rx = escape(n)
+    if (src.some(line => new RegExp(`(^|[^a-z])${rx}([^a-z]|$)`).test(line))) continue
+    for (const line of src) {
+      const hit = new RegExp(`(^|[^a-z])${rx}([a-z]+)`).exec(line)
+      // A PLURAL is not a cut. "egg" against the creator's "2 eggs" is the same ingredient, and
+      // without this the detector rejects a healthy recipe for writing the singular — which is
+      // most of them. Caught by the test, not by reading.
+      if (hit && hit[2] !== 's' && hit[2] !== 'es') return raw
+    }
+  }
+  return null
+}
+
 export { parseIngredientBlock, stripBullet }

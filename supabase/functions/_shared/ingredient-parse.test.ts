@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseIngredientBlock, stripBullet } from './ingredient-parse.ts'
+import { parseIngredientBlock, stripBullet, truncatedAgainstSource } from './ingredient-parse.ts'
 
 test('a decimal quantity is not a numbered-list marker', () => {
   // \d+[.)] matched the DECIMAL POINT: "1.5 tsp Salt" was read as list item "1." followed by
@@ -57,4 +57,28 @@ test('a block with fewer than three usable lines yields nothing', () => {
   // The >= 3 floor is what stops a stray quantity-looking line becoming a one-item "recipe".
   assert.deepEqual(parseIngredientBlock('2 eggs\n1 tsp salt'), [])
   assert.deepEqual(parseIngredientBlock(''), [])
+})
+
+test('a name cut off mid-generation is detected against the creator list', () => {
+  const kebab = ['1 tsp Salt', '1.5 tsp Salt', '1 tsp Roasted Jeera Powder', '1/2 Cup Poha', '2 Onions']
+  // The three fragments actually found in stored rows, each the LAST entry of its array.
+  assert.equal(truncatedAgainstSource(['Salt', 'Roas', 'Poha'], kebab), 'Roas')
+  assert.equal(truncatedAgainstSource(['ga'], ['2 tsp garlic powder', '1 tbsp mayo']), 'ga')
+  assert.equal(truncatedAgainstSource(['Turmeric Powd'], ['1/2 tsp Turmeric Powder', '200g paneer']), 'Turmeric Powd')
+  // The repaired list is clean.
+  assert.equal(truncatedAgainstSource(['Salt', 'Roasted Jeera Powder', 'Poha'], kebab), null)
+})
+
+test('a real ingredient is never mistaken for a fragment', () => {
+  // The false positive this must not have: "Salt" IS a prefix of "Salted butter". It is only a
+  // fragment if the creator never listed it whole — which is why the whole-word check runs first.
+  assert.equal(truncatedAgainstSource(['Salt'], ['1 tsp Salt', '50g Salted butter']), null)
+  // A PLURAL is not a cut. Without the plural guard this rejected any recipe writing the singular
+  // of an ingredient the creator pluralised — which is most of them.
+  assert.equal(truncatedAgainstSource(['egg', 'oil'], ['2 eggs', '1 tbsp oil', '200g flour']), null)
+  assert.equal(truncatedAgainstSource(['potato'], ['500g potatoes']), null)
+  assert.equal(truncatedAgainstSource(['chilli'], ['2 Dried Red Chillies']), null)
+  // Nothing to compare against is not evidence of a cut.
+  assert.equal(truncatedAgainstSource(['Roas'], []), null)
+  assert.equal(truncatedAgainstSource([], ['1 tsp Salt']), null)
 })
