@@ -108,7 +108,8 @@ npx expo run:ios   # build and run on iOS simulator
   Any cache change needs verification at a day boundary, not just same-day.
 
 ### Tab bar `animation` must stay `'none'`
-- This is the fix for the intermittent black screen on tab switch (`2bd6a62`). With ANY animation,
+- **VERIFIED FIXED on device 2026-08-30.** This is the fix for the intermittent black screen on
+  tab switch (`2bd6a62`) — the bug that survived three debugging sessions. With ANY animation,
   `BottomTabView` drives react-native-screens' `activityState` — the prop that attaches `RNSScreen`
   to the UIKit hierarchy — through a native-driver interpolation whose detach threshold is the last
   `1e-5` of the range. Desync with the JS commit and the incoming tab is focused and rendered in
