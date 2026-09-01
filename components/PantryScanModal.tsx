@@ -20,7 +20,7 @@ import {
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
@@ -840,6 +840,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
+      {/* A React Native <Modal> is its own WINDOW, and react-native-safe-area-context cannot read
+          that window's insets from the app root — so inside here every useSafeAreaInsets() returned
+          0 and every <SafeAreaView> applied no padding. This is the documented remedy: a provider
+          scoped to the modal.
+          It is why "More tips" was untappable — `insets.top + 4` resolved to y=4, putting the
+          CENTRED pill under the Dynamic Island while the left-hugging ✕ stayed clear — and the same
+          zero silently reached every other inset use in this file. The non-camera steps
+          (stepWithSafeTop) and both overlays were all compensating with 0, which is exactly the
+          case the comment on stepWithSafeTop warns about. */}
+      <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['bottom']}>
 
         {/* ── Prep / "how scanning works" overlay (first run + ? button) ── */}
@@ -924,16 +934,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
               {/* Top scrim keeps the X / help / count legible over a bright frame */}
               <LinearGradient colors={['rgba(0,0,0,0.55)', 'transparent']} style={styles.cameraTopScrim} pointerEvents="none" />
-              {/* Top chrome sits in a SafeAreaView, not on insets arithmetic.
-                  useSafeAreaInsets() returns 0 everywhere in this app (there is no
-                  SafeAreaProvider), so `insets.top + 4` resolved to y=4 and put both rows inside
-                  the status bar. The ✕ still worked because it hugs the LEFT edge, clear of the
-                  Dynamic Island; the tips pill is CENTERED, so it landed directly under the Island
-                  — an interactive system view that eats the tap. That is why closing the camera
-                  worked and "More tips" did nothing.
-                  SafeAreaView is a self-measuring native view and DOES work here, but only for
-                  children in normal flow — an absolutely-positioned child escapes its padding — so
-                  neither row is absolutely positioned any more. */}
+              {/* Top chrome sits in a SafeAreaView in NORMAL FLOW — an absolutely-positioned
+                  child escapes a SafeAreaView's padding, which is why neither row is absolute.
+                  This only works because of the SafeAreaProvider added at the modal root; without
+                  it the inset here is 0 and this chrome lands back inside the status bar. */}
               <SafeAreaView edges={['top']} style={styles.cameraTopSafe} pointerEvents="box-none">
               <View style={styles.cameraTopBar}>
                 {/* ✕ always, photos or not — Logan's call. This briefly swapped to a Back chevron
@@ -1542,6 +1546,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         )}
 
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   )
 }
