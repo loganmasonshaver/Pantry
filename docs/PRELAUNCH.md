@@ -61,25 +61,56 @@ candidate gate from 61 videos to 8.
 - [ ] Let skeptical users skip onboarding to explore first, then show a paywall tailored to
       browsers. Must be in the build that goes to TestFlight, and likely appears in screenshots.
 
-## 5. End-to-end test AI meal generation
+## 5. Rating prompt — sentiment-gated, never the native popup first
+Review count is the durable moat against a copycat: a competitor can clone the UI in a weekend but
+cannot clone 400 reviews. Must be in the TestFlight build.
+- [ ] Ask at a **success moment**, not on launch or on a timer. Candidates: 3rd meal cooked, first
+      pantry scan that returns a full shelf, a meal saved. Must not collide with the paywall or the
+      onboarding trailer.
+- [ ] **Own modal first.** "How's Pantry working out?" → two paths, no App Store branding on it:
+      - Loves it → THEN fire the native prompt (`StoreReview.requestReview()`).
+      - Doesn't → route to an in-app feedback form, never to the App Store. Bad reviews land in a
+        private pool that feeds the roadmap instead of the public rating.
+- [ ] Needs `expo-store-review` — **not currently a dependency.** Add it before building the flow.
+- [ ] Needs an in-app feedback form — **does not exist yet.** Nothing in `app/` collects written
+      user feedback today (the "feedback" hits in the codebase are all haptics). Simplest version:
+      a text field writing to a `feedback` table with RLS insert-only for `auth.uid()`.
+- [ ] Ask once, then never again for that user unless they engage. Persist a `review_prompted_at`
+      on the profile — an unsaved flag re-asks on every reinstall.
+
+**Two constraints that decide the design — read before building:**
+- **iOS caps the native prompt at 3 per user per 365 days,** and it silently no-ops past that with
+  no callback and no error. So the gate is not just a rating filter — it is how you avoid burning a
+  scarce prompt on someone who was going to leave 2 stars. That is the real argument for it.
+- **App Store Review Guideline 5.6.1 says Apple "will disallow custom review prompts."** The
+  sentiment-gate is a gray area: it is shipped by large apps and rarely rejected, but it is against
+  the letter of the rule. Keep the pre-screen worded as a satisfaction question, not a review ask —
+  no stars, no "rate us", no App Store logo. If it says "rate us" it is a custom review prompt and
+  it is rejectable.
+- **On a premium-only app the review pool is small.** Nearly everyone who could review is a trialist
+  or subscriber, so gating too aggressively can leave you with 12 reviews instead of 40. Volume at
+  the ask matters more than purity of the filter — do not set the bar so high that almost nobody
+  reaches the native prompt.
+
+## 6. End-to-end test AI meal generation
 - [ ] Full path on device, not simulator.
 
-## 6. Onboarding trailer  *(after 3 — the app must be final before filming)*
+## 7. Onboarding trailer  *(after 3 — the app must be final before filming)*
 - [ ] BLOCKED ON A DECISION: is any cached meal image hero-grade enough to hold 2.4 seconds? That
       frame is a third of the film.
 - [ ] Shot list: https://claude.ai/code/artifact/766f88c0-a922-463a-ad84-09059a351b14
 
-## 7. App Store screenshots + description  *(after 3)*
+## 8. App Store screenshots + description  *(after 3)*
 - [ ] Screenshots must be AI-generated, not Figma re-skins.
 
-## 8. Unset SCAN_CAP_WEEK  *(after the trailer and screenshots are shot)*
+## 9. Unset SCAN_CAP_WEEK  *(after the trailer and screenshots are shot)*
 - [ ] `npx supabase secrets unset SCAN_CAP_WEEK` — unset is correct; scan-pantry falls back to 7.
       Held raised deliberately until app fixes and filming are done. Preflight fails until reverted.
 
-## 9. Clean git history of leaked secrets
+## 10. Clean git history of leaked secrets
 - [ ] BFG Repo-Cleaner — anon key still in old commits.
 
-## 10. TestFlight beta
+## 11. TestFlight beta
 - [ ] Everything above must be in the build.
 - [ ] **Prove the email system end to end here, not at launch.** It had NEVER worked before
       2026-08-30 (`4c016c2`) — loops-sync selected `email`/`full_name` from `profiles`, which have
@@ -91,7 +122,7 @@ candidate gate from 61 videos to 8.
       (`8977f41`). Use the app — save a meal, open a Cook Tonight pick, change a goal — then re-read
       the profiles row. Until this is checked the Loops sequences are unproven.
 
-## 11. App Store submission
+## 12. App Store submission
 - [ ] App Review demo account: `appreview@heypantry.app`, `promo_active=true`, entered in App Store
       Connect. REQUIRED AT EVERY SUBMISSION — a missing one is an automatic rejection.
 - [ ] Paste the prepared App Review Notes into the Notes field.
