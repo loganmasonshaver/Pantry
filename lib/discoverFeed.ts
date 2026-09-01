@@ -144,6 +144,39 @@ export async function readDiscoverCache(uid: string): Promise<DiscoverMeal[] | n
   }
 }
 
+// ── Hero pick ────────────────────────────────────────────────────────────────────────────────
+//
+// The hero is supposed to be a dish the reader has not been served before, so the record of what
+// they HAVE been served has to outlive the process — an in-memory ref resets on every cold start
+// and the hero would repeat on relaunch. Stored with the day so a same-day relaunch keeps the same
+// hero rather than picking a second one, which is what made it flicker between the cache paint and
+// the fetch paint. Lives here with the other storage so the screen never touches AsyncStorage.
+export type HeroPick = { day: number; id: string; seen: string[] }
+const HERO_KEY = 'pantry_discover_hero'
+export const HERO_SEEN_CAP = 60 // ~2 months of daily heroes before the pool has to recycle
+
+export async function readHeroPick(): Promise<HeroPick | null> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
+    const raw = await AsyncStorage.getItem(HERO_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    if (typeof p?.day !== 'number' || typeof p?.id !== 'string' || !Array.isArray(p?.seen)) return null
+    return p as HeroPick
+  } catch {
+    return null
+  }
+}
+
+export async function writeHeroPick(pick: HeroPick): Promise<void> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
+    await AsyncStorage.setItem(HERO_KEY, JSON.stringify({ ...pick, seen: pick.seen.slice(-HERO_SEEN_CAP) }))
+  } catch {
+    // best-effort: a failed write just means the hero may repeat once
+  }
+}
+
 // Warm the cache so opening the tab paints today's feed immediately instead of starting the fetch
 // on arrival. The Discover screen is not mounted until it is first opened, so nothing inside it
 // can do this — the prefetch has to live out here and hand the screen a fresh cache to hydrate.

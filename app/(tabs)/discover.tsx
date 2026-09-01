@@ -20,6 +20,7 @@ import { COLORS } from '@/constants/colors'
 import { countMissingIngredients } from '@/lib/ingredientDisplay'
 import {
   loadTrendingMeals, readDiscoverCache, writeDiscoverCache, prefetchDiscover,
+  readHeroPick, writeHeroPick, HERO_SEEN_CAP, type HeroPick,
   type DiscoverMeal,
 } from '@/lib/discoverFeed'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
@@ -415,6 +416,20 @@ export default function DiscoverScreen() {
   // Flips once the three diet inputs above are known (or known to be unavailable). The cache paint
   // waits on it — see the comment on that effect.
   const [profileLoaded, setProfileLoaded] = useState(false)
+  const [pantryLoaded, setPantryLoaded] = useState(false)
+  // undefined = the stored hero record hasn't been read yet; the hero must not be chosen before it
+  // is, or the first pick would ignore everything the reader has already been shown.
+  const [heroStore, setHeroStore] = useState<HeroPick | undefined>(undefined)
+  useEffect(() => { readHeroPick().then(p => setHeroStore(p ?? { day: -1, id: '', seen: [] })) }, [])
+  // Nothing paints until EVERY input to the shelves is in. browseSections depends on pantryNames,
+  // excludedStaples, budget and lastCooked, which arrive on separate async waves after the meals —
+  // and claim() is first-shelf-wins, so the moment "Almost in your kitchen" finally populates it
+  // takes up to 8 meals away from every shelf below it and the whole page re-lays-out under the
+  // reader. That is the card shuffling on the right-hand side. Meals arriving early is not enough;
+  // the personalisation that decides where they GO has to be there too. Costs a slightly longer
+  // skeleton, which is the trade discoverFeed.ts already makes for the stale-day cache.
+  const personalReady = profileLoaded && pantryLoaded
+  const showSkeleton = loading || !personalReady
 
   // Pantry + last-cooked, fetched independently of the profile/budget call above. in_stock is
   // filtered here to match every other pantry reader in the app — an item marked out of stock is
@@ -430,6 +445,9 @@ export default function DiscoverScreen() {
       setPantryNames(new Set((pantry ?? []).map((p: any) => String(p.name ?? '').toLowerCase().trim()).filter(Boolean)))
       if (recent?.[0]?.meal_name) setLastCooked(recent[0].meal_name)
     })()
+      // Set on BOTH paths — a failed pantry read must not strand the feed on a skeleton.
+      .catch(() => {})
+      .finally(() => setPantryLoaded(true))
   }, [user])
 
   // Profile-based dietary filters apply to every Discover view (always-on safety
@@ -452,7 +470,6 @@ export default function DiscoverScreen() {
         }
         if (data?.diet_type) setDietType(data.diet_type)
         if (data?.max_prep_minutes) setMaxPrep(data.max_prep_minutes)
-        setProfileLoaded(true) // diet inputs are set; the cache may paint now
 
         const goalCal = data?.calorie_goal ?? 0
         const goalPro = data?.protein_goal ?? 0
@@ -460,7 +477,9 @@ export default function DiscoverScreen() {
         // last-cooked are fetched separately below — they were originally inside this block, so a
         // profile without macro goals silently lost the pantry shelf too. Unrelated data should
         // never share an early return.
-        if (!goalCal && !goalPro) return
+        // No goals means there is no budget to fetch and `fits` never renders — the profile is
+        // fully settled right here. Flag it before returning or the feed waits forever.
+        if (!goalCal && !goalPro) { setProfileLoaded(true); return }
         const loggedToday = todayStr() // LOCAL day, matching how logged_at is written
         const { data: logs } = await supabase.from('meal_logs')
           .select('calories, protein').eq('user_id', user.id).eq('logged_at', loggedToday)
@@ -473,6 +492,9 @@ export default function DiscoverScreen() {
           // fits — the section would be noise pretending to be personalisation. Gate on it.
           hasLogged: (logs ?? []).length > 0,
         })
+        // LAST, deliberately: budget feeds the "Fits your remaining kcal" shelf, and claim() is
+        // first-shelf-wins, so a budget that lands after first paint re-allocates the whole page.
+        setProfileLoaded(true)
       },
       // Rejection handler as .then's SECOND argument, not .catch — the postgrest builder is a
       // PromiseLike and has no .catch. A failed profile read must not strand the screen on a
@@ -499,7 +521,7 @@ export default function DiscoverScreen() {
   // Same argument discoverFeed.ts already makes for the stale-day cache: a moment more skeleton is
   // honest, rearranging the page under the reader is not.
   useEffect(() => {
-    if (!user || !profileLoaded) return
+    if (!user || !personalReady) return
     let cancelled = false
     readDiscoverCache(user.id).then(cached => {
       if (cancelled || !cached) return
@@ -508,7 +530,7 @@ export default function DiscoverScreen() {
       prefetchMealImages(cached.slice(0, 8).map(m => m.image)) // warm the rail before scroll
     })
     return () => { cancelled = true }
-  }, [user, profileLoaded])
+  }, [user, personalReady])
 
   const fetchTrending = useCallback(async (force = false) => {
     if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
@@ -608,30 +630,47 @@ export default function DiscoverScreen() {
   //
   // Picking by hash of (meal id + day) has no index arithmetic at all, so inserting meals cannot
   // move it. It is stable for a whole day and independent the next.
-  const heroPickRef = useRef<{ day: number; id: string } | null>(null)
+  // NEWEST DISH THE READER HAS NOT BEEN SHOWN. A day-indexed rotation (either the old rotateByDay
+  // or a hash of the day) can only ever promise "different from yesterday" — it happily serves a
+  // three-week-old meal, and it repeats by coincidence at 1-in-tier-size. What the hero is for is
+  // "here is something new", so it now reads the actual record of what has been featured.
+  //
+  // topTier is generated_at DESC within a rank, so the FIRST unseen entry IS the newest unseen —
+  // no day arithmetic anywhere, which is what made the old version cancel itself out against the
+  // pipeline's daily inserts. It also survives a cron miss: on a day that produced nothing the
+  // next-newest unseen meal is still new TO THIS READER, which is the only definition that matters.
   const featured = useMemo(() => {
-    if (filtered.length === 0) return undefined
+    if (filtered.length === 0 || heroStore === undefined) return undefined
     const bestRank = timeOfDayRank(filtered[0], mealTime)
     const topTier = filtered.filter(m => timeOfDayRank(m, mealTime) === bestRank)
     if (topTier.length === 0) return undefined
+    // Today's hero is already decided — including by a previous launch — so keep it. Without this
+    // the cache paint (60 meals) and the fetch paint (600) each chose, and the hero swapped a
+    // second after the reader started looking at it.
+    if (heroStore.day === dayOfYearNow()) {
+      const held = topTier.find(m => m.id === heroStore.id)
+      if (held) return held
+    }
+    const seen = new Set(heroStore.seen)
+    // Falling back to topTier[0] when everything has been seen recycles the pool rather than
+    // showing nothing — HERO_SEEN_CAP is ~2 months, so this is the rare case.
+    return topTier.find(m => !seen.has(m.id)) ?? topTier[0]
+  }, [filtered, mealTime, heroStore])
+
+  // Record the pick, once per day. Kept out of the memo so the memo stays pure; the guard below is
+  // what stops it looping, since writing heroStore re-runs the memo that produced `featured`.
+  useEffect(() => {
+    if (!featured || heroStore === undefined) return
     const day = dayOfYearNow()
-    // Sticky within the day. The cache paints 60 meals and the fetch replaces them with up to 600,
-    // so the tier changes size mid-session and a fresh pick would swap the hero out from under the
-    // reader a second after they started looking at it — measured on 3 of 4 sampled days.
-    const held = heroPickRef.current
-    if (held?.day === day) {
-      const still = topTier.find(m => m.id === held.id)
-      if (still) return still
+    if (heroStore.day === day && heroStore.id === featured.id) return
+    const next: HeroPick = {
+      day,
+      id: featured.id,
+      seen: [...heroStore.seen.filter(id => id !== featured.id), featured.id].slice(-HERO_SEEN_CAP),
     }
-    let best = topTier[0]
-    let bestH = hashKey(`${best.id}:${day}`)
-    for (const m of topTier) {
-      const h = hashKey(`${m.id}:${day}`)
-      if (h < bestH) { best = m; bestH = h }
-    }
-    heroPickRef.current = { day, id: best.id }
-    return best
-  }, [filtered, mealTime])
+    setHeroStore(next)
+    writeHeroPick(next)
+  }, [featured, heroStore])
   // The rail is a CURATED shelf, not the whole browsing surface — that distinction is why the tab
   // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
   // unreachable. The rail stays tight (10, protein-varied) and everything else drops into the
@@ -1040,7 +1079,7 @@ export default function DiscoverScreen() {
             screen gets crowded and how the same meal shows up twice on one scroll.
             The filter chips deliberately STAY: results derive from `filtered`, so searching inside
             "High Protein" already works, and hiding the chip would hide that it applies. */}
-        {!searching && (loading ? (
+        {!searching && (showSkeleton ? (
           <View style={[styles.featuredHero, styles.featuredSkeleton]}>
             <Compass size={32} stroke="#333" strokeWidth={1.5} />
           </View>
@@ -1085,7 +1124,7 @@ export default function DiscoverScreen() {
             empty by construction. It's now a normal grid section like everything else, so the page
             has one scroll direction and nothing hides behind a sideways gesture. The hero above
             remains the single "display" moment. */}
-        {!searching && !loading && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
+        {!searching && !showSkeleton && CREATOR_SHELF_ENABLED && (creatorRail.length > 0 || promoActive) && (
           <View style={{ marginTop: 28 }}>
             <View style={styles.railHeader}>
               <Text style={styles.sectionTitle}>From Creators</Text>
@@ -1117,7 +1156,7 @@ export default function DiscoverScreen() {
             look at"; a grid answers "show me everything", which is the mode someone is in when they
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
-        {!searching && !loading && browseSections.map(section => {
+        {!searching && !showSkeleton && browseSections.map(section => {
           const shown = shownCount(section.key, section.meals.length)
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
@@ -1169,14 +1208,14 @@ export default function DiscoverScreen() {
         })}
 
         {/* Empty states — distinguish "nothing trending at all" from "filter narrowed to zero" */}
-        {!loading && trending.length === 0 && (
+        {!showSkeleton && trending.length === 0 && (
           <View style={styles.emptyState}>
             <Compass size={36} stroke={COLORS.textMuted} strokeWidth={1.5} />
             <Text style={styles.emptyTitle}>No trending recipes yet</Text>
             <Text style={styles.emptySub}>Check back tomorrow — new picks drop daily.</Text>
           </View>
         )}
-        {!loading && trending.length > 0 && filtered.length === 0 && (
+        {!showSkeleton && trending.length > 0 && filtered.length === 0 && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No {activeFilter} recipes right now</Text>
             <Text style={styles.emptySub}>Try a different filter — the daily pool changes every morning.</Text>
