@@ -730,6 +730,27 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // photos hadn't finished — the user would pay for a scan of fewer photos than they took.
   const encoding = photos.some(p => !p.base64)
 
+  // Scanning is an INTENT, not a disabled button. `encoding` flips true on every shutter press and
+  // back a moment later, so driving the CTA's label off it made the primary action flash
+  // "Preparing photos…" and a spinner after every single photo — at a moment when nobody is trying
+  // to press it. The busy state is only informative if the user actually asked to scan, so the
+  // label now stays "Scan N photos" and a press made too early is REMEMBERED and fires itself once
+  // the work lands. (It cannot just navigate: scanPhotos() reads `photos` from its step-5 effect
+  // closure, so anything unencoded at that instant is silently dropped from the upload.)
+  const [pendingScan, setPendingScan] = useState(false)
+  const requestScan = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+    if (encoding) { setPendingScan(true); return }
+    setStep(5)
+  }
+  useEffect(() => {
+    if (!pendingScan) return
+    if (photos.length === 0) { setPendingScan(false); return } // every capture failed out from under it
+    if (encoding) return
+    setPendingScan(false)
+    setStep(5)
+  }, [pendingScan, encoding, photos.length])
+
   // Ride the photo count rather than the capture call, so gallery imports scroll too.
   useEffect(() => {
     if (photos.length === 0) return
@@ -743,26 +764,40 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       Alert.alert('Photo limit', `You can include up to ${MAX_PHOTOS_PER_SCAN} photos per scan.`)
       return
     }
+    // The row is inserted BEFORE the capture resolves. takePictureAsync at quality 1 is a
+    // full-resolution capture plus a disk write — hundreds of ms — and the filmstrip stayed empty
+    // for every one of them. That gap IS the lag. The strip already renders a placeholder tile for
+    // a row with no uri, so the slot now appears on the shutter press and the image drops into it.
+    // It also closes a real hole: with no row in `photos` during the capture, `encoding` was false,
+    // so pressing Scan right after the shutter sent the user to step 5 while scanPhotos() read a
+    // photos array that did not contain the shot they had just taken. It was dropped silently.
+    const id = String(Date.now())
+    setPhotos(prev => [...prev, { id, label, uri: undefined, base64: undefined }])
+    let captured: string
     try {
       // Capture near-lossless (quality 1, no base64), then do the single resize +
       // re-encode in downscaleToBase64 — avoids the old double-compression that
       // destroyed label readability while still keeping the upload small.
+      // NOT using skipProcessing: it discards `quality` outright and returns an image whose
+      // rotation is EXIF-only, which is the exact bug fixed in a37bd03. Speed is not worth it.
       const photo = await cameraRef.current.takePictureAsync({ quality: 1 })
-      if (photo) {
-        // Show the thumbnail and free the shutter IMMEDIATELY. downscaleToBase64 resizes to
-        // 2048px, re-encodes JPEG at 0.95 and base64s the result — hundreds of ms on a modern
-        // phone photo — and awaiting it before setPhotos is what made the second shot feel
-        // laggy. The encode now runs in the background and patches itself into the same row.
-        const id = String(Date.now())
-        setPhotos(prev => [...prev, { id, label, uri: photo.uri, base64: undefined }])
-        downscaleToBase64(photo.uri)
-          .then(out => setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: out.uri, base64: out.base64 } : p)))
-          // A failed encode leaves base64 undefined, which keeps the Scan button disabled rather
-          // than letting the photo be silently dropped from the upload (scanPhotos filters on it).
-          .catch(() => {})
-      }
+      if (!photo) throw new Error('no photo returned')
+      captured = photo.uri
+      setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: captured } : p))
     } catch (e) {
+      setPhotos(prev => prev.filter(p => p.id !== id))
       Alert.alert('Capture failed', 'Could not take photo.')
+      return
+    }
+    try {
+      const out = await downscaleToBase64(captured)
+      setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: out.uri, base64: out.base64 } : p))
+    } catch {
+      // The old code swallowed this and left base64 undefined forever, which pinned `encoding`
+      // true and wedged the Scan button with no way out. Dropping the row is the honest outcome:
+      // the photo cannot be uploaded, so say so and let them retake it.
+      setPhotos(prev => prev.filter(p => p.id !== id))
+      Alert.alert('Photo not usable', 'That photo could not be prepared. Take it again.')
     }
     // next === 0 means "stay on the camera". The shutter used to hand you back to the areas hub
     // after EVERY photo, so four shots cost eight screen transitions and four camera remounts —
@@ -789,13 +824,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       quality: 1,
     })
     if (!result.canceled && result.assets[0]) {
-      const out = await downscaleToBase64(result.assets[0].uri)
-      setPhotos(prev => [...prev, {
-        id: String(Date.now()),
-        label,
-        uri: out.uri,
-        base64: out.base64,
-      }])
+      // Row first, encode second — same reason as capturePhoto. The picker hands back a usable
+      // uri immediately, so this one shows the real image rather than a placeholder tile.
+      const id = String(Date.now())
+      const picked = result.assets[0].uri
+      setPhotos(prev => [...prev, { id, label, uri: picked, base64: undefined }])
+      try {
+        const out = await downscaleToBase64(picked)
+        setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: out.uri, base64: out.base64 } : p))
+      } catch {
+        setPhotos(prev => prev.filter(p => p.id !== id))
+        Alert.alert('Photo not usable', 'That photo could not be prepared. Try another.')
+      }
       if (next !== 0) {
         setPendingLabel(null)
         setStep(next)
@@ -815,13 +855,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       quality: 1,
     })
     if (!result.canceled && result.assets[0]) {
-      const out = await downscaleToBase64(result.assets[0].uri)
-      setPhotos(prev => [...prev, {
-        id: String(Date.now()),
-        label,
-        uri: out.uri,
-        base64: out.base64,
-      }])
+      const id = String(Date.now())
+      const picked = result.assets[0].uri
+      setPhotos(prev => [...prev, { id, label, uri: picked, base64: undefined }])
+      try {
+        const out = await downscaleToBase64(picked)
+        setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: out.uri, base64: out.base64 } : p))
+      } catch {
+        setPhotos(prev => prev.filter(p => p.id !== id))
+        Alert.alert('Photo not usable', 'That photo could not be prepared. Try another.')
+      }
     }
   }
 
@@ -1103,20 +1146,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     the upload silently drops photos that haven't. */}
                 {photos.length > 0 && (
                   <TouchableOpacity
-                    style={[styles.cameraScanBtn, encoding && styles.cameraScanBtnBusy]}
-                    onPress={() => {
-                      if (encoding) return
-                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
-                      setStep(5)
-                    }}
-                    disabled={encoding}
+                    style={[styles.cameraScanBtn, pendingScan && styles.cameraScanBtnBusy]}
+                    onPress={requestScan}
+                    disabled={pendingScan}
                     activeOpacity={0.85}
                   >
-                    {encoding
+                    {pendingScan
                       ? <ActivityIndicator size="small" color="#000000" />
                       : <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />}
                     <Text style={styles.cameraScanBtnText}>
-                      {encoding ? 'Preparing photos…' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
+                      {pendingScan ? 'Preparing photos…' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1264,9 +1303,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               </View>
             </ScrollView>
             <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8, justifyContent: 'center' }]} onPress={() => setStep(5)} activeOpacity={0.85}>
-                <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />
-                <Text style={styles.primaryBtnText}>Scan {photos.length} Photo{photos.length !== 1 ? 's' : ''}</Text>
+              {/* Same requestScan as the camera's CTA. This one had NO encode guard at all — it
+                  called setStep(5) unconditionally, so a photo still encoding when you reached the
+                  hub was dropped from the upload without a word. */}
+              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8, justifyContent: 'center' }]} onPress={requestScan} disabled={pendingScan} activeOpacity={0.85}>
+                {pendingScan
+                  ? <ActivityIndicator size="small" color="#000000" />
+                  : <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />}
+                <Text style={styles.primaryBtnText}>{pendingScan ? 'Preparing photos…' : `Scan ${photos.length} Photo${photos.length !== 1 ? 's' : ''}`}</Text>
               </TouchableOpacity>
             </View>
           </View>
