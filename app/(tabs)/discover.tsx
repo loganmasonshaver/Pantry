@@ -412,6 +412,9 @@ export default function DiscoverScreen() {
   const [foodDislikes, setFoodDislikes] = useState<string[]>([])
   const [dietaryRestrictions, setDietaryRestrictions] = useState<string[]>([])
   const [dietType, setDietType] = useState<string>('Classic')
+  // Flips once the three diet inputs above are known (or known to be unavailable). The cache paint
+  // waits on it — see the comment on that effect.
+  const [profileLoaded, setProfileLoaded] = useState(false)
 
   // Pantry + last-cooked, fetched independently of the profile/budget call above. in_stock is
   // filtered here to match every other pantry reader in the app — an item marked out of stock is
@@ -449,6 +452,7 @@ export default function DiscoverScreen() {
         }
         if (data?.diet_type) setDietType(data.diet_type)
         if (data?.max_prep_minutes) setMaxPrep(data.max_prep_minutes)
+        setProfileLoaded(true) // diet inputs are set; the cache may paint now
 
         const goalCal = data?.calorie_goal ?? 0
         const goalPro = data?.protein_goal ?? 0
@@ -469,7 +473,11 @@ export default function DiscoverScreen() {
           // fits — the section would be noise pretending to be personalisation. Gate on it.
           hasLogged: (logs ?? []).length > 0,
         })
-      })
+      },
+      // Rejection handler as .then's SECOND argument, not .catch — the postgrest builder is a
+      // PromiseLike and has no .catch. A failed profile read must not strand the screen on a
+      // skeleton forever: paint unfiltered rather than not at all, as it behaved before this gate.
+      () => setProfileLoaded(true))
   }, [user])
 
   // Serve the in-state pool instead of re-hitting Postgres on every tab-return / foreground.
@@ -483,16 +491,24 @@ export default function DiscoverScreen() {
   // that. Painting a stale day was the whole bug: yesterday's shelves appeared instantly, then the
   // fetch landed 2-3s later and the page visibly rearranged itself, because on a new day both the
   // meals AND the rotation change at once. A skeleton is better than a feed that reshuffles.
+  // Gated on profileLoaded, NOT just on the cache being present. foodDislikes /
+  // dietaryRestrictions / dietType all start empty and are filled by the profile query below, and
+  // they are inputs to `filtered` — so painting before that lands showed the feed with the
+  // always-on safety filter switched off (a nut-allergy user briefly served almond recipes), and
+  // then silently reordered it when the profile arrived. That reorder was one of the two Logan saw.
+  // Same argument discoverFeed.ts already makes for the stale-day cache: a moment more skeleton is
+  // honest, rearranging the page under the reader is not.
   useEffect(() => {
-    if (!user) return
+    if (!user || !profileLoaded) return
     let cancelled = false
     readDiscoverCache(user.id).then(cached => {
       if (cancelled || !cached) return
-      setTrending(cached); hasContentRef.current = true; setLoading(false)
+      setTrending(prev => prev.length ? prev : cached) // never clobber a fetch that already landed
+      hasContentRef.current = true; setLoading(false)
       prefetchMealImages(cached.slice(0, 8).map(m => m.image)) // warm the rail before scroll
     })
     return () => { cancelled = true }
-  }, [user])
+  }, [user, profileLoaded])
 
   const fetchTrending = useCallback(async (force = false) => {
     if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
@@ -581,11 +597,40 @@ export default function DiscoverScreen() {
   // Rotating only among the BEST-ranked candidates keeps the time-of-day guarantee intact — a
   // dessert still never leads the feed at breakfast — while guaranteeing a different dish daily
   // even if nothing new arrives.
+  //
+  // rotateByDay was the WRONG tool here and it measurably repeated. topTier is ordered
+  // generated_at DESC, so every meal the cron adds lands at the FRONT and pushes each existing
+  // meal back one slot — while the day index advances the cursor forward exactly one slot. The two
+  // cancel. Simulated against the live pool: the breakfast hero was byte-identical on 26, 27 and
+  // 28 Aug (tier 11 -> 12 -> 13, n 7 -> 8 -> 9) because exactly one breakfast meal landed on each
+  // of those days. With K new meals it is worse than static — the cursor slides BACKWARDS through
+  // meals it already showed. Index rotation is only sound on a fixed-length array; this one grows.
+  //
+  // Picking by hash of (meal id + day) has no index arithmetic at all, so inserting meals cannot
+  // move it. It is stable for a whole day and independent the next.
+  const heroPickRef = useRef<{ day: number; id: string } | null>(null)
   const featured = useMemo(() => {
     if (filtered.length === 0) return undefined
     const bestRank = timeOfDayRank(filtered[0], mealTime)
     const topTier = filtered.filter(m => timeOfDayRank(m, mealTime) === bestRank)
-    return rotateByDay(topTier, dayOfYearNow(), 'featured', 1)[0]
+    if (topTier.length === 0) return undefined
+    const day = dayOfYearNow()
+    // Sticky within the day. The cache paints 60 meals and the fetch replaces them with up to 600,
+    // so the tier changes size mid-session and a fresh pick would swap the hero out from under the
+    // reader a second after they started looking at it — measured on 3 of 4 sampled days.
+    const held = heroPickRef.current
+    if (held?.day === day) {
+      const still = topTier.find(m => m.id === held.id)
+      if (still) return still
+    }
+    let best = topTier[0]
+    let bestH = hashKey(`${best.id}:${day}`)
+    for (const m of topTier) {
+      const h = hashKey(`${m.id}:${day}`)
+      if (h < bestH) { best = m; bestH = h }
+    }
+    heroPickRef.current = { day, id: best.id }
+    return best
   }, [filtered, mealTime])
   // The rail is a CURATED shelf, not the whole browsing surface — that distinction is why the tab
   // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
