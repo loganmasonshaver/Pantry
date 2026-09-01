@@ -866,7 +866,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               </View>
               <Text style={styles.prepFootnote}>You'll review every photo and fix misses after.</Text>
             </ScrollView>
-            <View style={styles.prepActions}>
+            {/* Explicit bottom clearance rather than relying on the overlay inheriting it: this is
+                an absoluteFill child, and an absolutely-positioned child does not pick up the
+                parent SafeAreaView's padding. Math.max keeps it honest on a home-button device
+                where insets.bottom is 0. */}
+            <View style={[styles.prepActions, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
               <TouchableOpacity style={styles.primaryBtn} onPress={dismissPrep} activeOpacity={0.85}>
                 <Text style={styles.primaryBtnText}>Got it — start scanning</Text>
               </TouchableOpacity>
@@ -1578,7 +1582,7 @@ const styles = StyleSheet.create({
   prepTipText: { flex: 1, fontSize: 15, color: '#999999', lineHeight: 20 },
   prepTipBold: { color: '#FFFFFF', fontWeight: '700' },
   prepFootnote: { fontSize: 13, color: '#777777', textAlign: 'center', marginTop: 28, lineHeight: 19 },
-  prepActions: { paddingBottom: 8, paddingTop: 8 },
+  prepActions: { paddingTop: 8 },
   savedOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 60, paddingHorizontal: 24 },
   savedBody: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
   savedCheck: { width: 72, height: 72, borderRadius: 36, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
