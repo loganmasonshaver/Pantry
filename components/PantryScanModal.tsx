@@ -924,7 +924,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
               {/* Top scrim keeps the X / help / count legible over a bright frame */}
               <LinearGradient colors={['rgba(0,0,0,0.55)', 'transparent']} style={styles.cameraTopScrim} pointerEvents="none" />
-              <View style={[styles.cameraTopBar, { top: insets.top + 4 }]}>
+              {/* Top chrome sits in a SafeAreaView, not on insets arithmetic.
+                  useSafeAreaInsets() returns 0 everywhere in this app (there is no
+                  SafeAreaProvider), so `insets.top + 4` resolved to y=4 and put both rows inside
+                  the status bar. The ✕ still worked because it hugs the LEFT edge, clear of the
+                  Dynamic Island; the tips pill is CENTERED, so it landed directly under the Island
+                  — an interactive system view that eats the tap. That is why closing the camera
+                  worked and "More tips" did nothing.
+                  SafeAreaView is a self-measuring native view and DOES work here, but only for
+                  children in normal flow — an absolutely-positioned child escapes its padding — so
+                  neither row is absolutely positioned any more. */}
+              <SafeAreaView edges={['top']} style={styles.cameraTopSafe} pointerEvents="box-none">
+              <View style={styles.cameraTopBar}>
                 {/* ✕ always, photos or not — Logan's call. This briefly swapped to a Back chevron
                     once a photo existed (to the areas hub) because ✕ here calls handleClose, which
                     resets photos with no confirmation. That trade is accepted: one control with one
@@ -934,8 +945,24 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <X size={20} stroke="#FFFFFF" strokeWidth={2} />
                 </TouchableOpacity>
                 {/* The photo count lived here. It duplicated the filmstrip below — which shows the
-                    same number as actual pictures — so the tips pill gets the slot instead. */}
-                <View style={styles.cameraTopCenter} />
+                    same number as actual pictures — so the tips pill gets the slot instead. The
+                    pill IS this slot now, rather than a second absolutely-positioned row laid over
+                    the same line: overlapping two absolute rows is what buried it under the
+                    Dynamic Island in the first place. */}
+                <View style={styles.cameraTopCenter} pointerEvents="box-none">
+                  <TouchableOpacity
+                    style={styles.cameraTipRow}
+                    onPress={() => setShowPrep(true)}
+                    activeOpacity={0.7}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Lightbulb size={13} stroke="#4ADE80" strokeWidth={2} />
+                    <Text style={styles.cameraTip} numberOfLines={1}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
+                    <View style={styles.cameraTipDivider} />
+                    <Text style={styles.cameraTipMore}>More tips</Text>
+                    <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} style={{ marginLeft: -2 }} />
+                  </TouchableOpacity>
+                </View>
                 {/* The "?" lived here and opened the same guide as the tips pill above the shutter —
                     two controls, one destination. Removed; the pill is the single, visible entry.
                     Invisible spacer (NOT cameraCloseBtn, whose background rendered as a grey blob)
@@ -943,24 +970,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <View style={{ width: 36 }} />
               </View>
 
-              {/* Tips pill, moved up out of the bottom stack. It's guidance you want BEFORE framing
-                  a shot, and down there it was competing with the filmstrip and the shutter for
-                  the space the viewfinder needs. Now shares the back-arrow's line: it owned a
-                  whole band of its own for one 30pt pill, and that band is viewfinder. */}
-              <View style={[styles.cameraTipWrap, { top: insets.top + 4 }]} pointerEvents="box-none">
-                <TouchableOpacity
-                  style={styles.cameraTipRow}
-                  onPress={() => setShowPrep(true)}
-                  activeOpacity={0.7}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Lightbulb size={13} stroke="#4ADE80" strokeWidth={2} />
-                  <Text style={styles.cameraTip} numberOfLines={1}>{CAMERA_TIPS[photos.length % CAMERA_TIPS.length]}</Text>
-                  <View style={styles.cameraTipDivider} />
-                  <Text style={styles.cameraTipMore}>More tips</Text>
-                  <ChevronRight size={13} stroke="#4ADE80" strokeWidth={2.5} style={{ marginLeft: -2 }} />
-                </TouchableOpacity>
-              </View>
+              </SafeAreaView>
 
               {/* Hero beat: the instruction opens large and centered, then settles above the shutter.
                   Gated on photos.length like the bottom copy it cross-fades into — the two are the
@@ -1745,14 +1755,14 @@ const styles = StyleSheet.create({
   cameraHeroWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
   cameraHeroTitle: { fontSize: 38, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.8, lineHeight: 44, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.85)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 14 },
   cameraSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.9)', lineHeight: 20, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.7)', textShadowRadius: 6 },
+  // Anchors the camera's top chrome below the status bar. zIndex keeps it over the CameraView.
+  cameraTopSafe: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   cameraTopBar: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
+    marginTop: 4,
+    marginHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    zIndex: 10,
   },
   cameraTopCenter: {
     flex: 1,
@@ -1905,7 +1915,6 @@ const styles = StyleSheet.create({
   // Height matches cameraCloseBtn so the pill centres on the back arrow whatever the pill's own
   // height is. left/right clear the 36pt top-bar controls (which start at 16) — without that a long
   // tip grows under the back arrow, since the pill is centred and free to widen in both directions.
-  cameraTipWrap: { position: 'absolute', left: 56, right: 56, height: 36, alignItems: 'center', justifyContent: 'center' },
   cameraScanBtnText: { fontSize: 15, fontWeight: '700', color: '#000000' },
 
   // Extra grid (step 4)
