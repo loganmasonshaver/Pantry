@@ -28,6 +28,35 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
 
 ## Open
 
+### Logged 2026-09-01 from Logan's device review — DEFERRED by him, do not start unprompted
+
+- [ ] **"Jello" — 100 kcal / 20g protein / 2g carbs / 0g fat, and it does not close.** 20*4 + 2*4
+      = 88 kcal against a stated 100. Separately the ingredient list says 120g unflavoured beef
+      gelatin over 4 servings = 30g/serving, which is ~30g protein and ~110 kcal on its own — so
+      the macro block disagrees with the ingredients AND with itself. Logan's framing is the right
+      one: "someone who can do quick math would look at that and call this app unreliable." Also
+      open, and a separate question: should a bowl of gelatin and water have passed the pipeline at
+      all, or is this creator trolling? Row: `name = 'Jello'`, `trend_source = 'YouTube trending'`.
+      **This is a different failure from the known 38% estimator spread** — that one is variance
+      around a correct method; this is an internal contradiction visible without any reference data.
+- [ ] **Coriander listed twice on "Green Butter Garlic Chicken"** — `30g coriander leaves` and
+      `1 tbsp chopped coriander leaves`. ⚠️ Before touching this: a blanket dedupe is a MEASURED
+      DEAD END (see CLAUDE.md and the paprika item below) — a repeat is usually FAITHFUL, the
+      creator putting the same ingredient in two sections (here almost certainly the green sauce
+      and the garnish). The fix that was actually built for this is `parseIngredientSections`
+      (#4754), which preserves the creator's section headings so the two reads as "sauce" and
+      "garnish" rather than as a duplicate. **First question is therefore not "why is it
+      duplicated" but "does this row predate sections, or is the meal screen not rendering them?"**
+      Check `trending_meals.<section field>` on this row before writing any code.
+- [ ] **"5g cooking oil spray" — a mass on something nobody weighs.** Two defects in one line.
+      (a) Cooking spray is one of the `parseUnquantifiedExtras` recoveries — the creator wrote no
+      amount, so 5g was INVENTED downstream. That makes it the same class as the already-logged
+      "Mark invented amounts" item further down this file; fix them together. (b) Even given a
+      quantity, grams is the wrong unit for oil — this is the inverse of the "cups are a
+      measurement" call Logan made (if the creator wrote a volume, keep the volume; do not convert
+      a cooking medium into a weight nobody can measure). A spray in particular has no honest
+      amount: the right rendering is no quantity at all.
+
 - [ ] **Yield: variance or defect?** BLOCKED on YouTube quota (resets midnight Pacific; burned
       2026-08-30 by ~16 runs). Identical code, sequential runs gave raw 24 vs 5 and stored 17 vs 4.
       A once-daily cron takes ONE sample from that spread and the swap makes it permanent — a better
