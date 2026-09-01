@@ -139,6 +139,14 @@ npx expo run:ios   # build and run on iOS simulator
   self-measuring native view, so nothing looks broken — but any layout maths using insets is
   silently wrong. Cost three failed attempts at one header. Absolutely-positioned children also
   escape SafeAreaView's padding; keep chrome in normal flow.
+- **Inside a `<Modal>`, SafeAreaView does NOT work either** — corrected 2026-08-30. A Modal is its
+  own window and react-native-safe-area-context cannot read that window's insets from the app root,
+  so both the hook AND the component yield 0 there. Acting on the line above ("SafeAreaView still
+  works") produced a fix that changed nothing and looked right until it was seen on device.
+  The remedy is a `<SafeAreaProvider>` **inside** the Modal — see `PantryScanModal`, which now has
+  one. Symptom that identifies it: chrome at `insets.top + N` renders at y=N, so a LEFT-hugging
+  control still works while a CENTRED one lands under the Dynamic Island, which eats the tap. That
+  is exactly how the scan camera's "More tips" was unreachable while its ✕ was fine.
 
 ### Recipe fidelity rules (trending pipeline)
 - **100% ingredient retention is a product requirement, not a tuning knob.** A recipe that keeps
