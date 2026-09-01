@@ -25,7 +25,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb, Tag, EyeOff } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { ScanTheater } from './ScanTheater'
 import { supabase } from '@/lib/supabase'
@@ -191,17 +191,20 @@ function ProgressDots({ total, active }: { total: number; active: number }) {
 // (✗) vs the same shelf front-faced and fully visible (✓). This is the only treatment that
 // SHOWS the feature's core failure mode (hidden items in a packed pantry) instead of
 // describing it, so it sets honest expectations before the user shoots.
+// The ✕/✓ badges were typographic glyphs in a <Text>, which renders at the system font's weight
+// and metrics rather than the icon set's — visibly inconsistent beside every other control here.
+// Lucide X and Check were already imported in this file.
 function PrepCompare() {
   return (
     <View style={styles.prepCompareRow}>
       <View style={styles.prepCompareCard}>
         <Image source={require('../assets/scan-prep/dont.jpg')} style={[styles.prepCompareImg, styles.prepCompareImgBad]} resizeMode="cover" />
-        <View style={[styles.prepBadge, styles.prepBadgeBad]}><Text style={styles.prepBadgeText}>✕</Text></View>
+        <View style={[styles.prepBadge, styles.prepBadgeBad]}><X size={16} stroke="#FFFFFF" strokeWidth={3} /></View>
         <Text style={[styles.prepCompareTag, styles.prepCompareTagBad]}>Buried = missed</Text>
       </View>
       <View style={styles.prepCompareCard}>
         <Image source={require('../assets/scan-prep/do.jpg')} style={[styles.prepCompareImg, styles.prepCompareImgGood]} resizeMode="cover" />
-        <View style={[styles.prepBadge, styles.prepBadgeGood]}><Text style={styles.prepBadgeText}>✓</Text></View>
+        <View style={[styles.prepBadge, styles.prepBadgeGood]}><Check size={16} stroke="#FFFFFF" strokeWidth={3} /></View>
         <Text style={[styles.prepCompareTag, styles.prepCompareTagGood]}>Front-faced = found</Text>
       </View>
     </View>
@@ -210,7 +213,11 @@ function PrepCompare() {
 
 // One row of the prep / "how scanning works" screen. Each row fades + rises in on a
 // staggered delay (driven by `index`) so the list animates to life instead of landing flat.
-function PrepTip({ emoji, bold, rest, index }: { emoji: string; bold: string; rest: string; index: number }) {
+// Takes an ICON, not an emoji. Emoji as UI iconography is the single loudest "assembled from a
+// template" tell — it renders at a different weight to every other glyph in the app, shifts with
+// the OS emoji font, and cannot take the accent colour. Lucide is already the icon set everywhere
+// else in this file.
+function PrepTip({ icon, bold, rest, index }: { icon: React.ReactNode; bold: string; rest: string; index: number }) {
   const anim = useRef(new Animated.Value(0)).current
   useEffect(() => {
     Animated.timing(anim, {
@@ -227,9 +234,7 @@ function PrepTip({ emoji, bold, rest, index }: { emoji: string; bold: string; re
         { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
       ]}
     >
-      <View style={styles.prepTipChip}>
-        <Text style={styles.prepTipEmoji}>{emoji}</Text>
-      </View>
+      <View style={styles.prepTipChip}>{icon}</View>
       <Text style={styles.prepTipText}>
         <Text style={styles.prepTipBold}>{bold}</Text>{rest}
       </Text>
@@ -859,10 +864,25 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <Text style={styles.prepTitle}>A quick prep = a better scan</Text>
               <Text style={styles.prepIntro}>Pantry reads what the camera can see. Items tucked behind others are its blind spot — pull them forward so nothing gets missed.</Text>
               <PrepCompare />
+              {/* Audited against scan-pantry's OWN documented failure modes rather than intuition.
+                  Two removed:
+                    "One shelf per photo" contradicted this file's corrected CAMERA_TIPS, whose
+                    comment already records that it is "the opposite of the truth: recall scales
+                    with coverage" — and contradicted the camera's own "capture the whole inside".
+                    "Packed? Lay it flat" asked the user to unpack a pantry onto a counter. High
+                    friction, and it appears nowhere in the model's miss list.
+                  What replaced them is named in the scan prompt: door shelves, egg trays and
+                  drawers are scanned separately and are called out as common misses, and an
+                  unnameable item is SKIPPED by design ("NEVER invent placeholder entries like
+                  'leftovers'") — which is the expectation most worth setting before the first scan,
+                  because it pre-empts "why did it miss the covered dish?". */}
               <View style={styles.prepTips}>
-                <PrepTip index={0} emoji="🔍" bold="One shelf per photo" rest=" — get up close" />
-                <PrepTip index={1} emoji="🏷️" bold="Labels facing out" rest=" — separates lookalikes" />
-                <PrepTip index={2} emoji="🍽️" bold="Packed? Lay it flat" rest=" — one layer on the counter" />
+                <PrepTip index={0} bold="Labels facing out" rest=" — it reads them to tell lookalikes apart"
+                  icon={<Tag size={19} stroke="#4ADE80" strokeWidth={2} />} />
+                <PrepTip index={1} bold="Shoot drawers and the door" rest=" — condiments and eggs hide there"
+                  icon={<Refrigerator size={19} stroke="#4ADE80" strokeWidth={2} />} />
+                <PrepTip index={2} bold="Covered or unlabeled is skipped" rest=" — it won't guess what's inside"
+                  icon={<EyeOff size={19} stroke="#4ADE80" strokeWidth={2} />} />
               </View>
               <Text style={styles.prepFootnote}>You'll review every photo and fix misses after.</Text>
             </ScrollView>
@@ -871,7 +891,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 parent SafeAreaView's padding. Math.max keeps it honest on a home-button device
                 where insets.bottom is 0. */}
             <View style={[styles.prepActions, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={dismissPrep} activeOpacity={0.85}>
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                onPress={dismissPrep}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Got it, start scanning"
+              >
                 <Text style={styles.primaryBtnText}>Got it — start scanning</Text>
               </TouchableOpacity>
             </View>
@@ -1569,7 +1595,6 @@ const styles = StyleSheet.create({
   prepBadge: { position: 'absolute', top: 8, left: 8, width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   prepBadgeBad: { backgroundColor: '#EF4444' },
   prepBadgeGood: { backgroundColor: '#16A34A' },
-  prepBadgeText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', lineHeight: 18 },
   prepCompareTag: { fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 8 },
   prepCompareTagBad: { color: '#FF6B6B' },
   prepCompareTagGood: { color: '#4ADE80' },
@@ -1578,7 +1603,6 @@ const styles = StyleSheet.create({
   prepTips: { gap: 14 },
   prepTipRow: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   prepTipChip: { width: 42, height: 42, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.12)', alignItems: 'center', justifyContent: 'center' },
-  prepTipEmoji: { fontSize: 20 },
   prepTipText: { flex: 1, fontSize: 15, color: '#999999', lineHeight: 20 },
   prepTipBold: { color: '#FFFFFF', fontWeight: '700' },
   prepFootnote: { fontSize: 13, color: '#777777', textAlign: 'center', marginTop: 28, lineHeight: 19 },
