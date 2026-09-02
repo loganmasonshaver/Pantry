@@ -112,6 +112,15 @@ Decision: Apple IAP via Superwall for all in-app purchases (safe, compliant). St
     (`auth.uid() = user_id`) and nothing else. Anon SELECT returns `[]`, anon INSERT is rejected
     outright, and anon DELETE/UPDATE report success while affecting zero rows — proved by planting
     a row, attacking it as anon, and confirming it survived unmodified.
+  - **Insert VERIFIED LIVE 2026-09-02.** Logan ran a real generation; the table went 0 -> 3 rows in
+    one timestamp, names matching the three cards on screen exactly, `meal_data` a complete object
+    (ingredients 6-8, steps 3-4, macros, prepTime, slot all present). This was the last untested
+    piece — it is wrapped in a catch that cannot fail the response, so a broken insert would have
+    failed silently and looked identical to a working one.
+  - **⚠️ `meal_data` has NO `image` key**, confirmed on the live rows. Images are fetched
+    client-side AFTER generation, so the edge function cannot know them. Not a defect — the image
+    cache is keyed by meal NAME, so the history page re-resolves past photos for free. Just do not
+    build the page expecting a URL in the row.
   - **Why the write shipped pre-launch when the page did not:** it is a one-way door. Nothing else
     persists a generated meal — only names reach `profiles.recent_meal_names` (a rolling 30) and
     the full meals live in an AsyncStorage cache discarded at local midnight. A generation not
