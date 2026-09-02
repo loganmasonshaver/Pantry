@@ -95,6 +95,30 @@ cannot clone 400 reviews. Must be in the TestFlight build.
 ## 6. End-to-end test AI meal generation
 - [ ] Full path on device, not simulator.
 
+## 6b. Home screen — verify the next-day behaviour  *(CANNOT be tested same-day)*
+
+Four changes shipped 2026-09-02 that only reveal themselves on the FIRST OPEN OF A NEW DAY. They
+are invisible today because today's cache already exists, so none of this can be signed off in the
+session that wrote it.
+
+- [ ] **"Yesterday's picks · fresh ones cooking"** appears above the Cook-from-pantry carousel on
+      the first open of a new day, with yesterday's three meals shown while today's generate
+      underneath — instead of a 6-8s skeleton. Label disappears when today's land. (`43d7055`)
+- [ ] **No blank gap.** The section holds its place and shimmers from first paint; it must never be
+      absent for 2-3s and then push the page down when it appears. (`9237e47` — this part IS
+      testable same-day.)
+- [ ] **Discover hero is a dish not served before**, and does not change again once the page has
+      settled. (`a14c9b4`)
+- [ ] **"Almost in your kitchen" does not lead the page every day**, and its internal order differs
+      from the previous day. (`37b9ba1`)
+
+**How to test without waiting:** these all read the DEVICE clock (`dayOfYearNow`, `todayStr`), not
+the database — no SQL can simulate a new day. Either wait for tomorrow, or set the iPhone forward a
+day (Settings > General > Date & Time > off "Set Automatically"). Expect a Supabase token refresh
+when the clock jumps; there is a `refreshSession` path for it, worst case sign in again.
+
+---
+
 ## 7. Onboarding trailer  *(after 3 — the app must be final before filming)*
 - [ ] BLOCKED ON A DECISION: is any cached meal image hero-grade enough to hold 2.4 seconds? That
       frame is a third of the film.
