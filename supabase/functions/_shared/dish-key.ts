@@ -198,3 +198,74 @@ export function clusterDishCounts(names: readonly unknown[]): Array<{ name: stri
   }
   return out
 }
+
+// ── Base-food overuse ────────────────────────────────────────────────────────────────────────
+//
+// Why this exists, when a do-not-repeat list already does: it does not work. Handed a list headed
+// "DO NOT SUGGEST these dishes", the model returned two of them VERBATIM (2026-09-02, measured).
+// This endpoint already assumes the model ignores constraints under load — that is why macro bands
+// are enforced in code rather than requested — and meal variety had no equivalent backstop.
+//
+// A name ban is trivially satisfiable by renaming. An INGREDIENT ban is not: "do not use cottage
+// cheese today" cannot be complied with by calling it something else. That is the whole idea.
+//
+// Longest-first matching matters: "cottage cheese" must win over "cheese", "egg white" over "egg",
+// "greek yogurt" over "yogurt", or every cottage cheese dish also counts as a cheese dish.
+const BASE_FOODS: string[] = [
+  "cottage cheese", "greek yogurt", "egg white", "protein powder", "peanut butter",
+  "ground beef", "chicken salad", "cream cheese",
+  "chicken", "beef", "turkey", "pork", "salmon", "tuna", "shrimp", "tofu", "paneer",
+  "yogurt", "egg", "cheese", "lentil", "chickpea", "bean",
+  "oats", "rice", "potato", "pasta", "quinoa", "granola",
+].sort((a, b) => b.length - a.length)
+
+/** Base foods a dish is built on, read from its name and (when present) its ingredient list. */
+export function detectBases(name: unknown, ingredients?: unknown): Set<string> {
+  let hay = ` ${String(name ?? "").toLowerCase()} `
+  if (Array.isArray(ingredients)) {
+    for (const raw of ingredients) hay += ` ${String((raw as any)?.name ?? raw ?? "").toLowerCase()} `
+  }
+  hay = hay.replace(/[^a-z\s]/g, " ")
+  const found = new Set<string>()
+  for (const base of BASE_FOODS) {
+    if (!hay.includes(base)) continue
+    // Consume the match so a longer base blocks the shorter one inside it.
+    hay = hay.split(base).join(" ")
+    found.add(base)
+  }
+  return found
+}
+
+/**
+ * The base foods leaning on a user's recent feed hard enough to be worth banning for one day.
+ *
+ * Capped at `topK` deliberately. Banning everything over-used would empty a modest pantry — the
+ * user this was built for had roughly six usable protein bases, so removing more than two leaves
+ * the model nothing to build on and the generation degrades worse than the repetition did.
+ */
+// Thresholds calibrated against a real 29-meal history, not chosen for roundness. Cottage cheese
+// and potato each sat at 27-29% of the last 15 meals there — with roughly six usable bases in that
+// pantry an even spread is ~17%, so 27% is over-represented by more than half again. A 30% cut
+// (the obvious round number) missed both by a point and would have banned nothing at all.
+//
+// The window is 15 SERVED MEALS, about five generations. Ten was too short to show the pattern:
+// counts were 2-3 and indistinguishable from noise.
+export function overusedBases(
+  dishes: ReadonlyArray<{ name?: unknown; ingredients?: unknown }>,
+  { window = 15, topK = 2, minCount = 3, minShare = 0.25 }:
+    { window?: number; topK?: number; minCount?: number; minShare?: number } = {},
+): string[] {
+  const recent = dishes.slice(0, window)
+  if (recent.length === 0) return []
+  const counts = new Map<string, number>()
+  for (const d of recent) {
+    for (const base of detectBases(d?.name, d?.ingredients)) {
+      counts.set(base, (counts.get(base) ?? 0) + 1)
+    }
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n >= minCount && n / recent.length >= minShare)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, topK)
+    .map(([base]) => base)
+}

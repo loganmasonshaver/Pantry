@@ -5,7 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
-import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, clusterDishCounts, isSameDish, isSameDishDetailed } from '../_shared/dish-key.ts'
+import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases } from '../_shared/dish-key.ts'
 import { verifyMacros } from '../_shared/macro-estimate.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -270,6 +270,26 @@ Deno.serve(async (req: Request) => {
       ? `\nALREADY SERVED RECENTLY — do not suggest these dishes OR a reworded version of one: ${recentDishes.join(", ")}.` +
         `\nA different adjective is NOT a different dish. "Cottage Cheese and Herb Potato Bowl" and "Cottage Cheese and Fruit Power Bowl" are the SAME dish to the person reading it, and so are "Egg White Scramble with Toast" and "Egg White Scramble with Potatoes". To count as different, change the PRIMARY PROTEIN or the FORM of the dish (bowl vs wrap vs bake vs soup) — not the garnish, not the adjective, not the side.`
       : ""
+    // BAN THE FOOD, NOT THE NAME.
+    //
+    // The do-not-suggest list demonstrably does not hold: handed one, the model returned two of its
+    // entries VERBATIM (measured 2026-09-02). A name ban is satisfiable by renaming, which is
+    // exactly what it had been doing. An ingredient ban is not — "do not use cottage cheese" cannot
+    // be complied with by calling it something else. Same reasoning that already puts the macro
+    // bands in code rather than in a request.
+    //
+    // Counted over the RAW served history, never the stored window: that window is now deduped by
+    // dish, so every dish appears once and the overuse signal is gone by construction. Prefers
+    // generated_meals (true per-meal history, with ingredients) once it is deep enough, and falls
+    // back to the client's raw name list until it is.
+    const overuseHistory = recentDetailed.length >= 15
+      ? recentDetailed
+      : (Array.isArray(rawRecent) ? rawRecent : []).map((n: unknown) => ({ name: n }))
+    const bannedBases = overusedBases(overuseHistory)
+    if (bannedBases.length > 0) console.log(`Base ban: ${bannedBases.join(", ")} (from ${overuseHistory.length} recent meals)`)
+    const bannedBasesLine = bannedBases.length === 0 ? "" :
+      `\n- BASE INGREDIENT BAN (blocking constraint): ${bannedBases.map(b => b.toUpperCase()).join(" and ")} ${bannedBases.length > 1 ? "have" : "has"} carried roughly a third of this user's recent meals and they are sick of ${bannedBases.length > 1 ? "them" : "it"}. Do NOT build ANY of today's meals on ${bannedBases.join(" or ")} — not as the protein, not as the base, not as the headline ingredient. A trace amount as a garnish is fine. Use a DIFFERENT base from their pantry. This is a rule about the FOOD, not the title: renaming the dish does not satisfy it.`
+
     const fatLine = highFatDiet ? "" :
       `\n- FAT CEILING (blocking constraint): every meal MUST have ≤ ${fatMax}g fat (aim ~${fatTarget}g). A single meal must NOT eat the whole day's fat budget — a beef + cheese + creamy dressing + buttered bread pileup at 50g+ fat is disqualified. Use leaner cuts, less cheese/oil, or pick a naturally leaner dish to stay under. Protein and carbs matter more than packing in fat.`
 
@@ -380,7 +400,7 @@ ${ingredientRule}${proteinVarietyRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
-- CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.${fatLine}
+- CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.

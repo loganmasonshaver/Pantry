@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dishKey, isSameDish, matchesRecentDish, clusterDishes, ingredientSignature, ingredientOverlap, isSameDishDetailed } from './dish-key.ts'
+import { dishKey, isSameDish, matchesRecentDish, clusterDishes, ingredientSignature, ingredientOverlap, isSameDishDetailed, detectBases, overusedBases } from './dish-key.ts'
 
 const REMEMBERED = [
   'Thai Peanut Sauce Chicken Rice Bowl',            // 1 — shown today
@@ -214,4 +214,50 @@ test('no ingredient data means the name decides, exactly as before', () => {
   const b = { name: 'Egg White and Vegetable Scramble with Potatoes' }
   assert.equal(isSameDishDetailed(a, b), isSameDish(a.name, b.name))
   assert.ok(isSameDishDetailed(a, b))
+})
+
+test('detectBases matches longest-first so a specific base does not also count as a generic one', () => {
+  const b = detectBases('Cottage Cheese and Herb Potato Bowl')
+  assert.ok(b.has('cottage cheese'))
+  assert.ok(!b.has('cheese'), 'cottage cheese must not also register as plain cheese')
+  assert.ok(b.has('potato'))
+
+  const e = detectBases('Egg White and Vegetable Scramble')
+  assert.ok(e.has('egg white'))
+  assert.ok(!e.has('egg'), 'egg white must not also register as plain egg')
+
+  const g = detectBases('Mediterranean Greek Yogurt and Granola Bowl')
+  assert.ok(g.has('greek yogurt') && !g.has('yogurt'))
+})
+
+test('detectBases reads the ingredient list too, not just the title', () => {
+  // "Jello" says nothing; its ingredients do.
+  const b = detectBases('Protein Pudding', [{ name: 'Non-Fat Plain Greek Yogurt' }, { name: 'protein powder' }])
+  assert.ok(b.has('greek yogurt'))
+  assert.ok(b.has('protein powder'))
+})
+
+test('overusedBases finds the real offenders in a real history, and stays quiet without one', () => {
+  // Logan's live window, 2026-09-02. Cottage cheese and potato each ran ~27% of the last 15 meals.
+  const HISTORY = [
+    'Cottage Cheese and Herb Potato Bowl', 'Vanilla Berry Protein Yogurt Bowl',
+    'Egg White and Vegetable Scramble', 'Chicken Salad and Roasted Potato Plate',
+    'Creamy Cottage Cheese and Spinach Scramble', 'Greek Yogurt Protein Power Bowl',
+    'Pesto Cauliflower and Egg White Frittata', 'Thai Peanut Sauce Chicken Rice Bowl',
+    'Pesto Scrambled Eggs with Potatoes', 'Classic Beef Bolognese with Pasta',
+    'Scrambled Egg and Cheese Breakfast Burrito Bowl', 'Cottage Cheese and Fruit Power Bowl',
+    'Garlic Herb Chicken and Roasted Potatoes', 'Mediterranean Greek Yogurt and Granola Bowl',
+    'Savory Cottage Cheese and Egg Scramble',
+  ].map(name => ({ name }))
+  assert.deepEqual(overusedBases(HISTORY), ['cottage cheese', 'potato'])
+
+  // Never bans on thin history — a new user must not have their pantry restricted on 3 meals.
+  assert.deepEqual(overusedBases([]), [])
+  assert.deepEqual(overusedBases(HISTORY.slice(0, 3)), [])
+})
+
+test('overusedBases never bans more than topK, so a modest pantry keeps something to cook', () => {
+  const ALL_COTTAGE = Array.from({ length: 15 }, () => ({ name: 'Cottage Cheese Egg Potato Rice Bowl' }))
+  assert.equal(overusedBases(ALL_COTTAGE).length, 2)
+  assert.equal(overusedBases(ALL_COTTAGE, { topK: 1 }).length, 1)
 })
