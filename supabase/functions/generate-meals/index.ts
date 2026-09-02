@@ -634,6 +634,30 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       console.log("recent_meal_names update failed:", (e as Error).message)
     }
 
+    // Generation HISTORY. recent_meal_names above is a rolling 30-name window that forgets by
+    // design; this is the permanent record. Written here rather than from the client because the
+    // client's copy dies with its cache at local midnight, and because a row the client could write
+    // is a row the client could forge. RLS on generated_meals grants SELECT only.
+    //
+    // Nothing reads this yet — the history page is V2. It is written now because the backfill is
+    // impossible: a generation not recorded at the moment it happens is gone for good.
+    //
+    // Its OWN try/catch on purpose. Sharing the block above would mean a failed anti-repeat write
+    // silently stops history from being recorded, and one log line would then be blaming the wrong
+    // write. Neither is allowed to fail the response: the user already paid for this generation.
+    try {
+      await db.from("generated_meals").insert(
+        meals.map((m: any) => ({
+          user_id: user.id,
+          meal_data: m,
+          name: String(m?.name ?? "").trim(),
+          mode,
+        })),
+      )
+    } catch (e) {
+      console.log("generated_meals insert failed:", (e as Error).message)
+    }
+
     // Return meals immediately, images will be fetched by a separate function
     return new Response(JSON.stringify(meals.map((m: any) => ({ ...m, image: null }))), {
       headers: { "Content-Type": "application/json" },

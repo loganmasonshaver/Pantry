@@ -104,6 +104,42 @@ Decision: Apple IAP via Superwall for all in-app purchases (safe, compliant). St
 - [ ] Questions to answer: What source for trends (TikTok, Instagram, Google Trends, editorial)? How often do trends refresh? Do trending foods get auto-matched to user's macros/preferences? Is this a discovery feed or a "try this" suggestion? Free or premium feature?
 
 ### V2 Features (post-launch)
+- [ ] **"Made for you before" — generation history page. ⚠️ THE WRITE HALF IS ALREADY BUILT AND LIVE
+  (2026-09-02). Only the page is left.**
+  - **Shipped:** `generated_meals` table (migration `20260902193451`), plus an insert in the
+    `generate-meals` edge function that records every meal it returns. Deployed. Rows are
+    accumulating from now on. RLS **verified end-to-end, not assumed**: one SELECT policy
+    (`auth.uid() = user_id`) and nothing else. Anon SELECT returns `[]`, anon INSERT is rejected
+    outright, and anon DELETE/UPDATE report success while affecting zero rows — proved by planting
+    a row, attacking it as anon, and confirming it survived unmodified.
+  - **Why the write shipped pre-launch when the page did not:** it is a one-way door. Nothing else
+    persists a generated meal — only names reach `profiles.recent_meal_names` (a rolling 30) and
+    the full meals live in an AsyncStorage cache discarded at local midnight. A generation not
+    recorded when it happens cannot be reconstructed later. The page has the opposite profile: a
+    brand-new user has zero history, so it cannot help launch, first-session, or screenshots.
+  - **Still to build:** the page itself, and its entry point. Logan's design: after the 3 carousel
+    meals, reachable by MANUAL SWIPE ONLY (never by auto-rotation), a card with white / `#4ADE80`
+    text over a blurred plated dish.
+  - **Window to show: the last 30 dishes** — deliberately the same window the generator is already
+    promising not to repeat (`RECENT_MEMORY = 30` in `_shared/dish-key.ts`). "Everything we've made
+    you that we won't repeat yet" is a product idea; "everything ever" is a database dump.
+  - **How long before the pantry repeats itself:** roughly `30 / meals-per-day`. Each generation
+    returns 3 meals; up to 4 generations/day (1 + `MAX_DAILY_REGENS = 3`) = 12/day max. So ~10 days
+    at one generation a day, ~2.5 at heavy reroll use — and capped below that by how much variety
+    the pantry actually supports, since the server keeps repeats as reserves rather than returning
+    an empty list. The number is not a constant and the copy must not imply it is.
+  - **Build risk lives in the carousel, not the page.** The hero is an infinite loop (3 meals × 5
+    copies, `LOOP_COPIES`), auto-advancing every `HERO_CYCLE_MS = 6250`. A terminal card is
+    structurally at odds with an infinite loop, so it has to sit outside the loop and be excluded
+    from the auto-advance stride. `onHeroSettle`'s recentring is delicate — already the source of
+    one fixed glitch — and it is the highest-visibility surface in the app.
+  - **Opening a past meal is free:** Home already routes via
+    `router.push('/meal/[id]', { mealData: JSON.stringify(meal) })`, and images are keyed by NAME in
+    a global cache, so past photos re-resolve without regeneration.
+  - **Naming:** not "previous generations" — nobody thinks in generations. And treat a short list as
+    a feature: "6 so far — scan more to unlock variety" turns the page into a nudge toward the scan.
+  - **Open:** `generated_meals` has no retention cap. 12 rows/day/user worst case is fine for a long
+    while, but nothing prunes it — decide a cap when the page is built.
 - [x] User recipe uploads — create/edit recipes with AI auto-fill, "My Recipe" badge, filter tab
 - [ ] Social media recipe import — YouTube/TikTok caption extraction built, needs Whisper for real transcripts (shelved for post-launch)
 - [ ] Social media recipe import — add Instagram support (requires RapidAPI scraper ~$10/mo)
