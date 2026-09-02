@@ -57,6 +57,17 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
       a cooking medium into a weight nobody can measure). A spray in particular has no honest
       amount: the right rendering is no quantity at all.
 
+- [ ] **Discover's FIRST open: black screen + a Safari icon, then 3-6s, then a reorder.** Reported
+      2026-09-02, DEFERRED. Three separate things in one symptom and they should not be conflated:
+      (a) the **Safari-glyph-on-black** is almost certainly a broken/absent image placeholder, not a
+      web view — check what `MealImage` renders before a source resolves and what the hero falls
+      back to when `image` is null; (b) the **3-6s** is Discover's own first fetch, which is a
+      different wait from Home's (no GPT call — this is a 600-row query plus image decode); (c) the
+      **reorder a second later** should ALREADY be fixed by a14c9b4 (first paint now waits on
+      profile + pantry) — if it survives a reload on that commit, the gate is missing a third async
+      wave and the fix was incomplete. Verify which of these three still reproduce before touching
+      anything; (c) in particular may be a stale build rather than a live bug.
+
 - [ ] **Yield: variance or defect?** BLOCKED on YouTube quota (resets midnight Pacific; burned
       2026-08-30 by ~16 runs). Identical code, sequential runs gave raw 24 vs 5 and stored 17 vs 4.
       A once-daily cron takes ONE sample from that spread and the swap makes it permanent — a better
