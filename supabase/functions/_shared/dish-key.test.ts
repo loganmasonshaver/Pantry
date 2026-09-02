@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dishKey, isSameDish, matchesRecentDish } from './dish-key.ts'
+import { dishKey, isSameDish, matchesRecentDish, clusterDishes, ingredientSignature, ingredientOverlap, isSameDishDetailed } from './dish-key.ts'
 
 const REMEMBERED = [
   'Thai Peanut Sauce Chicken Rice Bowl',            // 1 — shown today
@@ -136,4 +136,82 @@ test('matchesRecentDish would have rejected the whole batch', () => {
   assert.ok(distinct.length >= 8, `collapsed too hard: ${distinct.length} left of 18`)
   console.log(`  18 remembered names -> ${distinct.length} genuinely distinct dishes:`)
   for (const d of distinct) console.log(`    ${d}`)
+})
+
+test('clusterDishes collapses a window of reworded names to one per real dish', () => {
+  // Verbatim from Logan's live 30-name window on 2026-09-02. Seven names, one cottage cheese bowl.
+  const WINDOW = [
+    'Cottage Cheese and Herb Potato Bowl',
+    'Cottage Cheese and Fruit Power Bowl',
+    'Savory Cottage Cheese and Egg Breakfast Bowl',
+    'Cottage Cheese and Veggie Power Plate',
+    'Cottage Cheese and Pineapple Protein Bowl',
+    'Vanilla Berry Protein Yogurt Bowl',
+    'Greek Yogurt Protein Power Bowl',
+    'Mediterranean Greek Yogurt and Granola Bowl',
+    'Thai Peanut Sauce Chicken Rice Bowl',
+    'Ground Beef and Salsa Taco Bowl',
+  ]
+  const reps = clusterDishes(WINDOW)
+  // 10 names -> 6. Deliberately compares each name against the REPRESENTATIVES kept so far, not
+  // against every member of a cluster. Transitive grouping would give 4 here and 14 on the full
+  // live window, but it chains: A~B and B~C collapses A into C even when A and C are unrelated.
+  // Keeping more entries is the safe error — this exists to remember MORE real dishes, and a
+  // wrongly-merged pair silently forgets one.
+  assert.equal(reps.length, 6, `expected 6 distinct dishes, got ${reps.length}: ${reps.join(' | ')}`)
+  assert.equal(reps[0], 'Cottage Cheese and Herb Potato Bowl') // newest of its cluster represents it
+  assert.ok(reps.includes('Ground Beef and Salsa Taco Bowl'))
+  // The point of the exercise: five cottage-cheese/yogurt restatements became two entries.
+  assert.ok(reps.length < WINDOW.length)
+})
+
+test('clusterDishes drops junk and keeps order', () => {
+  assert.deepEqual(clusterDishes(['', null, undefined, '!!!', 'Beef Tacos']), ['Beef Tacos'])
+  assert.deepEqual(clusterDishes([]), [])
+})
+
+test('ingredientSignature ignores the things every dish contains', () => {
+  const sig = ingredientSignature([
+    { name: 'Salt' }, { name: 'olive oil' }, { name: 'Water' },
+    { name: 'high-protein greek yogurt' }, { name: 'Chicken Breast' },
+  ])
+  assert.ok(!sig.has('salt') && !sig.has('olive oil') && !sig.has('water'))
+  // Head-noun only, so a qualified name and its plain form are one ingredient.
+  assert.ok(sig.has('greek yogurt'), [...sig].join(','))
+  assert.ok(sig.has('chicken breast'))
+})
+
+test('ingredients can overrule a false-positive name match, and only in that direction', () => {
+  const savoryEgg = {
+    name: 'Savory Cottage Cheese and Egg Breakfast Bowl',
+    ingredients: [{ name: 'cottage cheese' }, { name: 'eggs' }, { name: 'spinach' }, { name: 'chives' }],
+  }
+  const sweetPineapple = {
+    name: 'Cottage Cheese and Pineapple Protein Bowl',
+    ingredients: [{ name: 'cottage cheese' }, { name: 'pineapple' }, { name: 'honey' }, { name: 'granola' }],
+  }
+  // Names alone call these the same dish — the known false positive.
+  assert.ok(isSameDish(savoryEgg.name, sweetPineapple.name))
+  // The food says otherwise, and the food wins.
+  assert.ok(!isSameDishDetailed(savoryEgg, sweetPineapple))
+
+  // Same food AND same name stays a repeat.
+  const savoryEggAgain = {
+    name: 'Cottage Cheese and Egg Savory Plate',
+    ingredients: [{ name: 'cottage cheese' }, { name: 'eggs' }, { name: 'spinach' }],
+  }
+  assert.ok(isSameDishDetailed(savoryEgg, savoryEggAgain))
+
+  // Ingredients NEVER create a match that the name did not already make.
+  assert.ok(!isSameDishDetailed(
+    { name: 'Ground Beef and Salsa Taco Bowl', ingredients: [{ name: 'cottage cheese' }, { name: 'eggs' }] },
+    savoryEgg,
+  ))
+})
+
+test('no ingredient data means the name decides, exactly as before', () => {
+  const a = { name: 'Egg White and Vegetable Scramble with Toast' }
+  const b = { name: 'Egg White and Vegetable Scramble with Potatoes' }
+  assert.equal(isSameDishDetailed(a, b), isSameDish(a.name, b.name))
+  assert.ok(isSameDishDetailed(a, b))
 })

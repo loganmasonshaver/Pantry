@@ -95,3 +95,86 @@ export function isSameDish(a: unknown, b: unknown): boolean {
 export function matchesRecentDish(name: unknown, recent: readonly unknown[]): boolean {
   return recent.some(r => isSameDish(name, r))
 }
+
+/**
+ * Collapse a list of names into ONE REPRESENTATIVE PER DISTINCT DISH, newest first.
+ *
+ * The write-side window used to dedupe on exact dishKey equality, which never fired: measured on a
+ * live 30-name window, 29 names produced 29 distinct keys and clustered into just 14 real dishes.
+ * Half the remembered window was the model restating itself — seven names for one cottage cheese
+ * bowl, five for one yogurt bowl.
+ *
+ * That is why shortening the window is the wrong instinct. It was never too long; it was half
+ * empty. Deduping by SAMENESS rather than by key roughly doubles what the same 30 slots remember.
+ */
+export function clusterDishes(names: readonly unknown[]): string[] {
+  const reps: string[] = []
+  for (const n of names) {
+    const name = String(n ?? "").trim()
+    if (!name || !dishKey(name)) continue
+    if (reps.some(r => isSameDish(name, r))) continue
+    reps.push(name)
+  }
+  return reps
+}
+
+// Ingredients that say nothing about which dish this is. Everything cooks with these.
+const PANTRY_NOISE = new Set([
+  "salt", "pepper", "black pepper", "water", "oil", "olive oil", "cooking spray", "butter",
+  "garlic", "onion", "sugar", "flour", "ice", "vanilla", "vanilla extract", "cinnamon",
+  "baking powder", "baking soda", "lemon juice", "spices", "seasoning",
+])
+
+/** Core ingredient names, lowercased and stripped of the things every dish contains. */
+export function ingredientSignature(ingredients: unknown): Set<string> {
+  const out = new Set<string>()
+  if (!Array.isArray(ingredients)) return out
+  for (const raw of ingredients) {
+    const n = String((raw as any)?.name ?? raw ?? "").toLowerCase().replace(/[^a-z\s]/g, " ").trim()
+    if (!n || PANTRY_NOISE.has(n)) continue
+    // Keep the head noun only: "high-protein greek yogurt" and "greek yogurt" are one ingredient.
+    const head = n.split(/\s+/).filter(w => w.length > 2).slice(-2).join(" ")
+    if (head) out.add(head)
+  }
+  return out
+}
+
+/**
+ * Fraction of the SMALLER signature that both dishes share. 0 when either is empty, so a meal with
+ * no usable ingredient list can never be judged by this.
+ */
+export function ingredientOverlap(a: Set<string>, b: Set<string>): number {
+  const smaller = Math.min(a.size, b.size)
+  if (smaller === 0) return 0
+  let shared = 0
+  for (const t of a) if (b.has(t)) shared++
+  return shared / smaller
+}
+
+// Below this, two similarly-named dishes are made of different food and are NOT the same meal.
+// Calibrated conservatively: it only ever RESCUES a name match, never creates one.
+const INGREDIENT_RESCUE_MAX = 0.4
+
+/**
+ * Name-based sameness, with ingredients allowed to overrule a false positive.
+ *
+ * Names alone provably cannot separate the last class of error: "Savory Cottage Cheese and Egg
+ * Breakfast Bowl" and "Cottage Cheese and Pineapple Protein Bowl" share exactly 3 of 5 tokens —
+ * identical to every TRUE positive — so no threshold on names keeps one and drops the other. The
+ * food is the only thing that distinguishes them, and generated_meals now stores it.
+ *
+ * Deliberately one-directional: ingredients can only turn a name-match OFF, never on. Turning it on
+ * would need a calibrated threshold, and there is not yet enough recorded history to calibrate one
+ * honestly. With no ingredients on either side this returns exactly what isSameDish returns, so a
+ * caller with no history behaves as it did before.
+ */
+export function isSameDishDetailed(
+  a: { name?: unknown; ingredients?: unknown },
+  b: { name?: unknown; ingredients?: unknown },
+): boolean {
+  if (!isSameDish(a?.name, b?.name)) return false
+  const sa = ingredientSignature(a?.ingredients)
+  const sb = ingredientSignature(b?.ingredients)
+  if (sa.size === 0 || sb.size === 0) return true // no evidence to overrule the name
+  return ingredientOverlap(sa, sb) > INGREDIENT_RESCUE_MAX
+}

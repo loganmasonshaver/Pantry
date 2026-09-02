@@ -5,7 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
-import { RECENT_MEMORY, dishKey, matchesRecentDish } from '../_shared/dish-key.ts'
+import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, isSameDishDetailed } from '../_shared/dish-key.ts'
 import { verifyMacros } from '../_shared/macro-estimate.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -186,6 +186,23 @@ Deno.serve(async (req: Request) => {
       .select("recent_meal_names")
       .eq("id", user.id)
       .maybeSingle()
+    // C: the same history WITH its ingredients, when we have it. generated_meals only started
+    // recording today, so this is empty for existing users and fills in from here — the code below
+    // falls back to names for anything it does not cover, so an empty table behaves exactly as
+    // before. Read on the same trip as the profile above; it is one indexed query on user_id.
+    const { data: recentRows } = await db
+      .from("generated_meals")
+      .select("name, meal_data")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(RECENT_MEMORY * 2)
+    type RecentDish = { name: unknown; ingredients: unknown }
+    const recentDetailed: RecentDish[] = (recentRows ?? []).map((r: any) => ({
+      name: r?.name,
+      ingredients: r?.meal_data?.ingredients,
+    }))
+    const detailedKeys = new Set(recentDetailed.map((r: RecentDish) => dishKey(r.name)))
+
     const recentMealNames = Array.from(new Set([
       ...sanitizeList(recentRow?.recent_meal_names ?? [], RECENT_MEMORY),
       ...sanitizeList(rawRecent, RECENT_MEMORY),
@@ -199,7 +216,13 @@ Deno.serve(async (req: Request) => {
     // (Gemini Flash Lite ignores constraints under load) without raising image-gen cost —
     // images only get fetched client-side for the FINAL displayed meals.
     const displayCount = Math.min(mealsPerDay, 3)
-    const genCount = mode === 'cookNow' ? Math.max(displayCount + 2, 5) : displayCount
+    // 5 candidates for 3 slots left only 2 spare, and the repeat filter cannot invent variety —
+    // it only reorders what the model produced, sending repeats to the back. With a nearly-full
+    // window most candidates get flagged, the freshness sort has nothing to prefer, and it degrades
+    // to plain macro ranking. More candidates is the only lever that gives it something to pick.
+    // Costs a longer completion on ONE call per generation; nothing extra is imaged, since images
+    // are fetched client-side for the final displayCount only.
+    const genCount = mode === 'cookNow' ? Math.max(displayCount + 5, 8) : displayCount
     // Per-meal protein band: ±15% of daily target divided by mealsPerDay. Upper cap prevents
     // protein dumping (96g in one meal = poor absorption + GI discomfort). Protein goals
     // already factor bodyweight via calculateGoals (lose=1.2g/lb, maintain=1.0, bulk=0.8).
@@ -234,8 +257,14 @@ Deno.serve(async (req: Request) => {
     const cuisineLine = cuisinePreferences.length > 0
       ? `\nThe user enjoys these cuisine styles — strongly prioritize them: ${cuisinePreferences.join(", ")}.`
       : ""
-    const recentMealsLine = recentMealNames.length > 0
-      ? `\nDO NOT SUGGEST these meals — they were shown in recent generations and would feel like a repeat: ${recentMealNames.join(", ")}. Suggest different dishes, even if the same ingredients are involved.`
+    // Handing over 30 exact names taught the model to avoid those STRINGS: it complied literally
+    // and returned reworded variants. Measured on a live window, 29 remembered names were only 14
+    // distinct dishes — seven names for one cottage cheese bowl. So send the DISHES, and say
+    // plainly that a new adjective is not a new dish.
+    const recentDishes = clusterDishes(recentMealNames)
+    const recentMealsLine = recentDishes.length > 0
+      ? `\nALREADY SERVED RECENTLY — do not suggest these dishes OR a reworded version of one: ${recentDishes.join(", ")}.` +
+        `\nA different adjective is NOT a different dish. "Cottage Cheese and Herb Potato Bowl" and "Cottage Cheese and Fruit Power Bowl" are the SAME dish to the person reading it, and so are "Egg White Scramble with Toast" and "Egg White Scramble with Potatoes". To count as different, change the PRIMARY PROTEIN or the FORM of the dish (bowl vs wrap vs bake vs soup) — not the garnish, not the adjective, not the side.`
       : ""
     const fatLine = highFatDiet ? "" :
       `\n- FAT CEILING (blocking constraint): every meal MUST have ≤ ${fatMax}g fat (aim ~${fatTarget}g). A single meal must NOT eat the whole day's fat budget — a beef + cheese + creamy dressing + buttered bread pileup at 50g+ fat is disqualified. Use leaner cuts, less cheese/oil, or pick a naturally leaner dish to stay under. Protein and carbs matter more than packing in fat.`
@@ -524,7 +553,15 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       const name = String(m?.name ?? '')
       // Two kinds of repeat: the same dish as a previous generation, or as an earlier candidate in
       // THIS response — the "No repeated meals" prompt line doesn't reliably prevent the latter.
-      const isRepeat = matchesRecentDish(name, recentMealNames) || matchesRecentDish(name, shownThisBatch)
+      // Ingredient-aware where history exists, name-only where it does not. Splitting them matters:
+      // running the name check over the WHOLE window as well would re-flag exactly the false
+      // positives the ingredient check just rescued, and the rescue would never take effect.
+      const nameOnlyRecent = recentMealNames.filter(n => !detailedKeys.has(dishKey(n)))
+      const cand = { name, ingredients: m?.ingredients }
+      const isRepeat =
+        recentDetailed.some((r: RecentDish) => isSameDishDetailed(cand, r)) ||
+        matchesRecentDish(name, nameOnlyRecent) ||
+        matchesRecentDish(name, shownThisBatch)
       shownThisBatch.push(name)
       if (isRepeat) repeatCount++
       return { ...m, _repeat: isRepeat }
@@ -618,15 +655,18 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     // they stay eligible. Deduped by fingerprint, not raw string, to keep the window dense with
     // distinct dishes instead of near-identical spellings of one.
     try {
-      const nextRecent: string[] = []
-      const seenKeys = new Set<string>()
-      for (const name of [...meals.map((m: any) => String(m?.name ?? "").trim()), ...recentMealNames]) {
-        const key = dishKey(name)
-        if (!key || seenKeys.has(key)) continue
-        seenKeys.add(key)
-        nextRecent.push(name)
-        if (nextRecent.length >= RECENT_MEMORY) break
-      }
+      // Deduped by SAMENESS, not by exact dishKey. The old key check never fired once — measured
+      // on a live window, 29 names produced 29 distinct keys while representing ~17 real dishes, so
+      // 30 slots were remembering roughly 17 things. clusterDishes collapses the restatements, so
+      // the same 30 slots now hold 30 genuinely distinct dishes.
+      //
+      // This is the answer to "should the window be shorter?" — no. It was never too long, it was
+      // half full of the model repeating itself. Shrinking it to 21 names would have remembered 13
+      // dishes instead of 14; this remembers close to 30.
+      const nextRecent = clusterDishes([
+        ...meals.map((m: any) => String(m?.name ?? "").trim()),
+        ...recentMealNames,
+      ]).slice(0, RECENT_MEMORY)
       // Service-role write to the caller's own verified row; no entitlement data involved.
       // Never allowed to fail the response — the user already paid for this generation.
       await db.from("profiles").update({ recent_meal_names: nextRecent }).eq("id", user.id)
