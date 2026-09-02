@@ -178,3 +178,23 @@ export function isSameDishDetailed(
   if (sa.size === 0 || sb.size === 0) return true // no evidence to overrule the name
   return ingredientOverlap(sa, sb) > INGREDIENT_RESCUE_MAX
 }
+
+/**
+ * Same clustering, but keeping HOW OFTEN each dish appeared.
+ *
+ * clusterDishes exists for the stored window, where the only question is "which dishes do we
+ * remember". The PROMPT wants something different: a bare deduped list tells the model that a
+ * cottage cheese bowl was served, and hides that seven of the last ten were. The count is the part
+ * that says "stop", and it is free — we are already grouping.
+ */
+export function clusterDishCounts(names: readonly unknown[]): Array<{ name: string; count: number }> {
+  const out: Array<{ name: string; count: number }> = []
+  for (const n of names) {
+    const name = String(n ?? "").trim()
+    if (!name || !dishKey(name)) continue
+    const hit = out.find(o => isSameDish(name, o.name))
+    if (hit) hit.count++
+    else out.push({ name, count: 1 })
+  }
+  return out
+}

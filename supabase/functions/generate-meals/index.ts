@@ -5,7 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
-import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, isSameDishDetailed } from '../_shared/dish-key.ts'
+import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, clusterDishCounts, isSameDish, isSameDishDetailed } from '../_shared/dish-key.ts'
 import { verifyMacros } from '../_shared/macro-estimate.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -261,7 +261,11 @@ Deno.serve(async (req: Request) => {
     // and returned reworded variants. Measured on a live window, 29 remembered names were only 14
     // distinct dishes — seven names for one cottage cheese bowl. So send the DISHES, and say
     // plainly that a new adjective is not a new dish.
-    const recentDishes = clusterDishes(recentMealNames)
+    // With COUNTS. A deduped list says a cottage cheese bowl was served; the count says seven of
+    // the last ten were, which is the part that actually reads as "stop". Ordered worst-first so
+    // the offenders lead.
+    const recentCounts = clusterDishCounts(recentMealNames).sort((a, b) => b.count - a.count)
+    const recentDishes = recentCounts.map(c => (c.count > 1 ? `${c.name} (served ${c.count}x)` : c.name))
     const recentMealsLine = recentDishes.length > 0
       ? `\nALREADY SERVED RECENTLY — do not suggest these dishes OR a reworded version of one: ${recentDishes.join(", ")}.` +
         `\nA different adjective is NOT a different dish. "Cottage Cheese and Herb Potato Bowl" and "Cottage Cheese and Fruit Power Bowl" are the SAME dish to the person reading it, and so are "Egg White Scramble with Toast" and "Egg White Scramble with Potatoes". To count as different, change the PRIMARY PROTEIN or the FORM of the dish (bowl vs wrap vs bake vs soup) — not the garnish, not the adjective, not the side.`
@@ -549,6 +553,7 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
     // already in the list. See _shared/dish-key.ts.
     const shownThisBatch: string[] = []
     let repeatCount = 0
+    let rescued = 0 // times ingredients overruled a name match — see the log below
     meals = meals.map((m: any) => {
       const name = String(m?.name ?? '')
       // Two kinds of repeat: the same dish as a previous generation, or as an earlier candidate in
@@ -558,14 +563,26 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       // positives the ingredient check just rescued, and the rescue would never take effect.
       const nameOnlyRecent = recentMealNames.filter(n => !detailedKeys.has(dishKey(n)))
       const cand = { name, ingredients: m?.ingredients }
+      // Split so the RESCUE is observable. INGREDIENT_RESCUE_MAX was picked by reasoning against
+      // two hand-built examples, not measured — generated_meals was empty when it was written. It
+      // will start making real decisions silently as history accumulates, on a path that costs
+      // money, so it logs every time it overrules a name match. Calibrate from these lines later
+      // rather than re-guessing.
+      const nameMatchedHistory = recentDetailed.some((r: RecentDish) => isSameDish(name, r.name))
+      const detailedMatch = recentDetailed.some((r: RecentDish) => isSameDishDetailed(cand, r))
+      if (nameMatchedHistory && !detailedMatch) {
+        rescued++
+        console.log(`Ingredient rescue: "${name}" reads as a repeat by name but its food differs — kept`)
+      }
       const isRepeat =
-        recentDetailed.some((r: RecentDish) => isSameDishDetailed(cand, r)) ||
+        detailedMatch ||
         matchesRecentDish(name, nameOnlyRecent) ||
         matchesRecentDish(name, shownThisBatch)
       shownThisBatch.push(name)
       if (isRepeat) repeatCount++
       return { ...m, _repeat: isRepeat }
     })
+    if (rescued > 0) console.log(`Ingredient rescue fired ${rescued}x this generation`)
     if (repeatCount > 0) {
       console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
     }
