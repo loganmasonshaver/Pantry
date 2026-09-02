@@ -51,10 +51,30 @@ function dishTokens(name: unknown): Set<string> {
 //   "Egg White and Vegetable Scramble with Toast" vs "...with Potatoes"           (4/5 shared)
 //   "Mediterranean Greek Yogurt and Granola Bowl" vs "Greek Yogurt and Granola Power Bowl"
 //
-// The all-but-one rule is calibrated from that data. Pairs sharing all-but-one were the same dish
-// every time; pairs sharing two fewer were genuinely different meals that happened to share a base
-// ingredient ("Cottage Cheese and Veggie Power Plate" vs "Cottage Cheese and Egg Savory Plate").
-// Loosening it further collapses real variety and starves the candidate pool.
+// SUPERSEDED 2026-09-02 — the all-but-one rule was measurably too strict, and the sentence that
+// used to sit here ("pairs sharing two fewer were genuinely different meals") was a judgement call
+// the user has since overruled with his own eyes.
+//
+// Re-measured against a LIVE 30-name window: 29 remembered names produced 29 DISTINCT dishKeys, so
+// the fast path never fired once, and all-but-one caught only 13 of 406 pairs. Everything the user
+// flagged as an obvious repeat sat exactly one notch below the threshold at `smaller - 2`:
+//   "Chicken Salad and Roasted Potato Plate"      vs "Herb-Roasted Chicken Salad with Potatoes"  3/5
+//   "Vanilla Berry Protein Yogurt Bowl"           vs "Greek Yogurt Protein Power Bowl"           3/5
+//   "Creamy Cottage Cheese and Spinach Scramble"  vs "Savory Cottage Cheese and Egg Scramble"    3/5
+// That is the same failure the all-but-one rule was written to fix, one rewording further along:
+// the model is handed exact names to avoid, and now varies them by TWO words instead of one.
+//
+// A RATIO replaces the fixed allowance, because the old rule got stricter as titles got shorter —
+// a 5-token pair had to share 4, a 7-token pair only 6, which is backwards. Sharing 60% of the
+// shorter title is the same standard at every length. On the live window this catches 31 pairs of
+// 406, and every one of the 18 newly caught pairs is a duplicate to the eye. Checked against the
+// generosity ceiling too: 0.5 catches 37, and those extra 6 start joining genuinely different
+// dishes, so 0.6 is the edge rather than an arbitrary pick.
+//
+// This does NOT manufacture variety — it only stops trivially reworded repeats. If the candidate
+// pool is genuinely thin the ranking keeps repeats as reserves rather than returning nothing, so
+// over-filtering degrades gracefully. Worth knowing the user's pantry held 55 in-stock items when
+// this was measured: the sameness was the model's, not the pantry's.
 export function isSameDish(a: unknown, b: unknown): boolean {
   const ka = dishKey(a)
   const kb = dishKey(b)
@@ -67,8 +87,8 @@ export function isSameDish(a: unknown, b: unknown): boolean {
   let shared = 0
   for (const t of A) if (B.has(t)) shared++
   // Floor of 2 keeps very short titles ("Chocolate Protein Smoothie") from matching on a single
-  // shared word, which all-but-one alone would allow at two tokens.
-  return shared >= Math.max(2, smaller - 1)
+  // shared word, which the ratio alone would allow at two or three tokens.
+  return shared >= Math.max(2, Math.ceil(smaller * 0.6))
 }
 
 /** True when `name` is the same dish as anything already shown. */

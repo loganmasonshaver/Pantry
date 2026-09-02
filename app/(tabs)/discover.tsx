@@ -824,27 +824,49 @@ export default function DiscoverScreen() {
     // unverified recipe is missing ~half its ingredients — so it looks MORE cookable than it is and
     // ranks higher precisely because it's incomplete. That's the one place the drop bug turns into
     // an outright lie, so unverified recipes are excluded here even though they ship elsewhere.
+    // Ties inside a missing-count tier used to be broken by the pool's own order (generated_at
+    // DESC), which never changes — so the same faces led this shelf every single day even as the
+    // pool grew underneath. Ordering within a tier by hash(id + day) changes who leads daily while
+    // NEVER letting a 2-missing meal jump ahead of a 0-missing one, so the shelf's whole claim —
+    // "you have almost everything for this" — survives intact.
+    //
+    // Hash, not an index rotation, for the reason recorded on the hero: this pool grows from the
+    // front, and a day-indexed cursor cancels against that exactly.
     const nearlyRanked = pantryNames.size > 0
       ? browseGrid.filter(m => m.source_verified)
           .map(m => ({ m, missing: missingCount(m, pantryNames, excludedStaples) }))
-          .sort((a, b) => a.missing - b.missing)
+          .sort((a, b) => (a.missing - b.missing)
+            || (hashKey(`${a.m.id}:${dayOfYear}`) - hashKey(`${b.m.id}:${dayOfYear}`)))
       : []
     // 8, not 12. Three personalised shelves at 12 claim 36 meals before any intent shelf runs —
     // on a 35-meal pool a user with a full pantry would pull almost everything into "Almost in
     // your kitchen" and leave the rest of the page bare.
     const PERSONAL_CAP = 8
-    const nearly = claim(nearlyRanked.map(x => x.m), PERSONAL_CAP)
-
     const cookedProtein = lastCooked ? detectPrimaryProtein({ name: lastCooked, ingredients: [] }) : null
-    const because = cookedProtein && cookedProtein !== 'other'
-      ? claim(browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein), PERSONAL_CAP)
-      : []
 
-    const fits = budget?.hasLogged
-      ? claim(browseGrid.filter(m =>
-          m.calories > 0 && m.calories <= budget.calLeft &&
-          (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)), PERSONAL_CAP)
-      : []
+    // WHICH personalised shelf leads rotates daily. claim() is first-shelf-wins, so the leader
+    // takes the best 8 and the rest divide what is left — a fixed leader therefore produced a page
+    // with the same shape every day, not just the same top shelf. "Almost in your kitchen" held
+    // that slot permanently, which is also the wrong default: it is the most useful answer only
+    // when you are actually cooking tonight, and it is the shelf whose contents move least.
+    //
+    // rotateByDay is safe HERE where it is wrong for the hero: this array is a fixed length of 3.
+    // The cancellation bug needs an array that grows from the front, and this one cannot.
+    // Built as thunks because claim() mutates `taken` — the rotation has to change the ORDER THE
+    // CLAIMS RUN IN, not just the order they are displayed, or rotating would be cosmetic.
+    const personalShelves = [
+      { key: 'nearly', run: () => claim(nearlyRanked.map(x => x.m), PERSONAL_CAP) },
+      { key: 'because', run: () => cookedProtein && cookedProtein !== 'other'
+          ? claim(browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein), PERSONAL_CAP)
+          : [] },
+      { key: 'fits', run: () => budget?.hasLogged
+          ? claim(browseGrid.filter(m =>
+              m.calories > 0 && m.calories <= budget.calLeft &&
+              (budget.proLeft <= 0 || m.protein >= budget.proLeft * 0.4)), PERSONAL_CAP)
+          : [] },
+    ]
+    const personalOrder = rotateByDay(personalShelves, dayOfYear, 'personal', 1)
+    const personalBuilt = new Map(personalOrder.map(sh => [sh.key, sh.run()]))
 
     // ── Today. One section, not a rail plus a leftovers grid: the rail took 10 and today's batch
     // is 8-15, so "More from today" was empty by construction and the two names described one set.
@@ -879,9 +901,16 @@ export default function DiscoverScreen() {
     const leftovers = spreadByArchetype(browseGrid.filter(m => !taken.has(m.id)))
 
     return [
-      { key: 'nearly', title: 'Almost in your kitchen', meals: nearly, accent: true },
-      { key: 'because', title: `Because you cooked ${lastCooked ?? ''}`.trim(), meals: because, accent: true },
-      { key: 'fits', title: `Fits your remaining ${budget?.calLeft ?? 0} kcal`, meals: fits, accent: true },
+      // Rendered in the SAME rotated order the claims ran in. Listing them fixed here while the
+      // claims rotated would put a shelf that got second pick at the top of the page.
+      ...personalOrder.map(sh => ({
+        key: sh.key,
+        title: sh.key === 'nearly' ? 'Almost in your kitchen'
+          : sh.key === 'because' ? `Because you cooked ${lastCooked ?? ''}`.trim()
+          : `Fits your remaining ${budget?.calLeft ?? 0} kcal`,
+        meals: personalBuilt.get(sh.key) ?? [],
+        accent: true,
+      })),
       { key: 'today', title: "Today's picks", meals: today, accent: false },
       ...intent.map(sec => ({ ...sec, accent: false })),
       { key: 'other', title: 'Everything else', meals: leftovers, accent: false },

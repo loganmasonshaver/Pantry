@@ -67,13 +67,33 @@ test('isSameDish catches the reworded repeats dishKey missed', () => {
   }
 })
 
-test('genuinely different meals sharing a base ingredient are NOT collapsed', () => {
-  // These sit just below the cut in the same real dataset. Collapsing them would starve variety,
-  // which is a worse failure than the one being fixed — a user with a narrow pantry would run out
-  // of acceptable candidates entirely.
-  const DIFFERENT: Array<[string, string]> = [
+test('two plates of the same base ingredient ARE the same dish to a reader', () => {
+  // Both of these were asserted as NOT-matching until 2026-09-02, on the reasoning that they are
+  // "genuinely different meals that happen to share a base ingredient". Logan looked at a feed
+  // holding them and called it repetitive, so the judgement was wrong at the level that matters.
+  //
+  // The second pair is an honest FALSE POSITIVE and is kept here on purpose: a savory egg bowl and
+  // a sweet pineapple bowl really are different meals, and the 0.6 ratio collapses them anyway.
+  // It cannot be separated by token overlap — it shares exactly 3 of 5 with the shorter title, the
+  // same as every true positive above it, so no threshold on NAMES can keep one and drop the other.
+  // Fixing it needs ingredients, which generated_meals now stores. Until then this errs toward
+  // collapsing, which is the right direction: a false positive costs one candidate out of five
+  // generated for three slots (and the ranking keeps repeats as reserves if the pool runs thin),
+  // while a false negative costs the user a feed that feels stale — the actual complaint.
+  const SAME_NOW: Array<[string, string]> = [
     ['Cottage Cheese and Veggie Power Plate', 'Cottage Cheese and Egg Savory Plate'],
     ['Savory Cottage Cheese and Egg Breakfast Bowl', 'Cottage Cheese and Pineapple Protein Bowl'],
+  ]
+  for (const [a, b] of SAME_NOW) {
+    assert.ok(isSameDish(a, b), `should match: "${a}" vs "${b}"`)
+    assert.ok(isSameDish(b, a), 'must be symmetric')
+  }
+})
+
+test('genuinely different meals sharing a base ingredient are NOT collapsed', () => {
+  // The guard against over-collapsing. Every pair here survives the looser 0.6 ratio, which is what
+  // makes that ratio the edge rather than an arbitrary number — 0.5 starts eating this list.
+  const DIFFERENT: Array<[string, string]> = [
     ['Savory Cottage Cheese and Egg Scramble', 'Savory Scrambled Egg and Potato Hash'],
     ['Chocolate Protein Smoothie', 'Greek Yogurt and Protein Power Bowl'],
     ['Ground Beef and Salsa Taco Bowl', 'Herb-Roasted Chicken Salad with Potatoes'],
