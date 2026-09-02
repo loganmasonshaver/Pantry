@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics'
 import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { prefetchDiscover } from '@/lib/discoverFeed'
+import { prefetchPantryNames } from '@/lib/pantryPrefetch'
 import {
   Home,
   UtensilsCrossed,
@@ -50,6 +51,10 @@ export default function TabLayout() {
   useEffect(() => {
     if (!user) return
     prefetchDiscover(user.id)
+    // Home's meal generation was gated on Home's OWN pantry read, so nothing could start until
+    // that screen had mounted, rendered and completed a round trip. Starting the same read here —
+    // where the tab bar mounts, before any screen does — takes that hop off the critical path.
+    prefetchPantryNames(user.id)
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') prefetchDiscover(user.id)
     })

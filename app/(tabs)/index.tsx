@@ -46,6 +46,7 @@ import PantryScanModal from '../../components/PantryScanModal'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useFocusEffect } from 'expo-router'
 import { useMealSuggestions } from '../../lib/useMealSuggestions'
+import { takePantryNames } from '@/lib/pantryPrefetch'
 import { perfMark } from '../../lib/perf'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
@@ -540,13 +541,16 @@ export default function HomeScreen() {
   // gate, sharing the 'cookNow' cache — so anyone who opened Pantry first (which is where you add
   // ingredients) got auto-generation anyway. The behaviour depended on which tab you happened to
   // open first, which is an accident, not a decision.
-  const { meals, loading, cacheChecked, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  const { meals, loading, stale, cacheChecked, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
   // The section used to render NOTHING — not even its heading — until Home's own pantry query
   // came back, because the block below was gated on `pantryFetched`. That is the 2-3s of blank
   // space before the shimmer: the hook cannot report `loading` yet, since it is not enabled until
   // the pantry lands. Treat "we do not know yet" as pending rather than as absent, so the section
   // holds its place and shimmers from first paint instead of appearing late and pushing the page.
-  const mealsPending = !pantryFetched || !cacheChecked || loading
+  // `&& meals.length === 0` is what makes the carryover worth having: once yesterday's meals are
+  // on screen the skeleton must not come back over them while today's generate underneath. The
+  // skeleton is for having NOTHING to show, not for being busy.
+  const mealsPending = (!pantryFetched || !cacheChecked || loading) && meals.length === 0
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -784,8 +788,14 @@ export default function HomeScreen() {
   const loadPantryNames = useCallback(async () => {
     if (!user) return
     perfMark('pantry fetch start')
-    const { data } = await supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true).limit(500) // in-stock pantry never realistically exceeds this; bounds payload on every focus
-    const names = new Set((data ?? []).map(i => i.name.toLowerCase()))
+    // Take the layout's warm read if it is still unclaimed. It is consumed once, so every LATER
+    // call here — the re-run after a scan adds items, above all — queries fresh, which is the
+    // whole point of that re-run.
+    const warm = takePantryNames(user.id)
+    const names = warm
+      ? await warm
+      : new Set((await supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true).limit(500)) // in-stock pantry never realistically exceeds this; bounds payload on every focus
+          .data?.map(i => String(i.name ?? '').toLowerCase()) ?? [])
     perfMark(`pantry fetched (${names.size} items)`)
     setPantryNames(names)
     setPantryFetched(true)
@@ -1559,6 +1569,12 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
+            {/* Says what these are, so holding yesterday's meals up is honest rather than a stale
+                cache pretending to be fresh. Drops the moment today's land. */}
+            {stale && (
+              <Text style={styles.carryoverNote}>Yesterday&rsquo;s picks &middot; fresh ones cooking</Text>
+            )}
+
             {mealsPending ? (
               // Card-shaped skeleton, not a bare spinner: a populated placeholder reads as "almost
               // ready" while a spinner on an empty card reads as stuck. The status line narrates
@@ -2064,6 +2080,13 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, marginBottom: 0 },
   sectionHeaderExpanded: { paddingBottom: 0, marginBottom: 8 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  carryoverNote: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+    marginTop: -4,
+    marginBottom: 10,
+  },
   sectionTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 2, textTransform: 'uppercase' },
   mealsCollapsedSub: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   mealList: { gap: 14, marginBottom: 28 },

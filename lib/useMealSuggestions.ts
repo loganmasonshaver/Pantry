@@ -47,6 +47,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // "Get tonight's meals" card for the ~100ms before the cache resolves — without it, every
   // launch shows the resting card and then yanks it away, which reads worse than a spinner.
   const [cacheChecked, setCacheChecked] = useState(false)
+  // True while the meals on screen are a PREVIOUS day's, held up so the carousel has something
+  // real in it during the 6-8s generation instead of a skeleton. The UI must label them — see the
+  // note on the carryover branch below.
+  const [stale, setStale] = useState(false)
   useEffect(() => { regensUsedTodayRef.current = regensUsedToday }, [regensUsedToday])
 
   const generate = async () => {
@@ -239,7 +243,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
       setLoading(true)
       const generated = await generate()
-      if (generated) setMeals(generated)
+      if (generated) { setMeals(generated); setStale(false) }
     } catch (err: any) {
       __DEV__ && console.log('MEAL ERROR v3:', err.message)
       __DEV__ && console.log('MEAL ERROR status:', err?.context?.status)
@@ -316,6 +320,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             setCacheChecked(true)
             perfMark(`meals painted from cache (${validMeals.length})`)
             setMeals(validMeals)
+            setStale(false)
             setRegensUsedToday(cached.regenCount ?? 0)
             if (cached.meals.some(m => !m.image)) {
               const cachedMeals = [...cached.meals]
@@ -340,6 +345,23 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           }
           // Seeded: treat as cache miss — clear and generate real meals
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
+        } else if (cached.meals.length > 0) {
+          // A PREVIOUS day's meals, painted while today's generate underneath. They are still
+          // cookable from the same pantry and still inside the 30-name anti-repeat window, so they
+          // are not wrong — only not new. Showing them beats 6-8s of skeleton, and the UI labels
+          // them as yesterday's, so nothing untrue is claimed. Deliberately does NOT return and
+          // does NOT set servedFromCacheRef: generation continues below and replaces these.
+          //
+          // Discover refuses to paint a stale-day cache; this is the opposite call ON PURPOSE.
+          // There, a stale paint re-lays-out the whole page under the reader. Here it is three
+          // cards replaced by three cards in the same slots, and the swap is the point.
+          const carry = cached.meals.filter(m => !m.prepTime || Number(m.prepTime) <= cached.maxPrepMinutes!)
+          if (carry.length > 0 && !carry.every(m => m.id?.startsWith('seeded_'))) {
+            prefetchMealImages(carry.map(m => m.image))
+            perfMark(`carryover painted from ${cached.date} (${carry.length})`)
+            setMeals(carry)
+            setStale(true)
+          }
         }
       }
       setCacheChecked(true)
@@ -373,5 +395,5 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // the SAME set the pantry tab serves (fixes the reveal-vs-pantry mismatch) instead of force-
   // generating a second batch — which also kills the wasted generation + the long reveal wait.
   const load = () => fetchAndGenerate(false)
-  return { meals, loading, error, errorCode, regenerate, retry, load, cacheChecked, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
+  return { meals, loading, stale, error, errorCode, regenerate, retry, load, cacheChecked, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
 }
