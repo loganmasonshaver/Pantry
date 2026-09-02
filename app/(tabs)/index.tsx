@@ -541,6 +541,12 @@ export default function HomeScreen() {
   // ingredients) got auto-generation anyway. The behaviour depended on which tab you happened to
   // open first, which is an accident, not a decision.
   const { meals, loading, cacheChecked, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  // The section used to render NOTHING — not even its heading — until Home's own pantry query
+  // came back, because the block below was gated on `pantryFetched`. That is the 2-3s of blank
+  // space before the shimmer: the hook cannot report `loading` yet, since it is not enabled until
+  // the pantry lands. Treat "we do not know yet" as pending rather than as absent, so the section
+  // holds its place and shimmers from first paint instead of appearing late and pushing the page.
+  const mealsPending = !pantryFetched || !cacheChecked || loading
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -1535,7 +1541,7 @@ export default function HomeScreen() {
             show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
         {/* The whole section shifts when the macros card grows. Without a layout animation here the
             header and "See all" snapped into place while everything else glided. */}
-        {pantryFetched && pantryNames.size > 0 && (
+        {(!pantryFetched || pantryNames.size > 0) && (
           <Reanimated.View layout={LinearTransition.duration(420)}
             style={{ marginBottom: 36 }}
             onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
@@ -1553,7 +1559,7 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </View>
 
-            {loading ? (
+            {mealsPending ? (
               // Card-shaped skeleton, not a bare spinner: a populated placeholder reads as "almost
               // ready" while a spinner on an empty card reads as stuck. The status line narrates
               // real work so the ~6s of generation feels like effort on the user's behalf.

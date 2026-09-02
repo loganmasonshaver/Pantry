@@ -75,31 +75,35 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         })
       }
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences, staples_excluded')
-        .eq('id', userId)
-        .single()
-
-      const { data: pantryItems } = await supabase
-        .from('pantry_items')
-        .select('name')
-        .eq('user_id', userId)
-        .eq('in_stock', true)
-        .order('created_at', { ascending: true })
-        .limit(200) // bound the list serialized into the GPT prompt (token cost + truncation risk)
+      // Three INDEPENDENT reads. None feeds another, so they run together — they were sequential,
+      // which spent two extra round trips (~150-250ms each, measured on this device) on the exact
+      // path the user is watching a shimmer through. The GPT call after this dominates the wait,
+      // which is precisely why the avoidable half-second before it should not be there.
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() // limits rating history fed to GPT so stale preferences don't bloat the prompt
+      const [{ data: profile }, { data: pantryItems }, { data: ratings }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences, staples_excluded')
+          .eq('id', userId)
+          .single(),
+        supabase
+          .from('pantry_items')
+          .select('name')
+          .eq('user_id', userId)
+          .eq('in_stock', true)
+          .order('created_at', { ascending: true })
+          .limit(200), // bound the list serialized into the GPT prompt (token cost + truncation risk)
+        supabase
+          .from('meal_ratings')
+          .select('meal_name, rating')
+          .eq('user_id', userId)
+          .gte('created_at', since)
+          .order('created_at', { ascending: false })
+          .limit(100), // most-recent ratings only — bounds prompt size as history grows
+      ])
 
       // Oldest items first — GPT prompt will prioritize using them up
       const ingredients = pantryItems?.map(i => i.name) || []
-
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() // limits rating history fed to GPT so stale preferences don't bloat the prompt
-      const { data: ratings } = await supabase
-        .from('meal_ratings')
-        .select('meal_name, rating')
-        .eq('user_id', userId)
-        .gte('created_at', since)
-        .order('created_at', { ascending: false })
-        .limit(100) // most-recent ratings only — bounds prompt size as history grows
 
       const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
       const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
