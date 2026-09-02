@@ -51,6 +51,33 @@ function dishTokens(name: unknown): Set<string> {
 //   "Egg White and Vegetable Scramble with Toast" vs "...with Potatoes"           (4/5 shared)
 //   "Mediterranean Greek Yogurt and Granola Bowl" vs "Greek Yogurt and Granola Power Bowl"
 //
+// Base foods collapsed to the family that decides what the DISH is. Carbs are deliberately absent:
+// rice, potato and pasta are the setting, not the subject — two dishes are not the same meal for
+// both being served over rice. Variants map together so "greek yogurt" and "yogurt", or "egg white"
+// and "egg", are one protein rather than two.
+const PROTEIN_FAMILY: Record<string, string> = {
+  "cottage cheese": "cottage cheese", "cream cheese": "cheese", "cheese": "cheese",
+  "greek yogurt": "yogurt", "yogurt": "yogurt",
+  "egg white": "egg", "egg": "egg",
+  "ground beef": "beef", "beef": "beef",
+  "chicken salad": "chicken", "chicken": "chicken",
+  "turkey": "turkey", "pork": "pork",
+  "salmon": "fish", "tuna": "fish", "shrimp": "shellfish",
+  "tofu": "tofu", "paneer": "paneer",
+  "lentil": "legume", "chickpea": "legume", "bean": "legume",
+  "protein powder": "protein powder", "peanut butter": "peanut butter",
+}
+
+/** Which protein a dish is built on. Empty when the title names none. */
+export function proteinFamilies(name: unknown, ingredients?: unknown): Set<string> {
+  const out = new Set<string>()
+  for (const base of detectBases(name, ingredients)) {
+    const fam = PROTEIN_FAMILY[base]
+    if (fam) out.add(fam)
+  }
+  return out
+}
+
 // SUPERSEDED 2026-09-02 — the all-but-one rule was measurably too strict, and the sentence that
 // used to sit here ("pairs sharing two fewer were genuinely different meals") was a judgement call
 // the user has since overruled with his own eyes.
@@ -80,6 +107,21 @@ export function isSameDish(a: unknown, b: unknown): boolean {
   const kb = dishKey(b)
   if (!ka || !kb) return false
   if (ka === kb) return true // fast path: exact fingerprint, i.e. a pure reordering
+
+  // DIFFERENT PROTEIN, DIFFERENT DISH — checked before the token count, because token overlap
+  // cannot see this. "Thai Basil Beef Rice Bowl" and "Thai Peanut Sauce Chicken Rice Bowl" share
+  // thai/rice/bowl — 3 of 5, enough to pass the ratio — but every shared word is STRUCTURAL and the
+  // thing that decides the meal is beef versus chicken. That false positive was real: it sorted a
+  // genuinely new beef dish to the back of a generation, penalising the variety the base ban had
+  // just produced. Only applies when BOTH titles name a protein; two dishes that name none fall
+  // through to the token rule as before.
+  const pa = proteinFamilies(a)
+  const pb = proteinFamilies(b)
+  if (pa.size > 0 && pb.size > 0) {
+    let sharesProtein = false
+    for (const f of pa) if (pb.has(f)) { sharesProtein = true; break }
+    if (!sharesProtein) return false
+  }
 
   const A = dishTokens(a)
   const B = dishTokens(b)

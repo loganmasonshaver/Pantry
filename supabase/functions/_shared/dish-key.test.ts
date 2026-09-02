@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dishKey, isSameDish, matchesRecentDish, clusterDishes, ingredientSignature, ingredientOverlap, isSameDishDetailed, detectBases, overusedBases } from './dish-key.ts'
+import { dishKey, isSameDish, matchesRecentDish, clusterDishes, ingredientSignature, ingredientOverlap, isSameDishDetailed, detectBases, overusedBases, proteinFamilies } from './dish-key.ts'
 
 const REMEMBERED = [
   'Thai Peanut Sauce Chicken Rice Bowl',            // 1 — shown today
@@ -260,4 +260,32 @@ test('overusedBases never bans more than topK, so a modest pantry keeps somethin
   const ALL_COTTAGE = Array.from({ length: 15 }, () => ({ name: 'Cottage Cheese Egg Potato Rice Bowl' }))
   assert.equal(overusedBases(ALL_COTTAGE).length, 2)
   assert.equal(overusedBases(ALL_COTTAGE, { topK: 1 }).length, 1)
+})
+
+test('a different protein makes a different dish, whatever the titles share', () => {
+  // From a real generation, 2026-09-02. These share thai/rice/bowl — 3 of 5, enough to pass the
+  // ratio — but every shared word is STRUCTURAL and the protein is not. Flagging the beef bowl as
+  // a repeat sorted a genuinely new dish to the back of the generation, penalising exactly the
+  // variety the base ban had just produced.
+  assert.ok(!isSameDish('Thai Basil Beef Rice Bowl', 'Thai Peanut Sauce Chicken Rice Bowl'))
+  assert.ok(!isSameDish('Ground Beef and Salsa Taco Bowl', 'Herb-Roasted Chicken Salad with Potatoes'))
+})
+
+test('protein variants are one family, so a rewording still reads as a repeat', () => {
+  // The guard must not become a new way to smuggle repeats through. greek yogurt/yogurt and
+  // egg white/egg are the same protein, so these stay matched.
+  assert.ok(isSameDish('Vanilla Berry Protein Yogurt Bowl', 'Greek Yogurt Protein Power Bowl'))
+  assert.ok(isSameDish('Egg White and Vegetable Scramble with Toast', 'Egg White and Vegetable Scramble with Potatoes'))
+  assert.ok(isSameDish('Chicken Salad and Roasted Potato Plate', 'Herb-Roasted Chicken Salad with Potatoes'))
+  assert.deepEqual([...proteinFamilies('Greek Yogurt Bowl')], ['yogurt'])
+  assert.deepEqual([...proteinFamilies('Egg White Scramble')], ['egg'])
+  assert.deepEqual([...proteinFamilies('Ground Beef Tacos')], ['beef'])
+})
+
+test('carbs are the setting, not the subject — they never make two dishes different', () => {
+  // rice/potato/pasta are excluded from the family map on purpose: sharing a starch says nothing,
+  // and treating it as identity would call every rice bowl the same meal.
+  assert.equal(proteinFamilies('Roasted Potato and Rice Plate').size, 0)
+  // With no protein named on either side the guard stands aside and the token rule decides.
+  assert.ok(isSameDish('Chocolate Protein Smoothie', 'Chocolate Protein Shake'))
 })
