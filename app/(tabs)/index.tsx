@@ -567,6 +567,22 @@ export default function HomeScreen() {
     return () => clearInterval(id)
   }, [loading])
 
+  // Breathing dot beside the carryover status. 1400ms each way on purpose — faster reads as a
+  // BLINK, which is the twitchy spinner feeling this exists to avoid. Only runs while yesterday's
+  // meals are held up, so nothing animates once today's have landed.
+  const livePulse = useRef(new RNAnimated.Value(0.35)).current
+  useEffect(() => {
+    if (!stale) return
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(livePulse, { toValue: 1, duration: 1400, useNativeDriver: true }),
+        RNAnimated.timing(livePulse, { toValue: 0.35, duration: 1400, useNativeDriver: true }),
+      ]),
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [stale, livePulse])
+
   // 5000 -> 6250: a 25% slower dwell. 5s read as a slideshow rushing past rather than a hero
   // presenting a dish. Also drives the Ken Burns duration, so the zoom slows with it and the two
   // stay in step.
@@ -1556,24 +1572,39 @@ export default function HomeScreen() {
             style={{ marginBottom: 36 }}
             onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
           >
-            {/* Header height feeds the hero fit calculation — the card starts where this ends. */}
+            {/* Header height feeds the hero fit calculation — the card starts where this ends. The
+                carryover line MUST be measured with it: it sat outside this view and the header
+                under-reported its own height by exactly that line, so the hero card overflowed and
+                clipped the photo along the bottom. Anything added here goes inside this wrapper. */}
             <View
               onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) > 0.5) setHeroHeaderH(h) }}
-              style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginHorizontal: 20, marginBottom: 12 }}
+              style={{ marginHorizontal: 20, marginBottom: 12 }}
             >
-              <Text style={styles.sectionTitle}>Cook from your pantry</Text>
-              {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
-                  navigator on top of itself and renders a black screen. navigate switches tabs. */}
-              <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
-                <Text style={{ color: '#4ADE80', fontSize: 13, fontWeight: '600' }}>See all →</Text>
-              </TouchableOpacity>
-            </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={styles.sectionTitle}>Cook from your pantry</Text>
+                {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
+                    navigator on top of itself and renders a black screen. navigate switches tabs. */}
+                <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
+                  <Text style={{ color: '#4ADE80', fontSize: 13, fontWeight: '600' }}>See all →</Text>
+                </TouchableOpacity>
+              </View>
 
-            {/* Says what these are, so holding yesterday's meals up is honest rather than a stale
-                cache pretending to be fresh. Drops the moment today's land. */}
-            {stale && (
-              <Text style={styles.carryoverNote}>Yesterday&rsquo;s picks &middot; fresh ones cooking</Text>
-            )}
+              {/* Says what these are, so holding yesterday's meals up is honest rather than a stale
+                  cache pretending to be fresh. Drops the moment today's land.
+                  The DOT and the rotating line are the point: showing yesterday's meals removed the
+                  skeleton, which was the only thing on screen conveying that work was happening —
+                  so a static sentence replaced a progressing one and the section read as finished.
+                  DAILY_STATUS is the same narration the skeleton uses, so the two states now say
+                  the same thing rather than one of them going quiet. */}
+              {stale && (
+                <View style={styles.carryoverRow}>
+                  <Text style={styles.carryoverNote}>Yesterday&rsquo;s picks</Text>
+                  <View style={styles.carryoverSep} />
+                  <RNAnimated.View style={[styles.livePulse, { opacity: livePulse }]} />
+                  <Text style={styles.carryoverStatus} numberOfLines={1}>{DAILY_STATUS[dailyStatusIdx]}</Text>
+                </View>
+              )}
+            </View>
 
             {mealsPending ? (
               // Card-shaped skeleton, not a bare spinner: a populated placeholder reads as "almost
@@ -2080,14 +2111,20 @@ const styles = StyleSheet.create({
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, marginBottom: 0 },
   sectionHeaderExpanded: { paddingBottom: 0, marginBottom: 8 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  carryoverNote: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    fontWeight: '500',
-    marginTop: -4,
-    marginBottom: 10,
-  },
-  sectionTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 2, textTransform: 'uppercase' },
+  // Horizontal margin now comes from the shared header wrapper. The old style set none while the
+  // header row set 20, which is why "Yesterday's picks" hugged the screen edge out of line with
+  // the title directly above it.
+  carryoverRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  carryoverNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
+  carryoverSep: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: COLORS.textMuted, opacity: 0.5, marginHorizontal: 7 },
+  // A live indicator, not a spinner — the language of a recording light. Slow enough to read as
+  // breathing rather than blinking.
+  livePulse: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#4ADE80', marginRight: 6 },
+  carryoverStatus: { fontSize: 12, color: '#4ADE80', fontWeight: '600', flexShrink: 1 },
+  // Promoted from a 12px uppercase muted eyebrow. This is the app's core feature and it was
+  // styled like a caption — quieter than the greeting above it and than "See all" beside it.
+  // Sentence case at heading scale puts it in the same typographic system as "Good evening, Logan".
+  sectionTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
   mealsCollapsedSub: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   mealList: { gap: 14, marginBottom: 28 },
   mealCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, padding: 16, gap: 16 },
