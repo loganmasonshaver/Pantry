@@ -196,6 +196,10 @@ EXCLUDE — these are NOT food and must NEVER appear in the list:
 - Unidentifiable leftovers and generic containers: "leftovers", "covered pot", "food in foil pan", "food in a clear/plastic/deli container", or a plain "sauce jar"/"drink bottle"/"condiment cup" whose actual contents you can't name. If you can't say what the FOOD is, it is NOT a pantry item — leave it out.
 Apart from these exclusions, include every actual food/drink you can NAME. When unsure of the exact variant, use ONE broader generic name — never an "X or Y" hedge, and never a container-description in place of a food. Never drop a real, identifiable food just because you're unsure of its brand or variant.
 
+CATEGORY — use EXACTLY one of these sixteen, spelled exactly as written:
+Produce, Bakery, Meat & Fish, Dairy & Eggs, Frozen, Grains & Pasta, Legumes, Canned & Jarred, Nuts & Seeds, Snacks, Sauces & Condiments, Spices & Seasonings, Oils & Vinegars, Baking, Beverages, Other.
+Do NOT invent shorter or macro-style names ("Dairy", "Carbs", "Protein", "Condiments", "Pantry Staples"). The app keys its icons and colours off this exact list, so anything outside it renders as an unlabelled grey box. If nothing fits, use "Other".
+
 Return a JSON object with this structure:
 {
   "layout": "shelves" | "horizontal",
@@ -204,8 +208,8 @@ Return a JSON object with this structure:
     {
       "zone": "Top Shelf",
       "items": [
-        { "name": "Non-Fat Greek Yogurt", "category": "Dairy", "photo": 0, "box": [0.41, 0.12, 0.10, 0.18], "confidence": 95 },
-        { "name": "Whole Wheat Pasta", "category": "Carbs", "photo": 1, "box": [0.22, 0.55, 0.14, 0.20], "confidence": 45 }
+        { "name": "Non-Fat Greek Yogurt", "category": "Dairy & Eggs", "photo": 0, "box": [0.41, 0.12, 0.10, 0.18], "confidence": 95 },
+        { "name": "Whole Wheat Pasta", "category": "Grains & Pasta", "photo": 1, "box": [0.22, 0.55, 0.14, 0.20], "confidence": 45 }
       ]
     }
   ]

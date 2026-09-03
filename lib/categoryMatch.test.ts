@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { STORE_CATEGORIES, autoCategoryMatches } from './categoryMatch.ts'
+import { STORE_CATEGORIES, autoCategoryMatches, normalizeCategory } from './categoryMatch.ts'
 
 const cat = (name: string) => autoCategoryMatches(name)[0] ?? 'Other'
 
@@ -78,4 +78,36 @@ test('ranking is deterministic and puts the best answer first', () => {
   assert.ok(m.length > 1, 'expected more than one category to match')
   assert.equal(m[0], 'Canned & Jarred')
   assert.deepEqual(autoCategoryMatches('peanut butter'), m, 'not deterministic')
+})
+
+test('normalizeCategory keeps a category that already exists', () => {
+  for (const c of STORE_CATEGORIES) {
+    assert.equal(normalizeCategory(c, 'anything'), c)
+  }
+})
+
+test('normalizeCategory rescues the exact vocabulary the scan model invented', () => {
+  // Measured in production 2026-09-03 — 97 in-stock items carried one of these.
+  assert.equal(normalizeCategory('Dairy', 'Bulgarian Yogurt'), 'Dairy & Eggs')
+  assert.equal(normalizeCategory('Carbs', 'Cooked Rice'), 'Grains & Pasta')
+  assert.equal(normalizeCategory('Condiments', 'Barbecue Sauce'), 'Sauces & Condiments')
+  assert.equal(normalizeCategory('Condiments & Spices', 'Hot Sauce'), 'Sauces & Condiments')
+})
+
+test('the item NAME outranks the alias table, because the name is the better signal', () => {
+  // The model labelled this "Protein" meaning the macro, not the aisle. The alias table would say
+  // Meat & Fish; the name says Snacks, and the name is right.
+  assert.equal(normalizeCategory('Protein', 'Chocolate Protein Bars'), 'Snacks')
+  // With a name the matcher cannot read, the alias is what saves it.
+  assert.equal(normalizeCategory('Protein', 'Zzzz'), 'Meat & Fish')
+})
+
+test('normalizeCategory never returns something outside the canonical list', () => {
+  const inputs: Array<[unknown, string]> = [
+    ['Pantry Staples', 'Mystery Jar'], ['', ''], [null, 'Bulgarian Yogurt'],
+    [undefined, 'Zzzz'], ['CompletelyMadeUp', 'Zzzz'], [42, 'Zzzz'],
+  ]
+  for (const [raw, name] of inputs) {
+    assert.ok(STORE_CATEGORIES.includes(normalizeCategory(raw, name)), `"${raw}"/"${name}" escaped the list`)
+  }
 })

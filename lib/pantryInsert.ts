@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { escapeLike } from './sqlLike'
+import { normalizeCategory } from './categoryMatch'
 
 export type PantryInsertRow = { name: string; category: string }
 
@@ -33,7 +34,11 @@ export async function addPantryItemsDeduped(userId: string, rows: PantryInsertRo
   if (newRows.length > 0) {
     const { error } = await supabase
       .from('pantry_items')
-      .insert(newRows.map(r => ({ user_id: userId, name: r.name, category: r.category, in_stock: true })))
+      // Category coerced to the canonical list HERE, at the one write path every surface routes
+      // through, rather than trusting each caller. The scan model invented its own vocabulary
+      // ("Dairy", "Carbs", "Protein"), none of which exists in STORE_CATEGORIES, so the icon and
+      // colour maps missed and the pantry rendered as identical grey boxes.
+      .insert(newRows.map(r => ({ user_id: userId, name: r.name, category: normalizeCategory(r.category, r.name), in_stock: true })))
     if (error) return { error }
   }
 

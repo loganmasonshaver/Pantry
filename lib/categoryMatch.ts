@@ -73,3 +73,55 @@ export function autoCategoryMatches(itemName: string): string[] {
   scored.sort((a, b) => (b.end - a.end) || (b.len - a.len))
   return scored.map(s => s.cat)
 }
+
+// Off-list category names seen in production, mapped to the canonical bucket they meant. These
+// came from the scan prompt, whose only guidance on categories was two EXAMPLES using "Dairy" and
+// "Carbs" — neither in STORE_CATEGORIES — so the model extrapolated its own vocabulary and wrote
+// it straight to the database. Measured 2026-09-03: 97 of one user's in-stock items carried a
+// category that does not exist in this file.
+//
+// The cost was not just cosmetic. CATEGORY_ICONS and CATEGORY_COLORS are keyed on STORE_CATEGORIES,
+// so every off-list name fell through to the Package icon and grey — which is why the pantry read
+// as a column of identical boxes. And "Condiments", "Condiments & Spices" and "Spices & Seasonings"
+// rendered as three separate rows for overlapping food.
+const LEGACY_CATEGORY_ALIASES: Record<string, string> = {
+  'dairy': 'Dairy & Eggs',
+  'eggs': 'Dairy & Eggs',
+  'carbs': 'Grains & Pasta',
+  'grains': 'Grains & Pasta',
+  'protein': 'Meat & Fish',
+  'meat': 'Meat & Fish',
+  'condiments': 'Sauces & Condiments',
+  'condiments & spices': 'Sauces & Condiments',
+  'sauces': 'Sauces & Condiments',
+  'spices': 'Spices & Seasonings',
+  'seasonings': 'Spices & Seasonings',
+  'pantry staples': 'Other',
+  'staples': 'Other',
+  'fruits': 'Produce',
+  'vegetables': 'Produce',
+  'fruits & vegetables': 'Produce',
+  'drinks': 'Beverages',
+  'oils': 'Oils & Vinegars',
+  'canned': 'Canned & Jarred',
+  'nuts': 'Nuts & Seeds',
+  'bread': 'Bakery',
+}
+
+/**
+ * Coerce any category to one that actually exists, so icons, colours and grouping can rely on it.
+ *
+ * Order matters. The ITEM'S OWN NAME is consulted before the alias table, because the name is the
+ * stronger signal: a model that labels "Chocolate Protein Bars" as "Protein" meant the macro, not
+ * the aisle, and the name correctly resolves it to Snacks where the alias would have said
+ * Meat & Fish. The alias table only catches names the keyword matcher cannot read at all.
+ */
+export function normalizeCategory(rawCategory: unknown, itemName: string): string {
+  const raw = String(rawCategory ?? '').trim()
+  if (STORE_CATEGORIES.includes(raw)) return raw
+  const byName = autoCategoryMatches(itemName)[0]
+  if (byName) return byName
+  const alias = LEGACY_CATEGORY_ALIASES[raw.toLowerCase()]
+  if (alias) return alias
+  return 'Other'
+}
