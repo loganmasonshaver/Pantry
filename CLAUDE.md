@@ -171,9 +171,14 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 134** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **27** in
-  app code (`app/ lib/ components/ hooks/ context/`) and **105** Deno-global noise from
+- **TS baseline = 124** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **17** in
+  app code (`app/ lib/ components/ hooks/ context/`) and **107** Deno-global noise from
   `supabase/functions` being inside the tsconfig.
+  (Was 134/27 until 2026-09-03. `GeneratedMeal.image` was declared `image: null` — a field that
+  can ONLY ever hold null — while the client assigns image URLs to it on every meal. Ten errors,
+  all of them `Type 'string' is not assignable to type 'null'`, were the type being wrong rather
+  than the code. Same lesson as the MOCK_DETECTED deletion below: check whether the DECLARATION
+  is wrong before assuming a stubborn baseline is load-bearing.)
   (Was 150/45 until 2026-08-30. Deleting the dead `MOCK_DETECTED` array from `PantryScanModal`
   removed 18 errors in one go — all of them `Property 'zone' is missing ... required in type
   'DetectedItem'`. The array predated `zone` being added to the type and nothing referenced it, so

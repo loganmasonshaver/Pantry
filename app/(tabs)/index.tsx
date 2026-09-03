@@ -1667,7 +1667,7 @@ export default function HomeScreen() {
                           style={[StyleSheet.absoluteFillObject, (i % Math.max(carouselMeals.length, 1)) === safeHeroIdx ? { transform: [{ scale: heroScale }] } : null]}
                         >
                           {m.image && m.image.startsWith('http') ? (
-                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === loopOffset ? 'high' : 'normal'} transition={0} />
+                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === loopOffset ? 'high' : 'normal'} transition={300} />
                           ) : (
                             // A photo-less page is why the pager can hold a stable 3 pages from the
                             // first frame: it narrates instead of going blank, so the page count

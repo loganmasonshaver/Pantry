@@ -22,6 +22,11 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 // server MEAL_GEN_CAP_PER_DAY is the real backstop. Resets at midnight (cache is keyed by date).
 const MAX_DAILY_REGENS = 3
 
+// How long the hero's own photo is waited for before today's meals are shown anyway. Only applies
+// when meals are ALREADY on screen — see the block that uses it. Long enough for a normal image
+// job, short enough that a stalled CDN cannot pin yesterday's meals up indefinitely.
+const HERO_IMAGE_WAIT_MS = 8000
+
 // userId stamps ownership so the cache survives sign-out (restored for the same user on
 // re-login) without leaking to a different account on a shared device — reads that don't match
 // the current user are treated as a miss. Absent userId = legacy/onboarding write, accepted.
@@ -31,6 +36,9 @@ type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: numb
 export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
   const { requestConsent } = useAIConsent()
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
+  // Whether anything is currently on screen. Decides whether a finished generation may swap in
+  // immediately (nothing to disturb) or has to wait for its hero photo first.
+  const shownRef = useRef(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Machine-readable reason alongside the human message, so the UI can adapt — e.g. suppress a
@@ -52,6 +60,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // note on the carryover branch below.
   const [stale, setStale] = useState(false)
   useEffect(() => { regensUsedTodayRef.current = regensUsedToday }, [regensUsedToday])
+  useEffect(() => { shownRef.current = meals.length > 0 }, [meals.length])
 
   const generate = async () => {
     if (!userId) return
@@ -154,28 +163,49 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         await AsyncStorage.setItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`, JSON.stringify(merged))
       } catch {}
 
-      // Images load progressively after meals are shown; errors must not block the UI.
-      // Fetched in parallel here (different meal names → independent Replicate jobs);
-      // the per-image retry loop above is what's serialized to avoid burst throttling.
+      // Images load progressively; errors must not block the UI. Fetched in parallel here
+      // (different meal names → independent jobs); the per-image retry loop above is what's
+      // serialized to avoid burst throttling.
       const mealsToImage = [...generated]
+      const jobs = mealsToImage.map(async (meal, i) => {
+        if (meal.image) return
+        const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+        const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
+        if (!image) return
+        mealsToImage[i] = { ...mealsToImage[i], image }
+        // Patched by ID, NOT by index. With the swap below now able to run late, `prev` may still
+        // be YESTERDAY's meals when an image lands — an index write would paste today's photo onto
+        // yesterday's dish. A no-op until the swap happens is the correct outcome; the mutation of
+        // mealsToImage above is what carries the photo across.
+        const id = mealsToImage[i].id
+        setMeals(prev => prev.map(p => (p.id === id ? { ...p, image } : p)))
+      })
+
+      // HOLD THE SWAP FOR THE HERO'S PHOTO — but only when something is already on screen.
+      //
+      // Returning image-less meals swaps a finished dish out for a shimmer, which reads as
+      // something breaking rather than something loading. The photo-less card is designed for a
+      // COLD start (nothing → shimmer → photo); arriving at it FROM a real photo is a downgrade
+      // the user notices. Waiting for the first meal's image means the swap presents a complete
+      // card instead of assembling one on screen.
+      //
+      // Only the FIRST image is waited for. Meals 2 and 3 land while the reader is on page 1, so
+      // the reveal stays fast. On a cold start nothing is waited for at all — the skeleton is
+      // already the honest state there, and delaying would only lengthen it.
+      if (shownRef.current && jobs.length > 0) {
+        await Promise.race([
+          jobs[0],
+          new Promise(resolve => setTimeout(resolve, HERO_IMAGE_WAIT_MS)),
+        ])
+      }
+
       ;(async () => {
-        await Promise.all(mealsToImage.map(async (meal, i) => {
-          if (meal.image) return
-          const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
-          const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
-          if (image) {
-            mealsToImage[i] = { ...mealsToImage[i], image }
-            setMeals(prev => {
-              const updated = [...prev]
-              updated[i] = { ...updated[i], image }
-              return updated
-            })
-          }
-        }))
+        await Promise.all(jobs)
         await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
       })()
 
-      return generated
+      // mealsToImage, not `generated` — it carries whichever photos arrived during the wait.
+      return mealsToImage
     } catch (err: any) {
       throw err
     }
