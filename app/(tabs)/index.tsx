@@ -785,7 +785,7 @@ export default function HomeScreen() {
   // remainder (`viewportH - cardTop - 12`), pinning its bottom edge 12pt above the tab bar no matter
   // what sat above it — so every point trimmed upstream was handed straight back to the photo and
   // the log stayed permanently below the fold. Three earlier trims in this file were spent that way.
-  const LOG_PEEK = 96
+  const LOG_PEEK = 128
   const heroFit = useMemo(() => {
     if (!viewportH || !heroSectionY) return 288 // pre-measure default; replaced on first layout
     const cardTop = heroSectionY + heroHeaderH
@@ -1574,7 +1574,7 @@ export default function HomeScreen() {
             header and "See all" snapped into place while everything else glided. */}
         {(!pantryFetched || pantryNames.size > 0) && (
           <Reanimated.View layout={LinearTransition.duration(420)}
-            style={{ marginBottom: 36 }}
+            style={{ marginBottom: 14 }}
             onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
           >
             {/* Header height feeds the hero fit calculation — the card starts where this ends. The
@@ -1747,7 +1747,7 @@ export default function HomeScreen() {
         <View style={styles.logSection}>
           <Text style={styles.logTitle}>Daily Meal Log</Text>
 
-          <View style={{ marginTop: 14, gap: 10 }}>
+          <View style={{ marginTop: 10, gap: 8 }}>
             {slots.map((slot) => {
               const hasEntries = slot.entries.length > 0
               const slotCal = slot.entries.reduce((s, e) => s + e.calories, 0)
@@ -2188,7 +2188,7 @@ const styles = StyleSheet.create({
   stapleActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   stapleHaveIt: { fontSize: 12, fontWeight: '600', color: '#4ADE80' },
   stapleGrocery: { fontSize: 12, fontWeight: '600', color: '#00C9A7' },
-  logSection: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40, gap: 10 },
+  logSection: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40, gap: 10 },
   logHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   aiEstimateBtn: {
     flexDirection: 'row',
@@ -2414,12 +2414,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.cardElevated,
     borderRadius: 16,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
   },
   mealSlotIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     backgroundColor: '#262626',
     alignItems: 'center',
     justifyContent: 'center',
