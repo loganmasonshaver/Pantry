@@ -1,218 +1,166 @@
-# Handoff — 2026-08-30 (late evening)
+# Handoff — 2026-09-03 (evening)
 
-Replaces the previous handoff (in git history, `296203a`). **51 commits this session.**
-`git log --since="2026-08-30 17:30"` carries the reasoning for every one — what was measured, what
-was rejected, and why. This file holds only what git does not.
+Replaces the 2026-08-30 handoff (in git history, `06ce465`). `git log --since="2026-09-02"` carries
+the reasoning for every commit; this file holds only what git does not.
 
-**State:** everything committed, pushed and deployed. Working tree clean. **226 tests**
-(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). TS baseline **134 total / 27
-app-code** — unchanged all session. Pool: **128 meals, 100% source_verified**, oldest 2026-08-16.
-Preflight green except `SCAN_CAP_WEEK`, still held **on purpose**.
-
----
-
-## 0. READ FIRST — the one thing that gates everything
-
-**Eleven generation-side changes shipped today and NOT ONE is verified.** The existing 128 rows
-were written by the old code, so they prove nothing about any of it. Do not report any of them as
-working.
-
-**`docs/TRENDING-OPEN.md` ends with a `⚠️ CONFIRM ON THE NEXT PIPELINE RUN` block.** It has five
-checks with exact SQL, the baseline numbers to beat, and — the part that matters — **what a FALSE
-pass looks like**. One run confirms all of them. Read it before running anything.
-
-The three false-pass traps, because they are easy to shrug off:
-- `has_time` not moving **at all** means the model is ignoring the method checklist. That is a
-  prompt problem, not a parser one.
-- Expect a rise but **not to 100%** — only ~43% of descriptions publish a method. Partial is the
-  correct outcome, not a failure.
-- A `truncated` counter above ~1 per run means the detector is **eating real food**. Read the log
-  line naming the ingredient before celebrating.
-
-Quota: ~1,314 units per run, 10,000/day, resets **midnight Pacific / 2am Logan's time**. `dryRun`
-costs the same. Run tests SEQUENTIALLY.
-
-Other canonical files, unchanged in authority: **`docs/PRELAUNCH.md`** (the official checklist —
-answer "what's next" from it) and **`docs/TRENDING-OPEN.md`** (standing procedure + open items).
-`~/my-briefing/todos/active.md` remains contested and stale; its remote is archived on purpose, so
-**do not flag its unpushed commits.**
+**State:** everything committed, pushed, deployed. Working tree clean. **243 tests**
+(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). **TS baseline 124 total / 17
+app-code — both DROPPED today, see §4.** Preflight green except `SCAN_CAP_WEEK`, still held on
+purpose.
 
 ---
 
-## 1. What changed today, in one line each
+## 0. READ FIRST — the next session is a design session
 
-All of it came out of one screenshot review. Eighteen reported items, all closed.
+Logan is taking **Home + Pantry layout** to a fresh chat for an outside perspective. It is written
+up as **`docs/PRELAUNCH.md` item 6c**, and it is a DECISION, not a bug list.
 
-**Pipeline (deployed, unverified):** junk/massless-ingredient gates · method checklist from the
-creator's own steps · cook settings captured from "Air Fryer Settings" blocks · truncation guards
-(finish_reason + output check) · decimal-quantity parser fix · section-heading gate · unquantified
-ingredient recovery · recipe SECTIONS · non-English parsing · brand-descriptor rule ·
-`regionCode=US&relevanceLanguage=en`.
+**Do not re-propose what was already rejected today.** Four options were put to him and all four
+were turned down, for reasons that are better than the options were:
 
-**App code (needs a rebuild, NOT seen on device):** whole-unit counts prefer the creator's count ·
-containers show count + size · unambiguous creator units win over grams · fractions instead of
-decimals · pepper-is-not-a-spice · Discover dish-form diversity · per-dish photo variation ·
-Ingredients header layout.
+- *Cut the meal section from Pantry, link to Home instead* — a link that promises "2 meals ready"
+  and delivers a tab you then have to scroll is worse than no link.
+- *Hero + two compact rows on Home* — **Discover already opens on a big photo hero.** Give Home one
+  too and both tabs lead with the same visual move, so neither has an identity. Any proposal must
+  say what makes Home look DIFFERENT from Discover. This is the constraint that kills most ideas.
+- *Turn Home's carousel into a plain list* — throws away the photography that makes the app look
+  like a product.
+- *Just stop the auto-advance* — only half-answers; you still see one meal at a time.
 
-**Data:** 36 unverified pre-gate rows deleted · 36 junk ingredients stripped · two rows repaired
-from source.
+**His actual objection, which is sharper than anything offered back:** the old Pantry Cook Tonight
+showed all three meals AT ONCE. Home shows one at a time on a 6250ms timer, so meals arrive
+individually even on an idle device. `app/(tabs)/index.tsx:519` says the quiet part out loud —
+*"every HERO_CYCLE_MS the hero crossfades to the next meal so all 3 are surfaced over time."* The
+rotation is compensation for a layout with room for one meal, and ~44 references of loop/recentring
+machinery exist to serve it.
 
-**Scan modal (needs a rebuild, NOT seen on device):** a `SafeAreaProvider` inside the modal — see
-§5 · the camera's top chrome moved out of the status bar · the prep screen's CTA given real bottom
-clearance · the prep screen rebuilt with Lucide icons instead of emoji and its copy audited against
-scan-pantry's own documented misses.
-
-**Audit:** `CODE_REVIEW.md` triaged — 3/3 criticals and 15/15 highs closed.
-
----
-
-## 2. NEEDS LOGAN
-
-- **`SCAN_CAP_WEEK`** — deliberate hold. `npx supabase secrets unset SCAN_CAP_WEEK` after filming.
-- **App Store Connect products** (#1 on the checklist). Still unchecked; the Superwall CLI needs an
-  interactive login to his account.
-- **Scan-flow QA on device** — a gate he set. The dead `setStep(6)` screen was deleted this
-  morning, so the ghost is gone and the flow can now be walked honestly.
-- **Nothing from today has been seen rendered.** Two visual passes on the Ingredients header were
-  reasoned from a measured 36pt row height, not observed. If it still looks wrong, the next suspect
-  is the pill height itself (36pt around 12pt text) — shrinking it was the option he did not take.
-- **The scan modal now has real insets for the first time.** Adding the provider made every
-  `insets.top` in that file live, where they had all been resolving to 0 — so steps 4/5/55
-  (`stepWithSafeTop`) and both overlays gain top padding they never had. That is the behaviour
-  their own comments intend, but it is a visible change nobody has seen. Check it during the
-  scan-flow QA rather than assuming it.
-- **The rebuilt prep screen is unseen.** Icons, three new tips, new CTA spacing.
+**The layout was REVERTED to its working state on purpose** (`129fe3c`). Not because the changes
+were wrong in isolation, but because they encoded a design opinion Logan does not share — and
+leaving them in would hand the next session that opinion as its baseline without flagging it as one.
 
 ---
 
-## 3. DECISIONS HE MADE — do not relitigate
+## 1. NEEDS LOGAN — verification, all of it on device
 
-- **No video link in the app.** Built it, he vetoed it, reverted (`8afcb04` + revert). Do not
-  re-propose sending users to YouTube.
-- **Cups are a measurement.** He overruled my "grams are more precise for volume-of-a-solid" call.
-  If the creator wrote "1 cup", the list says one cup. 222 rows changed.
-- **Delete, don't preserve, unverified rows.** He chose deletion twice over softer options.
-- **US bias by shoppability.** 29% of the pool needed an Indian grocer; the keyword search was
-  globally scoped while the trending call was already US-only. Two query parameters, at the source.
+`docs/PRELAUNCH.md` **6b** is the canonical list. Two classes:
 
----
+**Testable on any reload, today:**
+- Category icons and colours (the grey-boxes bug — see §2)
+- Pantry's `+` icon and the "Add an item" row at the end of the list
+- Home's promoted "Cook from your pantry" heading
+- The photo-gated meal swap — **use the refresh button, it does not need a new day.** The tell is
+  the ABSENCE of a shimmer beat between the old meals and the new ones.
 
-## 4. DEAD ENDS — measured and rejected, do not rebuild
+**Cannot be tested same-day, needs the first open of a NEW day:**
+- "Yesterday's picks" carryover — its alignment fix and the live pulse dot
+- Discover's hero being a dish never served before, and not swapping after first paint
+- "Almost in your kitchen" no longer leading every day, and reordering inside itself
 
-- **A "creamy"/"cheesy" name-gap rule.** Looks obviously right for "Creamy Fajita Chicken". Of 4
-  pool meals with "creamy" and no literal cream, only ONE is a real gap — the others are satisfied
-  by cashew cream, paneer and **vodka sauce**. Rejects 3 good recipes to catch 1.
-- **A blanket ingredient dedupe.** Duplicate paprika and Greek yogurt are FAITHFUL — creators
-  section recipes (pasta/salmon/dressing, cake/frosting). A dedupe silently halves them.
-- **Forcing times into the prompt.** With no method in the source the model INVENTS them, and an
-  invented "chicken at 200°C for 25 minutes" is a food-safety claim this app cannot make.
-- **YouTube captions.** The free route is closed: `captionTracks[].baseUrl` returns **HTTP 200 with
-  a zero-byte body**. Tested across 3 videos and 5 endpoint variants. `captions.download` needs
-  OAuth as the video OWNER. Do not spend a session rediscovering this.
-- **Dry-basis macro table.** Physically correct — the pool lists starches dry 11 times out of 12 —
-  and measurably WORSE: 49 → 50 failures. The table holds offsetting errors and correcting one
-  exposes the others. Fix the over-counting first, then flip, then re-measure.
+These read the DEVICE clock (`dayOfYearNow`, `todayStr`), **not the database — no SQL simulates a
+new day.** Either wait, or set the iPhone forward a day and expect a token refresh.
+
+**Needs DAYS, not a reload:** the repeat/variety work (§3). One generation proves nothing.
 
 ---
 
-## 5. METHOD — five ways I got caught today
+## 2. WHAT CHANGED TODAY, and the two bugs worth remembering
 
-1. **A "measured and rejected" verdict is only as good as the measurement.** I killed the
-   unquantified-ingredient idea on a test that applied none of the existing gates: 160 junk lines
-   vs ~7 real. With the real gates it was ~27 real vs 1 junk. Logan pushed back and was right.
-2. **Watch the TS DELTA, not the total.** 134 → 136 was a TDZ crash I had already deployed — it
-   would have thrown while building the prompt and taken out the whole run.
-3. **The pre-push AI review caught a real bug I could not see.** A `Map` keyed by ingredient line
-   collapsed repeated ingredients to their last section — breaking the exact case the feature
-   existed for.
-4. **Survivorship bias is everywhere here.** Any sample drawn from `trending_meals` consists of
-   rows extraction already succeeded on. My 15 sampled descriptions all parsed ≥3 by construction.
-5. **English-shaped assumptions keep surviving in new places.** Third time this repo has been bitten
-   (Składniki/Zutaten, ASCII `\b`, now three more). A German description inflated the retention
-   contract from 7 items to 11 and parsed its method to zero.
-6. **A landmine note can be half true and cost you the fix.** CLAUDE.md said "SafeAreaView still
-   works because it's a self-measuring native view". True in a normal tree, FALSE inside a
-   `<Modal>` — which is its own window. I acted on it, shipped a fix that changed nothing, and only
-   the device screenshot showed it. CLAUDE.md is now corrected.
+**The pantry was a column of grey boxes** (`750f4d6`). `CATEGORY_ICONS`/`CATEGORY_COLORS` are keyed
+on `STORE_CATEGORIES`, but the scan prompt gave the model **no allowed-values list** — only two
+examples using "Dairy" and "Carbs", neither of which exists in it. It invented its own vocabulary
+and it went straight to the database: 97 in-stock items on off-list names, all falling through to
+the `Package` icon and grey. "Condiments", "Condiments & Spices" and "Spices & Seasonings" rendered
+as three rows for overlapping food. Fixed in three places — the prompt states the sixteen values,
+`normalizeCategory` coerces at the one write path, and a migration backfilled the 97 rows (verified
+zero off-list remaining).
 
----
+**I deleted the only regen button in the app and did not notice** (`f874efb`, restored). It lived
+inside Cook Tonight's header; Home imports `RefreshCw` but has never rendered it. Cutting a section
+by its rendered height is how a five-line feature inside a 141-line block disappears. It came back
+with the revert. **Lesson worth keeping: audit what LIVES in a block before removing it, not just
+what it looks like.**
 
-## 6. NOT DONE, deliberately
-
-- **`CODE_REVIEW.md` is triaged and clean where it matters** — 3/3 criticals and 15/15 highs
-  closed, verified against live code and the live DB. Results table at the top of that file. The 42
-  medium and 27 low were NOT checked, and the recommendation is a fresh `/security-review` rather
-  than triaging a report three months and two security passes old.
-  **Carry this forward:** C1 (promo_active payment bypass) is fixed by a TRIGGER
-  (`trg_enforce_server_premium`), not by RLS. The policy is still blanket `auth.uid() = id`, so an
-  auditor who checks the policy will wrongly conclude the bypass is live.
-- **Mark invented amounts.** The creator wrote `• Cashew Nuts`; the app shows "30g · ¼ cup" and
-  "top with cashew nuts", neither of which they said. The pipeline already knows which ingredients
-  were unquantified and discards that fact. Design and honest sizing are logged in
-  `docs/TRENDING-OPEN.md` — harm is LOW, sequenced after the verification run.
-- **PRELAUNCH #4 (skip-onboarding paywall) is smaller than it looks.** Onboarding already proceeds
-  without a purchase and every feature is gated downstream, so the plumbing exists; what is missing
-  is the UX and a Superwall placement for the browser variant.
-- **Two stored rows still carry `1/2 can` / `1/2 packet`.** Harmless, correctly ignored. Noted so
-  they are not re-flagged.
+Also shipped and surviving the revert: Home's photo-gated meal swap and the `image: null` type fix
+(§4), the carryover alignment + live pulse, and the promoted section heading.
 
 ---
 
-## 7. Corrections — believe these, not the transcript
+## 3. THE REPEAT PROBLEM — three attempts, and why the third is different
 
-- **"The estimator runs high" was WRONG.** Over the pool the estimate/claim calorie ratio is p25
-  0.80, **median 1.00**, p75 1.31, and meat vs meatless is 1.02 vs 0.99. The 38% failure rate is
-  SPREAD, not bias. Only the failing tail runs high, which is true by definition.
-- **"Most descriptions carry no method" was HALF wrong**, and the wrong half was the actionable
-  one: 6 of 14 publish a full numbered method, all inside the prompt window. The model could see it
-  and was summarising it away.
-- **"Baking powder and soda" is NOT a merge defect.** The creator merged it. Splitting invents two
-  amounts from one "pinch", and the obvious rule breaks "macaroni and cheese".
-- **"Protein chips" and "tuna in water" are NOT defects.** The video is titled "Protein chip steak
-  bowls"; "tuna in water" is a faithful translation of "Thunfisch (eigener Saft)" and the "in
-  water" is load-bearing for macros. What was wrong was our rendering — we dropped "Quest Chili
-  Lime", which is what made it read as random.
+Logan's complaint: generated meals feel like the same food renamed. Measured against his live data,
+not guessed.
+
+- **The window was half full of the model repeating itself.** 29 remembered names clustered to 14
+  distinct dishes — seven names for one cottage cheese bowl. Shortening the window is the WRONG
+  instinct and was explicitly considered and rejected: it was never too long, it was half empty.
+  It now dedupes by sameness, so 30 slots hold ~30 real dishes.
+- **A name ban does not work.** Handed a list headed "DO NOT SUGGEST", the model returned two
+  entries VERBATIM. Better ban lists were the first two attempts and both failed.
+- **So the third bans the FOOD** (`ef1c4b4`). "Do not use cottage cheese" cannot be satisfied by
+  renaming. First run after: cottage cheese gone entirely, and beef — a base sitting unused in a
+  55-item pantry — finally appeared.
+
+**Two open items on this:**
+- **Potato slipped through inside a "Vegetable Hash"** — the ban held on the name but not the
+  ingredient list. If it recurs, the ban needs enforcing in code against the returned ingredients,
+  not just requested in the prompt.
+- **`INGREDIENT_RESCUE_MAX = 0.4` was never calibrated** — picked against two hand-built examples
+  because `generated_meals` was empty when it was written. It logs every time it fires. Calibrate
+  from those lines; do not re-guess.
 
 ---
 
-## 8. WHAT IS LEFT — in order
+## 4. TS BASELINE DROPPED — 134/27 → 124/17
 
-Answer "what's next" from `docs/PRELAUNCH.md`; this is the same list with today's state folded in.
+`GeneratedMeal.image` was declared `image: null` — a field that can ONLY ever hold null — while the
+client assigns URLs to it on every meal. All ten `Type 'string' is not assignable to type 'null'`
+errors were the DECLARATION being wrong, not the code. Same lesson as the `MOCK_DETECTED` deletion
+already in CLAUDE.md: **check whether the type is wrong before assuming a stubborn baseline is
+load-bearing.** CLAUDE.md updated; 124/17 is the number to watch now.
 
-### Blocked on the clock (quota resets midnight Pacific / 2am)
-1. **Run the pipeline once and work the `⚠️ CONFIRM ON THE NEXT PIPELINE RUN` block** at the end of
-   `docs/TRENDING-OPEN.md`. Eleven shipped changes are unproven and this is the only thing that
-   proves them. Five checks, exact SQL, and what a FALSE pass looks like. **Do this first** — six
-   later items assume the pipeline is sound.
+---
 
-### Blocked on Logan's device
-2. **Scan-flow QA end to end** (PRELAUNCH #3) — his stated gate before filming. The dead review
-   screen is gone, so the flow can be walked honestly now. Watch the three unseen changes in §2.
-3. **Rebuild and eyeball today's app-code changes** — ingredient display across every meal, Discover
-   diversity, the Ingredients header, the whole scan modal. All measured against data, none seen.
-4. **End-to-end AI meal generation on device** (PRELAUNCH #5).
+## 5. NOT DONE, deliberately
 
-### Blocked on Logan personally
-5. **App Store Connect products** (PRELAUNCH #1) — the Superwall CLI needs his interactive login.
-   Longest external lead time on the list; worth doing before anything else on a slow evening.
+- **`generated_meals` is written but nothing reads it.** The V2 "Made for you before" page is
+  designed in `docs/todos.md` with the numbers that settle it. The WRITE shipped early on purpose —
+  it is a one-way door, nothing else persists a generated meal. Verified live: 0 → 3 rows on a real
+  generation, `meal_data` complete. **It carries no `image` key** (images are fetched client-side
+  after generation) — the image cache is name-keyed, so the page re-resolves them free.
+- **Two screens mount `useMealSuggestions`.** This is INTENDED — they share one generation through
+  the daily cache, and the shared `regenCount` is what makes "one regen per day" hold across both.
+  I wrongly called it an architecture problem in `f874efb`'s message; `62df0cb` corrects it. The
+  real issue is narrow: on a cold day, opening Pantry during Home's ~10s generation window can have
+  both see a cache miss and generate twice.
+- **Meal swap can still happen mid-drag.** `heroDragging` lives in the screen, the swap in the hook.
+  Not worth the coupling for a sub-second window — recorded rather than half-built.
+- **Three ingredient defects logged, not started**, in `docs/TRENDING-OPEN.md`: Jello's macros
+  contradicting themselves and its ingredients; duplicate coriander (⚠️ a dedupe is a MEASURED dead
+  end — the fix is showing the creator's section headings); and `5g cooking oil spray`, which is an
+  invented amount and belongs with the existing "Mark invented amounts" item.
+- **Discover's first open** — black screen with a Safari glyph, then 3-6s, then a reorder. Logged
+  with the three symptoms separated because they have three different causes and one may already be
+  fixed. Verify before writing code.
 
-### Buildable right now, no device and no quota
-6. **PRELAUNCH #4 — "skip onboarding" paywall variant.** Smaller than it reads: onboarding already
-   proceeds without a purchase and every feature is gated downstream (`if (!isPremium)
-   triggerUpgrade(...)`), so the plumbing exists. What is missing is the UX and a Superwall
-   placement for the browser variant. Must be in the TestFlight build.
-7. **Mark invented amounts** — design and honest sizing in `docs/TRENDING-OPEN.md`. Harm is LOW;
-   sequenced after the verification run on purpose.
-8. **PRELAUNCH #9 — BFG the leaked anon key out of git history.** Do NOT run this while another
-   session has the repo open; it rewrites history.
+---
 
-### After filming
-9. `npx supabase secrets unset SCAN_CAP_WEEK` (PRELAUNCH #8), then trailer (#6), screenshots (#7),
-   TestFlight (#10) — where the Loops email path and the engagement counters finally get proven —
-   and submission (#11).
+## 6. THE PIPELINE RUN IS STILL THE BIGGEST GATE
 
-### Explicitly NOT worth doing
-- Triaging `CODE_REVIEW.md`'s 42 medium / 27 low findings. 18 of 18 severity-ranked ones were
-  stale; a fresh `/security-review` carries more signal than the remainder.
-- Re-proposing a video link, an ingredient dedupe, a "creamy" name-gap rule, forced cook times, a
-  YouTube caption fetch, or a dry-basis macro flip. All measured and rejected — see §4.
+Unchanged from the last handoff and still true. Eleven generation-side changes remain unverified;
+`docs/TRENDING-OPEN.md` ends with a `⚠️ CONFIRM ON THE NEXT PIPELINE RUN` block — five checks, exact
+SQL, and what a FALSE pass looks like. Six later items assume the pipeline is sound. Quota ~1,314
+units per run of 10,000/day, resets midnight Pacific / 2am Logan's time. Run tests SEQUENTIALLY.
+
+---
+
+## 7. ENVIRONMENT
+
+- **Metro must run from `/Users/loganshaver/pantry`.** A stale instance from days earlier was found
+  running this session; kill and restart with `--clear` rather than trusting it.
+- **The bundler address is solved permanently.** The app's Configure Bundler is set to
+  `Logans-MacBook-Air-10.local:8081` — a Bonjour name, so it survives every network change and no
+  longer needs the Mac's IP. `RCT_jsLocation` lives in user defaults: it survives rebuilds and
+  upgrades but **a delete-and-reinstall wipes it.** If Metro is ever unreachable after a fresh
+  install, that is why.
+- The temporary `192.168.1.196` IP alias from the other house is **removed**; en0 holds a normal
+  DHCP lease.
