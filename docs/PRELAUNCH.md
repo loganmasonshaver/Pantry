@@ -173,6 +173,98 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
 
 ---
 
+## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
+
+These came out of a working session and existed ONLY in that conversation until now. Each has a
+decision attached; do not re-open the decision, build it. Ordered by how directly Logan asked.
+
+**The original complaint — Pantry categories sit below the fold.**
+Measured from the stylesheet: ~926pt of chrome above the first category row against a ~710pt
+viewport, so categories start ~215pt below the fold. Agreed fix, then parked when Logan pivoted to
+Home ("drop all of those design changes for now") — parked, NOT rejected:
+- [ ] Render NOTHING when `buildInsight` returns `tone === 'affirm'`. That state is terminal: the
+      pantry can only grow (see the depletion item below), so once you have no gaps you see the
+      same sentence and four checkmarks forever. The eight `gap` messages are good and stay —
+      including the log-driven protein nudge at `lib/pantryProfile.ts:258`, which IS dynamic.
+      Banner then survives exactly where the trailer films it (a fresh pantry has gaps).
+- [ ] Cut "Cook tonight" from the Pantry tab. It duplicates Home's three meals from the same hook,
+      and Home's "See all →" points AT it, so "See all" currently leads to less. Home's "See all"
+      goes with it. Frees ~426pt and removes the cold-day double-generation race.
+- [ ] Scan cards stay exactly as they are, full size, second on the screen. Logan pushed back on
+      demoting scan TWICE and he is right — scan is the acquisition hook. It is also not needed:
+      banner + Cook tonight alone are 614 of the 926pt.
+- [ ] Result: header 78 + scan 130 + search 68 + categories header 36 = 312pt, rows land at 720.
+
+**Pantry category rows carry two data points for 68pt each.**
+- [ ] Colour the icon circles at rest. `app/(tabs)/pantry.tsx:184` already has `category.iconColor`
+      and only applies it when the row is EXPANDED, so all six read as identical grey. One line.
+      This is also where the tab's visual identity comes from once the banner is gone.
+- [ ] Add 2-3 item names as a muted subtitle ("chicken, ground beef, salmon…"). Same height, triple
+      the information, answers "what's in there" without a tap.
+
+**⚠️ The pantry cannot deplete — and meal generation is built on top of that.**
+- [ ] Every `in_stock` write in the app sets TRUE (`lib/pantryInsert.ts:41`, `grocery.tsx:374`,
+      `pantry.tsx:558`). The only path to FALSE is the manual toggle at `pantry.tsx:486`, buried
+      inside a collapsed category below the fold. So `useMealSuggestions.ts:106` generates from a
+      pantry that only accumulates — an ever-growing fiction — and "Ready to cook" is a claim the
+      app cannot back. Likely a contributor to the repeat problem: a 55-item pantry keeps every
+      stale ingredient in the prompt forever. Needs a decision (log a meal → offer to mark its
+      ingredients used? a "still have this?" nudge on items untouched for N weeks?), not a patch.
+      Blocked on confirming `pantry_items.created_at` exists — the table is not in any migration.
+
+**Home layout — knobs left unspent after the 2026-09-04 compression.**
+Shipped: LOG_PEEK reserve, ring 170→124, header crunch, slot rows slimmed. Still available:
+- [ ] `LOG_PEEK` 128 → 170 shows most of Lunch, costs ~42pt of photo. One constant.
+- [ ] Move the day nav inside the calorie card (~20pt).
+- [ ] Drop "Let's start tracking today" (~18pt, loses a dynamic line).
+- [ ] Calorie card → number-left / ring-right, macros as a 3-tile row (~60pt, and it retires the
+      "Show carbs & fat ▾" disclosure). Biggest win; the Cal AI move Logan shared.
+
+**Smaller, all confirmed by reading the code or the screenshots:**
+- [ ] Pantry tab icon is `UtensilsCrossed` (`app/(tabs)/_layout.tsx:96`) — a MEAL icon on the
+      ingredients tab. Should be a shelf/basket/box.
+- [ ] "Other" holds 12 of 56 pantry items — 21% still uncategorised after the 2026-09-03 backfill.
+      Either the scan model punts to Other freely or the canonical list has a gap.
+- [ ] Saved Meals runs 4 filters over 5 meals. Show filters past a threshold (~8) or they read as
+      scaffolding.
+- [ ] Grocery: "Just 2 items left to complete your list" at 0/2 — "left" implies progress made.
+
+**DECIDED — "Made from your pantry" is post-launch, and it is an ARCHIVE, not an expansion.**
+- [ ] Not "Cook tonight but longer". `RECENT_MEMORY = 30` is the no-repeat window, so expanding
+      Cook tonight means "3 fresh picks + 27 you already passed on", and stale rows carry unbackable
+      readiness badges. Reframed: a separate section BELOW the categories, "Made from your pantry —
+      18 dishes", different promise from both Home (tonight) and Discover (the internet's food).
+      Cheaper than the design in `docs/todos.md` because moving the entry point off Home's carousel
+      removes the terminal-card-in-an-infinite-loop problem that doc calls the real build risk.
+      Hard-gate below ~12 dishes or it looks broken in the trailer. Sharpest objection on record:
+      Saved Meals already holds the ones worth keeping, so the honest pitch is "the one you forgot
+      to save".
+
+---
+
+## 6e. Security follow-ups from the 2026-09-04 sweep
+
+The critical finding (a published, permanent premium bypass) is FIXED and verified in prod — see
+`git log` for `20260904151500` / `152600` / `153900`. Never exploited: 0 redemptions all time.
+What that sweep left open:
+
+- [ ] **No replacement promo code exists.** Creating one belongs OUTSIDE the repo — a committed
+      code is the bug that was just fixed. Insert via the Supabase SQL editor with real entropy,
+      `max_redemptions` and an `expires_at`; the columns are now there for it.
+- [ ] **`validate_referral_code_v2` is still an anon oracle** returning `grants_premium` for any
+      guess, and PostgREST calls bypass the edge functions' rate limiter entirely. It cannot simply
+      be revoked: onboarding calls it at step 16, BEFORE createaccount, and step 3325 skips the
+      paywall on the result. Entropy + a redemption cap is what makes the oracle worthless; real
+      rate-limiting needs an identity anon does not have.
+- [ ] **⚠️ The migration tree does not match production.** Prod's `insert_saved_meal` takes
+      `numeric` protein/carbs/fat and has NO `p_image_url` — an older signature than
+      `20260420112446` claims is deployed. `handle_new_user()` (the auth trigger writing a profiles
+      row on every signup) is in NO migration at all. Both found via `pg_proc`, not the repo. Worth
+      a full `pg_proc` vs migrations diff before submission.
+- [ ] **Item 10 downgraded, see below.**
+
+---
+
 ## 7. Onboarding trailer  *(after 3 — the app must be final before filming)*
 - [ ] BLOCKED ON A DECISION: is any cached meal image hero-grade enough to hold 2.4 seconds? That
       frame is a third of the film.
@@ -185,7 +277,10 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
 - [ ] `npx supabase secrets unset SCAN_CAP_WEEK` — unset is correct; scan-pantry falls back to 7.
       Held raised deliberately until app fixes and filming are done. Preflight fails until reverted.
 
-## 10. Clean git history of leaked secrets
+## 10. Clean git history of leaked secrets  *(DOWNGRADED 2026-09-04 — not a blocker)*
+The `.env` committed at `eb9a624` contained ONLY `EXPO_PUBLIC_SUPABASE_URL` and
+`EXPO_PUBLIC_SUPABASE_ANON_KEY`. Both ship inside the IPA by design and are public keys. No
+service-role, OpenAI, FAL or FatSecret secret is in history. Real hygiene, not a launch gate.
 - [ ] BFG Repo-Cleaner — anon key still in old commits.
 
 ## 11. TestFlight beta
