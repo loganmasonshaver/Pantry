@@ -21,12 +21,13 @@ Ordered by what should be done first. Later items depend on earlier ones.
       File" with nothing uploaded. Apple requires a shot of the purchase UI per auto-renewable
       subscription; this is the usual cause of a product sitting in Missing Metadata. Upload a
       screenshot of the Superwall paywall showing both prices — the same image serves both products.
-- [ ] **Subscription GROUP localization is EMPTY.** The "Pantry Premium" group's Localization
+- [x] **Subscription GROUP localization — DONE 2026-09-04** ("Pantry Premium", English (U.S.),
+      "Use App Name"). Was empty; this is a separate field from the per-subscription localization.
+- [x] ~~Subscription GROUP localization is EMPTY.~~ The "Pantry Premium" group's Localization
       section shows only a Create button. Separate field from the per-subscription localization
       that IS filled. Create English (U.S.) with display name "Pantry Premium" — this is what users
       see in iOS Settings when managing the subscription.
-- [ ] **Confirm prices.** "Current Pricing for New Subscribers" was collapsed; $9.99 / $29.99 not
-      yet visually confirmed.
+- [x] **Prices CONFIRMED 2026-09-04** — $9.99 monthly / $29.99 annual.
 - [ ] **Leave Family Sharing OFF.** Currently off on monthly. Enabling it CANNOT be undone and lets
       one purchase cover up to six people.
 - [ ] **Attach to the app version and submit TOGETHER.** App Store Connect states it twice on
