@@ -72,7 +72,12 @@ const MAX_INGREDIENT_LINE = 140
 // while catching method sentences, which are almost never shorter.
 const BULLET_QTY_REQUIRED_OVER = 60
 
-function parseIngredientBlock(desc: string): string[] {
+// `maxLine` exists ONLY so an audit can faithfully re-run the parser under a previous cap. The
+// first attempt simulated the old behaviour by stripping long lines BEFORE parsing, which is not
+// the same thing: removing lines can flip the `bulleted.length >= 3 ? bulleted : quantified`
+// branch below, so the diff mixed genuine cap-drops with branch changes. "Chicken Spread" reported
+// nine lost lines of 9-28 characters, which no length cap could ever have touched.
+function parseIngredientBlock(desc: string, maxLine: number = MAX_INGREDIENT_LINE): string[] {
   if (!desc) return []
   // Where the ingredient list begins. Non-English headings included for the same reason the junk
   // patterns carry Składniki and Zutaten: this pipeline accepts non-English sources on purpose, and
@@ -99,8 +104,8 @@ function parseIngredientBlock(desc: string): string[] {
     // compares the model's array against parsed.length, so a line the parser never saw shrinks
     // BOTH sides and the contract passes at the lower count. A parser miss cannot be caught
     // downstream — it can only be seen here.
-    if (line.length >= MAX_INGREDIENT_LINE) {
-      console.log(`[parse] ingredient line dropped, ${line.length} chars >= ${MAX_INGREDIENT_LINE}: ${line.slice(0, 120)}`)
+    if (line.length >= maxLine) {
+      console.log(`[parse] ingredient line dropped, ${line.length} chars >= ${maxLine}: ${line.slice(0, 120)}`)
       continue
     }
     const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`).test(raw)

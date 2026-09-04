@@ -361,3 +361,10 @@ test('short unquantified bulleted ingredients are still kept', () => {
     assert.ok(out.includes(want), `${want} must survive`)
   }
 })
+
+test('parseIngredientBlock maxLine reproduces an older cap faithfully', () => {
+  const long = '3 Tbsp. dark chocolate chips, melted (or 1 1/2 oz. dark chocolate bar, chopped) - optional'
+  const desc = `Ingredients:\n1 1/2 ripe, fresh avocados, pitted, and peeled\n3/4 cup non-fat vanilla Greek yogurt\n1 1/2 cups blueberries\n${long}\n\nInstructions:\nBlend.`
+  assert.equal(parseIngredientBlock(desc).length, 4, 'default cap keeps the 90-char line')
+  assert.equal(parseIngredientBlock(desc, 90).length, 3, 'cap of 90 reproduces the old drop')
+})

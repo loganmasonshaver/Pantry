@@ -27,10 +27,12 @@ const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SE
 const YT = Deno.env.get("YOUTUBE_API_KEY") ?? ""
 const OLD_CAP = 90   // the value that dropped a real 90-char line; see MAX_INGREDIENT_LINE
 
-// Re-parse under the OLD rule by removing >=90-char lines before the parser sees them — exactly
-// what the old `line.length >= 90` check did.
-const asOldCap = (desc: string) =>
-  parseIngredientBlock(desc.split("\n").filter(l => l.trim().length < OLD_CAP).join("\n"))
+// Re-parse by genuinely running the parser at the old cap, NOT by pre-stripping long lines.
+// Pre-stripping was the first attempt and it overcounted: removing lines can flip the
+// `bulleted.length >= 3 ? bulleted : quantified` branch inside the parser, so the diff mixed real
+// cap-drops with branch changes — one row reported nine "lost" lines of 9 to 28 characters, which
+// no length cap could have touched.
+const asOldCap = (desc: string) => parseIngredientBlock(desc, OLD_CAP)
 
 Deno.serve(async (req: Request) => {
   const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? ""
