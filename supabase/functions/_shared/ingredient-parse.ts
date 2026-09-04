@@ -67,6 +67,10 @@ function stripBullet(raw: string): string {
 // Longest line still treated as an ingredient. See the note at the length check below — a real
 // line was lost at exactly 90, which was the previous value.
 const MAX_INGREDIENT_LINE = 140
+// Over this length a bulleted line must lead with a quantity to count as an ingredient. 60 clears
+// every real unquantified ingredient seen in the pool ("Cilantro", "Salt to taste", "Cream cheese")
+// while catching method sentences, which are almost never shorter.
+const BULLET_QTY_REQUIRED_OVER = 60
 
 function parseIngredientBlock(desc: string): string[] {
   if (!desc) return []
@@ -100,6 +104,24 @@ function parseIngredientBlock(desc: string): string[] {
       continue
     }
     const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`).test(raw)
+    // A LONG bulleted line must still lead with a quantity. Bulleted lines were previously trusted
+    // outright, and the 90-char cap was silently doing the job of keeping prose out: when a
+    // description runs its numbered METHOD straight on from the ingredients with no "Instructions:"
+    // heading, STOP_LINE never fires and every step is read as a bulleted ingredient. Most steps
+    // are over 90 characters, so the cap excluded them by accident.
+    //
+    // Raising the cap to 140 exposed that. Measured over all 178 live rows: the raise admitted
+    // "In a pan, add oil, once it's hot, add tomatoes...", "Bake for 10 minutes, peel the crust
+    // off...", and a Turkish macro line "Toplam Tarif Değeri (2 Kişilik): 608 kcal | 40.6g
+    // Protein..." — none of them food.
+    //
+    // So the length guard is replaced by the honest rule it was standing in for. Short bulleted
+    // lines stay exempt because "Cilantro", "Salt to taste" and "Cream cheese" are real
+    // unquantified ingredients; a line this long claiming to be one should say how much.
+    if (wasBulleted && line.length >= BULLET_QTY_REQUIRED_OVER && !QTY_START.test(line)) {
+      console.log(`[parse] long bulleted line has no leading quantity, treated as prose: ${line.slice(0, 90)}`)
+      continue
+    }
     if (wasBulleted) bulleted.push(line)
     else if (QTY_START.test(line)) quantified.push(line)
   }

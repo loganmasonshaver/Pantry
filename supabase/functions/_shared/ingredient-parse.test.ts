@@ -327,3 +327,37 @@ Blend the avocado and yogurt.`)
   assert.equal(out.length, 4, `expected all four ingredients, got ${out.length}: ${out.join(' / ')}`)
   assert.ok(out.some(l => l.includes('dark chocolate chips')), 'the chocolate line must survive')
 })
+
+// Every line below is REAL, taken from the 178-row audit on 2026-09-04. Raising MAX_INGREDIENT_LINE
+// from 90 to 140 rescued genuine long ingredients but also admitted method sentences and macro
+// lines, because the old cap had been acting as an accidental prose filter. These pin both halves.
+test('long bulleted lines: quantities kept, prose rejected', () => {
+  const keep = [
+    '3 Tbsp. dark chocolate chips, melted (or 1 1/2 oz. dark chocolate bar, chopped) - optional',
+    '40g sugar (or caster sugar alternative, such as erythritol, 20g for the yolk, 20g for the whites)',
+    '8 oz (227g) cooked top sirloin steak, cut into cubes (seasoned with salt, black pepper and garlic powder)',
+    '1.5 lb 93/7 ground beef (2 tsp chili powder, 2 tsp garlic powder, 1 tsp cumin, salt/pepper to taste)',
+  ]
+  const drop = [
+    'In a pan, add oil, once it is hot, add tomatoes and cook until tomatoes get charred texture.',
+    'Pour the white chocolate-yogurt mixture over the berries. Lastly drizzle the dark chocolate on top',
+    'Toplam Tarif Değeri (2 Kişilik): 608 kcal | 40.6g Protein | 25.5g Yağ | 81.1g Karbonhidrat',
+    'Slowly sprinkle the gelatin powder over the water (spread evenly). Let it sit for 10-15 minutes',
+  ]
+  for (const line of keep) {
+    const out = parseIngredientBlock(`Ingredients:\n- 1 cup flour\n- 2 eggs\n- 100g butter\n- ${line}\n\nInstructions:\nMix.`)
+    assert.ok(out.some(l => l === line), `should KEEP a quantified line: ${line.slice(0, 50)}`)
+  }
+  for (const line of drop) {
+    const out = parseIngredientBlock(`Ingredients:\n- 1 cup flour\n- 2 eggs\n- 100g butter\n- ${line}\n\nInstructions:\nMix.`)
+    assert.ok(!out.some(l => l === line), `should DROP prose: ${line.slice(0, 50)}`)
+  }
+})
+
+test('short unquantified bulleted ingredients are still kept', () => {
+  // The reason the rule only applies over 60 chars — these are real lines creators write.
+  const out = parseIngredientBlock('Ingredients:\n- Cilantro\n- Salt to taste\n- Cream cheese\n- 1 cup flour\n\nInstructions:\nMix.')
+  for (const want of ['Cilantro', 'Salt to taste', 'Cream cheese']) {
+    assert.ok(out.includes(want), `${want} must survive`)
+  }
+})

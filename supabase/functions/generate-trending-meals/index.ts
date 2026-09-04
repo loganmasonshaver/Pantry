@@ -1540,10 +1540,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // response body reaches nobody when the caller is the cron — the table is the only place a
       // run's result survives. Wrapped so a logging failure can never fail the run itself.
       try {
-        await db.from('pipeline_runs').insert({
+        const { error: logErr } = await db.from('pipeline_runs').insert({
           dry_run: true, provider: (funnel.providerUsed as string | undefined) ?? null, stored: recipes.length, funnel,
         })
-      } catch (e) { console.log(`[funnel] pipeline_runs insert failed (ignored): ${(e as Error).message}`) }
+        if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
+      } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
       return new Response(JSON.stringify({ dryRun: true, wouldStore: recipes.length, funnel }), {
         headers: { 'Content-Type': 'application/json' },
       })
@@ -1709,10 +1710,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const { data: finalMeals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
     console.log(`Success: ${meals.length} trending meals from YouTube + Groq`)
     try {
-      await db.from('pipeline_runs').insert({
+      const { error: logErr } = await db.from('pipeline_runs').insert({
         dry_run: false, provider: (funnel.providerUsed as string | undefined) ?? null, stored: meals.length, funnel,
       })
-    } catch (e) { console.log(`[funnel] pipeline_runs insert failed (ignored): ${(e as Error).message}`) }
+      if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
+    } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
     return new Response(JSON.stringify({ generated: true, count: meals.length, funnel, meals: finalMeals ?? meals }), {
       headers: { 'Content-Type': 'application/json' },
     })

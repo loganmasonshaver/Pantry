@@ -79,8 +79,13 @@ Deno.serve(async (req: Request) => {
     rows_with_parseable_list: checked, rows_without_parseable_list: noList,
     rows_that_lost_a_line: affected.length, affected,
   }
-  await db.from("pipeline_runs").insert({
+  // Surface the insert result. The first version ignored it, and the run returned 200 with a full
+  // body while the table stayed empty — supabase-js reports a refused write as a returned error,
+  // not a thrown one, so ignoring it makes a silent failure indistinguishable from success.
+  const { error: logErr } = await db.from("pipeline_runs").insert({
     dry_run: true, provider: "audit-ingredient-lines", stored: affected.length, funnel,
   })
-  return new Response(JSON.stringify(funnel), { headers: { "Content-Type": "application/json" } })
+  if (logErr) console.log(`[audit] pipeline_runs insert FAILED: ${logErr.message}`)
+  return new Response(JSON.stringify({ ...funnel, logged: !logErr, log_error: logErr?.message ?? null }),
+    { headers: { "Content-Type": "application/json" } })
 })
