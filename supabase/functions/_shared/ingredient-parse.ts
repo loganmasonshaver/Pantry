@@ -53,7 +53,11 @@ const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
 //     inflated 3.3x, which is worse than losing it.
 //
 // Matches "1. Flour" and "2) Flour" exactly as before; those are followed by a space.
-const NUMBERED_MARKER = String.raw`\d+[.)](?=\s|$)`
+// `{1,2}` so "2.)" strips as well as "2." and "2)". A real creator numbered their method that way
+// (Hailey Bieber Style Pizza), the marker survived, and "2.)" then satisfied QTY_START on its own —
+// so two "Bake for 10 minutes..." steps passed the long-bulleted-line quantity rule as ingredients.
+// Decimals are unaffected: in "2.5 cups" the lookahead sees "5", not whitespace, so nothing strips.
+const NUMBERED_MARKER = String.raw`\d+[.)]{1,2}(?=\s|$)`
 
 function stripBullet(raw: string): string {
   return raw

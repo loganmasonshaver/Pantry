@@ -386,26 +386,35 @@ Run predates the day's deploys, so it exercises the 2026-08-30 generation change
         `computePerServingMacros` over the complete list: **158 kcal / 5p / 14c / 10f**, marked
         `macros_source = 'computed'`, 5% off Atwater. The old 180/8/15/12 were the model's
         invention (that description publishes no macros) and overstated protein by 60%.
-      - [ ] **How many other rows lost a >=90-char line? RUN `audit-ingredient-lines`.**
-        Built as an EDGE FUNCTION, not a local script, because the key cannot be had locally:
-        Supabase Edge Function secrets are WRITE-ONLY (`secrets list` returns a SHA-256 digest —
-        `YOUTUBE_API_KEY` and `GOOGLE_SEARCH_API_KEY` show the SAME digest, which is the proof), and
-        Logan confirmed the key is not in the Google Cloud account either. Running it on the
-        platform that holds the secret sidesteps the problem entirely.
-        It fetches every source description, parses each twice — once with >=90-char lines stripped
-        (old behaviour), once as it is now — and writes the diff to `pipeline_runs`
-        (`provider = 'audit-ingredient-lines'`). ~4 quota units for the whole pool, re-runnable.
-        Invoke with the Vault pattern so nothing is pasted:
+      - [x] **ANSWERED 2026-09-04: FIVE rows, and all five lost a REAL ingredient.**
+        `audit-ingredient-lines` re-fetches all 178 source descriptions and parses each twice, at
+        the old cap and the current one. Runnable from SQL with the Vault pattern — no key handling,
+        ~4 quota units, freely repeatable:
         ```sql
         select net.http_post(
           url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/audit-ingredient-lines',
           headers := jsonb_build_object('Content-Type','application/json','Authorization',
             'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name='cron_service_role_key' limit 1)),
           body := '{}'::jsonb);
-        -- then, after ~30s:
-        select funnel->'rows_that_lost_a_line', funnel->'affected'
+        select funnel->>'rows_that_lost_a_line', funnel->'affected'
         from pipeline_runs where provider='audit-ingredient-lines' order by id desc limit 1;
         ```
+        **Getting to 5 took two corrections, and the first two answers were both wrong:**
+        - **20** — the simulation stripped long lines BEFORE parsing, which flips the
+          `bulleted.length >= 3 ? bulleted : quantified` branch. Fixed with a `maxLine` parameter so
+          the parser genuinely re-runs at the old cap. The tell was in the output: one row showed
+          nine "lost" lines of 9-28 chars, which no length cap can drop.
+        - **6** — one row was method steps numbered `2.)`. `NUMBERED_MARKER` handled `2.` and `2)`
+          but not `2.)`, so the marker survived, and `"2.)"` then satisfies QTY_START on its own.
+        - **5** — all genuine, all lost to the 90-char cap:
+          `Tiramisu Protein Dessert` (40g sugar), `Pepperoni Calzones` (40g pepperoni),
+          `Street Corn Sweet Potato Bowl` (1.5 lb ground beef),
+          `Loaded Garlic Butter Steak Sweet Potato` (8 oz sirloin),
+          `Avocado Blueberry Yogurt Clusters` (already corrected).
+      - [ ] **FOUR of those rows are still wrong in prod** — each is missing an ingredient, and each
+        one is a headline protein or a main sugar, so the macros are wrong too. Fix as done for the
+        Clusters row: restore the line at the creator's own quantity, then recompute with
+        `computePerServingMacros` and mark `macros_source`.
       - [ ] **Store the source description alongside each row.** This audit needed YouTube only
         because the description is thrown away after generation. Keeping it (or its parsed list)
         would make every future fidelity question answerable from SQL, and this is the second time

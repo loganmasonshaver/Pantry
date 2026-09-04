@@ -368,3 +368,20 @@ test('parseIngredientBlock maxLine reproduces an older cap faithfully', () => {
   assert.equal(parseIngredientBlock(desc).length, 4, 'default cap keeps the 90-char line')
   assert.equal(parseIngredientBlock(desc, 90).length, 3, 'cap of 90 reproduces the old drop')
 })
+
+test('"N.)" numbered method steps are not read as ingredients', () => {
+  // Real lines from Hailey Bieber Style Pizza. The marker "2.)" was not stripped, and "2.)" itself
+  // matches QTY_START — so a method step looked like a quantified ingredient.
+  const out = parseIngredientBlock(`Ingredients:
+- 1 cup flour
+- 2 eggs
+- 100g mozzarella
+2.) Bake for 10 minutes, peel the crust off the parchment, and set it back down. Top with marinara and cheese.
+3.) Bake 10 more minutes until the cheese is bubbly and the edges are crisp. Finish with fresh basil, slice, and enjoy`)
+  assert.ok(!out.some(l => l.includes('Bake')), `method steps must not survive: ${out.join(' / ')}`)
+})
+
+test('a decimal quantity still parses after the numbered-marker change', () => {
+  const out = parseIngredientBlock('Ingredients:\n2.5 cups flour\n1 tsp salt\n100g butter\n\nInstructions:\nMix.')
+  assert.ok(out.some(l => l.startsWith('2.5 cups')), `decimals must be untouched: ${out.join(' / ')}`)
+})
