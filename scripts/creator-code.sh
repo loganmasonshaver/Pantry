@@ -4,8 +4,13 @@
 # 20260904151500/152600 exists to fix; see docs/PRELAUNCH.md 6e.
 #
 #   ./scripts/creator-code.sh comp     "Sarah Chen"       # free premium, 1 use, 180d
-#   ./scripts/creator-code.sh comp     "Creators"    25   # ONE shared code, capped at 25
+#   ./scripts/creator-code.sh comp     "Creators"    25   # shared, 25 per ROLLING 30 DAYS
 #   ./scripts/creator-code.sh audience "Sarah Chen"       # attribution only, unlimited
+#
+# A shared comp code (cap passed) gets cap_window_days = 30, so the budget REFILLS and one
+# permanent code covers creators signed next month too. Do NOT mint a new code per month:
+# 'PANTRY_CREATOR' is published in the public repo, so name+digit is a ~12 guess space that
+# validate_referral_code_v2 will confirm anonymously, and it is predictable a month ahead.
 #
 # comp     -> grants_premium=true, capped.   Send PRIVATELY. Never said on camera.
 # audience -> grants_premium=false, unlimited. Safe to say out loud in a video.
@@ -33,9 +38,12 @@ case "$KIND" in
   # the name half is public (it is in the video), the random half is the secret.
   # Default 1 use = a personal code for one creator. Pass a cap to make it a SHARED code
   # for several. Either way it is capped: an uncapped premium code is the original bug.
-  comp)     PREMIUM=true;  CAP="${CAP_ARG:-1}"; EXPIRY="now() + interval '180 days'"; SUFFIX=true ;;
+  # No cap arg = personal 1-use code, lifetime (WINDOW=NULL). A cap arg = shared code whose
+  # budget refills every 30 days, so it never needs re-minting.
+  comp)     PREMIUM=true;  CAP="${CAP_ARG:-1}"; EXPIRY="now() + interval '180 days'"; SUFFIX=true
+            if [ -n "$CAP_ARG" ]; then WINDOW=30; else WINDOW=NULL; fi ;;
   # No cap and no expiry — this one is meant to spread, it just cannot grant anything.
-  audience) PREMIUM=false; CAP=NULL; EXPIRY=NULL;                          SUFFIX=false ;;
+  audience) PREMIUM=false; CAP=NULL; EXPIRY=NULL; WINDOW=NULL;             SUFFIX=false ;;
   *) echo "first arg must be 'comp' or 'audience'"; exit 1 ;;
 esac
 
@@ -56,10 +64,10 @@ NAME_ESC=${NAME//\'/\'\'}
 TMP=$(mktemp /tmp/creator-code.XXXXXX.sql)
 trap 'rm -f "$TMP"' EXIT
 cat > "$TMP" <<SQL
-insert into referral_codes (code, creator_name, active, grants_premium, notes, max_redemptions, expires_at)
-values (${CODE_EXPR}, '${NAME_ESC}', true, ${PREMIUM}, '${KIND} code', ${CAP}, ${EXPIRY})
+insert into referral_codes (code, creator_name, active, grants_premium, notes, max_redemptions, expires_at, cap_window_days)
+values (${CODE_EXPR}, '${NAME_ESC}', true, ${PREMIUM}, '${KIND} code', ${CAP}, ${EXPIRY}, ${WINDOW})
 on conflict (code) do nothing
-returning code, grants_premium, max_redemptions, expires_at;
+returning code, grants_premium, max_redemptions, cap_window_days, expires_at;
 SQL
 
 echo "Minting ${KIND} code for ${NAME}…"
