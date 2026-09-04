@@ -411,10 +411,24 @@ Run predates the day's deploys, so it exercises the 2026-08-30 generation change
           `Street Corn Sweet Potato Bowl` (1.5 lb ground beef),
           `Loaded Garlic Butter Steak Sweet Potato` (8 oz sirloin),
           `Avocado Blueberry Yogurt Clusters` (already corrected).
-      - [ ] **FOUR of those rows are still wrong in prod** — each is missing an ingredient, and each
-        one is a headline protein or a main sugar, so the macros are wrong too. Fix as done for the
-        Clusters row: restore the line at the creator's own quantity, then recompute with
-        `computePerServingMacros` and mark `macros_source`.
+      - [x] **HANDLED 2026-09-04 — and the impact is much smaller than the audit implied.**
+        Only **2 of the 5** rows had actually lost the ingredient: `Avocado Blueberry Yogurt
+        Clusters` (chocolate) and `Tiramisu Protein Dessert` (40g sugar, added). The other three —
+        Pepperoni Calzones, Street Corn Sweet Potato Bowl, Loaded Garlic Butter Steak — **already
+        held the ingredient**.
+        **⚠️ WHY, and it changes how to read this audit: the retention checklist is GUIDANCE to the
+        model, not the source of its ingredient list.** The model reads the whole description, so a
+        line the parser drops from the checklist can still reach the output. A parser miss weakens
+        the CONTRACT (it can no longer detect a drop, since both sides shrink) without necessarily
+        causing one. `audit-ingredient-lines` measures checklist damage, not stored damage — the
+        two must not be conflated, and the first read of it here did exactly that.
+        Macros recomputed only where the arithmetic AGREED: `Loaded Garlic Butter Steak` ->
+        844 kcal / 68p / 41c / 47f, `macros_source = 'computed'`. Tiramisu abstained (an ingredient
+        the table cannot weigh) and the other two disagreed beyond the band, so all three keep the
+        model's numbers and stay marked `model` rather than being silently rewritten.
+      - [ ] **Two of them surfaced serving-count suspicion instead**, which is the more useful
+        output: `Pepperoni Calzones` servings=7 against a batch implying ~4, and `Street Corn Sweet
+        Potato Bowl` servings=4 against ~5. Part of the ~83-row servings item above.
       - [ ] **Store the source description alongside each row.** This audit needed YouTube only
         because the description is thrown away after generation. Keeping it (or its parsed list)
         would make every future fidelity question answerable from SQL, and this is the second time
