@@ -108,6 +108,10 @@ function balanceTitle(name: string, oneLineMax = HERO_ONE_LINE_MAX): string {
 
 const HERO_COMPACT_H = 172
 
+// Width of the travelling segment in the indeterminate sweep. ~38% of the track: long enough to
+// read as a bar rather than a dot, short enough that its motion is obvious across the full width.
+const SWEEP_W = (width - 40) * 0.38
+
 const DAILY_STATUS = [
   'Checking what\'s in your pantry…',
   'Matching recipes to your goals…',
@@ -586,6 +590,24 @@ export default function HomeScreen() {
     loop.start()
     return () => loop.stop()
   }, [stale, livePulse])
+
+  // Indeterminate sweep under the section header. The 6pt breathing dot was the only signal that
+  // work was happening, and at 6pt beside 12pt text it reads as punctuation, not activity — with
+  // the photo gate now able to hold yesterday's meals for up to 22s, that is a long time to look
+  // at a screen that appears finished. A bar travelling the full width is the one progress idiom
+  // nobody has to be taught. Indeterminate on purpose: generation has no measurable percentage,
+  // and a fake filling bar that stalls at 90% is worse than an honest loop.
+  const sweep = useRef(new RNAnimated.Value(0)).current
+  useEffect(() => {
+    if (!stale) return
+    // resetBeforeIteration (default) snaps back to 0 between passes, so the segment re-enters from
+    // the left rather than ping-ponging — direction stays constant, which reads as progress.
+    const loop = RNAnimated.loop(
+      RNAnimated.timing(sweep, { toValue: 1, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+    )
+    loop.start()
+    return () => loop.stop()
+  }, [stale, sweep])
 
   // 5000 -> 6250: a 25% slower dwell. 5s read as a slideshow rushing past rather than a hero
   // presenting a dish. Also drives the Ken Burns duration, so the zoom slows with it and the two
@@ -1645,6 +1667,15 @@ export default function HomeScreen() {
                   <Text style={styles.carryoverStatus} numberOfLines={1}>{DAILY_STATUS[dailyStatusIdx]}</Text>
                 </View>
               )}
+              {/* Inside the measured wrapper on purpose — heroHeaderH feeds the hero fit, so a bar
+                  added outside it would push the photo past the fold. */}
+              {stale && (
+                <View style={styles.sweepTrack}>
+                  <RNAnimated.View style={[styles.sweepFill, {
+                    transform: [{ translateX: sweep.interpolate({ inputRange: [0, 1], outputRange: [-SWEEP_W, width - 40] }) }],
+                  }]} />
+                </View>
+              )}
             </View>
 
             {mealsPending ? (
@@ -2160,8 +2191,10 @@ const styles = StyleSheet.create({
   carryoverSep: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: COLORS.textMuted, opacity: 0.5, marginHorizontal: 7 },
   // A live indicator, not a spinner — the language of a recording light. Slow enough to read as
   // breathing rather than blinking.
-  livePulse: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#4ADE80', marginRight: 6 },
-  carryoverStatus: { fontSize: 12, color: '#4ADE80', fontWeight: '600', flexShrink: 1 },
+  livePulse: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#4ADE80', marginRight: 7 },
+  sweepTrack: { height: 3, borderRadius: 2, backgroundColor: 'rgba(74,222,128,0.12)', overflow: 'hidden', marginTop: 8 },
+  sweepFill: { width: SWEEP_W, height: '100%', borderRadius: 2, backgroundColor: '#4ADE80' },
+  carryoverStatus: { fontSize: 13, color: '#4ADE80', fontWeight: '700', flexShrink: 1 },
   // Promoted from a 12px uppercase muted eyebrow. This is the app's core feature and it was
   // styled like a caption — quieter than the greeting above it and than "See all" beside it.
   // Sentence case at heading scale puts it in the same typographic system as "Good evening, Logan".

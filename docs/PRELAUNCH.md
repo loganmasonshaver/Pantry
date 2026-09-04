@@ -121,6 +121,21 @@ session that wrote it.
       backfill is already applied and verified at zero off-list rows. (`750f4d6`)
 - [ ] **Pantry "Add an item".** Header pill is now a `+` icon; a dashed "Add an item" row sits at the
       end of the category list. Testable on any reload. (`129fe3c`)
+- [ ] **⚠️ COLD-START DEFECTS — Logan could not verify these, they need a NEW DAY's first open.**
+      Both were found from the 11:21 screenshots on 2026-09-04 and both are fixed blind.
+      - [ ] **Calorie/protein goals must NOT flash the wrong numbers.** The ring used to animate to
+            a hardcoded 2,400 kcal / 180g before the profile landed, then re-animate to the real
+            2,100 / 160g. Goals now hydrate from AsyncStorage on mount. **This part is testable
+            TODAY** — force-quit and reopen: the ring should animate exactly once, to your numbers.
+      - [ ] **No shimmer between yesterday's meals and today's.** `HERO_IMAGE_WAIT_MS` was 8000,
+            calibrated against the cached-image path (~50ms); a dish nobody has generated before
+            needs a ~10s Flux render, so the gate always timed out and swapped in the shimmer
+            anyway. Raised to 22000. **Needs a day rollover.** Tell: yesterday's photo holds until
+            today's photo replaces it, with no shimmer beat between them.
+      - [ ] **The sweep bar reads as activity.** A full-width indeterminate bar now runs under the
+            "Yesterday's picks" line while meals generate — the 6pt dot alone was not noticeable.
+            Confirm it is visible without being told it is there. (`app/(tabs)/index.tsx`)
+
 - [ ] **Repeat/variety fixes need DAYS, not a reload.** The base-food ban, the deduped 30-dish
       window and the protein-family guard only prove themselves across several generations. Watch
       for: no cottage-cheese/potato run, and no two meals that are the same dish reworded.
