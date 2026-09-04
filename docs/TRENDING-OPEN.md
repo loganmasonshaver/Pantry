@@ -53,14 +53,40 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
         stays legal), and an Atwater gap over BOTH 50 kcal and 25%. Tuned against the distribution
         above, not guessed: on the live pool it rejects exactly 1 of 178, and it is the right one.
         6 unit tests use the real row values.
-      - [ ] **STILL OPEN: `Pepperoni Pizza Pasta` is live in prod right now.** The gate is
+      - [x] **`Pepperoni Pizza Pasta` CORRECTED in prod 2026-09-04** to 540 kcal / 48p / 60c / 17f
+        (Atwater 585, 8.3% off — inside the normal band). Cause was mundane: the creator published
+        only calories and protein, as fitness creators usually do, and the model wrote 0 for what it
+        did not have rather than estimating. Their 540/48 were KEPT per the fidelity rule; carbs and
+        fat were derived from their own ingredient list (120g dried pasta, 60g mozzarella, 30g
+        pepperoni, 250g chicken). **Those two numbers are an estimate, not the creator's** — they
+        belong to the "mark amounts the model invented" item below. Re-checked after: zero rows in
+        the pool now fail the new gate.
+      - [ ] ~~**`Pepperoni Pizza Pasta` is live in prod right now.**~~ The gate is
         generation-side, so it cannot retro-fix a stored row. Needs deleting or correcting —
         Logan's call, it is public content.
       - [ ] **STILL OPEN: `"glass container"` is stored as an INGREDIENT on Jello.** Equipment, not
         food. Belongs with the junk-ingredient class already logged below.
-      - [ ] **STILL OPEN, and the original second half of this item:** does the Jello macro block
-        agree with its own ingredients (120g gelatin over 4 servings)? Not measured — the pool-wide
-        coherence work took priority. And separately: should a bowl of gelatin have passed at all?
+      - [ ] **SHOULD JELLO HAVE PASSED? Answered 2026-09-04: no — but not for the reason it looks
+        like.** Logan's read was "looks nasty, weird ingredients". On appearance ALONE that does not
+        stand up: protein jello is a genuine fitness-YouTube staple, and at 20g protein per 100 kcal
+        it has the best protein-to-calorie ratio in the entire 178-row pool. Taste is not a spec.
+        What convicts it is that **the row contradicts itself**, which is testable:
+        - **The stored image shows diced fruit. The ingredient list has none** — gelatin, cold
+          water, boiling water, salt, vanilla, sweetener, drink enhancer. Either the photo depicts a
+          dish this recipe does not make, or the ingredient list dropped the creator's fruit, which
+          is a 100%-retention violation. Not yet determined which; the source video would settle it.
+        - `"glass container"` is stored as an ingredient — extraction failure on the same row.
+        - The pipeline prompt itself asks for "the most **appetizing** high-protein recipes", so
+          appetising is already in the spec rather than being an outside opinion.
+        - By mass it is 1,900ml water in a ~2,050g batch — **93% water**. A preparation, not a recipe.
+      - [ ] **DO NOT write a "no jello" rule.** Keyword rules for food quality are a MEASURED dead
+        end here twice over (see the shelving notes in CLAUDE.md). The generalisable, measurable
+        version is a real-food-mass ratio: reject when the ingredient list is overwhelmingly water
+        plus powders. Worth designing — but not worth bolting on while generation-side changes are
+        already stacked up unverified waiting on a run.
+      - [ ] **Still not measured:** whether the Jello macro block agrees with its own ingredients
+        (120g gelatin over 4 servings = 30g/serving, which is ~30g protein against a stated 20g).
+        The pool-wide coherence work took priority.
 - [ ] ~~**"Jello" — 100 kcal / 20g protein / 2g carbs / 0g fat, and it does not close.**~~ 20*4 + 2*4
       = 88 kcal against a stated 100. Separately the ingredient list says 120g unflavoured beef
       gelatin over 4 servings = 30g/serving, which is ~30g protein and ~110 kcal on its own — so
