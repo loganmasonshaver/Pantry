@@ -154,8 +154,8 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
   const remaining = goal - consumed
   const isOver = remaining < 0
   const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
-  const size = 170
-  const strokeWidth = 10
+  const size = 124
+  const strokeWidth = 9
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
 
@@ -196,8 +196,8 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
           strokeLinecap="round" />
       </Svg>
       <View style={{ position: 'absolute', alignItems: 'center' }}>
-        <Text style={{ fontSize: 38, fontWeight: '800', color: isOver ? '#EF4444' : COLORS.textWhite, letterSpacing: -1 }}>{isOver ? `-${Math.abs(remaining).toLocaleString()}` : displayRemaining.toLocaleString()}</Text>
-        <Text style={{ fontSize: 12, fontWeight: '700', color: isOver ? '#EF4444' : '#4ADE80', textTransform: 'uppercase', letterSpacing: 1.5 }}>{isOver ? 'OVER' : 'KCAL LEFT'}</Text>
+        <Text style={{ fontSize: 30, fontWeight: '800', color: isOver ? '#EF4444' : COLORS.textWhite, letterSpacing: -0.8 }}>{isOver ? `-${Math.abs(remaining).toLocaleString()}` : displayRemaining.toLocaleString()}</Text>
+        <Text style={{ fontSize: 10.5, fontWeight: '700', color: isOver ? '#EF4444' : '#4ADE80', textTransform: 'uppercase', letterSpacing: 1.2 }}>{isOver ? 'OVER' : 'KCAL LEFT'}</Text>
       </View>
     </View>
   )
@@ -781,10 +781,15 @@ export default function HomeScreen() {
   const [heroHeaderH, setHeroHeaderH] = useState(0)
   const HERO_MIN = 190
   const HERO_MAX = width - 40 // square: matches the card's width at marginHorizontal 20
+  // Reserved for the Daily Meal Log so it clears the fold. Without this the hero took the WHOLE
+  // remainder (`viewportH - cardTop - 12`), pinning its bottom edge 12pt above the tab bar no matter
+  // what sat above it — so every point trimmed upstream was handed straight back to the photo and
+  // the log stayed permanently below the fold. Three earlier trims in this file were spent that way.
+  const LOG_PEEK = 96
   const heroFit = useMemo(() => {
     if (!viewportH || !heroSectionY) return 288 // pre-measure default; replaced on first layout
     const cardTop = heroSectionY + heroHeaderH
-    return Math.max(HERO_MIN, Math.min(HERO_MAX, viewportH - cardTop - 12))
+    return Math.max(HERO_MIN, Math.min(HERO_MAX, viewportH - cardTop - 12 - LOG_PEEK))
   }, [viewportH, heroSectionY, heroHeaderH])
   // Expanding the macros accordion grows the card above, so the hero gives back the same 76pt.
   // Both of these run on the UI thread now. As RN Animated with useNativeDriver:false every frame
@@ -1339,9 +1344,9 @@ export default function HomeScreen() {
         {/* The card's own height changes with the rows, so it needs its own layout animation —
             otherwise its dark background snaps to the new size while the contents animate. */}
         <Reanimated.View layout={LinearTransition.duration(420)} style={styles.heroCard}>
-          <View style={{ alignItems: 'center', marginBottom: 8 }}>
+          <View style={{ alignItems: 'center', marginBottom: 4 }}>
             <CalorieGauge consumed={totalCal} goal={calorieGoal} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
               <Flame size={13} stroke="#4ADE80" strokeWidth={2} fill="rgba(74,222,128,0.25)" />
               <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
                 {totalCal > 0 ? `${totalCal.toLocaleString()} consumed` : 'Keep logging!'}
@@ -1996,10 +2001,10 @@ const styles = StyleSheet.create({
   scrollContent: { paddingBottom: 40 },
   // paddingBottom 12 -> 8: part of ~34pt trimmed above the meal hero so the whole card clears
   // the tab bar at rest. It used to sit ~20pt below the fold, so you had to scroll to see it.
-  header: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
-  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+  header: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 4 },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   brandText: { fontSize: 18, fontWeight: '800', color: '#4ADE80', letterSpacing: -0.3 },
-  headerGreeting: { gap: 4 },
+  headerGreeting: { gap: 2 },
   prefBanner: {
     marginHorizontal: 20,
     marginBottom: 16,
@@ -2089,8 +2094,8 @@ const styles = StyleSheet.create({
   },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.trackDark },
   avatarInitial: { fontSize: 14, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
-  hiText: { fontSize: 26, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
-  greetText: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
+  hiText: { fontSize: 22, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  greetText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
   macroCard: { marginHorizontal: 20, marginBottom: 32, borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   macroSectionLabel: { fontSize: 10, fontWeight: '700', color: '#4ADE80', textTransform: 'uppercase', letterSpacing: 2 },
   macroCalorieText: { fontSize: 32, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
@@ -2183,7 +2188,7 @@ const styles = StyleSheet.create({
   stapleActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   stapleHaveIt: { fontSize: 12, fontWeight: '600', color: '#4ADE80' },
   stapleGrocery: { fontSize: 12, fontWeight: '600', color: '#00C9A7' },
-  logSection: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 40, gap: 10 },
+  logSection: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40, gap: 10 },
   logHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   aiEstimateBtn: {
     flexDirection: 'row',
@@ -2251,8 +2256,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 20,
-    // paddingVertical 8 -> 5, marginBottom 4 -> 0: 10pt toward fitting the meal hero above the fold.
-    paddingVertical: 5,
+    // paddingVertical 8 -> 5 -> 3. See LOG_PEEK: trims up here now reach the meal log, not the photo.
+    paddingVertical: 3,
     marginHorizontal: 20,
     marginBottom: 0,
   },
@@ -2268,14 +2273,14 @@ const styles = StyleSheet.create({
     // 24 -> 14: the reclaimed 10pt is handed to heroHeight below rather than shortening the page,
     // so the meal photo gets it back. Flux renders square (1:1) and the hero box is ~1.24:1 even
     // after this, so `cover` still crops vertically — this reduces it, it doesn't remove it.
-    marginBottom: 14,
+    marginBottom: 12,
     backgroundColor: '#0F0F0F',
     borderRadius: 24,
     paddingHorizontal: 20,
     // 20 -> 16 top and bottom: 8pt more toward fitting the meal hero above the fold. The gauge
     // itself is untouched — it's the padding around it that was doing the least work.
-    paddingTop: 16,
-    paddingBottom: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
     borderWidth: 1,
     borderColor: 'rgba(74,222,128,0.08)',
     shadowColor: '#4ADE80',
