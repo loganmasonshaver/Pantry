@@ -975,7 +975,24 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // one number that is free to compute here.
     console.log(`[funnel] prompt: ${prompt.length} chars across ${uniqueVideos.length} videos`)
 
-    for (const provider of selected) {
+    // RETRY THE MODEL, NOT THE PIPELINE.
+    //
+    // Measured across two dry runs on 2026-09-04: rawCandidates 644 both times, afterDedup 455 and
+    // 448, sentToLLM 39 and 40 — every stage before the model is stable — and then the model
+    // returned 19 recipes once and 6 the next, storing 5 and 2. The variance is the model's own
+    // selectivity, nothing upstream of it.
+    //
+    // PRELAUNCH proposes running the pipeline 2-3x and keeping the best batch. That works, but it
+    // pays ~1,314 YouTube units each time for the half that does NOT vary. Re-asking the model
+    // against the SAME candidate list costs zero additional quota, which is the whole reason this
+    // sits here rather than around the outside.
+    //
+    // Appended to `selected` rather than written as a nested loop so the existing "keep the biggest
+    // sanitized pool" comparison and the `>= 12` early break govern it unchanged: a healthy first
+    // pass still breaks immediately and costs nothing, and only a thin one spends the extra calls.
+    const LLM_RETRIES = 2
+    const attempts = [...selected, ...Array.from({ length: LLM_RETRIES }, () => selected[0]).filter(Boolean)]
+    for (const provider of attempts) {
       stageLog(`LLM call start: ${provider.name}`)
       try {
         // 90s hard timeout. Without this the fetch hangs indefinitely if the provider
@@ -1287,6 +1304,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             droppedDetail,
           }
           if (!recipes || sanitized.length > recipes.length) { recipes = sanitized; funnel.providerUsed = provider.name }
+          funnel.llmAttempts = ((funnel.llmAttempts as number | undefined) ?? 0) + 1
+          funnel.llmYields = [...((funnel.llmYields as number[]) ?? []), sanitized.length]
           if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
       } catch (e) {
