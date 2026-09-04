@@ -64,6 +64,10 @@ function stripBullet(raw: string): string {
 }
 
 
+// Longest line still treated as an ingredient. See the note at the length check below — a real
+// line was lost at exactly 90, which was the previous value.
+const MAX_INGREDIENT_LINE = 140
+
 function parseIngredientBlock(desc: string): string[] {
   if (!desc) return []
   // Where the ingredient list begins. Non-English headings included for the same reason the junk
@@ -77,7 +81,24 @@ function parseIngredientBlock(desc: string): string[] {
   for (const raw of body.split('\n')) {
     const line = stripBullet(raw)
     if (STOP_LINE.test(line)) break
-    if (!line || NOISE_LINE.test(line) || line.length <= 2 || line.length >= 90) continue
+    if (!line || NOISE_LINE.test(line) || line.length <= 2) continue
+    // 90 -> 140. A real creator line was lost at EXACTLY 90 characters: "3 Tbsp. dark chocolate
+    // chips, melted (or 1 1/2 oz. dark chocolate bar, chopped) - optional" on qCMuQxUtLbs. Drop
+    // either the parenthetical or the " - optional" and it parsed; together they tipped one char
+    // over. An alternative plus a prep note plus an optional marker is an ordinary ingredient line.
+    //
+    // Raising this is low risk because length was never the real filter: unbulleted lines must
+    // still pass QTY_START, so prose without a leading quantity is already excluded, and inside an
+    // ingredients block a bulleted line is an ingredient.
+    //
+    // The LOG matters as much as the number. This drop was invisible: the retention contract
+    // compares the model's array against parsed.length, so a line the parser never saw shrinks
+    // BOTH sides and the contract passes at the lower count. A parser miss cannot be caught
+    // downstream — it can only be seen here.
+    if (line.length >= MAX_INGREDIENT_LINE) {
+      console.log(`[parse] ingredient line dropped, ${line.length} chars >= ${MAX_INGREDIENT_LINE}: ${line.slice(0, 120)}`)
+      continue
+    }
     const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`).test(raw)
     if (wasBulleted) bulleted.push(line)
     else if (QTY_START.test(line)) quantified.push(line)

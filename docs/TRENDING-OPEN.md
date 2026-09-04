@@ -345,6 +345,51 @@ ingredient checklist, for the same reason.
 
 ---
 
+
+## 2026-09-04 — audit of the 09-04 cron run (15 meals)
+
+Run predates the day's deploys, so it exercises the 2026-08-30 generation changes only.
+
+- [x] **CHECK 1 — method checklist (`ec4a1d1`): CONFIRMED, and it moved a lot.** Against the
+      128-row pre-08-30 baseline of 27% time / 14% temp / 4.2 steps / 351 chars, the 15 rows scored
+      **67% time, 33% temp, 5.1 steps, 499 chars** — time and temp both ~2.4x. The doc's own caution
+      holds: only ~43% of source descriptions publish a method at all, so 67% means the model is
+      inferring sensible detail rather than only copying. n=15, so strong signal, not settled.
+- [ ] **CHECK 2 — truncation guards (`6cb039d`): STILL UNVERIFIABLE from stored rows.** The counter
+      records candidates the pipeline REJECTED, and rejected rows never reach the table. Needs
+      `funnel.rejected.truncated`, which is why `pipeline_runs` now exists.
+- [x] **CHECK 3 — decimal parser (`561360e`): no evidence of the old bug.** Zero rows store a
+      quantity that is only a decimal's fractional part. Ingredient counts avg 8.5.
+- [x] **CHECK 4 — junk gates (`50e29c0`): CLEAN.** Zero massless or scaffolding-shaped ingredients.
+- [x] **Macro coherence (new): all 15 within 25%, and no row with 0 carbs AND 0 fat.**
+- [x] **`source_verified`: 15 of 15.**
+
+### ⚠️ The audit found a real ingredient drop — and a parser bug behind it
+
+- [x] **"Avocado Blueberry Yogurt Clusters" stored 3 ingredients; the creator listed 4.**
+      Source `qCMuQxUtLbs`. Missing:
+      `3 Tbsp. dark chocolate chips, melted (or 1 1/2 oz. dark chocolate bar, chopped) - optional`.
+      Not trivial — it is 3 tbsp of chocolate, and the creator's own steps reference it.
+      **ROOT CAUSE: `parseIngredientBlock` capped lines at `>= 90` characters and that line is
+      EXACTLY 90.** Drop either the parenthetical or the " - optional" and it parsed; together they
+      tipped it one character over. Fixed: cap raised to 140, with a regression test using the real
+      line.
+      **THE DEEPER PROBLEM, now fixed too: the drop was invisible.** The retention contract compares
+      the model's array against `parsed.length`, so a line the PARSER never saw shrinks BOTH sides
+      and the contract passes at the lower count. A parser miss cannot be caught anywhere
+      downstream. `parseIngredientBlock` now LOGS every line it discards for length.
+      Length was never the real filter anyway: unbulleted lines must still pass `QTY_START`, so
+      prose without a leading quantity is already excluded.
+      - [ ] **The stored row is still wrong** — 3 ingredients, and its macros (180/8/15/12) were
+        invented, since that description publishes none. Re-run or correct it.
+      - [ ] **How many other rows lost a >=90-char line?** Unknown and not measurable from the
+        table — the evidence only exists in the descriptions. Worth a sweep of stored counts against
+        re-parsed descriptions.
+
+- [ ] **WATCH, do not act yet: 10 of 15 rows on 09-04 were desserts** (cheesecake x3, brownie,
+      crepes, pancakes x2, dessert cups, cheesecake dip). Logan's call is that one day is not
+      evidence — revisit once several runs can be stacked. Recorded so it is not lost.
+
 # ⚠️ CONFIRM ON THE NEXT PIPELINE RUN
 
 Everything shipped on 2026-08-30 below affects GENERATION only, so none of it is proven yet — the

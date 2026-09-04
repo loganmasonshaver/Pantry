@@ -308,3 +308,22 @@ test('a macro line without a colon is still a macro line', () => {
   for (const good of ['30 g protein powder', '100 g Light Käse', '20g fat free yogurt', '15 g protein bar'])
     assert.equal(isNonIngredientLine(good), false, `"${good}" should be kept`)
 })
+
+// Regression: a real creator line lost at EXACTLY 90 characters (qCMuQxUtLbs, "Avocado Blueberry
+// Yogurt Clusters"). The stored row carried 3 ingredients against the creator's 4, and the
+// retention contract could not catch it — it compares the model's array against parsed.length, so
+// a line the parser never saw shrinks both sides and the check passes at the lower count.
+test('parseIngredientBlock keeps a 90-char line with an alternative and an optional marker', () => {
+  const line = '3 Tbsp. dark chocolate chips, melted (or 1 1/2 oz. dark chocolate bar, chopped) - optional'
+  assert.equal(line.length, 90, 'the regression depends on this being exactly 90 chars')
+  const out = parseIngredientBlock(`Ingredients:
+1 1/2 ripe, fresh avocados, pitted, and peeled
+3/4 cup non-fat vanilla Greek yogurt
+1 1/2 cups blueberries
+${line}
+
+Instructions:
+Blend the avocado and yogurt.`)
+  assert.equal(out.length, 4, `expected all four ingredients, got ${out.length}: ${out.join(' / ')}`)
+  assert.ok(out.some(l => l.includes('dark chocolate chips')), 'the chocolate line must survive')
+})
