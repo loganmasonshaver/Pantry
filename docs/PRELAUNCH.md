@@ -112,10 +112,49 @@ session that wrote it.
 - [ ] **"Almost in your kitchen" does not lead the page every day**, and its internal order differs
       from the previous day. (`37b9ba1`)
 
+- [ ] **Photo-gated meal swap.** When a generation lands while meals are on screen, the old meals
+      hold until the NEW hero's photo is ready, then cross-fade in (300ms). The tell is the ABSENCE
+      of a shimmer beat between old and new. Testable same-day with the refresh button — it does not
+      need a day rollover. (`08771ab`)
+- [ ] **Category icons and colours.** Every pantry category should now have a real icon, not a grey
+      box, and the three overlapping condiment rows should be one. Testable on any reload; the
+      backfill is already applied and verified at zero off-list rows. (`750f4d6`)
+- [ ] **Pantry "Add an item".** Header pill is now a `+` icon; a dashed "Add an item" row sits at the
+      end of the category list. Testable on any reload. (`129fe3c`)
+- [ ] **Repeat/variety fixes need DAYS, not a reload.** The base-food ban, the deduped 30-dish
+      window and the protein-family guard only prove themselves across several generations. Watch
+      for: no cottage-cheese/potato run, and no two meals that are the same dish reworded.
+      (`8de4e00`, `ef1c4b4`, `a38a9b9`)
+
 **How to test without waiting:** these all read the DEVICE clock (`dayOfYearNow`, `todayStr`), not
 the database — no SQL can simulate a new day. Either wait for tomorrow, or set the iPhone forward a
 day (Settings > General > Date & Time > off "Set Automatically"). Expect a Supabase token refresh
 when the clock jumps; there is a `refreshSession` path for it, worst case sign in again.
+
+---
+
+## 6c. Home + Pantry layout — OPEN DESIGN QUESTION, needs a decision before the trailer
+
+Not a bug list. The layout of these two tabs is unresolved and item 7 films them.
+
+- [ ] **Decide how Home presents the three meals.** Today it is a hero carousel auto-rotating every
+      6250ms, so meals arrive one at a time even on an idle device. Logan's objection: the old
+      Pantry "Cook Tonight" list showed all three AT ONCE and was better for choosing. The code
+      admits the tradeoff at `app/(tabs)/index.tsx:519` — "so all 3 are surfaced over time". The
+      rotation is compensation for a layout with room for one meal, and ~44 references of
+      loop/recentring machinery exist to serve it.
+- [ ] **Constraint that killed the obvious fix:** Discover already opens on a big photo hero. Give
+      Home one too and both tabs lead with the same visual move, so neither has an identity. Any
+      proposal has to say what makes Home look different from Discover.
+- [ ] **Decide whether the Pantry tab shows meals at all.** It currently does (Cook Tonight,
+      restored). Measured cost: ~700pt of an 852pt screen before a single ingredient is visible, on
+      the tab called "My Pantry".
+- [ ] **Scan-card placement.** Probably state-gated rather than fixed — an empty pantry has nothing
+      else to show and scan IS the content; a stocked one should not be pitched a feature it has
+      already adopted. Logan pushed back on demoting scan and that pushback is recorded.
+- [ ] **Scan Pantry card illustration** — the line drawing does not read as a shelf with food on it.
+      Same root problem as the category icons: line art asked to carry meaning at a size where it
+      reads as abstract shapes.
 
 ---
 
