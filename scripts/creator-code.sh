@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# Mint a referral code. Values are generated here and land ONLY in the database —
-# never commit a code. A committed premium code is exactly the bug that
+# Mint a referral code. Values are generated here and land ONLY in the database.
+#
+# 🚫 A CODE VALUE NEVER ENTERS THIS REPO. Not a migration, not a doc, not a comment. The repo is
+# PUBLIC and this has happened twice: PANTRY_CREATOR in a 2026-05 seed, then CREATORS-D9929 which
+# was hand-written into 20260904171500 about an hour after the first was removed. Both had to be
+# ROTATED, not edited out, because git history keeps the value. If you need to reference the live
+# code in SQL, match on a property (grants_premium, cap_window_days, creator_name) instead. A committed premium code is exactly the bug that
 # 20260904151500/152600 exists to fix; see docs/PRELAUNCH.md 6e.
 #
 #   ./scripts/creator-code.sh comp     "Sarah Chen"       # free premium, 1 use, 180d

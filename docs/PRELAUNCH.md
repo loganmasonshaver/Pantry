@@ -248,9 +248,14 @@ The critical finding (a published, permanent premium bypass) is FIXED and verifi
 `git log` for `20260904151500` / `152600` / `153900`. Never exploited: 0 redemptions all time.
 What that sweep left open:
 
-- [ ] **No replacement promo code exists.** Creating one belongs OUTSIDE the repo — a committed
-      code is the bug that was just fixed. Insert via the Supabase SQL editor with real entropy,
-      `max_redemptions` and an `expires_at`; the columns are now there for it.
+- [x] **Replacement comp code minted 2026-09-04** via `scripts/creator-code.sh` — shared, 25 per
+      rolling 30 days, expiring. Value lives in the DATABASE and in Claude's local memory only.
+- [ ] **🚫 STANDING RULE — a code value never enters this repo.** It has leaked TWICE now:
+      `PANTRY_CREATOR` in the 2026-05 seed, and `CREATORS-D9929`, hand-written into
+      `20260904171500` about an hour after the first was removed. Both were rotated rather than
+      edited out, because the repo is public and git history keeps the value. To touch the live
+      code from SQL, match on a property (`grants_premium`, `cap_window_days`, `creator_name`),
+      never on the literal. `scripts/creator-code.sh` is the only sanctioned way to create one.
 - [ ] **`validate_referral_code_v2` is still an anon oracle** returning `grants_premium` for any
       guess, and PostgREST calls bypass the edge functions' rate limiter entirely. It cannot simply
       be revoked: onboarding calls it at step 16, BEFORE createaccount, and step 3325 skips the

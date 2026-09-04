@@ -102,5 +102,9 @@ end;
 $$;
 grant execute on function redeem_referral_code(text) to authenticated;
 
--- Put the existing shared creator code on a 25-per-30-days budget.
-update referral_codes set cap_window_days = 30 where code = 'CREATORS-D9929';
+-- The shared creator code was put on a 25-per-30-days budget here, BY LITERAL VALUE, and this
+-- file is in a public repo. That republished a working premium code — the exact defect this
+-- day's migrations exist to remove. The code was rotated in 20260904183000; the value is gone
+-- from the working tree but remains in git history, which is why rotation was the fix rather
+-- than an edit. Replacements are minted with scripts/creator-code.sh and live only in the
+-- database. NEVER write a code value into this repo.
