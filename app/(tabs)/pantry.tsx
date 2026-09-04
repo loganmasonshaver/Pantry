@@ -621,9 +621,9 @@ export default function PantryScreen() {
       <View style={styles.header}>
         <PantryGroceryTabs active="pantry" />
         {/* Was a solid white "Manual Entry" pill — the loudest control on the screen while not
-            being its primary action, out-shouting Scan Pantry below it. And "Manual Entry" is our
-            word: the user's intent is "add something". Demoted to an icon; the readable entry point
-            now sits at the END OF THE LIST, where the hand already is when you notice a gap. */}
+            being its primary action, and "Manual Entry" is our word, not the user's. Demoted to an
+            icon; the readable entry point is the "Add an item" row at the END OF THE LIST, where
+            the hand already is when you notice a gap. */}
         <TouchableOpacity
           style={styles.addIconBtn}
           onPress={() => setShowAddModal(true)}
@@ -827,24 +827,146 @@ export default function PantryScreen() {
                 </TouchableOpacity>
               </View>
 
-              {/* Cook Tonight lived here — ~137 lines and roughly 300pt of the tab, rendering the
-                  SAME three meals Home already shows as its primary content. Two tabs competing to
-                  be the meal surface, and the duplicate sat between "how to add food" and "your
-                  food", which is why no ingredient was visible without scrolling most of a screen.
-                  Replaced by a link. The full section is in git if it is ever wanted back. */}
-              {hasPantryItems && meals.length > 0 && (
-                <TouchableOpacity
-                  style={styles.cookLinkRow}
-                  onPress={() => router.navigate({ pathname: '/(tabs)' })}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.cookLinkText}>
-                    {readySummary && readySummary.ready > 0
-                      ? `${readySummary.ready} meal${readySummary.ready === 1 ? '' : 's'} ready from this pantry`
-                      : `${meals.length} meal${meals.length === 1 ? '' : 's'} from this pantry`}
-                  </Text>
-                  <Text style={styles.cookLinkArrow}>→</Text>
-                </TouchableOpacity>
+              {/* ── Cook Tonight — utility-framed action list (NOT the cinematic browse
+                  experience that lives in the Discover tab). Compact rows surface
+                  what's missing per meal so the section is unmistakably pantry-anchored. ── */}
+              {hasPantryItems && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={styles.cookTonightHeader}>
+                    <View>
+                      <View style={styles.cookTonightTitleRow}>
+                        <Text style={styles.cookTonightTitle}>Cook tonight</Text>
+                        {/* "Fresh today" — these are today's picks, not yesterday's. Pops in on the
+                            first view of a new day (freshState 'new'); static once seen today. */}
+                        {freshState && (
+                          <Reanimated.View entering={freshState === 'new' ? FadeIn.duration(500) : undefined} style={styles.freshPill}>
+                            <View style={styles.freshDot} />
+                            <Text style={styles.freshPillText}>Fresh today</Text>
+                          </Reanimated.View>
+                        )}
+                      </View>
+                      <Text style={styles.cookTonightSub}>
+                        {/* Personalized ready-count — rewards a stocked pantry ("cook these NOW, no
+                            shopping"). Excitement is carried by the GREEN accent on the ready count,
+                            not an emoji. Falls back to the neutral line while regen is offered or if
+                            nothing is fully ready. */}
+                        {canRegenerate ? 'From what you have'
+                          : readySummary && readySummary.ready > 0
+                            ? (readySummary.ready === readySummary.total
+                                ? <Text style={styles.cookTonightReadyAccent}>All {readySummary.total} ready to cook now</Text>
+                                : <><Text style={styles.cookTonightReadyAccent}>{readySummary.ready} ready now</Text>{` · ${readySummary.total - readySummary.ready} to shop for`}</>)
+                            : 'Refreshed today · New tomorrow'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={regenerate}
+                      hitSlop={10}
+                      activeOpacity={0.7}
+                      disabled={!canRegenerate}
+                      style={[styles.cookTonightRegen, !canRegenerate && { opacity: 0.35 }]}
+                    >
+                      <RefreshCw size={14} stroke={canRegenerate ? '#4ADE80' : '#888'} strokeWidth={2.2} />
+                    </TouchableOpacity>
+                  </View>
+
+                  {mealsLoading ? (
+                    <View style={styles.cookTonightLoading}>
+                      <ActivityIndicator color="#4ADE80" />
+                      <Text style={styles.cookTonightLoadingText}>Finding meals from your pantry…</Text>
+                    </View>
+                  ) : mealsError ? (
+                    <View style={styles.cookTonightLoading}>
+                      {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
+                      <Text style={styles.cookTonightErrorText}>{mealsError}</Text>
+                      {/* Retry is pointless once the daily cap is hit — hide it in that case. */}
+                      {mealsErrorCode !== 'meal_cap_reached' && (
+                        <TouchableOpacity onPress={retry} activeOpacity={0.7}>
+                          <Text style={styles.cookTonightRetryText}>Try again →</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  ) : meals.length > 0 ? (
+                    <Reanimated.View entering={FadeIn.duration(300)} style={{ gap: 10 }}>
+                      {/* Ready-to-cook meals first (fewest missing items) so the list leads with what
+                          the user can make right now — matches the "N ready now" subtitle top-down. */}
+                      {[...meals].sort((a, b) =>
+                        (missingFor(a.ingredients).length - missingFor(b.ingredients).length) ||
+                        (slotScore(a) - slotScore(b)) // ready-to-cook still wins; time-of-day breaks the tie
+                      ).slice(0, 3).map((meal, idx) => {
+                        // Compute against the LIVE pantry (the same check the meal-detail screen uses)
+                        // so the card and the detail always agree. The old code trusted the server's
+                        // self-reported missing_ingredients, but GPT returns [] even when the pantry is
+                        // near-empty → a false "Got everything" on the card while the detail correctly
+                        // showed every ingredient missing. `missingFor` skips staples + does two-way
+                        // substring, so a genuinely stocked pantry still reads "Got everything".
+                        const missing = missingFor(meal.ingredients)
+                        return (
+                          <TouchableOpacity
+                            key={`${meal.id}-${idx}`}
+                            style={styles.cookTonightRow}
+                            activeOpacity={0.7}
+                            onPress={() => {
+                              // Opening a Cook Tonight pick IS the feature being used. This counter
+                              // and its Loops event were never fired, so cook_tonight_used_count was
+                              // 0 for every user despite 12 meal logs in the table.
+                              if (user) trackCookTonightUsed(user.id)
+                              router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
+                            }}
+                          >
+                            {meal.image && meal.image.startsWith('http') ? (
+                              <Image source={{ uri: meal.image }} style={styles.cookTonightThumb} resizeMode="cover" />
+                            ) : (
+                              <Shimmer style={styles.cookTonightThumb} />
+                            )}
+                            <View style={{ flex: 1, gap: 4 }}>
+                              <Text style={styles.cookTonightName} numberOfLines={2}>{meal.name}</Text>
+                              <Text style={styles.cookTonightMeta} numberOfLines={1}>
+                                {meal.prepTime > 0 ? `${meal.prepTime} min` : null}
+                                {meal.prepTime > 0 ? '  ·  ' : ''}
+                                {meal.calories} cal
+                                {/* Protein — the app's north-star macro — gets a green weight so every
+                                    meal ties visibly to the user's protein goal. */}
+                                {meal.protein > 0 ? '  ·  ' : ''}
+                                {meal.protein > 0 ? <Text style={styles.cookTonightProtein}>{meal.protein}g protein</Text> : null}
+                              </Text>
+                              {missing.length === 0 ? (
+                                // "Ready to cook" reward pill — an earned, tappable-looking badge (vs
+                                // plain text) that makes the zero-shopping moment feel like a win.
+                                <View style={styles.cookTonightReadyPill}>
+                                  <Check size={10} stroke="#4ADE80" strokeWidth={3} />
+                                  <Text style={styles.cookTonightHaveText}>Ready to cook</Text>
+                                </View>
+                              ) : (
+                                // Anything still listed here is now an OPTIONAL finishing item — the
+                                // generator can't leave out a defining ingredient (protein, main carb,
+                                // the cheese in a cheesy dish). So this reads as an upgrade, not a
+                                // blocker: "Need:" made a cookable meal look impossible.
+                                <Text style={styles.cookTonightNeedText} numberOfLines={1}>
+                                  Better with: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}
+                                </Text>
+                              )}
+                            </View>
+                          </TouchableOpacity>
+                        )
+                      })}
+                    </Reanimated.View>
+                  ) : null}
+                  {/* Meals came back, but from a thin pantry — say what would unlock better ones
+                      instead of letting quality degrade silently. */}
+                  {!mealsLoading && !mealsError && meals.length > 0 && pantryIsThin && (
+                    <Text style={styles.cookTonightThinHint}>
+                      {hasInStockProtein
+                        ? 'Scan your freezer or pantry — more ingredients means better meals.'
+                        : 'Add a protein and we can suggest a lot more.'}
+                    </Text>
+                  )}
+                  {!mealsLoading && !mealsError && meals.length === 0 && (
+                    // Zero meals came back (pantry too sparse) — nudge instead of rendering nothing.
+                    <View style={styles.cookTonightLoading}>
+                      <Text style={styles.cookTonightLoadingText}>Scan a few more items and we'll suggest meals you can make right now.</Text>
+                    </View>
+                  )}
+                </View>
               )}
 
               {/* Search bar */}
@@ -870,9 +992,6 @@ export default function PantryScreen() {
           ListFooterComponent={
             totalItems > 0 ? (
               <View style={styles.footerWrap}>
-                {/* The second entry point, and the one that will get used. Someone scanning their
-                    own list and noticing a gap is already looking HERE, two screens from the icon
-                    in the header. */}
                 <TouchableOpacity style={styles.addItemRow} onPress={() => setShowAddModal(true)} activeOpacity={0.7}>
                   <Plus size={16} stroke={'#4ADE80'} strokeWidth={2.5} />
                   <Text style={styles.addItemRowText}>Add an item</Text>
@@ -998,13 +1117,6 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
   },
-  cookLinkRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 14, paddingHorizontal: 16, marginBottom: 20,
-    borderRadius: 14, backgroundColor: COLORS.cardElevated,
-  },
-  cookLinkText: { fontSize: 14, fontWeight: '600', color: COLORS.textWhite },
-  cookLinkArrow: { fontSize: 15, fontWeight: '700', color: '#4ADE80' },
   addIconBtn: {
     width: 38, height: 38, borderRadius: 19,
     alignItems: 'center', justifyContent: 'center',
@@ -1016,6 +1128,20 @@ const styles = StyleSheet.create({
     borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: COLORS.trackDark,
   },
   addItemRowText: { fontSize: 14, fontWeight: '600', color: '#4ADE80' },
+  manualEntryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: COLORS.textWhite,
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  manualEntryText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000000',
+  },
 
   heroBanner: {
     marginHorizontal: 20,
@@ -1444,11 +1570,110 @@ const styles = StyleSheet.create({
   // Cook Tonight — compact action-row list (Phase 2b). Visually distinct from the
   // Discover tab's cinematic browse so users feel the difference between "what to
   // make right now" and "what to explore."
+  cookTonightHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  cookTonightTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  cookTonightTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.textWhite,
+    letterSpacing: -0.3,
+  },
   // "Fresh today" pill — quiet green marker that these are the day's new picks.
   freshPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(74,222,128,0.14)', borderRadius: 30, paddingVertical: 3, paddingHorizontal: 8 },
   freshDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#4ADE80' },
   freshPillText: { fontSize: 10.5, fontWeight: '700', color: '#4ADE80', letterSpacing: 0.3 },
+  cookTonightSub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  cookTonightRegen: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.2)',
+  },
+  cookTonightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#141414',
+    borderRadius: 14,
+    padding: 12, // slightly roomier now that we reclaimed vertical space above
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.04)',
+  },
+  cookTonightThumb: {
+    width: 84, // bigger, photo-forward (was 64) — food shots drive appetite/excitement
+    height: 84,
+    borderRadius: 12,
+  },
+  cookTonightThumbPlaceholder: {
+    backgroundColor: '#2A2A2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cookTonightName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textWhite,
+    letterSpacing: -0.1,
+    lineHeight: 19, // 2-line names wrap cleanly instead of truncating mid-word
+  },
   // Green accent on the ready-count in the Cook Tonight subtitle — carries excitement via color.
+  cookTonightReadyAccent: {
+    color: '#4ADE80',
+    fontWeight: '700',
+  },
+  cookTonightMeta: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    fontWeight: '500',
+  },
   // Green weight on the protein number — reinforces the app's core metric on every meal row.
+  cookTonightProtein: {
+    color: '#4ADE80',
+    fontWeight: '700',
+  },
   // "Ready to cook" reward pill: subtle green fill + self-start so it hugs its text.
+  cookTonightReadyPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderRadius: 30,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    marginTop: 1,
+  },
+  cookTonightHaveText: {
+    fontSize: 11,
+    color: '#4ADE80',
+    fontWeight: '700',
+  },
+  cookTonightNeedText: {
+    fontSize: 11,
+    color: '#F59E0B',
+    fontWeight: '600',
+  },
+  cookTonightLoading: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    gap: 10,
+  },
+  cookTonightThinHint: { fontSize: 12, color: '#888888', textAlign: 'center', paddingHorizontal: 20, paddingTop: 12, lineHeight: 17 },
+  cookTonightLoadingText: { fontSize: 13, color: COLORS.textMuted },
+  cookTonightErrorText: { fontSize: 13, color: '#EF4444' },
+  cookTonightRetryText: { fontSize: 13, color: '#4ADE80', fontWeight: '700' },
 })

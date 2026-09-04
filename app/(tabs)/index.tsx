@@ -541,7 +541,7 @@ export default function HomeScreen() {
   // gate, sharing the 'cookNow' cache — so anyone who opened Pantry first (which is where you add
   // ingredients) got auto-generation anyway. The behaviour depended on which tab you happened to
   // open first, which is an accident, not a decision.
-  const { meals, loading, stale, cacheChecked, retry, regenerate, canRegenerate } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  const { meals, loading, stale, cacheChecked, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
   // The section used to render NOTHING — not even its heading — until Home's own pantry query
   // came back, because the block below was gated on `pantryFetched`. That is the 2-3s of blank
   // space before the shimmer: the hook cannot report `loading` yet, since it is not enabled until
@@ -1581,24 +1581,7 @@ export default function HomeScreen() {
               style={{ marginHorizontal: 20, marginBottom: 12 }}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={[styles.sectionTitle, { flex: 1 }]}>Cook from your pantry</Text>
-                {/* The daily manual regen. It lived in Cook Tonight's header on the Pantry tab and
-                    was deleted with that section — Home imported RefreshCw but never used it, so
-                    for one commit the app had NO way to ask for a different selection. It belongs
-                    here now: this is where the meals are. Capped by MAX_DAILY_REGENS, dimmed rather
-                    than hidden once spent so the affordance stays legible. */}
-                {meals.length > 0 && (
-                  <TouchableOpacity
-                    onPress={regenerate}
-                    disabled={!canRegenerate || loading}
-                    hitSlop={10}
-                    activeOpacity={0.7}
-                    accessibilityLabel="Suggest a different set of meals"
-                    style={[styles.heroRegenBtn, (!canRegenerate || loading) && { opacity: 0.35 }]}
-                  >
-                    <RefreshCw size={15} stroke={canRegenerate ? '#4ADE80' : COLORS.textMuted} strokeWidth={2.2} />
-                  </TouchableOpacity>
-                )}
+                <Text style={styles.sectionTitle}>Cook from your pantry</Text>
                 {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
                     navigator on top of itself and renders a black screen. navigate switches tabs. */}
                 <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
@@ -2131,10 +2114,6 @@ const styles = StyleSheet.create({
   // Horizontal margin now comes from the shared header wrapper. The old style set none while the
   // header row set 20, which is why "Yesterday's picks" hugged the screen edge out of line with
   // the title directly above it.
-  heroRegenBtn: {
-    width: 32, height: 32, borderRadius: 16, marginRight: 12,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: COLORS.cardElevated,
-  },
   carryoverRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   carryoverNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
   carryoverSep: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: COLORS.textMuted, opacity: 0.5, marginHorizontal: 7 },
