@@ -1,7 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isNonIngredientLine, realIngredients, countedIngredients, massBearingIngredients, sectionHeadingIngredient, nameIngredientGaps,
-         looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from './recipe-integrity.ts'
+import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameIngredientGaps, realIngredients, recoverMergedIngredients, sectionHeadingIngredient } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
@@ -423,4 +422,44 @@ test('a section heading stored as an ingredient is rejected', () => {
 
   assert.equal(sectionHeadingIngredient([]), null)
   assert.equal(sectionHeadingIngredient(undefined), null)
+})
+
+// Real case from the 2026-09-04 dry runs: Apple Pie Cottage Cheese Cake. The creator lists sugar
+// three times at different amounts; the model returned one "sugar" entry, so retention saw 13
+// against 15 and rejected the recipe. Three prompt attempts failed to stop the merge.
+test('recoverMergedIngredients restores a food the model consolidated', () => {
+  const src = [
+    '3 eggs', '1/2 cup (100 g) sugar', '2 cups (300 g) all-purpose flour',
+    '2 tbsp sugar', '1 tsp vanilla extract', '1 tbsp sugar',
+  ]
+  const model = [
+    { name: 'eggs', grams: '150g' },
+    { name: 'sugar', grams: '100g' },
+    { name: 'all-purpose flour', grams: '300g' },
+    { name: 'vanilla extract', grams: '5g' },
+  ]
+  const { ingredients, recovered } = recoverMergedIngredients(model, src)
+  assert.equal(recovered.length, 2, `expected the two surplus sugar lines, got ${JSON.stringify(recovered)}`)
+  assert.equal(ingredients.filter(i => i.name === 'sugar').length, 3, 'three sugar entries after recovery')
+  // Quantities come from the creator's own lines, never invented.
+  const qtys = ingredients.filter(i => i.name === 'sugar').map(i => i.grams)
+  assert.ok(qtys.includes('2 tbsp') && qtys.includes('1 tbsp'), `creator quantities kept: ${qtys.join(', ')}`)
+})
+
+test('recoverMergedIngredients does NOT invent a food the model omitted entirely', () => {
+  // The case retention exists to catch. A source line for a food with no entry at all is a genuine
+  // drop and must still fail — recovering it would defeat the contract.
+  const src = ['2 eggs', '100g butter', '200g chocolate']
+  const model = [{ name: 'eggs', grams: '100g' }, { name: 'butter', grams: '100g' }]
+  const { ingredients, recovered } = recoverMergedIngredients(model, src)
+  assert.equal(recovered.length, 0, 'nothing recovered')
+  assert.equal(ingredients.length, 2, 'chocolate must NOT be invented')
+})
+
+test('recoverMergedIngredients is a no-op when the model already matched the source', () => {
+  const src = ['2 eggs', '100g butter']
+  const model = [{ name: 'eggs', grams: '100g' }, { name: 'butter', grams: '100g' }]
+  const { ingredients, recovered } = recoverMergedIngredients(model, src)
+  assert.equal(recovered.length, 0)
+  assert.equal(ingredients.length, 2)
 })

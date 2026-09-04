@@ -479,3 +479,79 @@ export function isNonEnglishSource(lang: string | null | undefined): boolean {
   if (!l) return false            // most videos omit it — absence is not evidence
   return !l.startsWith('en')      // en, en-US, en-GB all pass
 }
+
+// ── Recovering ingredients the model consolidated ────────────────────────────────────────────
+// The single largest cause of retention rejections. Measured over two dry runs on 2026-09-04:
+// 7 of 19 and 4 of 6 candidates died on the retention contract, and most were this — a creator
+// listing the same food more than once at DIFFERENT amounts, which the model merges into one
+// entry. Apple Pie Cottage Cheese Cake lists "1/2 cup (100 g) sugar", "2 tbsp sugar" and
+// "1 tbsp sugar"; Cottage Cheese Flatbread lists olive oil and garlic twice each.
+//
+// PROMPTING DOES NOT FIX IT — three attempts, all failed and all logged in docs/TRENDING-OPEN.md.
+// The prompt already forbids merging in strong terms, the "[appears Nx]" marker cannot see it
+// (it keys on the exact line, and these lines differ), and an explicit "these repeats are
+// deliberate" annotation was verified to reach the model and changed nothing.
+//
+// So recover mechanically instead. This INVENTS NOTHING: every recovered entry carries the
+// creator's own line and the creator's own quantity. It only ever fires when the same food is
+// already present in the model's output, so it cannot introduce an ingredient the model rejected
+// for a reason of its own.
+
+/** Normalised food identity: drop the leading quantity/unit, parentheticals and punctuation. */
+function foodIdentity(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/^[\d\s./-]*(?:g|kg|ml|l|oz|lb|lbs|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|cloves?|pinch(?:es)?|slices?|cans?|blatt|prise)?\b/, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z\s]/g, ' ')
+    .split(/\s+/).filter(w => w.length > 2).sort().join(' ')
+}
+
+/** The quantity a source line opens with — "2 tbsp sugar" -> "2 tbsp". Empty when it has none. */
+function leadingQuantity(line: string): string {
+  const m = line.match(/^\s*([\d\s./-]+\s*(?:g|kg|ml|l|oz|lb|lbs|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|cloves?|slices?|cans?|blatt)?)/i)
+  return (m?.[1] ?? '').trim()
+}
+
+/**
+ * Append entries for source lines the model folded into an existing entry.
+ *
+ * Only recovers a line whose food ALREADY appears in the model's output — a line for a food the
+ * model omitted entirely is a genuine drop and must still fail retention, because that is the
+ * case the contract exists to catch. Returns the ingredients unchanged when there is nothing to do.
+ */
+export function recoverMergedIngredients<T extends { name?: string; grams?: string; visual?: string; section?: string | null }>(
+  ingredients: T[] | undefined,
+  sourceLines: string[],
+): { ingredients: T[]; recovered: string[] } {
+  const list = [...(ingredients ?? [])]
+  if (!list.length || !sourceLines?.length) return { ingredients: list, recovered: [] }
+
+  // How many source lines name each food, versus how many entries the model produced for it.
+  const srcByFood = new Map<string, string[]>()
+  for (const line of sourceLines) {
+    const k = foodIdentity(line)
+    if (!k) continue
+    ;(srcByFood.get(k) ?? srcByFood.set(k, []).get(k)!).push(line)
+  }
+  const haveByFood = new Map<string, number>()
+  for (const i of list) {
+    const k = foodIdentity(String(i?.name ?? ''))
+    if (k) haveByFood.set(k, (haveByFood.get(k) ?? 0) + 1)
+  }
+
+  const recovered: string[] = []
+  for (const [food, lines] of srcByFood) {
+    const have = haveByFood.get(food) ?? 0
+    if (have === 0 || lines.length <= have) continue   // absent = a real drop; matched = nothing to do
+    const template = list.find(i => foodIdentity(String(i?.name ?? '')) === food)
+    // Recover the SURPLUS lines only. The model's own entry stands for the first occurrence, so
+    // take the last (lines.length - have) — the ones with no entry of their own.
+    for (const line of lines.slice(have)) {
+      const qty = leadingQuantity(line)
+      list.push({ ...(template as T), grams: qty || (template as any)?.grams, visual: qty || undefined })
+      recovered.push(line)
+    }
+  }
+  return { ingredients: list, recovered }
+}

@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
-import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible } from '../_shared/recipe-integrity.ts'
+import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
@@ -1068,7 +1068,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0
           const droppedDetail: any[] = []
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
@@ -1138,6 +1138,18 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // ("Składniki") or macro lines ("Kalorien: 504 kcal") as ingredients, and seven listed
             // the same item twice. A model that echoes the raw description block should not clear
             // a retention check by echoing more of it.
+            // Recover entries the model consolidated BEFORE counting. The creator listing one
+            // food at two or three different amounts is the largest single cause of retention
+            // rejections, and three prompt-shaped attempts have failed to stop it (see
+            // docs/TRENDING-OPEN.md). This invents nothing — every recovered entry carries the
+            // creator's own line and quantity, and it only fires when the food is ALREADY in the
+            // model's output, so a genuinely omitted ingredient still fails the check below.
+            const rec = recoverMergedIngredients(r.ingredients, srcList)
+            if (rec.recovered.length) {
+              r.ingredients = rec.ingredients
+              rejRecovered += rec.recovered.length
+              console.log(`[funnel] recovered ${rec.recovered.length} merged ingredient(s) on "${name}": ${rec.recovered.join(' | ')}`)
+            }
             const counted = countedIngredients(r.ingredients)
             const got = counted.length
             // Split from `dropped`, which conflated two unrelated failures. Every candidate cleared
@@ -1266,10 +1278,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName}, macroIncoherent ${rejMacroIncoherent})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName}, macroIncoherent ${rejMacroIncoherent}, ingredientsRecovered ${rejRecovered})`)
           funnel[`llm_${provider.name}`] = {
             raw: parsed.length, sanitized: sanitized.length,
-            rejected: { noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, dupName: rejDupName, nearDup: rejNearDup,
+            rejected: { noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup,
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
               nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName },
             droppedDetail,
