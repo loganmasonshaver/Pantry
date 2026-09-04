@@ -311,6 +311,20 @@ What that sweep left open:
 - [ ] Shot list: https://claude.ai/code/artifact/766f88c0-a922-463a-ad84-09059a351b14
 
 ## 8. App Store screenshots + description  *(after 3)*
+- [x] **NAME DECIDED 2026-09-04 — `Pantry: AI Meal Planner` (23/30), already live in ASC.**
+      A 2026-04-07 decision renamed it to "Pantry: Food Tracker" to drop "AI"; that rename was
+      never applied and has now been dropped rather than completed. Reasoning: dropping "AI"
+      optimised for brand taste at a stage where the name's only job is discovery — zero users
+      means no brand equity to protect, and the name field is the heaviest-weighted keyword
+      surface in App Store search. Cal AI, the direct benchmark, carries "AI" in the same
+      category. "Food Tracker" was also the wrong fight: that term belongs to MyFitnessPal /
+      Lose It / Cal AI, and Logan's own positioning is "instead of getting the macros we make
+      the food" — the differentiator is generation, so "Meal Planner" is where it lives.
+      No conflict with the no-sparkles rule: that governs UI craft, this is a discovery surface.
+- [ ] **Subtitle proposed: `Scan your pantry, track macros` (30/30)** — picks up the *pantry
+      scan* and *macro tracking* keywords the name gives up. Not yet set in ASC.
+- [ ] **⚠️ The name/subtitle call was reasoned from structure and the Cal AI precedent, NOT from
+      live search-volume data.** A real ASO check belongs here before the copy is written.
 - [ ] Screenshots must be AI-generated, not Figma re-skins.
 
 ## 9. Unset SCAN_CAP_WEEK  *(after the trailer and screenshots are shot)*
