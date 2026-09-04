@@ -34,7 +34,16 @@ Ordered by what should be done first. Later items depend on earlier ones.
       "Your first auto-renewable subscription must be submitted with a new app version." They
       cannot go on their own. Submitting the app WITHOUT them attached leaves the IAPs in limbo —
       the most likely explanation for the half-remembered "not approved".
-- [ ] Confirm the Superwall product mapping points at those exact product IDs.
+- [x] **Superwall mapping CONFIRMED correct** (2026-09-04). "Pantry Main" paywall: primary =
+      `com.kobalabs.pantry.annual` $29.99/year 7d trial, secondary = `com.kobalabs.pantry.monthly`
+      $9.99/month 7d trial. Exact ID match with App Store Connect, prices match canonical pricing.
+- [ ] **⚠️ Superwall shows "Missing required metadata" under BOTH products — this is NOT a Superwall
+      problem.** Superwall reads product metadata from Apple, and Apple withholds it until the IAP
+      has every required field. It is the SAME gap as the missing review screenshot / group
+      localization above, surfacing in a second dashboard. Do not go looking for a fix in
+      Superwall. **Use it as the verification signal instead:** once App Store Connect is complete,
+      reload Superwall's products page and this warning should disappear. If it does not, Apple
+      still considers something incomplete.
 - Context: Logan recalls App Store Connect or Superwall reporting "not approved" at some point.
   Banking/Mercury is confirmed complete, so that is NOT the cause. Most likely remaining causes:
   products in "Missing Metadata", not attached to a version, or a Superwall mapping pointing at
