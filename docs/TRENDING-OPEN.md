@@ -346,6 +346,57 @@ ingredient checklist, for the same reason.
 ---
 
 
+
+## 2026-09-04 — two dry runs under the new code. Read this before touching retention again.
+
+Fired from SQL with the Vault pattern; both landed in `pipeline_runs`.
+
+| run | raw | sanitized | stored | dropped | nearDup | nameGap | truncated | macroIncoherent |
+|-----|-----|-----------|--------|---------|---------|---------|-----------|-----------------|
+| 1   | 19  | 5         | 5      | **7**   | 4       | 2       | 0         | 0               |
+| 2   | 6   | 2         | 2      | **4**   | 0       | 0       | 0         | 0               |
+
+- [x] **PRELAUNCH check 2 (truncation guards) ANSWERED: `truncated` = 0 on both runs**, the
+      documented healthy value. That closes the last of the four 2026-08-30 checks.
+- [x] **`macros_from_creator` is NOT being over-claimed.** Splits were `{creator 1, computed 2,
+      model 2}` and `{creator 1, computed 1}` — a mix, never 100% creator. That was the one failure
+      mode with no downstream catch.
+- [x] **YIELD VARIANCE OBSERVED DIRECTLY: identical code, minutes apart, raw 19 vs 6.** The
+      PRELAUNCH item asks whether thin days are variance or a defect; two runs is not the ~10 it
+      wants, but the spread is now measured rather than remembered, and it matches the 24-vs-5 seen
+      before. **Consequence for all future work here: a single run cannot validate a generation
+      change.** Compare rates across several runs, never counts across two.
+- [x] **RETENTION IS THE DOMINANT YIELD KILLER** — 7 of 19 and 4 of 6, far ahead of every other
+      counter. Two causes, from `droppedDetail`.
+
+### ⚠️ NEGATIVE RESULT — prompting does NOT stop the model merging repeated ingredients
+
+Four of the seven drops in run 1 were the same food listed at different amounts: sugar 3x (Apple
+Pie Cottage Cheese Cake), olive oil and garlic 2x each (Cottage Cheese Flatbread), yoghurt,
+erythritol and mango 2x each (Mango Cheesecake), chipotle seasoning 2x (Honey Chipotle
+Quesadillas). The model consolidates them and the recipe is rejected for the shortfall.
+
+**Tried and FAILED (2026-09-04):** annotating each such line in the source checklist with "[this
+food is listed Nx at DIFFERENT amounts — emit a SEPARATE entry for each. Do NOT add them together
+or keep only one.]". Verified the annotation renders (all three sugar lines carry it) and verified
+the model received it. Run 2 dropped **the same four recipes with the same counts** — Apple Pie
+13 vs 15, Quesadillas 12 vs 13, Flatbread 11 vs 13, Hot Honey 9 vs 10.
+
+**Do not spend another attempt on prompt wording.** The existing prompt already says "Never merge
+two lines into one entry" in stronger terms than the annotation, and the pre-existing "[appears Nx]"
+marker cannot help because `sections` keys on the EXACT LINE and these lines differ. Three
+prompt-shaped attempts have now failed; this is the same shape as the ban-list finding logged
+earlier in this file, where the model returned banned names verbatim.
+
+- [ ] **The remaining lever is DETERMINISTIC RECOVERY, not prompting.** When the model returns
+      fewer entries than the source list, walk the unmatched source lines: if a line's food matches
+      an entry already present, append a new entry carrying that line's own quantity. This recovers
+      the creator's real data rather than inventing any, and it is mechanical. It is also the only
+      approach left that does not depend on the model changing its behaviour.
+- [ ] **Untested: the group-heading fix.** Neither of the two recipes that motivated it (High
+      Protein Brownies, High Protein Tiramisu Balls) appeared in run 2's batch of 6, so no heading
+      case was exercised. Needs another run that happens to include one.
+
 ## 2026-09-04 — audit of the 09-04 cron run (15 meals)
 
 Run predates the day's deploys, so it exercises the 2026-08-30 generation changes only.
