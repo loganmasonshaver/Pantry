@@ -256,11 +256,16 @@ What that sweep left open:
       be revoked: onboarding calls it at step 16, BEFORE createaccount, and step 3325 skips the
       paywall on the result. Entropy + a redemption cap is what makes the oracle worthless; real
       rate-limiting needs an identity anon does not have.
-- [ ] **⚠️ The migration tree does not match production.** Prod's `insert_saved_meal` takes
-      `numeric` protein/carbs/fat and has NO `p_image_url` — an older signature than
-      `20260420112446` claims is deployed. `handle_new_user()` (the auth trigger writing a profiles
-      row on every signup) is in NO migration at all. Both found via `pg_proc`, not the repo. Worth
-      a full `pg_proc` vs migrations diff before submission.
+- [x] **⚠️ The migration tree does not match production — DIFFED 2026-09-04, and it found a live
+      hole.** `insert_saved_meal` had TWO overloads in prod; the superseded 9-arg one was SECURITY
+      DEFINER, had NO `auth.uid()` guard, took the target account as a parameter, and was executable
+      by **anon**. Dropped in `20260904161200` and verified: one overload left, guarded.
+      Also confirmed benign: `handle_new_user()` and `rls_auto_enable()` are in no migration but
+      both return `trigger`/`event_trigger`, so neither can be invoked directly. `rls_auto_enable`
+      is wired to `ensure_rls on ddl_command_end` and never disables RLS — it is why every table
+      had RLS on. Every remaining anon-executable DEFINER function is either uncallable (trigger)
+      or guarded internally by `auth.uid()`.
+      **Standing rule this produced: audit against `pg_proc`, never against the migration tree.**
 - [ ] **Item 10 downgraded, see below.**
 
 ---
