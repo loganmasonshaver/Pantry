@@ -706,6 +706,27 @@ Deno.serve(async (req: Request) => {
         if (seen) seen.push(r.section)
         else sections.set(r.line, [r.section])
       }
+      // SAME FOOD, DIFFERENT AMOUNT — the biggest single cause of retention rejections.
+      // Measured on the 2026-09-04 dry run: 7 of 19 candidates died on the retention contract, and
+      // four of those were this. Apple Pie Cottage Cheese Cake lists "1/2 cup (100 g) sugar",
+      // "2 tbsp sugar" and "1 tbsp sugar"; Cottage Cheese Flatbread lists olive oil and garlic
+      // twice each; Mango Cheesecake lists yoghurt, erythritol and mango twice each. The model
+      // consolidated every one of them and lost the recipe.
+      //
+      // The existing "[appears Nx]" marker cannot help: `sections` is keyed by the EXACT LINE, and
+      // these lines differ, so each looks unique and is annotated as such. The prompt already says
+      // "Never merge two lines into one entry" in bold terms and the model does it anyway — so
+      // repeating the rule is not the fix. What it is actually doing is TIDYING what looks like a
+      // duplicate, which means the useful thing to tell it is that these are deliberate.
+      const foodKey = (line: string) => line
+        .toLowerCase()
+        .replace(/^[\d\s./-]*(?:g|kg|ml|l|oz|lb|lbs|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|cloves?|pinch(?:es)?|slices?|cans?|blatt|prise)?\b/, '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[^a-z\s]/g, ' ')
+        .split(/\s+/).filter(w => w.length > 2).sort().join(' ')
+      const foodCounts = new Map<string, number>()
+      for (const x of parsed) { const k = foodKey(x); if (k) foodCounts.set(k, (foodCounts.get(k) ?? 0) + 1) }
+
       const checklist = parsed.length >= 3
         ? `\n   SOURCE INGREDIENT LIST (${parsed.length} items — your ingredients array MUST contain all ${parsed.length}, copied, none merged or omitted):\n${parsed.map(x => {
             const parts = sections.get(x) ?? []
@@ -713,6 +734,12 @@ Deno.serve(async (req: Request) => {
             if (parts.length > 1) {
               // Listed more than once: the model must emit one entry PER occurrence.
               return `     - ${x}   [appears ${parts.length}x — one entry each${named.length ? `, parts: ${named.join(', ')}` : ''}]`
+            }
+            // Same food on more than one source line, at different amounts. Say so, or it gets
+            // consolidated into a single entry and the whole recipe is rejected for the shortfall.
+            const repeats = foodCounts.get(foodKey(x)) ?? 1
+            if (repeats > 1) {
+              return `     - ${x}   [this food is listed ${repeats}x at DIFFERENT amounts — the creator uses it in ${repeats} places. Emit a SEPARATE entry for each, with its own amount. Do NOT add them together or keep only one.${named.length ? ` part: ${named[0]}` : ''}]`
             }
             return `     - ${x}${named.length ? `   [part: ${named[0]}]` : ''}`
           }).join('\n')}`
