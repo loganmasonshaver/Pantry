@@ -380,11 +380,24 @@ Run predates the day's deploys, so it exercises the 2026-08-30 generation change
       downstream. `parseIngredientBlock` now LOGS every line it discards for length.
       Length was never the real filter anyway: unbulleted lines must still pass `QTY_START`, so
       prose without a leading quantity is already excluded.
-      - [ ] **The stored row is still wrong** — 3 ingredients, and its macros (180/8/15/12) were
-        invented, since that description publishes none. Re-run or correct it.
-      - [ ] **How many other rows lost a >=90-char line?** Unknown and not measurable from the
-        table — the evidence only exists in the descriptions. Worth a sweep of stored counts against
-        re-parsed descriptions.
+      - [x] **Row CORRECTED in prod 2026-09-04.** The chocolate line is back at 43g — the
+        creator's OWN alternative figure ("1 1/2 oz. dark chocolate bar"), not a conversion of their
+        3 Tbsp, because a number they published beats one I derive. Macros then recomputed by
+        `computePerServingMacros` over the complete list: **158 kcal / 5p / 14c / 10f**, marked
+        `macros_source = 'computed'`, 5% off Atwater. The old 180/8/15/12 were the model's
+        invention (that description publishes no macros) and overstated protein by 60%.
+      - [ ] **How many other rows lost a >=90-char line? TOOL BUILT, NEEDS THE KEY TO RUN.**
+        `scripts/audit-dropped-lines.ts` re-fetches every source description and parses it twice —
+        once with lines >=90 chars stripped (the old behaviour) and once as it is now — then reports
+        every row where the counts differ. Each one silently lost an ingredient.
+        Costs ~4 YouTube quota units for all 178 rows (`videos.list` is 1 unit per 50 ids), so it is
+        nothing like a pipeline run. Blocked only on `YOUTUBE_API_KEY`, which is a Supabase secret
+        and is read from the environment so it never lands in a file or a chat:
+        `YOUTUBE_API_KEY=... node scripts/audit-dropped-lines.ts <video_ids.json>`
+      - [ ] **Store the source description alongside each row.** This audit needed YouTube only
+        because the description is thrown away after generation. Keeping it (or its parsed list)
+        would make every future fidelity question answerable from SQL, and this is the second time
+        today that the missing source has been the blocker.
 
 - [ ] **WATCH, do not act yet: 10 of 15 rows on 09-04 were desserts** (cheesecake x3, brownie,
       crepes, pancakes x2, dessert cups, cheesecake dip). Logan's call is that one day is not
