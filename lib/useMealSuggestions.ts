@@ -23,9 +23,19 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 const MAX_DAILY_REGENS = 3
 
 // How long the hero's own photo is waited for before today's meals are shown anyway. Only applies
-// when meals are ALREADY on screen — see the block that uses it. Long enough for a normal image
-// job, short enough that a stalled CDN cannot pin yesterday's meals up indefinitely.
-const HERO_IMAGE_WAIT_MS = 8000
+// when meals are ALREADY on screen — see the block that uses it.
+//
+// 8000 was calibrated against the CACHED path, where fetchMealImage returns from AsyncStorage in
+// ~50ms. A dish nobody has generated before has to be rendered by Flux first, which takes ~10s —
+// so on the day-rollover cold start, the exact case this gate was written for, the timer always
+// won and the swap it was meant to hold happened anyway: yesterday's photo out, shimmer in, for
+// the remainder of the generation. Observed on device 2026-09-04.
+//
+// This is a BACKSTOP, not the expected path. fetchMealImage always settles — 3 attempts, 3s gaps,
+// then null — so jobs[0] resolves on failure as well as success and the race normally ends there.
+// The timer only matters if supabase.functions.invoke hangs without resolving, which is why it can
+// sit well above a normal generation without risking a permanently pinned carryover.
+const HERO_IMAGE_WAIT_MS = 22000
 
 // userId stamps ownership so the cache survives sign-out (restored for the same user on
 // re-login) without leaking to a different account on a shared device — reads that don't match

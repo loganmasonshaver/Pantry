@@ -68,6 +68,10 @@ const { width } = Dimensions.get('window')
 // macro app" positioning. The AILogModal component + estimate-meal-macros
 // edge function remain intact behind this flag; flip to true post-launch
 // once we have demand signal + budget for accuracy iteration.
+// Calorie/macro goals mirrored to disk. See the goal state in the component: without this the
+// first paint of a cold start shows the placeholder constants, not the user's own targets.
+const GOALS_CACHE_KEY = 'pantry_goals_cache'
+
 const ENABLE_AI_PHOTO_LOG = false
 
 // Narrates the daily meal generation instead of a static "Finding a meal…". Honest to what the
@@ -895,10 +899,35 @@ export default function HomeScreen() {
     })
   }
 
+  // Last-resort values for a genuinely first-ever launch. They are NOT a sane default to render:
+  // the profile fetch below is a network round-trip, so on a cold start the ring used to animate
+  // all the way to 2400/180 — a calorie target belonging to nobody — and then re-animate to the
+  // user's real numbers when the row arrived. GOALS_CACHE_KEY exists to make that window ~20ms.
   const [calorieGoal, setCalorieGoal] = useState(2400)
   const [proteinGoal, setProteinGoal] = useState(180)
   const [carbsGoal, setCarbsGoal] = useState(250)
   const [fatGoal, setFatGoal] = useState(80)
+  // Set once the profile row lands, so a slow AsyncStorage read can never overwrite fresher
+  // network data with the previous session's numbers.
+  const goalsFromNetworkRef = useRef(false)
+
+  // Hydrate goals from disk on mount. AsyncStorage settles in ~10-30ms against a multi-second
+  // cold-start network fetch, so this is what the user actually sees. userId-stamped for the same
+  // reason the meal cache is: cached goals must never paint for a different account on one device.
+  useEffect(() => {
+    if (!user) return
+    AsyncStorage.getItem(GOALS_CACHE_KEY).then(raw => {
+      if (!raw || goalsFromNetworkRef.current) return
+      try {
+        const g = JSON.parse(raw)
+        if (g.userId && g.userId !== user.id) return
+        if (g.calorie_goal) setCalorieGoal(g.calorie_goal)
+        if (g.protein_goal) setProteinGoal(g.protein_goal)
+        if (g.carbs_goal) setCarbsGoal(g.carbs_goal)
+        if (g.fat_goal) setFatGoal(g.fat_goal)
+      } catch {}
+    }).catch(() => {})
+  }, [user?.id])
 
   // Milestone celebration plumbing: mirror the live goal into a ref (so the logs fetch
   // reads the CURRENT goal, not a stale closure) and track the previous calorie total.
@@ -927,11 +956,18 @@ export default function HomeScreen() {
       .then(({ data }) => {
         perfMark('Home profile fetch DONE')
         if (cancelled) return
+        goalsFromNetworkRef.current = true
         if (!data?.food_prefs_banner_dismissed) setShowPrefBanner(true)
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
         if (data?.carbs_goal) setCarbsGoal(data.carbs_goal)
         if (data?.fat_goal) setFatGoal(data.fat_goal)
+        // Fire and forget — next cold start paints these instead of the placeholder constants.
+        AsyncStorage.setItem(GOALS_CACHE_KEY, JSON.stringify({
+          userId: user.id,
+          calorie_goal: data?.calorie_goal, protein_goal: data?.protein_goal,
+          carbs_goal: data?.carbs_goal, fat_goal: data?.fat_goal,
+        })).catch(() => {})
       })
     return () => { cancelled = true }
   }, [user]))
