@@ -171,9 +171,17 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 124** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **17** in
-  app code (`app/ lib/ components/ hooks/ context/`) and **107** Deno-global noise from
+- **TS baseline = 131** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **17** in
+  app code (`app/ lib/ components/ hooks/ context/`) and the rest Deno-global noise from
   `supabase/functions` being inside the tsconfig.
+  (Was 124/17 until 2026-09-04, when the `audit-ingredient-lines` edge function added 7 more
+  `Deno`/esm.sh lines. A NEW EDGE FUNCTION RAISES THE TOTAL AND THAT IS EXPECTED — the app-code
+  number is the one that must not move. The 8th error it added was NOT noise: `Deno.serve(async
+  (req) =>` gave an implicit-any, fixed by typing `req: Request`. Reading the delta line by line
+  is what separates the two, and on the same day a +2 caught a genuine ReferenceError — a
+  `supabase` client that does not exist in `generate-trending-meals`, where it is called `db`,
+  sitting inside a try/catch that would have swallowed it and left every run looking logged while
+  the table stayed empty.)
   (Was 134/27 until 2026-09-03. `GeneratedMeal.image` was declared `image: null` — a field that
   can ONLY ever hold null — while the client assigns image URLs to it on every meal. Ten errors,
   all of them `Type 'string' is not assignable to type 'null'`, were the type being wrong rather

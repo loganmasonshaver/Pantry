@@ -32,7 +32,7 @@ const OLD_CAP = 90   // the value that dropped a real 90-char line; see MAX_INGR
 const asOldCap = (desc: string) =>
   parseIngredientBlock(desc.split("\n").filter(l => l.trim().length < OLD_CAP).join("\n"))
 
-Deno.serve(async (req) => {
+Deno.serve(async (req: Request) => {
   const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? ""
   const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
   const token = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
