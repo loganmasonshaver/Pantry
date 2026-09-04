@@ -123,7 +123,7 @@ session that wrote it.
       end of the category list. Testable on any reload. (`129fe3c`)
 - [ ] **⚠️ COLD-START DEFECTS — Logan could not verify these, they need a NEW DAY's first open.**
       Both were found from the 11:21 screenshots on 2026-09-04 and both are fixed blind.
-      - [ ] **Calorie/protein goals must NOT flash the wrong numbers.** The ring used to animate to
+      - [x] **Calorie/protein goals must NOT flash the wrong numbers.** VERIFIED ON DEVICE 2026-09-04. The ring used to animate to
             a hardcoded 2,400 kcal / 180g before the profile landed, then re-animate to the real
             2,100 / 160g. Goals now hydrate from AsyncStorage on mount. **This part is testable
             TODAY** — force-quit and reopen: the ring should animate exactly once, to your numbers.
