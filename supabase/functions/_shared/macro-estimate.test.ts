@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimateMacros, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
+import { estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -294,4 +294,44 @@ test('a zero-macro seasoning with no weight does NOT suppress the check', () => 
   )
   assert.equal(v.skipped, false, v.reason)
   assert.equal(v.ok, true)
+})
+
+// ── macroIncoherence ──────────────────────────────────────────────────────────────────────────
+// Cases are REAL ROWS read out of trending_meals on 2026-09-04, not invented numbers, so the
+// thresholds are pinned to the distribution they were tuned against.
+test('macroIncoherence rejects the row with two macros missing', () => {
+  // Live: 540 kcal on a pasta dish with 0 carbs and 0 fat. The worst row in the pool at 64% off,
+  // and invisible to a reader precisely BECAUSE the number is large.
+  const r = macroIncoherence({ calories: 540, protein: 48, carbs: 0, fat: 0 })
+  assert.ok(r && r.includes('carbs and fat both 0'), `expected a zero-pair rejection, got ${r}`)
+})
+
+test('macroIncoherence accepts Jello — 12% is 12 kcal', () => {
+  // The row Logan reported. It really is off, but by 12 kcal; rejecting it would mean rejecting
+  // every small dish that rounds. fat=0 here is CORRECT — gelatin and water have no fat.
+  assert.equal(macroIncoherence({ calories: 100, protein: 20, carbs: 2, fat: 0 }), null)
+})
+
+test('macroIncoherence accepts the protein-dessert band', () => {
+  // Sugar alcohols and fiber yield well under Atwater's 4 kcal/g, so these gaps are the
+  // approximation being wrong about real food, not the data being wrong.
+  assert.equal(macroIncoherence({ calories: 126, protein: 19, carbs: 12, fat: 2 }), null)  // Brownie Muffin 12.7%
+  assert.equal(macroIncoherence({ calories: 245, protein: 22, carbs: 35, fat: 5 }), null)  // Funfetti Protein Cake 11.4%
+  assert.equal(macroIncoherence({ calories: 280, protein: 6, carbs: 45, fat: 4 }), null)   // Choc Sweet Potato 14.3%
+})
+
+test('macroIncoherence accepts a large dish with a large absolute gap but a small fraction', () => {
+  // Philly Cheesesteak Pasta: 37 kcal off, more than Jello in absolute terms, but 10.3%.
+  assert.equal(macroIncoherence({ calories: 360, protein: 37, carbs: 24, fat: 17 }), null)
+})
+
+test('macroIncoherence rejects a gross overstatement that has no zeros', () => {
+  // Both conditions must fire: 330 kcal gap AND 66%. This is the backstop for a failure mode the
+  // zero-pair rule would miss.
+  const r = macroIncoherence({ calories: 500, protein: 10, carbs: 10, fat: 10 })
+  assert.ok(r && r.includes('off by'), `expected an Atwater rejection, got ${r}`)
+})
+
+test('macroIncoherence abstains when calories are absent — that is the noMacros gate', () => {
+  assert.equal(macroIncoherence({ calories: 0, protein: 0, carbs: 0, fat: 0 }), null)
 })

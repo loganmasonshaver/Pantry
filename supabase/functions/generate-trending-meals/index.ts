@@ -6,6 +6,10 @@ import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
+// Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
+// that one needs weighable ingredients and abstains often, this one is arithmetic on the four
+// numbers the model already returned and cannot abstain.
+import { macroIncoherence } from '../_shared/macro-estimate.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
@@ -1035,7 +1039,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             return union > 0 ? overlap / union : 0
           }
           // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0
+          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0
           const droppedDetail: any[] = []
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
@@ -1184,14 +1188,19 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
+            // Do the four numbers agree with each other? Nothing checked this before, which is how
+            // "Pepperoni Pizza Pasta" reached the pool at 540 kcal with 0 carbs and 0 fat. Cheap,
+            // needs no reference data, and cannot abstain the way verifyMacros does.
+            const incoherent = macroIncoherence(r)
+            if (incoherent) { rejMacroIncoherent++; console.log(`[funnel] rejected "${name}" — ${incoherent}`); return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName})`)
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName}, macroIncoherent ${rejMacroIncoherent})`)
           funnel[`llm_${provider.name}`] = {
             raw: parsed.length, sanitized: sanitized.length,
-            rejected: { noName: rejNoName, noMacros: rejNoMacros, dupName: rejDupName, nearDup: rejNearDup,
+            rejected: { noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, dupName: rejDupName, nearDup: rejNearDup,
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
               nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName },
             droppedDetail,

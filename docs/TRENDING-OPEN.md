@@ -30,7 +30,38 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
 
 ### Logged 2026-09-01 from Logan's device review — DEFERRED by him, do not start unprompted
 
-- [ ] **"Jello" — 100 kcal / 20g protein / 2g carbs / 0g fat, and it does not close.** 20*4 + 2*4
+- [x] **INVESTIGATED 2026-09-04 — Jello was the symptom, not the bug, and it is not the worst row.**
+      Measured the whole pool instead of the one row Logan spotted. Of **178 live rows**: 124 within
+      5% of Atwater, 42 at 5-10%, 11 at 10-20%, **1 at 64%**.
+      - **The actual worst row is `Pepperoni Pizza Pasta`: 540 kcal stated, 48g protein, 0 carbs,
+        0 fat.** A pasta dish with pepperoni and cheese, and two macros are simply missing. It is
+        348 kcal off. Nobody noticed it precisely BECAUSE the number is large — Jello got caught at
+        12 kcal off because 100 is small enough to check mentally.
+      - **Jello's 12% is 12 kcal**, and its `fat: 0` is CORRECT (gelatin and water have no fat).
+        Percentage is the wrong lens on small dishes: Philly Cheesesteak Pasta is off by 37 kcal —
+        three times Jello in absolute terms — at 10.3%.
+      - **The 10-14% band is almost entirely protein desserts** (Brownie Muffin, Funfetti Protein
+        Cake, two cheesecakes, Mega Protein Ice Cream). That is exactly where sugar alcohols
+        (~0.2-2.4 kcal/g vs Atwater's 4) and fiber (~2 vs 4) live. The gap is the approximation
+        being wrong about real food, not the data being wrong. Rejecting it would drop good rows.
+      - **ROOT CAUSE: the trending pipeline ran no macro check of any kind.** `verifyMacros` is
+        imported ONLY by `generate-meals`. This is what "macro coherence is not a per-row verdict"
+        actually meant — not a weak verdict, an unwired gate.
+      - **FIXED (generation side, UNVERIFIED until a run):** `macroIncoherence` in
+        `_shared/macro-estimate.ts`, wired into the sanitize chain as `rejMacroIncoherent`.
+        Two rules: carbs AND fat both zero (a missing answer, not a low-carb dish — fat=0 alone
+        stays legal), and an Atwater gap over BOTH 50 kcal and 25%. Tuned against the distribution
+        above, not guessed: on the live pool it rejects exactly 1 of 178, and it is the right one.
+        6 unit tests use the real row values.
+      - [ ] **STILL OPEN: `Pepperoni Pizza Pasta` is live in prod right now.** The gate is
+        generation-side, so it cannot retro-fix a stored row. Needs deleting or correcting —
+        Logan's call, it is public content.
+      - [ ] **STILL OPEN: `"glass container"` is stored as an INGREDIENT on Jello.** Equipment, not
+        food. Belongs with the junk-ingredient class already logged below.
+      - [ ] **STILL OPEN, and the original second half of this item:** does the Jello macro block
+        agree with its own ingredients (120g gelatin over 4 servings)? Not measured — the pool-wide
+        coherence work took priority. And separately: should a bowl of gelatin have passed at all?
+- [ ] ~~**"Jello" — 100 kcal / 20g protein / 2g carbs / 0g fat, and it does not close.**~~ 20*4 + 2*4
       = 88 kcal against a stated 100. Separately the ingredient list says 120g unflavoured beef
       gelatin over 4 servings = 30g/serving, which is ~30g protein and ~110 kcal on its own — so
       the macro block disagrees with the ingredients AND with itself. Logan's framing is the right

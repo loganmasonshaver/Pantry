@@ -381,3 +381,53 @@ export function verifyMacros(claim: MacroClaim, ingredients: MacroIngredient[] |
     reason: `protein ${proteinRatio.toFixed(2)}x, kcal ${kcalRatio.toFixed(2)}x of estimate`,
   }
 }
+
+// ── Internal macro coherence ────────────────────────────────────────────────────────────────
+// verifyMacros compares a claim against an INGREDIENT-derived estimate, so it abstains whenever
+// the ingredients cannot be weighed — which is often, and is why it was never a per-row verdict.
+// This is the complementary check and it needs no reference data at all: do the four numbers the
+// model returned agree with each other? Logan's framing when he found "Jello": "someone who can do
+// quick math would look at that and call this app unreliable." This is that quick math.
+//
+// The trending pipeline ran NO macro check of any kind — verifyMacros is imported only by
+// generate-meals. Measured across the 178 live rows: 124 within 5%, 42 at 5-10%, 11 at 10-20%,
+// 1 at 64%.
+//
+// THRESHOLDS ARE TUNED AGAINST THAT DISTRIBUTION, not guessed:
+//  * The 10-14% band is almost entirely protein desserts (Brownie Muffin, Funfetti Protein Cake,
+//    two cheesecakes, Mega Protein Ice Cream). That is exactly where sugar alcohols (~0.2-2.4
+//    kcal/g against Atwater's 4) and fiber (~2 against 4) live, so the "error" is real food being
+//    measured by an approximation. Rejecting it would drop good rows.
+//  * Percentage alone is the wrong lens on small dishes: Jello's 12% is 12 kcal, while Philly
+//    Cheesesteak Pasta's 10.3% is 37 kcal. Requiring BOTH a large fraction and a large absolute
+//    gap stops small dishes being punished for rounding.
+// On the live pool these rules reject exactly 1 of 178 rows, and it is the one that is genuinely
+// broken rather than the one that was easiest to notice.
+const ATWATER_MIN_ABS_GAP = 50   // kcal — below this, the fraction does not matter
+const ATWATER_MAX_FRACTION = 0.25 // and the gap must also exceed this share of the stated calories
+
+export function macroIncoherence(m: {
+  calories?: unknown; protein?: unknown; carbs?: unknown; fat?: unknown
+}): string | null {
+  const kcal = Number(m?.calories) || 0
+  const p = Number(m?.protein) || 0
+  const c = Number(m?.carbs) || 0
+  const f = Number(m?.fat) || 0
+  // Nothing to check. A missing/zero calorie figure is the noMacros gate's job, not this one.
+  if (kcal <= 0) return null
+
+  // Two macros at zero together is not a rounding artefact, it is a missing answer. Live example:
+  // "Pepperoni Pizza Pasta", 540 kcal, 48g protein, 0 carbs, 0 fat — a pasta dish with pepperoni
+  // and cheese. Deliberately requires BOTH to be zero: fat=0 alone is legitimate and common
+  // (Jello is gelatin and water, and its 0 is correct), and carbs=0 alone is a real low-carb dish.
+  if (c === 0 && f === 0) {
+    return `carbs and fat both 0 against ${kcal} kcal — macros missing, not low`
+  }
+
+  const atwater = p * 4 + c * 4 + f * 9
+  const gap = Math.abs(kcal - atwater)
+  if (gap >= ATWATER_MIN_ABS_GAP && gap / kcal > ATWATER_MAX_FRACTION) {
+    return `stated ${kcal} kcal vs ${atwater} from ${p}p/${c}c/${f}f — off by ${gap} kcal (${Math.round(gap / kcal * 100)}%)`
+  }
+  return null
+}
