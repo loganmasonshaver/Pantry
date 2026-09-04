@@ -84,6 +84,40 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
         version is a real-food-mass ratio: reject when the ingredient list is overwhelmingly water
         plus powders. Worth designing — but not worth bolting on while generation-side changes are
         already stacked up unverified waiting on a run.
+      - [x] **SOURCE VIDEO READ 2026-09-04 — hcBwG5_7POU, "The Plant Slant", 8.5M views.** Three of
+        the guesses above are now settled, and one of them was MINE and wrong:
+        - **The creator publishes NO macros and NO serving count.** The description is an ingredient
+          list plus five steps, ending "makes 64 Fl oz". So the stored 100/20/2/0 AND servings=4
+          were invented downstream — the pipeline's "READ macros from the description first" rule
+          has no branch that marks what happens when there is nothing to read. **This is the real
+          trust defect on this row, far more than the 12 kcal.** Generalised as an open item below.
+        - **`"64 fl oz GLASS container"` IS in the creator's list.** The parser was FAITHFUL and I
+          was wrong to call it an extraction failure — the 100%-retention contract mandated keeping
+          it. The tension is real though: retention says keep every line, and a container is not
+          food, and it fed the image prompt.
+        - **The creator's list contains NO FRUIT** — only "fruit flavored zero sugar water drink
+          enhancer". So the stored photo of diced fruit in jelly depicts a dish this recipe does not
+          make. Confirmed IMAGE defect, not an ingredient drop.
+        - **Protein was ~26% LOW against the recipe's own gelatin.** 120g beef gelatin is ~85-90%
+          protein (~355 kcal/100g) = ~108g protein / ~426 kcal per batch, over 4 servings = ~26g and
+          ~107 kcal. Logan's original ~30g estimate was closer than the app's 20g.
+      - [x] **Jello CORRECTED in prod 2026-09-04** to 107 kcal / 26p / 1c / 0f (Atwater 108, within
+        1%), equipment line dropped (8 ingredients -> 7), and BOTH `image_cache` and
+        `trending_meals.image` cleared so the photo regenerates under the hardened prompt. Corrected
+        rather than deleted, for consistency with Pepperoni Pizza Pasta.
+      - [x] **Image prompt hardened** (`generate-meal-image`, deployed): a flavouring named after a
+        food must never be drawn as that food ("fruit flavored drink enhancer" is not fruit,
+        "strawberry protein powder" is not strawberries), and equipment lines are never depicted as
+        food. Both added to the negative prompt too. Measured first: only **1 of 178 rows** carries
+        an equipment line, so this is narrow by design rather than a broad filter that would
+        misread "1 container greek yogurt" as a container.
+      - [ ] **⚠️ NEW, and the biggest thing this investigation turned up: nothing records whether
+        macros came from the creator or were invented.** Jello's were invented; Pepperoni Pizza
+        Pasta's 540 kcal / 48g protein are verbatim from @mealswithmax ("Approximately 540 calories
+        and 48g protein per serving", "SERVES: 2"). Both look identical in the database and in the
+        app. For a macro-tracking app that is the difference between a source and a guess. Fix
+        shape: a `macros_source` column ('creator' | 'estimated') set by the model, surfaced in the
+        UI. Supersedes and generalises the "mark amounts the model INVENTED" item below.
       - [ ] **Still not measured:** whether the Jello macro block agrees with its own ingredients
         (120g gelatin over 4 servings = 30g/serving, which is ~30g protein against a stated 20g).
         The pool-wide coherence work took priority.
