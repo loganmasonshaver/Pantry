@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
+import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -363,4 +363,14 @@ test('computePerServingMacros treats a missing/zero serving count as 1, never di
   const a = computePerServingMacros([{ name: 'chicken breast', grams: '250g' }], 0)
   const b = computePerServingMacros([{ name: 'chicken breast', grams: '250g' }], 1)
   assert.deepEqual(a, b)
+})
+
+test('COMPUTED_AGREEMENT_BAND is the guard that makes replacement safe', () => {
+  // Regression pin for the replay finding: the coverage guards alone pass 98% of live rows, so
+  // this band — not those guards — is what stops a 2x disagreement overwriting a plausible number.
+  assert.equal(COMPUTED_AGREEMENT_BAND, 0.25)
+  const within = Math.abs(560 - 540) / 540 <= COMPUTED_AGREEMENT_BAND
+  const beyond = Math.abs(1615 - 750) / 750 <= COMPUTED_AGREEMENT_BAND  // Stuffed Chicken Caesar Sourdough
+  assert.ok(within, 'a 4% difference must count as agreement')
+  assert.ok(!beyond, 'a 2x difference must NOT count as agreement')
 })

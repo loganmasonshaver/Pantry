@@ -448,6 +448,24 @@ export function macroIncoherence(m: {
 // verifyMacros abstains on: an unreadable quantity means real food is missing from the total, and
 // low coverage means the lookup table did not recognise enough of the dish. Null is the caller's
 // signal to keep the model's numbers and label them as such, never to invent a fallback.
+//
+// ⚠️ THOSE GUARDS ALONE ARE NOT ENOUGH TO REPLACE A NUMBER — measured, not assumed. Replaying all
+// 178 live rows through this function: the median computed/stored calorie ratio is 0.98, so the
+// arithmetic is well calibrated. But the guards pass 175 of 178 (98%), and 83 of those disagree
+// with the stored number by more than 25%, some by 2x. "Stuffed Chicken Caesar Sourdough" is
+// 958g of food at servings=1 — 300g chicken and a 250g sourdough loaf — where the batch estimate
+// is 1615 kcal and the stored figure is 750, almost exactly half.
+//
+// 43 of the 83 reconcile to a DIFFERENT integer serving count and 40 do not, and at that tolerance
+// some of the 43 land on an integer by chance. So a disagreement is genuinely ambiguous: it may be
+// a wrong serving count, or a wrong estimate, and per row we cannot tell. Replacing on the guards
+// alone would have overwritten plausible numbers with inflated ones on roughly a quarter of the
+// pool. Callers must therefore also require agreement — see COMPUTED_AGREEMENT_BAND.
+// Widest disagreement between our arithmetic and the model's number that we will still treat as
+// "the same answer, computed more precisely". Beyond it the two DISAGREE, and a disagreement is not
+// evidence that ours is right — see the replay note in computePerServingMacros.
+export const COMPUTED_AGREEMENT_BAND = 0.25
+
 export function computePerServingMacros(
   ingredients: MacroIngredient[] | undefined,
   servings: number,

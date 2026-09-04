@@ -9,7 +9,7 @@ import { mapLimit } from '../_shared/concurrency.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
-import { computePerServingMacros, macroIncoherence } from '../_shared/macro-estimate.ts'
+import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, macroIncoherence } from '../_shared/macro-estimate.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
@@ -1204,10 +1204,24 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               r._macrosSource = 'creator'
             } else {
               const computed = computePerServingMacros(r.ingredients, toInt(r.servings) ?? 1)
-              if (computed) {
+              const stated = Number(r.calories) || 0
+              // Replace ONLY when the two answers AGREE. A replay of all 178 live rows showed the
+              // arithmetic is well calibrated at the median (ratio 0.98) but that the coverage
+              // guards alone pass 98% of rows, of which ~half disagree with the stored number by
+              // over 25% and some by 2x. A disagreement does not tell us ours is the right one —
+              // it is equally often a wrong serving count — so replacing on the guards alone would
+              // have overwritten plausible macros with inflated ones across a quarter of the pool.
+              const agrees = computed && stated > 0 &&
+                Math.abs(computed.calories - stated) / stated <= COMPUTED_AGREEMENT_BAND
+              if (computed && agrees) {
                 r.calories = computed.calories; r.protein = computed.protein
                 r.carbs = computed.carbs; r.fat = computed.fat
                 r._macrosSource = 'computed'
+              } else if (computed) {
+                // Both numbers exist and they disagree. Keep the model's, say so, and LOG it —
+                // this is the highest-signal line in the run for finding wrong serving counts.
+                r._macrosSource = 'model'
+                console.log(`[funnel] macro disagreement "${name}" — model ${stated}kcal vs computed ${computed.calories}kcal (servings ${toInt(r.servings) ?? 1}); keeping the model's`)
               } else {
                 // Estimate not trustworthy (unweighable ingredient, or the table recognised too
                 // little of the dish). Keep the model's numbers but say so — inventing a fallback
@@ -1467,6 +1481,25 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       console.log(`[funnel] WARN: ${bare.length} recipe(s) stored with <=3 ingredients — possible ingredient drop: ${bare.map((r: any) => `${r.name}(${r.ingredients?.length ?? 0})`).join(', ')}`)
     }
     stageLog(`pool ranked + capped: storing ${recipes.length} (cap ${STORE_CAP})`)
+    // WHERE THE NUMBERS CAME FROM — the point of macros_source is to be auditable, so it has to be
+    // visible in a run rather than only in the table. Read this on every run:
+    //   creator-heavy or 100% creator  -> the model is lying about macros_from_creator, which is
+    //                                     the ONE failure mode with no downstream catch
+    //   model-heavy                    -> computePerServingMacros is abstaining a lot, so the
+    //                                     lookup table is not recognising these dishes (coverage
+    //                                     < 0.7) or quantities are unreadable — a parser problem,
+    //                                     not a macro problem
+    const macroSplit = recipes.reduce((acc: Record<string, number>, r: any) => {
+      const k = r._macrosSource ?? 'model'; acc[k] = (acc[k] ?? 0) + 1; return acc
+    }, {})
+    funnel.macrosSource = macroSplit
+    stageLog(`macros_source: creator ${macroSplit.creator ?? 0}, computed ${macroSplit.computed ?? 0}, model ${macroSplit.model ?? 0}`)
+    // Name the rows we recomputed, so a spot-check against the video is one click rather than a
+    // query. The creator's own numbers need no audit; ours do.
+    const recomputed = recipes.filter((r: any) => r._macrosSource === 'computed')
+    if (recomputed.length) {
+      stageLog(`recomputed from ingredients: ${recomputed.map((r: any) => `${r.name} (${r.calories}kcal/${r.protein}p)`).join(' | ')}`)
+    }
 
     // HARD MINIMUM GATE: only triggers if the candidate pool itself was under 6
     // (LLM yielded too few names). With MMR replacing the kill-filters, this

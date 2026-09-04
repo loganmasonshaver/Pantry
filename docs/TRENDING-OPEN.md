@@ -128,7 +128,31 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
         Backfill is `model` for all 176 pre-existing rows — which of the three they were is unknown,
         and `model` is the claim that overstates least. The two verified against their videos today
         are marked correctly: Pepperoni Pizza Pasta `creator`, Jello `computed`.
-      - [ ] **UNVERIFIED — needs a pipeline run.** None of the above has processed a real candidate.
+      - [x] **REPLAYED AGAINST ALL 178 LIVE ROWS 2026-09-04 — and it caught a real defect in the
+        first version.** `scripts/replay-macros.ts` runs every stored candidate through the new code
+        with no quota, no auth and no writes. Findings:
+        - **The arithmetic is calibrated: median computed/stored calorie ratio 0.98.**
+        - **The coverage guards alone were far too permissive — they passed 175 of 178 (98%).**
+          Of those, **83 disagreed with the stored number by more than 25%, some by 2x.** Shipping
+          the first version would have overwritten plausible macros with inflated ones on ~a quarter
+          of the pool. The guards prove the estimate is COMPLETE; they say nothing about it being
+          RIGHT.
+        - **A disagreement is genuinely ambiguous.** 43 of the 83 reconcile to a different integer
+          serving count and 40 do not, and at that tolerance some of the 43 land on an integer by
+          chance. Per row we cannot tell a wrong serving count from a wrong estimate.
+        - **FIX: replacement now also requires AGREEMENT** (`COMPUTED_AGREEMENT_BAND = 0.25`).
+          Split on the live pool: 92 computed / 83 model-kept-disagreed / 3 model-kept-abstained,
+          and 0 of the computed rows fail the coherence gate. Pinned by a unit test.
+        - **The disagreement list is now the most useful output of a run** — each line is a
+          candidate WRONG SERVING COUNT with the implied value, e.g. "Stuffed Chicken Caesar
+          Sourdough, servings=1, batch implies ~2" (958g of food including a 250g sourdough loaf and
+          300g of chicken, at one serving). Logged as its own item below.
+      - [ ] **⚠️ NEW: ~83 rows carry a serving count the ingredients contradict.** Surfaced by the
+        replay above, not yet fixed — it needs the source videos to settle each one, and it may be
+        an estimator problem on some. Start with the clean 2x cases: Stuffed Chicken Caesar
+        Sourdough, Creamy Garlic Pepper Soya Chunks, Chicken Semolina Momos, Roti, Corn Paneer
+        Pakoda. Servings is load-bearing — it is the divisor for every macro on the card.
+      - [ ] **STILL UNVERIFIED against a live pipeline run.** None of the above has processed a real candidate.
         On the next run check the `macros_source` split: a run that returns 100% `creator` means the
         model is lying about `macros_from_creator`, which is the failure mode with no downstream
         catch. Expect a mix.
