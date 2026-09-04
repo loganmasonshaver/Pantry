@@ -386,14 +386,26 @@ Run predates the day's deploys, so it exercises the 2026-08-30 generation change
         `computePerServingMacros` over the complete list: **158 kcal / 5p / 14c / 10f**, marked
         `macros_source = 'computed'`, 5% off Atwater. The old 180/8/15/12 were the model's
         invention (that description publishes no macros) and overstated protein by 60%.
-      - [ ] **How many other rows lost a >=90-char line? TOOL BUILT, NEEDS THE KEY TO RUN.**
-        `scripts/audit-dropped-lines.ts` re-fetches every source description and parses it twice —
-        once with lines >=90 chars stripped (the old behaviour) and once as it is now — then reports
-        every row where the counts differ. Each one silently lost an ingredient.
-        Costs ~4 YouTube quota units for all 178 rows (`videos.list` is 1 unit per 50 ids), so it is
-        nothing like a pipeline run. Blocked only on `YOUTUBE_API_KEY`, which is a Supabase secret
-        and is read from the environment so it never lands in a file or a chat:
-        `YOUTUBE_API_KEY=... node scripts/audit-dropped-lines.ts <video_ids.json>`
+      - [ ] **How many other rows lost a >=90-char line? RUN `audit-ingredient-lines`.**
+        Built as an EDGE FUNCTION, not a local script, because the key cannot be had locally:
+        Supabase Edge Function secrets are WRITE-ONLY (`secrets list` returns a SHA-256 digest —
+        `YOUTUBE_API_KEY` and `GOOGLE_SEARCH_API_KEY` show the SAME digest, which is the proof), and
+        Logan confirmed the key is not in the Google Cloud account either. Running it on the
+        platform that holds the secret sidesteps the problem entirely.
+        It fetches every source description, parses each twice — once with >=90-char lines stripped
+        (old behaviour), once as it is now — and writes the diff to `pipeline_runs`
+        (`provider = 'audit-ingredient-lines'`). ~4 quota units for the whole pool, re-runnable.
+        Invoke with the Vault pattern so nothing is pasted:
+        ```sql
+        select net.http_post(
+          url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/audit-ingredient-lines',
+          headers := jsonb_build_object('Content-Type','application/json','Authorization',
+            'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name='cron_service_role_key' limit 1)),
+          body := '{}'::jsonb);
+        -- then, after ~30s:
+        select funnel->'rows_that_lost_a_line', funnel->'affected'
+        from pipeline_runs where provider='audit-ingredient-lines' order by id desc limit 1;
+        ```
       - [ ] **Store the source description alongside each row.** This audit needed YouTube only
         because the description is thrown away after generation. Keeping it (or its parsed list)
         would make every future fidelity question answerable from SQL, and this is the second time

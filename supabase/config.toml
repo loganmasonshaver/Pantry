@@ -52,3 +52,8 @@ verify_jwt = false
 # pg_cron posts here with the service-role key / CRON_SECRET, not a user JWT.
 [functions.trending-health-check]
 verify_jwt = false
+
+# Auth is the same CRON_SECRET / service-role check the trending function uses, done in code —
+# the gateway cannot verify this project's ES256 tokens.
+[functions.audit-ingredient-lines]
+verify_jwt = false
