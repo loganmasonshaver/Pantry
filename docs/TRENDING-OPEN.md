@@ -361,6 +361,38 @@ Fired from SQL with the Vault pattern; both landed in `pipeline_runs`.
 - [x] **`macros_from_creator` is NOT being over-claimed.** Splits were `{creator 1, computed 2,
       model 2}` and `{creator 1, computed 1}` — a mix, never 100% creator. That was the one failure
       mode with no downstream catch.
+- [x] **⚠️ VARIANCE LOCATED: it is ENTIRELY in the LLM step, not the candidate pipeline.**
+      Stage-by-stage across the two runs, minutes apart:
+
+      | stage | run 3 | run 4 |
+      |---|---|---|
+      | rawCandidates | 644 | **644** |
+      | afterDedup | 455 | 448 |
+      | afterViewFloor | 145 | 142 |
+      | afterIngredientGate | 39 | 40 |
+      | sentToLLM | 39 | 40 |
+      | **LLM returned** | **19** | **6** |
+      | stored | 5 | 2 |
+
+      **Everything up to the model is stable — 644 raw candidates both times, and 39 vs 40 sent.**
+      From near-identical input the model returned 19 recipes once and 6 the next. YouTube search
+      is not the variance source and neither are the gates; the model's own selectivity is.
+
+      **This makes the architectural fix far cheaper than PRELAUNCH assumes.** That item proposes
+      "run 2-3x, keep the best batch" — but a full run costs ~1,314 YouTube units, and the
+      expensive half is the half that is already stable. The retry belongs on the LLM CALL, against
+      the same 39 candidates, at **zero additional quota**. Re-running the whole pipeline would be
+      paying three times over for a stage that does not vary.
+      Likely mechanisms to check first: the prompt says "For each video you SELECT", so the model is
+      choosing a subset and its appetite varies; and `finish_reason=length` truncation is already
+      flagged in this file as something to watch.
+- [x] **Yield variance also explains 2026-09-03's two meals.** No funnel exists for it —
+      `pipeline_runs` predates that cron — but both rows were written at 08:00:22, twenty-two
+      seconds after the trigger, and a full run took 60-90s today. A fast run is a small run. At
+      the observed 26-33% survival, 2 stored implies ~6-8 recipes back from the model, which is
+      exactly run 4's draw. No separate defect: the same LLM variance, sampled once a day and made
+      permanent by the swap.
+      Ten-day spread for reference: 15, 2, 11, 18, 4, 18, 4, 9, 7, 13 against STORE_CAP 18.
 - [x] **YIELD VARIANCE OBSERVED DIRECTLY: identical code, minutes apart, raw 19 vs 6.** The
       PRELAUNCH item asks whether thin days are variance or a defect; two runs is not the ~10 it
       wants, but the spread is now measured rather than remembered, and it matches the 24-vs-5 seen
