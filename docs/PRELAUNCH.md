@@ -9,10 +9,31 @@ Ordered by what should be done first. Later items depend on earlier ones.
 ---
 
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
-- [ ] Confirm `pantry_monthly` ($9.99) and `pantry_annual` ($29.99) exist, are priced right, and are
-      in a submittable state.
-- [ ] Confirm they are attached to the app version being submitted — a first-time IAP is reviewed
-      WITH a version, not on its own.
+- [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.
+      Real product IDs are `com.kobalabs.pantry.monthly` (1 month) and `com.kobalabs.pantry.annual`
+      (1 year) — NOT `pantry_monthly` / `pantry_annual` as this checklist previously said. Group is
+      "Pantry Premium", Apple ID 6763233845 (monthly). Per-subscription localization is filled
+      ("Pantry Premium" / "Unlimited AI meals, scans, and macro tracking"), tax category matches the
+      parent app, availability is all countries.
+      **"Prepare for Submission" is NOT an error** — it is the normal pre-submission state and does
+      not mean anything is wrong. Two genuinely missing fields, below.
+- [ ] **Review screenshot is EMPTY on both products.** Review Information -> Screenshot -> "Choose
+      File" with nothing uploaded. Apple requires a shot of the purchase UI per auto-renewable
+      subscription; this is the usual cause of a product sitting in Missing Metadata. Upload a
+      screenshot of the Superwall paywall showing both prices — the same image serves both products.
+- [ ] **Subscription GROUP localization is EMPTY.** The "Pantry Premium" group's Localization
+      section shows only a Create button. Separate field from the per-subscription localization
+      that IS filled. Create English (U.S.) with display name "Pantry Premium" — this is what users
+      see in iOS Settings when managing the subscription.
+- [ ] **Confirm prices.** "Current Pricing for New Subscribers" was collapsed; $9.99 / $29.99 not
+      yet visually confirmed.
+- [ ] **Leave Family Sharing OFF.** Currently off on monthly. Enabling it CANNOT be undone and lets
+      one purchase cover up to six people.
+- [ ] **Attach to the app version and submit TOGETHER.** App Store Connect states it twice on
+      these pages: "Your first subscription group must be submitted with a new app version" and
+      "Your first auto-renewable subscription must be submitted with a new app version." They
+      cannot go on their own. Submitting the app WITHOUT them attached leaves the IAPs in limbo —
+      the most likely explanation for the half-remembered "not approved".
 - [ ] Confirm the Superwall product mapping points at those exact product IDs.
 - Context: Logan recalls App Store Connect or Superwall reporting "not approved" at some point.
   Banking/Mercury is confirmed complete, so that is NOT the cause. Most likely remaining causes:
