@@ -76,6 +76,25 @@ const MAX_INGREDIENT_LINE = 140
 // while catching method sentences, which are almost never shorter.
 const BULLET_QTY_REQUIRED_OVER = 60
 
+// Group headings inside a creator's ingredient list. These are NOT food and must not be counted,
+// because parsed.length is the denominator of the retention contract: every heading counted inflates
+// the number of entries the model is required to produce, and the recipe is then rejected for a
+// shortfall it never had.
+//
+// Measured on a real dry run (2026-09-04): 7 of 19 candidates were rejected as `dropped`, and two of
+// them failed purely on headings — "Batter ingredients for about 10 brownies" and "Topping" on
+// High Protein Brownies, "Dough ingredients for about 2 servings or 20 small balls" and "Side from
+// the video" on High Protein Tiramisu Balls.
+//
+// Deliberately TIGHT. Removing a line from `parsed` shrinks the denominator, so an over-broad
+// pattern stops the contract protecting a real ingredient — the same "shrink one side" hazard the
+// retention comparison already warns about, just in the other direction. A real ingredient line
+// essentially never contains the word "ingredients" or the phrase "from the video".
+const SOURCE_HEADING_LINE = new RegExp(
+  '(\\bingredients\\b|\\bfrom the video\\b)' +
+  '|^\\s*(toppings?|frosting|icing|filling|garnishe?s?|coating|glaze|drizzle|assembly' +
+  '|for serving|to serve|seasonings?|spices)\\s*$', 'i')
+
 // `maxLine` exists ONLY so an audit can faithfully re-run the parser under a previous cap. The
 // first attempt simulated the old behaviour by stripping long lines BEFORE parsing, which is not
 // the same thing: removing lines can flip the `bulleted.length >= 3 ? bulleted : quantified`
@@ -127,6 +146,11 @@ function parseIngredientBlock(desc: string, maxLine: number = MAX_INGREDIENT_LIN
     // So the length guard is replaced by the honest rule it was standing in for. Short bulleted
     // lines stay exempt because "Cilantro", "Salt to taste" and "Cream cheese" are real
     // unquantified ingredients; a line this long claiming to be one should say how much.
+    // A heading is not an ingredient, and counting one costs a whole recipe — see the note above.
+    if (SOURCE_HEADING_LINE.test(line) && !QTY_START.test(line)) {
+      console.log(`[parse] group heading excluded from the ingredient count: ${line.slice(0, 80)}`)
+      continue
+    }
     if (wasBulleted && line.length >= BULLET_QTY_REQUIRED_OVER && !QTY_START.test(line)) {
       console.log(`[parse] long bulleted line has no leading quantity, treated as prose: ${line.slice(0, 90)}`)
       continue

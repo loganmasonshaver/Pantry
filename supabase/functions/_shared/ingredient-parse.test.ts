@@ -385,3 +385,28 @@ test('a decimal quantity still parses after the numbered-marker change', () => {
   const out = parseIngredientBlock('Ingredients:\n2.5 cups flour\n1 tsp salt\n100g butter\n\nInstructions:\nMix.')
   assert.ok(out.some(l => l.startsWith('2.5 cups')), `decimals must be untouched: ${out.join(' / ')}`)
 })
+
+// Real headings from the 2026-09-04 dry run. Each one inflated parsed.length and cost a whole
+// recipe: the retention contract demanded an entry the model could never produce, because the
+// "entry" was a section label.
+test('group headings are excluded from the ingredient count', () => {
+  const out = parseIngredientBlock(`Ingredients:
+Batter ingredients for about 10 brownies
+60 g ground oats
+200 g skyr
+3 bananas
+2 eggs
+Topping
+Sugar-free chocolate drops of your choice`)
+  assert.ok(!out.some(l => /ingredients/i.test(l)), `"Batter ingredients..." must not count: ${out.join(' / ')}`)
+  assert.ok(!out.includes('Topping'), `"Topping" must not count: ${out.join(' / ')}`)
+  assert.ok(out.includes('60 g ground oats'), 'real ingredients must survive')
+})
+
+test('heading exclusion does not eat a quantified line that mentions a heading word', () => {
+  // The guard is `&& !QTY_START` precisely so a real quantified line is never removed — removing
+  // one would shrink the retention denominator and stop the contract protecting it.
+  const out = parseIngredientBlock('Ingredients:\n100g cream cheese frosting\n2 eggs\n1 cup flour\n50g spices\n\nInstructions:\nMix.')
+  assert.ok(out.includes('100g cream cheese frosting'), `quantified "frosting" line must survive: ${out.join(' / ')}`)
+  assert.ok(out.includes('50g spices'), `quantified "spices" line must survive: ${out.join(' / ')}`)
+})
