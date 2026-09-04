@@ -111,8 +111,32 @@ had been silently dead for 19 days. Treat "it looks fine" as untested.
         food. Both added to the negative prompt too. Measured first: only **1 of 178 rows** carries
         an equipment line, so this is narrow by design rather than a broad filter that would
         misread "1 container greek yogurt" as a container.
-      - [ ] **⚠️ NEW, and the biggest thing this investigation turned up: nothing records whether
-        macros came from the creator or were invented.** Jello's were invented; Pepperoni Pizza
+      - [x] **BUILT 2026-09-04 — macros are now COMPUTED, not guessed, when the creator published
+        none.** `computePerServingMacros` in `_shared/macro-estimate.ts` runs `estimateMacros` over
+        the creator's own ingredient list and divides by the serving count. Wired into the sanitize
+        chain BEFORE the coherence gate so the gate judges the numbers that will actually be stored.
+        `macros_source` column added ('creator' | 'computed' | 'model'), model now required to
+        declare `macros_from_creator` and told explicitly that a wrong `true` is the one thing that
+        cannot be caught downstream.
+        **Deliberately NOT a rejection gate.** Requiring published macros would intersect two
+        already-narrow filters — only ~28% of candidates have a parseable ingredient list — against
+        a pipeline whose yield problem is measured (24 raw vs 5 on identical runs). Same videos,
+        better numbers.
+        **Abstains rather than inventing:** returns null on an unweighable ingredient or coverage
+        below 0.7, the same guards verifyMacros uses, and the caller then keeps the model's numbers
+        and labels them `model`. 4 unit tests.
+        Backfill is `model` for all 176 pre-existing rows — which of the three they were is unknown,
+        and `model` is the claim that overstates least. The two verified against their videos today
+        are marked correctly: Pepperoni Pizza Pasta `creator`, Jello `computed`.
+      - [ ] **UNVERIFIED — needs a pipeline run.** None of the above has processed a real candidate.
+        On the next run check the `macros_source` split: a run that returns 100% `creator` means the
+        model is lying about `macros_from_creator`, which is the failure mode with no downstream
+        catch. Expect a mix.
+      - [ ] **The app still does not SHOW the distinction.** The column exists and is populated;
+        nothing reads it. A computed number should render differently from the creator's own — "~"
+        prefix or an explicit label. Until that ships, the database knows the difference and the
+        user does not.
+      - [x] ~~nothing records whether macros came from the creator or were invented~~ Jello's were invented; Pepperoni Pizza
         Pasta's 540 kcal / 48g protein are verbatim from @mealswithmax ("Approximately 540 calories
         and 48g protein per serving", "SERVES: 2"). Both look identical in the database and in the
         app. For a macro-tracking app that is the difference between a source and a guess. Fix

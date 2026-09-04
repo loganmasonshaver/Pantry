@@ -9,7 +9,7 @@ import { mapLimit } from '../_shared/concurrency.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
-import { macroIncoherence } from '../_shared/macro-estimate.ts'
+import { computePerServingMacros, macroIncoherence } from '../_shared/macro-estimate.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
@@ -757,6 +757,7 @@ CORE FIDELITY RULES — do not violate these:
 - PRESERVE THE PREPARATION METHOD exactly as described. If the creator cuts the potato into fries, the step says fries — not "dice", not "cube", not "roast". The cut and cooking method determine what the finished dish physically looks like, so changing it silently misrepresents the recipe.
 - NEVER add ingredients (protein powder, cottage cheese, Greek yogurt, egg whites, etc.) to engineer a recipe into a higher protein density. The recipe is what the creator made — period.
 - If the description doesn't list explicit macros, calculate ONLY from the ingredients exactly as the creator listed them — don't invent quantities.
+- "macros_from_creator" is REQUIRED and must be honest: true ONLY when the description actually states calories/protein/carbs/fat. If you worked them out yourself, it is false. Do not set it true because the numbers look reasonable — we recompute the false ones from the ingredients ourselves, so a wrong true is the one thing that cannot be caught downstream.
 
 PROTEIN DENSITY — we rank on this downstream, so do NOT skip:
 - We prefer recipes where protein is ≈25% of calories (20% for desserts), but DO NOT drop a recipe for missing that bar. Include it with accurate macros — downstream scoring ranks by density and surfaces the highest-protein options automatically.
@@ -870,6 +871,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "contains_dairy": false,
     "contains_gluten": false,
     "contains_nuts": false,
+    "macros_from_creator": true,   // REQUIRED. true ONLY if the description states the numbers.
     "calories": 550,
     "protein": 45,
     "carbs": 40,
@@ -1188,9 +1190,35 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
+            // WHERE THE MACROS CAME FROM. The prompt already asks the model to calculate from the
+            // creator's ingredients when the description states nothing, and it does not reliably
+            // comply — "Jello" returned 20g protein where 120g of gelatin gives ~26g, and invented
+            // a serving count the creator never gave. Multiplying grams by 4 is not a job for a
+            // language model, so when the creator published nothing we do the arithmetic here.
+            //
+            // Deliberately NOT a rejection. Requiring published macros would intersect two already
+            // narrow filters — only ~28% of candidates have a parseable ingredient list at all —
+            // and the pipeline's yield problem is measured (24 raw vs 5 on identical runs). Same
+            // videos, better numbers.
+            if (r.macros_from_creator === true) {
+              r._macrosSource = 'creator'
+            } else {
+              const computed = computePerServingMacros(r.ingredients, toInt(r.servings) ?? 1)
+              if (computed) {
+                r.calories = computed.calories; r.protein = computed.protein
+                r.carbs = computed.carbs; r.fat = computed.fat
+                r._macrosSource = 'computed'
+              } else {
+                // Estimate not trustworthy (unweighable ingredient, or the table recognised too
+                // little of the dish). Keep the model's numbers but say so — inventing a fallback
+                // here would be the exact defect this block exists to remove.
+                r._macrosSource = 'model'
+              }
+            }
             // Do the four numbers agree with each other? Nothing checked this before, which is how
             // "Pepperoni Pizza Pasta" reached the pool at 540 kcal with 0 carbs and 0 fat. Cheap,
-            // needs no reference data, and cannot abstain the way verifyMacros does.
+            // needs no reference data, and cannot abstain the way verifyMacros does. Runs AFTER the
+            // recompute above so it judges the numbers that will actually be stored.
             const incoherent = macroIncoherence(r)
             if (incoherent) { rejMacroIncoherent++; console.log(`[funnel] rejected "${name}" — ${incoherent}`); return false }
             seenNames.add(key)
@@ -1533,6 +1561,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           return null
         })(),
         source_verified: r._sourceVerified === true,
+        // 'creator' = stated in the description | 'computed' = our arithmetic on their ingredients
+        // | 'model' = neither could be trusted. The UI needs this to stop showing a guess as a source.
+        macros_source: r._macrosSource ?? 'model',
         // Ingredients are stored at the creator's full-batch scale, so servings is what makes the
         // per-serving macros interpretable. Defaults to 1 rather than null: an unknown serving
         // count is far more likely to be a single portion than a missing batch.

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
+import { computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -334,4 +334,33 @@ test('macroIncoherence rejects a gross overstatement that has no zeros', () => {
 
 test('macroIncoherence abstains when calories are absent — that is the noMacros gate', () => {
   assert.equal(macroIncoherence({ calories: 0, protein: 0, carbs: 0, fat: 0 }), null)
+})
+
+// ── computePerServingMacros ───────────────────────────────────────────────────────────────────
+test('computePerServingMacros divides a full batch by the serving count', () => {
+  // 250g chicken breast is the single ingredient, over 2 servings.
+  const one = computePerServingMacros([{ name: 'chicken breast', grams: '250g' }], 1)
+  const two = computePerServingMacros([{ name: 'chicken breast', grams: '250g' }], 2)
+  assert.ok(one && two, 'both should be computable from a single weighed ingredient')
+  assert.equal(two!.protein, Math.round(one!.protein / 2))
+  assert.equal(two!.calories, Math.round(one!.calories / 2))
+})
+
+test('computePerServingMacros abstains when an ingredient cannot be weighed', () => {
+  // "to taste" leaves a hole. Publishing a total that is knowingly missing food is the failure
+  // mode this returns null to avoid.
+  assert.equal(
+    computePerServingMacros([{ name: 'chicken breast', grams: '250g' }, { name: 'olive oil', grams: 'to taste' }], 1),
+    null,
+  )
+})
+
+test('computePerServingMacros abstains on a dish too small to reason about', () => {
+  assert.equal(computePerServingMacros([{ name: 'salt', grams: '1g' }], 1), null)
+})
+
+test('computePerServingMacros treats a missing/zero serving count as 1, never divides by zero', () => {
+  const a = computePerServingMacros([{ name: 'chicken breast', grams: '250g' }], 0)
+  const b = computePerServingMacros([{ name: 'chicken breast', grams: '250g' }], 1)
+  assert.deepEqual(a, b)
 })

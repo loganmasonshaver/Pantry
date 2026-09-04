@@ -431,3 +431,36 @@ export function macroIncoherence(m: {
   }
   return null
 }
+
+// ── Macros computed from the creator's own ingredients ──────────────────────────────────────
+// The trending prompt already tells the model: "If the description doesn't list explicit macros,
+// calculate ONLY from the ingredients exactly as the creator listed them." The model does not
+// reliably comply. Live example: "Jello" (hcBwG5_7POU) — the creator published no macros at all,
+// 120g of beef gelatin is ~26g protein per serving across the batch, and the model returned 20g
+// and invented a serving count the creator never gave.
+//
+// Multiplying grams by 4 is not a job for a language model. estimateMacros already does it
+// deterministically off a lookup table, so when the creator published nothing we compute the
+// numbers here instead of asking. Same yield — no video is rejected for lacking macros — but the
+// number stops being a guess.
+//
+// Returns null when the estimate is not trustworthy enough to publish, using the SAME guards
+// verifyMacros abstains on: an unreadable quantity means real food is missing from the total, and
+// low coverage means the lookup table did not recognise enough of the dish. Null is the caller's
+// signal to keep the model's numbers and label them as such, never to invent a fallback.
+export function computePerServingMacros(
+  ingredients: MacroIngredient[] | undefined,
+  servings: number,
+): { calories: number; protein: number; carbs: number; fat: number } | null {
+  const n = Math.max(1, Math.round(Number(servings) || 1))
+  const est = estimateMacros(ingredients)
+  // An ingredient we can price but cannot weigh leaves a hole. Publishing a total that is knowingly
+  // missing a protein source is worse than admitting the number came from the model.
+  if (est.unweighed.length > 0) return null
+  if (est.totalG < MACRO_TOLERANCE.minTotalG || est.coverage < MACRO_TOLERANCE.minCoverage) return null
+  // estimateMacros works at FULL BATCH scale, matching how ingredients are stored; macros are
+  // per serving. This division is the one place the two scales meet — see CLAUDE.md on never
+  // scaling ingredients to match macros, which is the same bug in the opposite direction.
+  const per = (v: number) => Math.max(0, Math.round(v / n))
+  return { calories: per(est.kcal), protein: per(est.protein), carbs: per(est.carbs), fat: per(est.fat) }
+}
