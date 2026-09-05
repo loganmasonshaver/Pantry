@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { todayStr } from './localDate'
 
@@ -115,13 +116,22 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
 // reshuffles every shelf at once. A stale-day cache is now simply not painted: a skeleton for two
 // seconds is honest, where showing yesterday's feed and rearranging it under the reader is not.
 
+// AsyncStorage is imported STATICALLY at the top of this file, like the ten other files in the app
+// that use it. It used to be `(await import(...)).default` inside each of the six functions below,
+// which made Metro split it into its own async chunk — and the device then fetched that chunk on
+// demand the first time Discover touched storage. It shows up in a cold-start trace as a 310ms
+// `iOS Bundled … async-storage (567 modules)` sitting between Discover's FOCUS and its first disk
+// read: the single largest block in an 800ms tap-to-paint. Home never paid it because Home imports
+// statically, which is why its cache read measured 25ms against Discover's 427ms.
+// Mostly a DEV cost — a release build does not fetch chunks over HTTP — but it also made every
+// measurement of this screen lie, and perf.ts exists to make these deltas trustworthy.
+
 export const discoverCacheKey = (uid: string) => `pantry_discover_${uid}`
 
 // Only the first 60 are kept — enough to fill the rail on first paint without storing the pool.
 const CACHE_SLICE = 60
 
 export async function writeDiscoverCache(uid: string, meals: DiscoverMeal[]): Promise<void> {
-  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
   await AsyncStorage.setItem(
     discoverCacheKey(uid),
     JSON.stringify({ day: todayStr(), meals: meals.slice(0, CACHE_SLICE) }),
@@ -132,7 +142,6 @@ export async function writeDiscoverCache(uid: string, meals: DiscoverMeal[]): Pr
 // before the stamp existed) has no day and is treated as stale, which self-heals on first write.
 export async function readDiscoverCache(uid: string): Promise<DiscoverMeal[] | null> {
   try {
-    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
     const raw = await AsyncStorage.getItem(discoverCacheKey(uid))
     if (!raw) return null
     const parsed = JSON.parse(raw)
@@ -157,7 +166,6 @@ export const HERO_SEEN_CAP = 60 // ~2 months of daily heroes before the pool has
 
 export async function readHeroPick(): Promise<HeroPick | null> {
   try {
-    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
     const raw = await AsyncStorage.getItem(HERO_KEY)
     if (!raw) return null
     const p = JSON.parse(raw)
@@ -170,7 +178,6 @@ export async function readHeroPick(): Promise<HeroPick | null> {
 
 export async function writeHeroPick(pick: HeroPick): Promise<void> {
   try {
-    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
     await AsyncStorage.setItem(HERO_KEY, JSON.stringify({ ...pick, seen: pick.seen.slice(-HERO_SEEN_CAP) }))
   } catch {
     // best-effort: a failed write just means the hero may repeat once
@@ -231,7 +238,6 @@ export const discoverPersonalKey = (uid: string) => `pantry_discover_personal_${
 
 export async function writeDiscoverPersonal(uid: string, p: DiscoverPersonal): Promise<void> {
   try {
-    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
     await AsyncStorage.setItem(discoverPersonalKey(uid), JSON.stringify(p))
   } catch { /* a cache write must never break the screen */ }
 }
@@ -248,7 +254,6 @@ export async function writeDiscoverPersonal(uid: string, p: DiscoverPersonal): P
 // usually logged nothing, so the truthful answer and the cached one agree and nothing moves.
 export async function readDiscoverPersonal(uid: string): Promise<DiscoverPersonal | null> {
   try {
-    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
     const raw = await AsyncStorage.getItem(discoverPersonalKey(uid))
     if (!raw) return null
     const p = JSON.parse(raw)
