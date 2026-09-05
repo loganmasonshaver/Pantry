@@ -27,11 +27,17 @@ function photoVariant(mealName: string): string {
     'low fifteen-degree angle close to the surface',
     'tight forty-five-degree crop filling the frame',
   ]
+  // BACKDROP ONLY — deliberately no plate/bowl/dish here. These four strings used to name a
+  // vessel too ("pale ceramic plate on a warm oak board"), which silently overrode the vessel
+  // Stage 1 had already chosen and, worse, could only ever express ONE. Kala Chana Protein Balls
+  // was described as balls on a plate "alongside a curd dip in a small ramekin" and rendered with
+  // no ramekin at all: the description asked for two vessels and the trailer asserted one.
+  // Choosing the vessel is Stage 1's job; this axis is only the surface it stands on.
   const SURFACE = [
-    'pale ceramic plate on a warm oak board',
-    'matte stoneware on a dark slate surface',
-    'off-white speckled plate on natural linen',
-    'rustic terracotta dish on weathered wood',
+    'on a warm oak board',
+    'on a dark slate surface',
+    'on natural linen',
+    'on weathered wood',
   ]
   const LIGHT = [
     'soft window light from the upper left',
@@ -299,7 +305,7 @@ Deno.serve(async (req: Request) => {
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
-    const { mealName, ingredients = [], steps = [] } = await req.json()
+    const { mealName, ingredients = [], steps = [], describeOnly = false } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
 
     // Declared HERE, above the cache lookup, because the cache-HIT path backfills
@@ -319,6 +325,18 @@ Deno.serve(async (req: Request) => {
     const stepStrings: string[] = Array.isArray(steps)
       ? steps.map((s: any) => typeof s === 'string' ? s : (s?.detail ?? s?.title ?? '')).filter(Boolean)
       : []
+
+    // DESCRIBE-ONLY: return stage 1's description and stop, without touching the cache, the
+    // FAL credits or the stored image. Stage 1 is otherwise only ever console.logged during a real
+    // generation, which made "is the description wrong, or is Flux ignoring a correct one?"
+    // unanswerable — the Kala Chana photo drew blended ingredients raw on top and dropped the curd
+    // dip, and there was no way to tell which stage did it. Internal-auth only: it is an
+    // unmetered LLM call, so a signed-in user must not be able to spin it.
+    if (describeOnly) {
+      if (!isInternal) return new Response(JSON.stringify({ error: 'internal only' }), { status: 401, headers: jsonHeaders })
+      const desc = await generateVisualDescription(mealName, ingredients, stepStrings)
+      return new Response(JSON.stringify({ description: desc, steps: stepStrings }), { headers: jsonHeaders })
+    }
 
     const cacheKey = normalizeKey(mealName)
     const legacyKey = legacyNormalizeKey(mealName)
@@ -375,10 +393,23 @@ Deno.serve(async (req: Request) => {
 
     let prompt: string
     if (description) {
-      // STAGE 2 (preferred): description-led prompt with photography direction layered on.
-      // The negative-prompt trailer is embedded in the prompt body since Flux 2's API
-      // doesn't accept a separate negative_prompt field — this is best-effort guidance.
-      prompt = `${description}. Professional food photography, ${photoVariant(mealName)}, sharp focus on subject, shallow depth of field, shot on Sony A7R IV with 50mm f/2.8 prime, photorealistic raw photo aesthetic. Negative prompt: text, watermark, logo, signage, label, blurry, oversaturated, artificial steam plume, cartoon, illustration, plastic-looking, stacked separate components, hallucinated ingredients not in the dish, fruit pieces or solid chunks that were only named by a flavouring, kitchen equipment or containers depicted as food, weird AI artifacts, multiple plates, deconstructed.`
+      // STAGE 2 (preferred): the description leads and everything after it is camera direction.
+      //
+      // The "Negative prompt: text, watermark, ... multiple plates, deconstructed." trailer that
+      // used to live here is GONE, and it must not come back. Two reasons, both verified:
+      //   1. fal-ai/flux-2 exposes no `negative_prompt` field (checked against fal's API schema
+      //      2026-09-05 — prompt, guidance_scale, seed, num_inference_steps, image_size,
+      //      num_images, acceleration, enable_prompt_expansion, sync_mode, enable_safety_checker,
+      //      output_format, and nothing else). So the trailer was never a negative prompt; it was
+      //      ~60 words appended to the POSITIVE one.
+      //   2. Flux's text encoder has no negation semantics. "no X" and "X" light up the same
+      //      features, so the trailer was handing the model the exact vocabulary of the thing it
+      //      was trying to forbid — "pieces", "solid chunks", "ingredients", "components",
+      //      "containers", "multiple plates" — and burying a 27-word description under 90 words
+      //      of boilerplate that is byte-identical for every dish in the app.
+      // Anything that must NOT appear has to be handled where a word can still be removed: in
+      // Stage 1's INVISIBLE_INGREDIENT rewrite, which works by never emitting the noun at all.
+      prompt = `${description} Professional food photography, ${photoVariant(mealName)}, sharp focus, shallow depth of field, photorealistic.`
     } else {
       // FALLBACK: original static template (keyword-detected vessel + sauce-filtered
       // ingredients). Worse than the LLM-guided version but never breaks image gen.
@@ -404,7 +435,10 @@ Deno.serve(async (req: Request) => {
                    : nameLower.includes('curry')     ? 'ceramic bowl with rice on the side'
                    : nameLower.includes('toast')     ? 'dark ceramic plate'
                    : 'dark ceramic plate'
-      prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant — glossy saucy finish with sauces fully integrated into the food (never in separate bowls or jars), sheen and moisture visible, rich saturated colors, no side dishes, no garnish props, no extra vessels, ${photoVariant(mealName)}, sharp focus, appetizing, photorealistic`
+      // Phrased affirmatively for the same reason Stage 2 above dropped its negative trailer:
+      // "no side dishes, no garnish props, no extra vessels" put "side dishes", "garnish props"
+      // and "extra vessels" into a prompt that cannot negate them.
+      prompt = `Professional food photography of ${mealName}${ingredientList}, served in a ${vessel}, complete and fully assembled exactly as served in a restaurant, sauces integrated into the food, sheen and moisture visible, rich saturated colors, a single plated serving, ${photoVariant(mealName)}, sharp focus, appetizing, photorealistic`
     }
 
     // Generate via FAL Flux 2
