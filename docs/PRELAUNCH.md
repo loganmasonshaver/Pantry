@@ -76,29 +76,34 @@ it draws from a fresh bucket instead of the previous day's leftovers; budget **1
 6 for testing**. Run tests SEQUENTIALLY — 3 fired concurrently starved each other and dropped the
 candidate gate from 61 videos to 8.
 
-## 2b. RAISED BY LOGAN 2026-09-05 — image does not match the recipe  *(Kala Chana Protein Balls)*
-Live bug, not a stale image. The row's `steps` are correct in the DB and the pipeline HAS passed
-them to `generate-meal-image` since `fd48c47` (2026-08-11); this photo was generated 2026-08-26,
-so every relevant prompt rule was already in place when it rendered wrong.
-- [ ] **Blended ingredients are drawn raw and whole on top.** Step 1 is "Blend chana, oats, onion,
-      chillies, garlic, and spices" — the photo shows whole chickpeas, loose raw oat flakes, sliced
-      raw green chilli and diced raw onion garnishing the surface. The prompt's "READ THE STEPS FOR
-      INGREDIENT ROLES" rule says exactly this must not happen; it lost.
-- [ ] **The curd dip is missing.** Step 4 is "Serve with curd dip" and curd is the ONE ingredient
-      that should be visible. It is the only one absent.
-- [ ] **"Small balls" rendered as one large ball.** Nothing in either prompt stage carries the
-      COUNT or size of a formed item.
-- [ ] Root-cause candidates, in order of suspicion — see the session notes:
-      (a) the smoothie EXAMPLE in the stage-1 system prompt teaches the failure: it blends
-      strawberries and then puts a strawberry slice back on top;
-      (b) the stage-2 negative prompt forbids "stacked separate components", "no side dishes",
-      "multiple plates", "deconstructed" — which is exactly what a dip served alongside IS;
-      (c) COVERAGE ("EVERY ingredient ... MUST be named", "if 6+ are visible, list them all")
-      outweighs the steps rule in a recipe where applying steps correctly hides 5 of 6.
-- [ ] **Blocked on making stage 1 observable.** The description is only ever `console.log`ed during
-      a real generation, so there is no way to tell whether stage 1 or stage 2 is at fault. Needs a
-      describe-only path before any prompt edit, or the fix is unverifiable like everything in §1
-      of the handoff.
+## 2b. RAISED BY LOGAN 2026-09-05 — image did not match the recipe  *(FIXED, but see the last item)*
+Kala Chana Protein Balls rendered as one giant ball garnished with whole chickpeas, raw oat flakes,
+sliced chilli and diced onion, with no curd dip — for a recipe that blends everything and serves it
+with a curd dip.
+- [x] **Stage 1 was innocent.** Added a `describeOnly` path to `generate-meal-image` (internal-auth
+      only, one near-free LLM call, no FAL spend) so the description is readable without generating
+      an image. Drive it from SQL with the Vault pattern; see `docs/TRENDING-OPEN.md`. It returned
+      *"...pan-seared protein balls...served alongside a smooth, creamy white curd dip in a small
+      ramekin"* — plural, blended, ramekin. Everything reported missing was already there.
+- [x] **Root cause: the "Negative prompt: ..." trailer was positive tokens.** `fal-ai/flux-2` has
+      no `negative_prompt` field (verified against fal's schema 2026-09-05), so that string was ~60
+      words appended to the POSITIVE prompt — and Flux's text encoder has no negation semantics
+      regardless. It fed the model "pieces", "solid chunks", "ingredients", "components",
+      "containers", "multiple plates", and buried a 27-word description under 90 words of
+      dish-independent boilerplate. Removed. **Do not reintroduce it in any form.**
+- [x] **Second conflict: `photoVariant` named the vessel.** Its SURFACE axis said "pale ceramic
+      plate on a warm oak board", overriding Stage 1's vessel and unable to express two (plate +
+      ramekin). Now backdrop-only; variety unchanged.
+- [x] **Verified by downloading the regenerated file and looking at it** — not by checking that its
+      size changed. All three defects gone in one generation.
+- [ ] **⚠️ ALL 1,370 CACHED IMAGES WERE GENERATED UNDER THE BROKEN PROMPT.** Only this one row has
+      been corrected. There is no way to tell which of the rest are wrong without looking at them,
+      and no automated check exists. Decide before launch: spot-audit the Discover pool by eye, or
+      bulk-regenerate (cost = 1,370 FAL generations). Regeneration is cheap to trigger — delete the
+      `image_cache` row, null `trending_meals.image`, re-invoke; the `?v=` token handles clients.
+- [ ] **Hero images are 512x512** (`image_size: "square"`) but the meal-detail hero is a tall
+      near-full-width box. Every photo in the app is being upscaled. Unmeasured, and it is a
+      one-word change to a larger size — but it changes cost, so decide deliberately.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
