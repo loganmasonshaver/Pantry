@@ -465,7 +465,13 @@ Deno.serve(async (req: Request) => {
 
         if (!uploadErr) {
           const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
-          const permanentUrl = urlData.publicUrl
+          // CACHE-BUST. `upload` uses `upsert`, so regenerating a dish overwrites the object at the
+          // SAME path — and every client that already has it keeps serving the old bytes from its
+          // own disk cache, indefinitely. Protein Jello was corrected three times on 2026-09-05 and
+          // the device still showed the first version; the file at the URL was right the whole time.
+          // A version token makes each regeneration a distinct URL, so clients refetch. It changes
+          // nothing about storage — the object path is untouched — only what the client is asked for.
+          const permanentUrl = `${urlData.publicUrl}?v=${Date.now()}`
           // Store under BOTH the exact key and the order-insensitive one, so the next meal whose
           // name is these same words in a different order resolves to this image instead of paying
           // for its own. Two tiny rows against one Flux generation is the right trade.
