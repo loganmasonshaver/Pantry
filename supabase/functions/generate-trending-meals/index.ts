@@ -891,7 +891,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
 [
   {
     "video_index": 1,
-    "name": "The actual dish name (cleaned up)",
+    "name": "The dish name as a RECIPE TITLE — include what makes it this recipe. A creator's video title is not a dish name: 'We added protein to everything else... why not jello?' is Protein Jello, not Jello. Two to five words. Never a bare category noun on its own.",
     "category": "meal",
     "servings": 1,
     "shelf_tag": "american-comfort",   // REQUIRED. Must be EXACTLY one of the nine values listed below.

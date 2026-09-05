@@ -134,7 +134,25 @@ function sortedKey(name: string): string {
 // brownie) end up as stacked components and cold dishes get steam plumes. Gemini Flash
 // Lite is essentially free; OpenAI fallback is cheap. If both fail, the caller falls back
 // to the original static template so image generation never hard-stops.
+// Ingredients that are INVISIBLE in a finished dish and whose NAMES mislead an image model.
+// Telling the description writer not to draw them was not enough: "Jello" regenerated under that
+// rule on 2026-09-04 and Flux still produced diced fruit, because "fruit flavored zero sugar water
+// drink enhancer" was in the list at all and the word survives into the pipeline. The reliable fix
+// is to never hand these to the model — a word that is not in the prompt cannot be rendered.
+//
+// Every entry here dissolves completely: extracts, essences, flavour drops and syrups, drink
+// enhancers, sweeteners, food colouring. Deliberately NOT "powder" on its own, which would strip
+// cocoa powder and baking powder; and not gelatin, which IS the dish in the case that motivated it.
+const INVISIBLE_INGREDIENT = /(extract|essence|drink enhancer|water enhancer|sweetener|food colou?ring|flavou?r(?:ing|ed)?\s*(?:drops?|syrup|enhancer|concentrate))/i
+
 async function generateVisualDescription(mealName: string, ingredients: string[], steps: string[] = []): Promise<string | null> {
+  // Filtered BEFORE the prompt is built, not forbidden inside it.
+  const visible = ingredients.filter(i => !INVISIBLE_INGREDIENT.test(String(i)))
+  if (visible.length < ingredients.length) {
+    console.log(`[image] dropped ${ingredients.length - visible.length} invisible ingredient(s) from the visual prompt for "${mealName}"`)
+  }
+  // Keep at least something to describe — if a recipe is ALL flavourings, fall back to the original.
+  ingredients = visible.length ? visible : ingredients
   const sysPrompt = `You are a food stylist. In ONE concise sentence (under 50 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate.
 
 CRITICAL — INGREDIENT FIDELITY: Compose the description from the SPECIFIC ingredients listed. If the dish name is generic (e.g., "Fruit", "Bowl", "Plate"), use the exact ingredient (e.g., "sliced apple" not "berries"). NEVER substitute photogenic alternatives or generic interpretations of the name.
