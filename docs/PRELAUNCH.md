@@ -96,6 +96,19 @@ with a curd dip.
       ramekin). Now backdrop-only; variety unchanged.
 - [x] **Verified by downloading the regenerated file and looking at it** — not by checking that its
       size changed. All three defects gone in one generation.
+- [x] **Second report same day — Bounty Overnight Weetabix.** Dry chocolate flakes instead of a
+      melted ganache; whole Weetabix instead of the crushed-and-soaked pressed base. Confirmed the
+      vessel bug visually: the old photo is a glass container sitting INSIDE a terracotta bowl,
+      because Stage 1 said "glass container" and photoVariant said "rustic terracotta dish"
+      (surface index 3 for this name — computed, not guessed). Ganache came back for free once the
+      boilerplate was gone. The base needed a new rule: PROCESSED INGREDIENTS had no entry for
+      crushed/soaked cereal, and the model knows a cereal's DRY look far better than its soaked
+      one. Verified at v3 by downloading the file.
+- [ ] **NEGATIVE RESULT — the LAYERED DISHES build-order rule does not work.** Step 3 sprinkles
+      coconut on the yoghurt and step 5 spreads chocolate OVER it, so the coconut belongs buried.
+      The rule is in the prompt, reaches the model, and the description still lists coconut after
+      the ganache on both runs — the model reads "sprinkle over" as a finishing garnish. Same shape
+      as the merged-ingredient finding. Left in place, but do not spend more prompt rounds on it.
 - [ ] **⚠️ ALL 1,370 CACHED IMAGES WERE GENERATED UNDER THE BROKEN PROMPT.** Only this one row has
       been corrected. There is no way to tell which of the rest are wrong without looking at them,
       and no automated check exists. Decide before launch: spot-audit the Discover pool by eye, or
