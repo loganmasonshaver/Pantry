@@ -279,7 +279,7 @@ const corsHeaders = {
 // Server-side because it has to be: RLS on trending_meals allows updates only to a creator's own
 // rows, so a client write-back is correctly refused. Scoped to `image is null` so it can never
 // overwrite a photo the pipeline already chose, and awaited-but-ignored so it cannot fail a request.
-async function backfillTrendingImage(db: any, mealName: string, url: string, isInternal: boolean) {
+async function backfillTrendingImage(db: any, mealName: string, url: string, isInternal: boolean, replaceExisting = false) {
   // GUARD 1 — internal callers only. My first version claimed RLS made this safe; it does not.
   // `db` is the SERVICE-ROLE client, which bypasses RLS entirely, so any signed-in caller could
   // have named a real trending row, passed their own `ingredients`, and had the resulting image
@@ -296,8 +296,13 @@ async function backfillTrendingImage(db: any, mealName: string, url: string, isI
     return
   }
   try {
-    const { error } = await db.from('trending_meals')
-      .update({ image: url }).eq('name', mealName).is('image', null)
+    // `.is('image', null)` is what makes an unattended backfill safe — it can only ever FILL a
+    // gap, never replace a photo the pipeline chose. But that same scope makes it useless for a
+    // REPAIR, which by definition targets a row that already has a (wrong) image, so a repair
+    // regeneration silently left the stale URL in place and Discover kept serving it. Callers
+    // doing a deliberate fix opt in; the default stays gap-fill-only.
+    const q = db.from('trending_meals').update({ image: url }).eq('name', mealName)
+    const { error } = await (replaceExisting ? q : q.is('image', null))
     if (error) console.log(`[image] trending backfill refused for "${mealName}": ${error.message}`)
   } catch (e) { console.log(`[image] trending backfill threw (ignored): ${(e as Error).message}`) }
 }
@@ -307,7 +312,7 @@ Deno.serve(async (req: Request) => {
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
-    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed } = await req.json()
+    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed, replaceTrending = false } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
 
     // Declared HERE, above the cache lookup, because the cache-HIT path backfills
@@ -524,13 +529,23 @@ Deno.serve(async (req: Request) => {
           const { error: cacheErr } = await db.from('image_cache').upsert(keyRows, { onConflict: 'meal_key' })
           if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
           else console.log('Cached OK:', cacheKey)
+          // Write the fresh URL to trending_meals HERE. This call was missing entirely: a
+          // successful generation wrote image_cache and returned, so trending_meals only ever
+          // learned the URL on some LATER request via the cache-HIT branch. Until that second
+          // request happened, Discover — which reads trending_meals.image directly — showed the
+          // fork-and-knife placeholder for a meal whose photo already existed. That is the same
+          // symptom 17905c0 was written to kill; it fixed the cache-hit path and left this one.
+          await backfillTrendingImage(db, mealName, permanentUrl, isInternal, isInternal && replaceTrending)
           return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
         }
 
-        // Both upload attempts failed — return the FAL URL so the caller has SOMETHING
-        // to render right now, but skip the cache write so the next request retries
-        // from scratch instead of pinning everyone to a soon-to-expire URL.
-        await backfillTrendingImage(db, mealName, imageUrl, isInternal)
+        // Both upload attempts failed — return the FAL URL so the caller has SOMETHING to render
+        // right now, but write NOTHING: not image_cache (a FAL CDN link expires ~24h and the row
+        // would serve a 404 forever) and not trending_meals. There used to be a
+        // backfillTrendingImage call here; it was dead code, because guard 2 rejects any URL that
+        // is not a durable /storage/ one and this branch only ever holds a FAL URL. Dead code that
+        // reads like a safety net is worse than none — it is why the missing call on the SUCCESS
+        // path above went unnoticed.
         return new Response(JSON.stringify({ image: imageUrl }), { headers: jsonHeaders })
       } catch (e) {
         console.log(`Attempt ${attempt + 1} error:`, e)
