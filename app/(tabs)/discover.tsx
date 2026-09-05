@@ -429,6 +429,14 @@ export default function DiscoverScreen() {
   // reader. That is the card shuffling on the right-hand side. Meals arriving early is not enough;
   // the personalisation that decides where they GO has to be there too. Costs a slightly longer
   // skeleton, which is the trade discoverFeed.ts already makes for the stale-day cache.
+  // A network result that MATCHES what we hydrated must not re-render. Every one of these feeds
+  // browseSections, and `new Set(...)` / a fresh array is a new identity even when the contents are
+  // identical — which is enough to re-run the memo and re-claim every shelf. Returning `prev`
+  // makes React bail out entirely. When the values genuinely DID change the update still lands, and
+  // a reorder then is correct rather than noise.
+  const sameArr = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i])
+  const sameSet = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every(v => b.has(v))
+
   const personalReady = profileLoaded && pantryLoaded
   const showSkeleton = loading || !personalReady
 
@@ -501,7 +509,8 @@ export default function DiscoverScreen() {
         supabase.from('meal_logs').select('meal_name, logged_at')
           .eq('user_id', user.id).order('logged_at', { ascending: false }).limit(1),
       ])
-      setPantryNames(new Set((pantry ?? []).map((p: any) => String(p.name ?? '').toLowerCase().trim()).filter(Boolean)))
+      const nextPantry = new Set((pantry ?? []).map((p: any) => String(p.name ?? '').toLowerCase().trim()).filter(Boolean))
+      setPantryNames(prev => sameSet(prev, nextPantry) ? prev : nextPantry)
       if (recent?.[0]?.meal_name) setLastCooked(recent[0].meal_name)
     })()
       // Set on BOTH paths — a failed pantry read must not strand the feed on a skeleton.
@@ -519,13 +528,18 @@ export default function DiscoverScreen() {
       .eq('id', user.id)
       .single()
       .then(async ({ data }) => {
-        setExcludedStaples(new Set([
+        const nextExcluded = new Set([
           ...((data?.staples_excluded ?? []) as string[]).map(x => String(x).toLowerCase()),
           ...dietExcludedStaples(data?.dietary_restrictions ?? []),
-        ]))
-        if (data?.food_dislikes) setFoodDislikes(data.food_dislikes ?? [])
+        ])
+        setExcludedStaples(prev => sameSet(prev, nextExcluded) ? prev : nextExcluded)
+        if (data?.food_dislikes) {
+          const next = data.food_dislikes ?? []
+          setFoodDislikes(prev => sameArr(prev, next) ? prev : next)
+        }
         if (data?.dietary_restrictions) {
-          setDietaryRestrictions((data.dietary_restrictions ?? []).filter((r: string) => r !== 'None'))
+          const next = (data.dietary_restrictions ?? []).filter((r: string) => r !== 'None')
+          setDietaryRestrictions(prev => sameArr(prev, next) ? prev : next)
         }
         if (data?.diet_type) setDietType(data.diet_type)
         if (data?.max_prep_minutes) setMaxPrep(data.max_prep_minutes)
@@ -544,13 +558,15 @@ export default function DiscoverScreen() {
           .select('calories, protein').eq('user_id', user.id).eq('logged_at', loggedToday)
         const eatenCal = (logs ?? []).reduce((sum, l: any) => sum + (l.calories ?? 0), 0)
         const eatenPro = (logs ?? []).reduce((sum, l: any) => sum + (l.protein ?? 0), 0)
-        setBudget({
+        const nextBudget = {
           calLeft: Math.max(0, goalCal - eatenCal),
           proLeft: Math.max(0, goalPro - eatenPro),
           // Before anything is logged, "remaining" is just the full goal and every meal trivially
           // fits — the section would be noise pretending to be personalisation. Gate on it.
           hasLogged: (logs ?? []).length > 0,
-        })
+        }
+        setBudget(prev => (prev && prev.calLeft === nextBudget.calLeft && prev.proLeft === nextBudget.proLeft
+          && prev.hasLogged === nextBudget.hasLogged) ? prev : nextBudget)
         // LAST, deliberately: budget feeds the "Fits your remaining kcal" shelf, and claim() is
         // first-shelf-wins, so a budget that lands after first paint re-allocates the whole page.
         perfMark('Discover PROFILE from network')
@@ -568,6 +584,8 @@ export default function DiscoverScreen() {
   // creator-join round-trip per focus was pure waste. 5-min TTL still picks up the overnight
   // batch and creator edits (any return after the window refetches); rapid tab-switching skips.
   const lastFetchRef = useRef(0)
+  // Holds a fresh pool that arrived while the tab was on screen, until blur — see fetchTrending.
+  const pendingFeedRef = useRef<DiscoverMeal[] | null>(null)
   const TRENDING_TTL_MS = 5 * 60 * 1000
 
   // Instant paint from the cache — but only if it was written TODAY. readDiscoverCache enforces
@@ -599,8 +617,26 @@ export default function DiscoverScreen() {
     const mapped = await loadTrendingMeals()
     perfMark('Discover FEED from network')
     if (!mapped) { setLoading(false); return }
-    setTrending(mapped)
-    hasContentRef.current = true
+    // DO NOT SWAP THE FEED UNDER THE READER.
+    //
+    // The disk cache holds a 60-meal SLICE; the network returns the whole pool. Shelving 60 and
+    // shelving 600 legitimately produce different shelves, so unlike the profile and pantry results
+    // above this cannot be equality-checked away — the data really did change. Applying it while
+    // the page is on screen is what makes the cards visibly reorder a beat after they appear, and
+    // it is the exact failure the personalReady gate was written to prevent. Painting from cache
+    // did not remove that risk, it just moved it after first paint.
+    //
+    // So the fresh pool is parked and applied on BLUR, where a re-layout costs nothing: the user
+    // gets an instant, STABLE page now and the full pool the next time they open the tab. The cache
+    // and the image prefetch are still written immediately below, so nothing is lost if the app
+    // dies first. When there is nothing on screen yet (no cache, or a new day) it applies at once —
+    // otherwise the screen would sit on a skeleton waiting for a swap that never comes.
+    if (hasContentRef.current) {
+      pendingFeedRef.current = mapped
+    } else {
+      setTrending(mapped)
+      hasContentRef.current = true
+    }
     lastFetchRef.current = Date.now() // mark fresh only on success — a failed fetch retries next focus
     setLoading(false)
     if (user) writeDiscoverCache(user.id, mapped) // stale-while-revalidate for the next open
@@ -611,7 +647,14 @@ export default function DiscoverScreen() {
   // (which for a tab screen IS mount), so a separate mount useEffect would just
   // double-fetch on cold load. This single hook covers both — plus it re-syncs
   // creator-recipe edits and overnight cron runs without a manual reload.
-  useFocusEffect(useCallback(() => { fetchTrending() }, [fetchTrending]))
+  useFocusEffect(useCallback(() => {
+    fetchTrending()
+    // Cleanup = blur. Applying the parked pool here means the re-shelve happens on a screen nobody
+    // is looking at, and the next focus renders the full pool with no visible movement.
+    return () => {
+      if (pendingFeedRef.current) { setTrending(pendingFeedRef.current); pendingFeedRef.current = null }
+    }
+  }, [fetchTrending]))
 
   // Foreground refetch: useFocusEffect doesn't re-fire when the app is backgrounded
   // and resumed (the tab is still "focused" the whole time), so without this users
