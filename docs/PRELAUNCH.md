@@ -109,6 +109,25 @@ with a curd dip.
       The rule is in the prompt, reaches the model, and the description still lists coconut after
       the ganache on both runs — the model reads "sprinkle over" as a finishing garnish. Same shape
       as the merged-ingredient finding. Left in place, but do not spend more prompt rounds on it.
+- [x] **THE JELLO "fixed it but Discover still shows the old one" BUG WAS ONLY HALF FIXED — now
+      closed properly 2026-09-05.** `17905c0` wired the cache-HIT path and stopped there: a
+      SUCCESSFUL generation wrote `image_cache`, returned, and never touched `trending_meals`, so
+      Discover kept the placeholder until someone opened that meal a SECOND time. What hid it was a
+      `backfillTrendingImage` call sitting on the upload-FAILED branch, where the only URL is a FAL
+      link that guard 2 rejects by design — it could never write under any input. Dead code shaped
+      like a safety net, in exactly the place the real call was missing.
+      Verified on a row that was NOT nulled first (the scenario that used to fail): the function
+      moved it from `...bowl.jpg` to `...bowl.jpg?v=1788630958080` on its own.
+- [x] **Repairs now have a supported path.** `.is('image', null)` keeps an unattended backfill safe
+      but makes a REPAIR impossible, since a repair targets a row that already holds a wrong image.
+      Internal-only `replaceTrending: true` opts out. **Use it for the library pass below** — every
+      manual regeneration before this needed a hand-written `update trending_meals set image = null`
+      first, and forgetting it once silently produced an A/B that compared an image to itself.
+- [ ] **OPEN — the steps rule misses the verb "Add".** `Kala Chana Paneer Protein Bowl` step 2 is
+      "Add sliced onion and green chillies" to the mash, and the photo draws them as raw garnish.
+      The rule triggers on mashed/blended/mixed/stirred/folded/dissolved/melted/whisked. Extending
+      the list is one line, but it is UNMEASURED and the LAYERED DISHES rule added the same day did
+      not take, so do it with a before/after on several dishes, not one sample.
 - [ ] **⚠️ ALL 1,370 CACHED IMAGES WERE GENERATED UNDER THE BROKEN PROMPT.** Only this one row has
       been corrected. There is no way to tell which of the rest are wrong without looking at them,
       and no automated check exists. Decide before launch: spot-audit the Discover pool by eye, or
