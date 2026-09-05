@@ -26,7 +26,13 @@ const TAGLINES = [
 const TAGLINE_CYCLE_MS = 700
 
 export default function SplashOverlay() {
-  const fadeIn = useRef(new Animated.Value(0)).current
+  // OPAQUE FROM THE FIRST FRAME. This used to start at 0 and fade in over 200ms, on the stated
+  // assumption that it was cross-fading from the NATIVE splash. It was not: expo-splash-screen is
+  // not a dependency and nothing calls preventAutoHideAsync, so the native splash is already gone
+  // by the time React paints. The fade was therefore cross-fading from the live app — you saw the
+  // Home screen for ~200ms, and then the splash appeared over it, which reads as the app loading
+  // backwards. Any non-1 starting opacity here reintroduces that, so do not "soften" it.
+  const fadeIn = useRef(new Animated.Value(1)).current
   const progressWidth = useRef(new Animated.Value(0)).current
   const glow = useRef(new Animated.Value(0.4)).current
   const [taglineIdx, setTaglineIdx] = useState(0)
@@ -45,14 +51,6 @@ export default function SplashOverlay() {
   }, [])
 
   useEffect(() => {
-    // 200ms fade-in so the transition from native splash → JS splash doesn't snap-cut.
-    // A plain opacity fade is allowed under Reduce Motion, so it's not gated.
-    Animated.timing(fadeIn, {
-      toValue: 1,
-      duration: 200,
-      useNativeDriver: true,
-    }).start()
-
     if (!motionReady || reduceMotion) return
 
     // Progress bar fills exactly during the splash window — feels purposeful
