@@ -197,3 +197,74 @@ export function prefetchDiscover(userId: string | undefined): Promise<void> {
   })()
   return inflight
 }
+
+// ── Personalisation snapshot ─────────────────────────────────────────────────────────────────
+//
+// Discover's skeleton was never really waiting for MEALS — readDiscoverCache returns those from
+// disk in milliseconds. It was waiting for `personalReady`, which is `profileLoaded && pantryLoaded`:
+// a profiles read that CHAINS a second meal_logs read for the budget, plus a pantry_items read.
+// Two network round-trips, one of them sequential, gating a paint whose data was already local.
+// That is the ~1s of empty card on every cold entry to the tab.
+//
+// The gate itself is right and stays: browseSections depends on pantryNames, excludedStaples,
+// budget and lastCooked, and claim() is first-shelf-wins, so anything arriving late re-allocates
+// the whole page under the reader. The fix is not to paint earlier with NOTHING — it is to have
+// the personalisation on disk so the gate opens immediately with the user's real values.
+//
+// Safety note, because this is the always-on allergy filter: hydrating from cache paints with the
+// user's LAST KNOWN restrictions, never with empty ones. That is the distinction the original
+// comment cared about — a nut-allergy user briefly served almond recipes happened because the
+// filters defaulted EMPTY, not because they were slightly old.
+export type DiscoverPersonal = {
+  day: string
+  foodDislikes: string[]
+  dietaryRestrictions: string[]
+  dietType: string
+  maxPrep: number | null
+  excludedStaples: string[]
+  pantryNames: string[]
+  lastCooked: string | null
+  budget: { calLeft: number; proLeft: number; hasLogged: boolean } | null
+}
+
+export const discoverPersonalKey = (uid: string) => `pantry_discover_personal_${uid}`
+
+export async function writeDiscoverPersonal(uid: string, p: DiscoverPersonal): Promise<void> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
+    await AsyncStorage.setItem(discoverPersonalKey(uid), JSON.stringify(p))
+  } catch { /* a cache write must never break the screen */ }
+}
+
+// `day` gates the BUDGET ONLY, and deliberately not the rest. Dislikes, restrictions, diet type and
+// pantry contents are not day-scoped — they are as valid this morning as they were last night, and
+// dropping them would put the skeleton straight back. The budget is different: it is derived from
+// today's meal_logs, so yesterday's is meaningless.
+//
+// Why a stale-day budget is returned as null rather than as zeroes: `hasLogged` decides whether the
+// "Fits your remaining kcal" shelf renders at all. Guessing it true would make the shelf appear and
+// then vanish; guessing it false on a day the user HAS logged makes it appear late. Null means the
+// shelf stays out until the real numbers land — and on the first visit of a new day the user has
+// usually logged nothing, so the truthful answer and the cached one agree and nothing moves.
+export async function readDiscoverPersonal(uid: string): Promise<DiscoverPersonal | null> {
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default
+    const raw = await AsyncStorage.getItem(discoverPersonalKey(uid))
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return null
+    return {
+      day: String(p.day ?? ''),
+      foodDislikes: Array.isArray(p.foodDislikes) ? p.foodDislikes : [],
+      dietaryRestrictions: Array.isArray(p.dietaryRestrictions) ? p.dietaryRestrictions : [],
+      dietType: typeof p.dietType === 'string' && p.dietType ? p.dietType : 'Classic',
+      maxPrep: typeof p.maxPrep === 'number' ? p.maxPrep : null,
+      excludedStaples: Array.isArray(p.excludedStaples) ? p.excludedStaples : [],
+      pantryNames: Array.isArray(p.pantryNames) ? p.pantryNames : [],
+      lastCooked: typeof p.lastCooked === 'string' ? p.lastCooked : null,
+      budget: p.day === todayStr() && p.budget ? p.budget : null,
+    }
+  } catch {
+    return null
+  }
+}

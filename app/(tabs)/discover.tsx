@@ -22,6 +22,7 @@ import {
   loadTrendingMeals, readDiscoverCache, writeDiscoverCache, prefetchDiscover,
   readHeroPick, writeHeroPick, HERO_SEEN_CAP, type HeroPick,
   type DiscoverMeal,
+  readDiscoverPersonal, writeDiscoverPersonal,
 } from '@/lib/discoverFeed'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
@@ -431,6 +432,54 @@ export default function DiscoverScreen() {
   const personalReady = profileLoaded && pantryLoaded
   const showSkeleton = loading || !personalReady
 
+  // HYDRATE THE GATE FROM DISK. Everything `personalReady` waits for was already known last time
+  // the user was here, so waiting on the network to re-learn it is what produced the ~1s empty card
+  // on every cold entry. The two fetches below still run and still win — this only decides what the
+  // first frame is allowed to contain.
+  //
+  // Guarded with `prev.size ? prev : …` / equivalent on every setter so a fetch that lands FIRST is
+  // never clobbered by a slower disk read. AsyncStorage is normally faster, but "normally" is not a
+  // guarantee and the network result is the correct one.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (!user || hydratedRef.current) return
+    let cancelled = false
+    readDiscoverPersonal(user.id).then(p => {
+      if (cancelled || !p || hydratedRef.current) return
+      hydratedRef.current = true
+      setFoodDislikes(prev => prev.length ? prev : p.foodDislikes)
+      setDietaryRestrictions(prev => prev.length ? prev : p.dietaryRestrictions)
+      setDietType(prev => (prev && prev !== 'Classic') ? prev : p.dietType)
+      setExcludedStaples(prev => prev.size ? prev : new Set(p.excludedStaples))
+      setPantryNames(prev => prev.size ? prev : new Set(p.pantryNames))
+      setMaxPrep(prev => prev ?? p.maxPrep)
+      setLastCooked(prev => prev ?? p.lastCooked)
+      // null on a stale day — see readDiscoverPersonal. Leaving it null keeps the budget shelf out
+      // rather than rendering it from yesterday's numbers.
+      if (p.budget) setBudget(prev => prev ?? p.budget!)
+      // Opening the gate is the entire point; the feed cache paints the instant this flips.
+      setProfileLoaded(true)
+      setPantryLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [user])
+
+  // Persist the snapshot once the REAL values are in, so the next entry hydrates from truth rather
+  // than from an older hydration. Keyed off the fetched flags, not the hydrated ones, so a
+  // cache-hydrated session cannot write its own cache back and pin a stale snapshot forever.
+  const profileFetchedRef = useRef(false)
+  const pantryFetchedRef = useRef(false)
+  useEffect(() => {
+    if (!user || !profileFetchedRef.current || !pantryFetchedRef.current) return
+    writeDiscoverPersonal(user.id, {
+      day: todayStr(),
+      foodDislikes, dietaryRestrictions, dietType, maxPrep,
+      excludedStaples: Array.from(excludedStaples),
+      pantryNames: Array.from(pantryNames),
+      lastCooked, budget,
+    })
+  }, [user, foodDislikes, dietaryRestrictions, dietType, maxPrep, excludedStaples, pantryNames, lastCooked, budget])
+
   // Pantry + last-cooked, fetched independently of the profile/budget call above. in_stock is
   // filtered here to match every other pantry reader in the app — an item marked out of stock is
   // not "in your kitchen", and counting it would overstate how cookable a recipe is.
@@ -447,7 +496,7 @@ export default function DiscoverScreen() {
     })()
       // Set on BOTH paths — a failed pantry read must not strand the feed on a skeleton.
       .catch(() => {})
-      .finally(() => setPantryLoaded(true))
+      .finally(() => { pantryFetchedRef.current = true; setPantryLoaded(true) })
   }, [user])
 
   // Profile-based dietary filters apply to every Discover view (always-on safety
@@ -479,7 +528,7 @@ export default function DiscoverScreen() {
         // never share an early return.
         // No goals means there is no budget to fetch and `fits` never renders — the profile is
         // fully settled right here. Flag it before returning or the feed waits forever.
-        if (!goalCal && !goalPro) { setProfileLoaded(true); return }
+        if (!goalCal && !goalPro) { profileFetchedRef.current = true; setProfileLoaded(true); return }
         const loggedToday = todayStr() // LOCAL day, matching how logged_at is written
         const { data: logs } = await supabase.from('meal_logs')
           .select('calories, protein').eq('user_id', user.id).eq('logged_at', loggedToday)
@@ -494,12 +543,13 @@ export default function DiscoverScreen() {
         })
         // LAST, deliberately: budget feeds the "Fits your remaining kcal" shelf, and claim() is
         // first-shelf-wins, so a budget that lands after first paint re-allocates the whole page.
+        profileFetchedRef.current = true
         setProfileLoaded(true)
       },
       // Rejection handler as .then's SECOND argument, not .catch — the postgrest builder is a
       // PromiseLike and has no .catch. A failed profile read must not strand the screen on a
       // skeleton forever: paint unfiltered rather than not at all, as it behaved before this gate.
-      () => setProfileLoaded(true))
+      () => { profileFetchedRef.current = true; setProfileLoaded(true) })
   }, [user])
 
   // Serve the in-state pool instead of re-hitting Postgres on every tab-return / foreground.
