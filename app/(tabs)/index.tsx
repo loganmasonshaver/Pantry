@@ -579,8 +579,30 @@ export default function HomeScreen() {
     return () => clearTimeout(t)
   }, [heroImageUri])
 
-  const mealsPending = ((!pantryFetched || !cacheChecked || loading) && meals.length === 0)
-    || (meals.length > 0 && !!heroImageUri && !heroPainted)
+  // ARM THE HERO HOLD ONLY FOR A GENERATION. `loading` is never true for a cached day — the hook
+  // serves disk cache with no loading state, and that path paints in ~40ms. The hold above was
+  // written for the sweep-bar path, where the card genuinely appeared with a dark rectangle while
+  // the photo downloaded. Applying it to a cached open charged every single app launch a second of
+  // "Checking what's in your pantry…" for a photo that was already on disk.
+  const [heroGateArmed, setHeroGateArmed] = useState(false)
+  useEffect(() => { if (loading) setHeroGateArmed(true) }, [loading])
+
+  const pendingBase = ((!pantryFetched || !cacheChecked || loading) && meals.length === 0)
+    || (heroGateArmed && meals.length > 0 && !!heroImageUri && !heroPainted)
+
+  // ONE-WAY LATCH. The skeleton is for having NOTHING to show, so once something HAS been shown it
+  // must never come back — and it was coming back. Any change to meals[0].image re-runs the effect
+  // above, resets heroPainted to false, and pendingBase flips true again, drawing the shimmer OVER
+  // cards already on screen: Home, then the loading card, then Home again. A refresh returning a
+  // freshly versioned `?v=` URL, the daily swap and carryover -> fresh all trigger it.
+  // Reset when meals empty out, so a genuinely empty day can still shimmer.
+  const [mealsEverShown, setMealsEverShown] = useState(false)
+  useEffect(() => {
+    if (meals.length === 0) { setMealsEverShown(false); return }
+    if (!pendingBase) setMealsEverShown(true)
+  }, [meals.length, pendingBase])
+
+  const mealsPending = pendingBase && !mealsEverShown
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
