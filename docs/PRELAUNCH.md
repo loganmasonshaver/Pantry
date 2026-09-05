@@ -163,9 +163,20 @@ session that wrote it.
             needs a ~10s Flux render, so the gate always timed out and swapped in the shimmer
             anyway. Raised to 22000. **Needs a day rollover.** Tell: yesterday's photo holds until
             today's photo replaces it, with no shimmer beat between them.
-      - [ ] **The sweep bar reads as activity.** A full-width indeterminate bar now runs under the
-            "Yesterday's picks" line while meals generate — the 6pt dot alone was not noticeable.
-            Confirm it is visible without being told it is there. (`app/(tabs)/index.tsx`)
+      - [x] **The sweep bar reads as activity — VERIFIED ON DEVICE 2026-09-05.** Logan: "it
+            behaved as it should, looked like something was cooking in the background."
+      - [ ] **NEW 2026-09-05, UNVERIFIED: no dark gap between the shimmer and the photo.**
+            Ending the skeleton at `meals.length > 0` ended it when the TEXT arrived, so the card
+            sat over MealImage's flat #1A1A1A for 1-2s while the photo downloaded — visible
+            precisely because the sweep bar had just made the screen look busy. Home now holds the
+            skeleton until the hero photo PAINTS (`onLoad`), capped at 2500ms, and only when there
+            is a URL to wait for. Sequence should be sweep bar -> shimmer -> photo, with no dark
+            beat. (`bf41c61`)
+      - [ ] **NEW 2026-09-05, UNVERIFIED: regenerated photos actually reach the device.**
+            Storage uploads with upsert, so a regenerated image overwrites the same path and every
+            client keeps serving its cached copy forever — three corrections to the Protein Jello
+            photo were invisible on device for this reason. URLs now carry `?v=<timestamp>`.
+            (`34707fe`)
 
 - [ ] **Repeat/variety fixes need DAYS, not a reload.** The base-food ban, the deduped 30-dish
       window and the protein-family guard only prove themselves across several generations. Watch
@@ -281,6 +292,12 @@ What that sweep left open:
 
 - [x] **Replacement comp code minted 2026-09-04** via `scripts/creator-code.sh` — shared, 25 per
       rolling 30 days, expiring. Value lives in the DATABASE and in Claude's local memory only.
+- [x] **Anon-callable `insert_saved_meal` overload DROPPED** — SECURITY DEFINER, no `auth.uid()`
+      check, took the target account as a parameter, executable by `anon`. Third instance of the
+      leftover-overload trap. (`cc9d43b`)
+- [x] **Creator comp codes rebuilt** — `scripts/creator-code.sh`, rolling 25-per-30-days budget,
+      denied attempts no longer eat it, attribution can no longer be silently overwritten. The live
+      code is in Claude's memory, never in this repo.
 - [ ] **🚫 STANDING RULE — a code value never enters this repo.** It has leaked TWICE now:
       `PANTRY_CREATOR` in the 2026-05 seed, and `CREATORS-D9929`, hand-written into
       `20260904171500` about an hour after the first was removed. Both were rotated rather than

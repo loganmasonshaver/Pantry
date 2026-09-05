@@ -1,114 +1,145 @@
-# Handoff — 2026-09-04
+# Handoff — 2026-09-05
 
-Replaces the 2026-09-03 handoff (in git history). `git log --since="2026-09-04"` carries the
-reasoning for every commit; this file holds only what git does not.
+Replaces the 2026-09-04 handoff (in git history). `git log --since="2026-09-04 14:00"` carries the
+reasoning for all 41 commits; this file holds only what git does not.
 
-**State:** everything committed, pushed, deployed, and three migrations applied to PROD. Working
-tree clean. **243 tests.** **TS baseline 124 total / 17 app-code — unchanged all day.**
-
----
-
-## 0. READ FIRST — the rule Logan set today
-
-**When he asks "what's next", the answer is the items HE raised most recently, from
-`docs/PRELAUNCH.md` §6d.** Not item 1, not your own idea. Today he asked, got PRELAUNCH item 1 plus
-a self-chosen security sweep, and had to point out that half a session's worth of issues he had
-raised were living only in the chat. His words: *"if I forget, you better not be forgetting to
-address this."*
-
-Two process changes follow from that, and they are not optional:
-- **Write each issue into `docs/PRELAUNCH.md` the moment he raises it**, not at session end. A
-  decided-but-unbuilt approach counts — record the decision, or the next session re-litigates it.
-- **Keep this file current during the session**, not only when a new chat is signalled.
-
-§6d is new and holds everything from today. §6e holds what the security sweep left open.
+**State:** everything committed, pushed, deployed. Working tree clean. **265 tests**
+(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). **TS baseline 131 total / 17
+app-code** — the total ROSE from 124 because a new edge function adds ~7 Deno-global lines; the
+app-code number is the one that must not move. Preflight green except `SCAN_CAP_WEEK`, still held
+on purpose.
 
 ---
 
-## 1. SHIPPED TODAY
+## 0. READ FIRST — two rules this session established
 
-**Home layout compression** (`8a1f0d1`-ish, see log). The load-bearing find was NOT the ring: the
-hero was sized `viewportH - cardTop - 12`, pinning its bottom edge 12pt above the fold BY
-CONSTRUCTION. Every point trimmed above it was handed straight back to the photo — which is why the
-three trims already in that file, each commented "toward fitting the meal hero above the fold",
-bought nothing. `LOG_PEEK` is the reserve that makes upstream trims reach the log. Then ~82pt of
-compression, then a second pass when Logan asked for more: of the 96pt reserved, 82 was going to
-MARGIN (36pt section gap) rather than a log row. Reclaimed that for free before spending photo.
+**1. "What's next" means Logan's open items, not the top of a checklist.** Written to memory as
+`whats-next-means-logans-open-items`. Capture every issue he raises into `docs/PRELAUNCH.md` THE
+MOMENT he raises it, and keep this file current DURING the session. He had to point out that half a
+session's issues existed only in the chat.
 
-**Two cold-start defects.** Identified because two screenshots a minute apart disagreed about the
-calorie goal. (a) `useState(2400)`/`useState(180)` meant the ring ran its full 1800ms animation
-toward numbers belonging to nobody before the profile landed; goals now hydrate from AsyncStorage,
-userId-stamped. **VERIFIED ON DEVICE.** (b) `HERO_IMAGE_WAIT_MS` was 8000, calibrated against the
-CACHED image path (~50ms) — a novel dish needs a ~10s Flux render, so the gate always timed out and
-swapped in the shimmer it existed to prevent. Raised to 22000. **NOT verified — needs a rollover.**
-
-**An indeterminate sweep bar** under "Yesterday's picks". The 6pt dot was the only activity signal
-and reads as punctuation; with the hold now up to 22s that was untenable. Inside the measured
-header wrapper on purpose — `heroHeaderH` feeds the hero fit.
-
-**Security: a published premium bypass, closed.** See §2.
+**2. ⚠️ EVERY UNVERIFIED FIX MUST LAND IN THIS FILE AND IN PRELAUNCH BEFORE THE SESSION ENDS.**
+That is what §1 is. A fix nobody can reproduce the reasoning for is worse than no fix, because the
+next session re-derives it wrongly. If you ship something that cannot be checked today, write it
+down today.
 
 ---
 
-## 2. THE SECURITY SWEEP — and the lesson that generalises
+## 1. ⚠️ UNVERIFIED — everything shipped today that nobody has confirmed
 
-`PANTRY_CREATOR` was seeded with `grants_premium = TRUE`, active, no expiry, no cap, in a **PUBLIC**
-repo. `_shared/premium.ts` gates every paid endpoint on `(is_premium OR promo_active)`, so the whole
-paywall came off in three steps with no exploit. **Verified never exploited: `referral_redemptions`
-holds 0 rows all time.** The 3 accounts with `promo_active` have `referral_code_used` NULL — granted
-directly in the dashboard, nothing revoked.
+Nothing below has been seen working. Grouped by what unblocks it.
 
-**⚠️ THE FIRST FIX REPORTED SUCCESS AND CHANGED NOTHING.** It deactivated `code =
-'PANTRY_CREATOR'`, taken from the seed. Prod holds **`PANTRY_CREATOR!`** — trailing exclamation
-mark, edited in the dashboard, never written back. Zero rows matched; `db push` printed "Finished".
-Caught only because the effect was QUERIED afterwards. **The repo is not the source of truth for
-this database's data, and — see §6e — not reliably for its function signatures either.** Verify
-against `pg_proc` and the live rows, never against the migration tree.
+### Needs tomorrow's 08:00 UTC cron (or a manual dry run)
+- **Macro coherence gate** (`6a74275`) — rejects carbs-and-fat-both-zero, and an Atwater gap over
+  BOTH 50 kcal and 25%. Tuned so it rejects exactly 1 of 178 live rows.
+- **Computed macros** (`130988f`, `46fdfeb`) — when the creator publishes none, the pipeline now
+  does the arithmetic itself, but ONLY when it agrees with the model within 25%. Read the
+  `macrosSource` split in `pipeline_runs`: **100% `creator` means the model is lying about
+  `macros_from_creator`**, the one failure mode with no downstream catch. Two runs gave a healthy
+  mix, so it is not lying yet.
+- **Group headings excluded from the retention count** (`ce02d20`) — UNEXERCISED. Neither recipe
+  that motivated it appeared in run 2's batch of 6.
+- **Merged-ingredient recovery** (`19edbd9`) — the deterministic fix for the biggest retention
+  killer. Watch `ingredientsRecovered` in the funnel: **large relative to `dropped` means the model
+  got worse, not the recipes better.**
+- **LLM retry** (`818a7f3`) — 2 extra attempts when the pool is thin, zero extra YouTube quota.
+  Watch `llmAttempts` and `llmYields`.
+- **Prose filters in the parser** (`0bd816a`, `e695b80`) — long bulleted lines need a quantity;
+  `2.)` markers now strip.
+- **Image prompt: flavourings** (`48af2dd`) — rewritten to a named colour, never removed.
+- **Dish naming rule** (`0c1e9cc`) — a recipe title, not a creator's video-title noun.
 
-Also fixed: dropped the dead `validate_referral_code(text)` (still anon-executable), added
-`max_redemptions`/`redemption_count` enforced as an atomic conditional UPDATE, pinned `search_path`
-on every SECURITY DEFINER function. Two further corrections came from the pre-push hook and were
-real — the repeat-call branch reported the code's advertised value instead of what the caller
-actually held.
+### Needs a device reload
+- **No dark gap before the hero photo** (`bf41c61`) — skeleton now waits for `onLoad`.
+- **Versioned image URLs** (`34707fe`) — regenerated photos actually reach the device.
 
-Full remaining list in §6e. The headline: **no replacement code exists yet, and it must be created
-outside the repo.**
+### Needs a new day's first open
+- Carryover, `HERO_IMAGE_WAIT_MS` 22000, Discover hero, "Almost in your kitchen" ordering.
+  All still open from 2026-09-04; see PRELAUNCH 6b.
 
----
-
-## 3. WHAT LOGAN CANNOT VERIFY, AND WHY IT MATTERS
-
-`docs/PRELAUNCH.md` §6b is canonical. Two of today's three cold-start checks need a **new day's
-first open** — they read the DEVICE clock, no SQL simulates it. The goal-flash one is already
-ticked (verified). Do not let the other two quietly become "probably fine".
-
----
-
-## 4. STILL THE BIGGEST GATE — unchanged
-
-The trending pipeline run. Eleven generation-side changes unverified; `docs/TRENDING-OPEN.md` ends
-with a `⚠️ CONFIRM ON THE NEXT PIPELINE RUN` block — five checks, exact SQL, and what a FALSE pass
-looks like. Quota ~1,314 units of 10,000/day, resets midnight Pacific / 2am Logan's time, cron takes
-one at 01:00 Pacific. **~6 test runs a day, SEQUENTIAL.** Logan has not authorised one; ask.
+### Verified today, for contrast
+Sweep bar reads as activity. Goal-flash fix. App Store Connect group localization + prices.
+Superwall product mapping. `truncated = 0` on both dry runs — that closes the LAST of the four
+2026-08-30 PRELAUNCH checks.
 
 ---
 
-## 5. DESIGN DECISIONS MADE TODAY — do not re-open
+## 2. THE PIPELINE, and the one thing that changes how you test it
 
-- **Home vs Discover identity:** Discover is one poster, Home is a rhythm of three. Any Home meal
-  layout must say what makes it different from Discover's photo hero. Rejected again today:
-  auto-rotation as the answer to "show all three".
-- **Scan is NOT demoted on Pantry.** Logan pushed back twice; he is right, and the fold problem is
-  solved without touching it.
-- **"Made from your pantry" is an archive, post-launch.** §6d carries the reasoning.
+**The yield variance is entirely in the LLM.** Two dry runs minutes apart: rawCandidates 644 and
+644, afterDedup 455 and 448, sentToLLM 39 and 40 — every stage before the model is stable — and the
+model returned 19 recipes then 6, storing 5 then 2.
+
+**Consequence: a single run cannot validate a generation change.** Compare RATES across several
+runs, never counts across two. This is the trap I nearly fell into reading run 2 alone.
+
+It also explains 2026-09-03's two meals: no funnel survives, but both rows were written 22 seconds
+after the trigger against 60-90s for a full run, and a fast run is a small run. Same variance,
+sampled once daily and made permanent by the swap. Not a separate defect.
+
+**You can now run the pipeline yourself from SQL** — the Vault holds CRON_SECRET and it is readable
+from SQL, so nothing needs pasting. `docs/TRENDING-OPEN.md` has the exact statements. I spent
+several rounds asking Logan to run things I could have run all along.
+
+**`pipeline_runs` now persists every funnel.** Before today a run's result was unreadable: pg_net
+abandons the request long before it finishes, so the cron's own output reached nobody.
+
+---
+
+## 3. NEGATIVE RESULTS — do not retry these
+
+- **Prompting cannot stop the model merging repeated ingredients.** Three attempts: the existing
+  "never merge two lines" instruction, the `[appears Nx]` marker (blind to it — it keys on the exact
+  line and these lines differ), and an explicit "these repeats are deliberate" annotation that was
+  verified to render, verified to reach the model, and changed nothing. Same shape as the ban-list
+  finding. `19edbd9` recovers mechanically instead.
+- **Do not write a "no jello" style rule** for food quality. Keyword rules for that are a measured
+  dead end here twice over.
+- **The 90-char ingredient cap was an accidental prose filter.** Raising it without replacing that
+  job admitted method sentences into ingredient lists. If you touch `MAX_INGREDIENT_LINE`, the
+  bulleted-line quantity rule is what keeps prose out.
+
+---
+
+## 4. THE HABIT THAT PAID OFF FOUR TIMES TODAY
+
+**Read the TS baseline DELTA line by line, never the total.** It caught: a `supabase` client that
+does not exist in `generate-trending-meals` (it is `db`) inside a try/catch that would have
+swallowed the ReferenceError; an implicit-any; a `{}` arithmetic error; and a **TDZ bug I had
+already deployed** that would have thrown on every cached image request within minutes.
+
+A related one: **supabase-js reports a refused write as a RETURNED error, not a thrown one.** A
+try/catch around `.insert()` catches nothing. Three call sites were silently failing this way.
+
+And: **when Logan says "this looks the same", download the artefact and look at it.** I verified
+three times that a regeneration had happened — by size and timestamp, all true, all useless. The
+bytes were right; his device was serving its own cache.
+
+---
+
+## 5. OPEN, NOT STARTED
+
+- **§6d in PRELAUNCH** — everything Logan raised on 2026-09-04 about Home and Pantry layout,
+  decided but not built. His original complaint (Pantry categories ~215pt below the fold) leads it.
+- **~83 rows carry a serving count their ingredients contradict.** Surfaced by
+  `scripts/replay-macros.ts`; servings is the divisor for every macro on the card. Start with the
+  clean 2x cases.
+- **Store the source description** alongside each row. Twice today the discarded source was the
+  thing blocking an audit.
+- **The app does not show `macros_source`.** The column is populated and nothing reads it, so the
+  database knows a number was computed and the user does not.
+- **`validate_referral_code_v2` is still an anon oracle** — it cannot be revoked, onboarding calls
+  it before account creation. Entropy plus the redemption cap is what makes it worthless.
 
 ---
 
 ## 6. ENVIRONMENT
 
 - **Metro must run from `/Users/loganshaver/pantry`**, never a worktree.
-- Bundler address is solved permanently via the Bonjour name
-  `Logans-MacBook-Air-10.local:8081`. A delete-and-reinstall wipes `RCT_jsLocation`; that is the
-  only thing that breaks it.
-- `npx supabase db query --linked --file <f>` is how to verify prod. `supabase db execute` is not a
-  command; the subcommand is `query`.
+- Bundler address is solved permanently via the Bonjour name `Logans-MacBook-Air-10.local:8081`.
+  Only a delete-and-reinstall breaks it (it wipes `RCT_jsLocation`).
+- **Supabase Edge Function secrets are WRITE-ONLY** — `secrets list` returns SHA-256 digests. Get
+  keys from the issuing service. **The Vault is different and IS readable from SQL**, which is how
+  the cron and every manual run authenticate. Saved to memory as
+  `supabase-secrets-are-write-only`.
+- `npx supabase db query --linked --file <f>` is how to read prod. There is no `db execute`.
