@@ -278,12 +278,31 @@ on launch Home paints, gives way to a loading card, then returns.
       (b) the hold was armed for cached opens too, though `useMealSuggestions` serves disk cache
       with NO loading state (~40ms), so every launch paid a second of shimmer for a photo already
       on disk — undoing `43d7055`. Now armed only once `loading` has been true.
-- [ ] **VERIFY ON DEVICE: cold open shows meals immediately, with no shimmer and no flash.**
+- [x] **VERIFIED ON DEVICE: images are present the moment Home shows.** (b) was the real cause of
+      the 1s wait.
+- [x] **THE FLASH WAS NOT THE SKELETON AT ALL — I diagnosed the wrong component twice.** Logan had
+      to correct me: "there is never a skeleton". The "loading screen" is the branded
+      `SplashOverlay`, and the ordering he reported (Home FIRST, then the loading screen) was the
+      whole clue — nothing that is loading appears AFTER the thing it loads.
+      `SplashOverlay` started at `opacity: 0` and faded in over 200ms, with a comment claiming it
+      was cross-fading from the NATIVE splash. False in this app: **`expo-splash-screen` is not a
+      dependency and nothing calls `preventAutoHideAsync`**, so the native splash is gone before
+      React paints and the fade was revealing the running app. Now opaque from frame 1.
+      It became visible only because fix (b) made Home paint in ~40ms — the bug is older than today.
+- [x] **Splash -> Home hand-off now dissolves (320ms fade + 1.06 content lift).** It was
+      `{showSplash && <SplashOverlay />}` — a one-frame hard cut, which is what read as janky beside
+      Cal AI and MyFitnessPal. Load TIME was never the difference; MyFitnessPal takes ~2s too.
+      Parent holds the mount until the animation reports finished. **320ms is the tunable** — 240 if
+      it drags, 400 if it still blinks.
 - [ ] **VERIFY: a real generation still holds the skeleton until the hero photo paints** — that is
-      `bf41c61`'s fix and it must not have been thrown away. Needs a day with no cache.
-- [ ] **If the flash survives, do NOT add another guard.** Next single variable: `app/_layout.tsx`
-      calls `router.replace('/(tabs)')` on SIGNED_IN even when already there. A remount would reset
-      `heroPainted` and every other Home state and produce the same shape.
+      `bf41c61`'s fix and the one thing here not yet re-confirmed. Needs a day with no cache.
+- [ ] **Splash has `pointerEvents="none"`** — taps during the 2s hold pass through to Home controls
+      that are invisible at the time. Known, unfixed, deliberately not bundled.
+
+**METHOD NOTE, worth more than the fixes.** I twice fixed a real defect in the wrong component and
+called the symptom addressed. What finally located it was Logan's ORDERING detail (content before
+loader), not more code reading. When a UI report says "X then Y", check that X-then-Y is even
+possible in the component you are looking at before fixing anything in it.
 
 ## 6c. Home + Pantry layout — OPEN DESIGN QUESTION, needs a decision before the trailer
 
