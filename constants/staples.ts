@@ -26,12 +26,39 @@ const STAPLE_ALIASES = new Set([
   'water', 'cooking spray',
 ])
 
+// Temperature and state adjectives describe how an ingredient is USED, never WHICH ingredient it
+// is. That makes them safe to strip here even though the match is otherwise deliberately exact:
+// the collision the exact match exists to prevent ("bell pepper" resolving to the basic "pepper")
+// cannot happen, because a stripped name must still hit STAPLE_ALIASES exactly to count.
+// Motivating case: the creator wrote "32 fl oz water (COLD)" and "32 fl oz water (BOILING)", which
+// parse to "cold water" and "boiling water". Neither matched the alias `water`, so Protein Jello
+// asked the user to BUY 64 fl oz of water in two separate grocery rows.
+// Deliberately NOT here: "fresh" (fresh vs dried basil is a real shopping difference) and
+// "frozen" (a different product, not a temperature).
+const STATE_QUALIFIER = /\b(cold|hot|warm|boiling|boiled|chilled|lukewarm|iced|ice|room temperature|tap|filtered|distilled)\b/g
+
+// Canonical key for a staple name: normalized, then with state words removed. Use this for
+// anything PERSISTED (a staples_excluded opt-out) so excluding "cold water" also excludes
+// "boiling water" — otherwise the same basic has to be opted out once per adjective.
+export function stapleKey(name: string): string {
+  const n = name.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, ' ').trim()
+  const bare = n.replace(STATE_QUALIFIER, ' ').replace(/\s+/g, ' ').trim()
+  // Falling back to `n` matters when the name is ONLY a state word ("ice"): stripping would leave
+  // an empty string, which would then match nothing and, worse, compare equal across ingredients.
+  return bare || n
+}
+
 // True when `name` is an assumed staple the user has NOT excluded. `excluded` is the user's
 // staples_excluded list (things they've tapped "I don't keep this" on).
 export function isAssumedStaple(name: string, excluded: Set<string> = new Set()): boolean {
   const n = name.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, ' ').trim()
   if (excluded.has(n)) return false
-  return STAPLE_ALIASES.has(n)
+  if (STAPLE_ALIASES.has(n)) return true
+  // Second pass on the state-stripped key. Checked against `excluded` too, so an opt-out stored
+  // as "water" still suppresses "cold water".
+  const bare = stapleKey(name)
+  if (bare === n || excluded.has(bare)) return false
+  return STAPLE_ALIASES.has(bare)
 }
 
 // Staples to auto-exclude based on a user's dietary_restrictions — so we NEVER assume butter for a

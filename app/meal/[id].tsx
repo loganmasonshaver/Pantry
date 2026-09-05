@@ -27,7 +27,7 @@ import CreatorRecipeModal from '@/components/CreatorRecipeModal'
 import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
+import { isAssumedStaple, dietExcludedStaples, stapleKey } from '@/constants/staples'
 import { escapeLike } from '@/lib/sqlLike'
 import { todayStr } from '@/lib/localDate'
 import { categorizeItem } from '@/lib/categories'
@@ -168,7 +168,9 @@ export default function MealDetailScreen() {
   // assuming it too, and move the row to "you'll need". Optimistic: update state before the write.
   const excludeStaple = async (name: string) => {
     if (!user) return
-    const norm = name.toLowerCase().replace(/[^a-z0-9 -]/g, '').replace(/\s+/g, ' ').trim()
+    // stapleKey, not a bare normalize: opting out on a row shown as "cold water" must also stop
+    // "boiling water" being assumed, or the same basic needs opting out once per adjective.
+    const norm = stapleKey(name)
     if (excludedStaples.has(norm)) return
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
     setExcludedStaples(prev => new Set(prev).add(norm))
