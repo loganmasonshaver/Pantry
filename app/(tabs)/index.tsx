@@ -558,7 +558,29 @@ export default function HomeScreen() {
   // `&& meals.length === 0` is what makes the carryover worth having: once yesterday's meals are
   // on screen the skeleton must not come back over them while today's generate underneath. The
   // skeleton is for having NOTHING to show, not for being busy.
-  const mealsPending = (!pantryFetched || !cacheChecked || loading) && meals.length === 0
+  // HOLD THE SKELETON UNTIL THE HERO PHOTO PAINTS.
+  //
+  // meals.length > 0 used to end the shimmer on its own, so the card appeared with its title and
+  // pills over MealImage's flat #1A1A1A while the photo was still downloading — a dark rectangle
+  // for 1-2s where a moment earlier something was visibly happening. The sweep bar made that worse
+  // by contrast: the screen goes from "working" to "finished but empty".
+  //
+  // Only waits when there IS a URL to wait for, and never past HERO_PAINT_MAX_MS, so a missing or
+  // failed image degrades to the old behaviour instead of shimmering forever.
+  const HERO_PAINT_MAX_MS = 2500
+  const [heroPainted, setHeroPainted] = useState(false)
+  const heroImageUri = meals[0]?.image
+  useEffect(() => {
+    setHeroPainted(false)
+    if (!heroImageUri) return
+    // Backstop: expo-image fires no onLoad for a cached-but-identical source in some cases, and a
+    // shimmer that never resolves is worse than the blank it replaced.
+    const t = setTimeout(() => setHeroPainted(true), HERO_PAINT_MAX_MS)
+    return () => clearTimeout(t)
+  }, [heroImageUri])
+
+  const mealsPending = ((!pantryFetched || !cacheChecked || loading) && meals.length === 0)
+    || (meals.length > 0 && !!heroImageUri && !heroPainted)
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -1739,7 +1761,7 @@ export default function HomeScreen() {
                           style={[StyleSheet.absoluteFillObject, (i % Math.max(carouselMeals.length, 1)) === safeHeroIdx ? { transform: [{ scale: heroScale }] } : null]}
                         >
                           {m.image && m.image.startsWith('http') ? (
-                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === loopOffset ? 'high' : 'normal'} transition={300} />
+                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === loopOffset ? 'high' : 'normal'} transition={300} onLoad={m.image === heroImageUri ? () => setHeroPainted(true) : undefined} />
                           ) : (
                             // A photo-less page is why the pager can hold a stable 3 pages from the
                             // first frame: it narrates instead of going blank, so the page count

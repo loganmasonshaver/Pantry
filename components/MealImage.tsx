@@ -11,6 +11,7 @@ export function MealImage({
   recyclingKey,
   priority = 'normal',
   transition = 200,
+  onLoad,
 }: {
   uri: string
   style: StyleProp<ImageStyle>
@@ -23,6 +24,10 @@ export function MealImage({
   // local, so the fade adds 200ms of visible ramp to something that could have painted instantly.
   // Pass 0 on surfaces where a cache hit is the overwhelmingly common case (Home).
   transition?: number
+  // Fires when the photo has actually PAINTED, not when the URL is known. Home uses it to hold its
+  // shimmer until the hero is real — without it the card renders its title and pills over a flat
+  // #1A1A1A rectangle for as long as the download takes.
+  onLoad?: () => void
 }) {
   return (
     <Image
@@ -35,6 +40,7 @@ export function MealImage({
       transition={transition}
       recyclingKey={recyclingKey}
       priority={priority}
+      onLoad={onLoad}
     />
   )
 }
