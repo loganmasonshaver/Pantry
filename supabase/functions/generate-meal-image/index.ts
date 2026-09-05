@@ -260,6 +260,25 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 }
 
+// Backfill trending_meals.image when we resolve a photo for a row that has none.
+//
+// Discover renders `meal.image && meal.image.startsWith('http')` straight off trending_meals, while
+// the meal detail screen asks THIS function by name. Those are two different sources, and nothing
+// wrote the generated URL back — so a row with a null image showed the fork-and-knife placeholder in
+// Discover FOREVER, while opening it produced the photo after a round-trip. Exactly the symptom
+// Logan reported on Protein Jello, and it would never have self-healed.
+//
+// Server-side because it has to be: RLS on trending_meals allows updates only to a creator's own
+// rows, so a client write-back is correctly refused. Scoped to `image is null` so it can never
+// overwrite a photo the pipeline already chose, and awaited-but-ignored so it cannot fail a request.
+async function backfillTrendingImage(db: any, mealName: string, url: string) {
+  try {
+    const { error } = await db.from('trending_meals')
+      .update({ image: url }).eq('name', mealName).is('image', null)
+    if (error) console.log(`[image] trending backfill refused for "${mealName}": ${error.message}`)
+  } catch (e) { console.log(`[image] trending backfill threw (ignored): ${(e as Error).message}`) }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
@@ -293,6 +312,7 @@ Deno.serve(async (req: Request) => {
         const { error: backfillErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: hit.image_url }, { onConflict: 'meal_key' })
         if (backfillErr) console.log('Backfill FAILED:', cacheKey, backfillErr.message)
       }
+      await backfillTrendingImage(db, mealName, hit.image_url)
       return new Response(JSON.stringify({ image: hit.image_url }), { headers: jsonHeaders })
     }
 
@@ -438,6 +458,7 @@ Deno.serve(async (req: Request) => {
         // Both upload attempts failed — return the FAL URL so the caller has SOMETHING
         // to render right now, but skip the cache write so the next request retries
         // from scratch instead of pinning everyone to a soon-to-expire URL.
+        await backfillTrendingImage(db, mealName, imageUrl)
         return new Response(JSON.stringify({ image: imageUrl }), { headers: jsonHeaders })
       } catch (e) {
         console.log(`Attempt ${attempt + 1} error:`, e)
