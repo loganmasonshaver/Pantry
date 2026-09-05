@@ -564,3 +564,18 @@ test('counting a full Discover pass stays off the render-blocking path', () => {
   const ms = Number(process.hrtime.bigint() - started) / 1e6
   assert.ok(ms < 600, `600x8 over a 200-item pantry took ${Math.round(ms)}ms — was ~3000ms before the fix`)
 })
+
+// "fl oz" is the most common US liquid measure and was unrecognised: UNAMBIGUOUS_VISUAL knew `oz`
+// but not `fl oz`, and `water` was missing from the liquid list, so BOTH routes back to the
+// creator's own wording failed and the raw metric string was printed instead.
+test('fl oz survives instead of falling through to the stored metric string', () => {
+  assert.equal(getMeasuredDisplay('cold water', '950ml', '32 fl oz'), '32 fl oz')
+  assert.equal(getMeasuredDisplay('boiling water', '950ml', '32 fl oz'), '32 fl oz')
+  assert.equal(getMeasuredDisplay('whole milk', '240ml', '8 fl oz'), '8 fl oz')
+  assert.equal(getMeasuredDisplay('heavy cream', '120ml', '4 fluid ounces'), '4 fluid ounces')
+})
+
+test('adding water to the liquid list does not capture watermelon', () => {
+  // \b must not match inside "watermelon" — it is a solid and belongs on the grams path.
+  assert.equal(getMeasuredDisplay('watermelon', '300g', 'a handful'), '300g')
+})

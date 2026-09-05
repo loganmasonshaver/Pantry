@@ -325,13 +325,17 @@ const MEASURE_OR_CONTAINER = /\b(tbsp|tablespoons?|tsp|teaspoons?|cups?|ml|oz|ou
 // Any real measurement the creator stated, and nothing else on the line: a weight, a count of
 // discrete pieces, or a volume. Fractions count ("1/2 cup", "¾ cup") — those are how recipes are
 // written, not an approximation of grams.
-const UNAMBIGUOUS_VISUAL = /^\s*[\d.\/½¼¾⅓⅔⅛]+\s*(kg|g|grams?|oz|ounces?|lbs?|pounds?|ml|l|litres?|liters?|cups?|tbsps?|tablespoons?|tsps?|teaspoons?|slices?|pieces?|units?|cloves?|sticks?|sheets?|scoops?|fillets?|breasts?)\s*$/i
+const UNAMBIGUOUS_VISUAL = /^\s*[\d.\/½¼¾⅓⅔⅛]+\s*(fl\.?\s*oz|fluid\s*ounces?|kg|g|grams?|oz|ounces?|lbs?|pounds?|ml|l|litres?|liters?|cups?|tbsps?|tablespoons?|tsps?|teaspoons?|slices?|pieces?|units?|cloves?|sticks?|sheets?|scoops?|fillets?|breasts?)\s*$/i
 // A creator who already wrote the size ("1 400g can", "1 jar (500g)") needs nothing added.
 const SIZE_ALREADY = /\d\s*(g|kg|ml|l|oz|ounces?|lbs?|pounds?)\b/i
 
 export function getMeasuredDisplay(name: string, gramsStr: string | undefined, visualStr: string | undefined): string {
   const n = name.toLowerCase()
-  const isLiquid = /\b(oil|vinegar|sauce|dressing|honey|syrup|extract|juice|milk|broth|stock|wine|tahini|mayo|mustard|cream)\b/.test(n)
+  // `water` belongs here for the same reason milk and broth do. Without it, "cold water" fell past
+  // the liquid branch, and with "fl oz" also unrecognised above it landed on the raw stored string:
+  // Protein Jello's "32 fl oz" rendered as "950ml". \b keeps it off "watermelon"; "coconut water"
+  // and "rose water" are liquids and SHOULD match.
+  const isLiquid = /\b(water|oil|vinegar|sauce|dressing|honey|syrup|extract|juice|milk|broth|stock|wine|tahini|mayo|mustard|cream)\b/.test(n)
   // "pepper" names three unrelated foods: the spice, the vegetable and a cheese. Only the spice
   // belongs in the seasoning branch — routing the others through it converted 150g of bell pepper
   // into "25 tbsp" and 120g of pepper jack into "20 tbsp". Same substring trap already recorded
