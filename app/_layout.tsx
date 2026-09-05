@@ -61,6 +61,11 @@ function RootLayoutNav() {
   // Splash stays visible while EITHER auth is still resolving OR min display
   // duration hasn't elapsed yet. Whichever finishes last hides the splash.
   const showSplash = checking || !minSplashElapsed
+  // Kept mounted past showSplash so its exit animation can actually run. Unmounting on showSplash
+  // directly is what made the hand-off a one-frame hard cut; the overlay now fades itself out over
+  // the already-rendered Home and tells us when it is done. showSplash only ever goes true->false
+  // (checking is only ever cleared, minSplashElapsed only ever set), so this cannot need to remount.
+  const [splashMounted, setSplashMounted] = useState(true)
 
   // Identify user in Superwall on sign-in so subscription status is linked to the correct account.
   // Applies to all auth methods: Apple, Google, and email.
@@ -187,7 +192,7 @@ function RootLayoutNav() {
       </Stack>
       {/* Branded splash overlay — covers any partial Stack render during cold start.
           Positioned AFTER the Stack so it floats above. */}
-      {showSplash && <SplashOverlay />}
+      {splashMounted && <SplashOverlay hiding={!showSplash} onHidden={() => setSplashMounted(false)} />}
     </>
   )
 }

@@ -17,6 +17,13 @@ import { View, Text, Animated, StyleSheet, Easing, AccessibilityInfo, Platform }
 
 const SPLASH_DURATION_MS = 2000
 
+// EXIT. The splash used to be unmounted the instant showSplash went false — a one-frame hard cut
+// from a full-black branded screen to Home, which is what read as janky next to Cal AI and
+// MyFitnessPal. Both of those dissolve the splash over an app that is already sitting behind it.
+// 320ms is long enough to read as a dissolve rather than a blink, short enough not to feel like a
+// second wait on top of the 2s hold.
+const SPLASH_EXIT_MS = 320
+
 const TAGLINES = [
   'Stocking the shelves…',
   'Sharpening the knives…',
@@ -25,7 +32,12 @@ const TAGLINES = [
 
 const TAGLINE_CYCLE_MS = 700
 
-export default function SplashOverlay() {
+export default function SplashOverlay({ hiding = false, onHidden }: {
+  // `hiding` starts the exit; the parent keeps this mounted until `onHidden` fires, so the fade
+  // actually gets to run instead of being unmounted mid-animation.
+  hiding?: boolean
+  onHidden?: () => void
+}) {
   // OPAQUE FROM THE FIRST FRAME. This used to start at 0 and fade in over 200ms, on the stated
   // assumption that it was cross-fading from the NATIVE splash. It was not: expo-splash-screen is
   // not a dependency and nothing calls preventAutoHideAsync, so the native splash is already gone
@@ -33,6 +45,10 @@ export default function SplashOverlay() {
   // Home screen for ~200ms, and then the splash appeared over it, which reads as the app loading
   // backwards. Any non-1 starting opacity here reintroduces that, so do not "soften" it.
   const fadeIn = useRef(new Animated.Value(1)).current
+  // Content lifts slightly as it dissolves — the same gesture iOS uses when a launch screen hands
+  // off to the app. Scales the CONTENT, never the container: the container is the black backdrop
+  // and scaling that would pull its edges in and let Home leak round the sides mid-fade.
+  const exitScale = useRef(new Animated.Value(1)).current
   const progressWidth = useRef(new Animated.Value(0)).current
   const glow = useRef(new Animated.Value(0.4)).current
   const [taglineIdx, setTaglineIdx] = useState(0)
@@ -92,6 +108,20 @@ export default function SplashOverlay() {
   }, [reduceMotion, motionReady])
 
   // Interpolate glow value to a shadow radius (4-12px) for subtle pulsing
+  useEffect(() => {
+    if (!hiding) return
+    // Opacity is allowed under Reduce Motion (a plain cross-fade is not "motion"); the lift is not,
+    // so it is gated. Unmount is driven by the completion callback rather than a matching timeout,
+    // which would drift from the animation and cut it off.
+    const anims = [
+      Animated.timing(fadeIn, { toValue: 0, duration: SPLASH_EXIT_MS, easing: Easing.out(Easing.quad), useNativeDriver: true }),
+    ]
+    if (!reduceMotion) {
+      anims.push(Animated.timing(exitScale, { toValue: 1.06, duration: SPLASH_EXIT_MS, easing: Easing.out(Easing.quad), useNativeDriver: true }))
+    }
+    Animated.parallel(anims).start(({ finished }) => { if (finished) onHidden?.() })
+  }, [hiding, reduceMotion])
+
   const shadowRadius = glow.interpolate({
     inputRange: [0.4, 1],
     outputRange: [4, 12],
@@ -99,6 +129,7 @@ export default function SplashOverlay() {
 
   return (
     <Animated.View style={[styles.container, { opacity: fadeIn }]} pointerEvents="none">
+     <Animated.View style={[styles.content, { transform: [{ scale: exitScale }] }]}>
       <Animated.Text
         style={[
           styles.wordmark,
@@ -131,11 +162,16 @@ export default function SplashOverlay() {
       <Text style={styles.tagline}>
         {reduceMotion ? 'Loading…' : TAGLINES[taglineIdx]}
       </Text>
+     </Animated.View>
     </Animated.View>
   )
 }
 
 const styles = StyleSheet.create({
+  content: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000000',
