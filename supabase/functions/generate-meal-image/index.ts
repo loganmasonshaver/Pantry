@@ -307,7 +307,7 @@ Deno.serve(async (req: Request) => {
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
-    const { mealName, ingredients = [], steps = [], describeOnly = false } = await req.json()
+    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
 
     // Declared HERE, above the cache lookup, because the cache-HIT path backfills
@@ -456,7 +456,16 @@ Deno.serve(async (req: Request) => {
           },
           body: JSON.stringify({
             prompt,
-            image_size: "square",
+            // 512x512. NOT a considered choice: it arrived as the migration default when image gen
+            // moved Replicate -> FAL in 22e790a, where `aspect_ratio: "16:9"` silently became
+            // `image_size: "square"` inside an unrelated onboarding commit. Square IS right — the
+            // consumers span 0.78 (detail hero, Discover rail) to 1.24 (Home hero), so no single
+            // aspect fits and 1:1 is the least-bad. The RESOLUTION is the problem: the meal-detail
+            // hero is 500pt full-width = 1179x1500 real px at @3x, so this is upscaled 2.93x.
+            // Overridable internally so a resolution can be A/B'd against a FIXED SEED — without
+            // pinning the seed you are comparing two different pictures, not two resolutions.
+            image_size: (isInternal && imageSize) ? imageSize : "square",
+            ...(isInternal && seed !== undefined ? { seed } : {}),
             num_images: 1,
             output_format: "jpeg",
           }),

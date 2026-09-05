@@ -4,6 +4,29 @@ Durable copy. `~/my-briefing/todos/active.md` kept getting overwritten wholesale
 concurrent session (five times on 2026-08-30), so this lives in the repo instead.
 Reasoning for every fix is in `git log`; this file holds only what is still open.
 
+
+## Busting the image cache — BOTH keys, or you regenerate nothing
+
+`generate-meal-image` stores every dish under TWO `image_cache` keys: the normalized one
+(`kala chana protein ball`) and a word-SORTED one (`ball chana kala protein`, added in `b523827`
+to stop paying twice for reordered names). A lookup tries both.
+
+So `delete from image_cache where meal_key ilike '%kala chana protein ball%'` deletes ONE of them.
+The next call hits the sorted sibling, backfills the normalized key with the OLD url, and returns
+the old image — while every outward sign says you regenerated. This cost a bogus A/B on
+2026-09-05 where both arms came back byte-identical because both were the same cache hit.
+
+Delete by URL instead, which cannot miss a key variant:
+
+```sql
+delete from image_cache where image_url like '%<slug>%';
+update trending_meals set image = null where name = '<Name>';   -- backfill is `is null`-scoped
+```
+
+Also: every size writes to the SAME storage path (upsert). If you generate two variants of one
+dish, DOWNLOAD BETWEEN THEM or the second silently overwrites the first.
+
+
 ## Standing: re-run and re-audit EVERY session
 
 Every time this pipeline has been examined it has produced significant findings — 13 fixes on
