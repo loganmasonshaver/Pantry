@@ -271,7 +271,22 @@ const corsHeaders = {
 // Server-side because it has to be: RLS on trending_meals allows updates only to a creator's own
 // rows, so a client write-back is correctly refused. Scoped to `image is null` so it can never
 // overwrite a photo the pipeline already chose, and awaited-but-ignored so it cannot fail a request.
-async function backfillTrendingImage(db: any, mealName: string, url: string) {
+async function backfillTrendingImage(db: any, mealName: string, url: string, isInternal: boolean) {
+  // GUARD 1 — internal callers only. My first version claimed RLS made this safe; it does not.
+  // `db` is the SERVICE-ROLE client, which bypasses RLS entirely, so any signed-in caller could
+  // have named a real trending row, passed their own `ingredients`, and had the resulting image
+  // written to public content. The URL is always one this function derived, so no arbitrary URL
+  // could be injected — but a WRONG image for a real dish is poisoning enough. The pipeline and
+  // the cron still self-heal rows; a user opening a meal no longer writes to shared content.
+  if (!isInternal) return
+  // GUARD 2 — durable URLs only. The last-resort path returns a FAL CDN link when both uploads
+  // fail, and that link EXPIRES. Writing it here would pin a guaranteed future 404 into the row,
+  // and `.is('image', null)` would then block any later successful upload from correcting it —
+  // the guard that makes this safe to retry is the same one that would make the mistake permanent.
+  if (!url.includes('/storage/v1/object/public/')) {
+    console.log(`[image] backfill skipped, not a durable storage URL: ${url.slice(0, 60)}`)
+    return
+  }
   try {
     const { error } = await db.from('trending_meals')
       .update({ image: url }).eq('name', mealName).is('image', null)
@@ -286,6 +301,19 @@ Deno.serve(async (req: Request) => {
   try {
     const { mealName, ingredients = [], steps = [] } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
+
+    // Declared HERE, above the cache lookup, because the cache-HIT path backfills
+    // trending_meals and needs it. Leaving it below produced TS2448/TS2454 — a temporal dead zone,
+    // which in this file would have thrown a ReferenceError on every cached image request. This
+    // codebase has lost a day to a TDZ bug before; the baseline delta caught this one in seconds.
+    // Match the same internal-auth tokens generate-trending-meals accepts: CRON_SECRET (the
+    // dedicated, reliable shared secret) preferred, SUPABASE_SERVICE_ROLE_KEY as fallback.
+    const cronSecret = Deno.env.get("CRON_SECRET") ?? ""
+    const authToken = (req.headers.get('Authorization') ?? req.headers.get('authorization') ?? '')
+      .replace(/^Bearer\s+/i, '').trim()
+    const isInternal = (cronSecret !== '' && authToken === cronSecret) ||
+                       (supabaseServiceKey !== '' && authToken === supabaseServiceKey)
+
 
     // Normalize steps to a string array — accepts either ["raw text"] or [{title, detail}]
     const stepStrings: string[] = Array.isArray(steps)
@@ -312,7 +340,7 @@ Deno.serve(async (req: Request) => {
         const { error: backfillErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: hit.image_url }, { onConflict: 'meal_key' })
         if (backfillErr) console.log('Backfill FAILED:', cacheKey, backfillErr.message)
       }
-      await backfillTrendingImage(db, mealName, hit.image_url)
+      await backfillTrendingImage(db, mealName, hit.image_url, isInternal)
       return new Response(JSON.stringify({ image: hit.image_url }), { headers: jsonHeaders })
     }
 
@@ -322,13 +350,6 @@ Deno.serve(async (req: Request) => {
     // with the service-role key (it has no user JWT). Its meal names are freshly generated =
     // always a cache miss, so without this bypass every new trending meal 401s and is left on
     // its YouTube-thumbnail fallback — the real cause of the all-YT Discover feed.
-    // Match the same internal-auth tokens generate-trending-meals accepts: CRON_SECRET (the
-    // dedicated, reliable shared secret) preferred, SUPABASE_SERVICE_ROLE_KEY as fallback.
-    const cronSecret = Deno.env.get("CRON_SECRET") ?? ""
-    const authToken = (req.headers.get('Authorization') ?? req.headers.get('authorization') ?? '')
-      .replace(/^Bearer\s+/i, '').trim()
-    const isInternal = (cronSecret !== '' && authToken === cronSecret) ||
-                       (supabaseServiceKey !== '' && authToken === supabaseServiceKey)
     const user = isInternal ? null : await verifyUser(req)
     if (!isInternal && !user) return new Response(JSON.stringify({ image: null, error: 'auth required' }), { status: 401, headers: jsonHeaders })
 
@@ -458,7 +479,7 @@ Deno.serve(async (req: Request) => {
         // Both upload attempts failed — return the FAL URL so the caller has SOMETHING
         // to render right now, but skip the cache write so the next request retries
         // from scratch instead of pinning everyone to a soon-to-expire URL.
-        await backfillTrendingImage(db, mealName, imageUrl)
+        await backfillTrendingImage(db, mealName, imageUrl, isInternal)
         return new Response(JSON.stringify({ image: imageUrl }), { headers: jsonHeaders })
       } catch (e) {
         console.log(`Attempt ${attempt + 1} error:`, e)
