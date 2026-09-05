@@ -268,6 +268,23 @@ when the clock jumps; there is a `refreshSession` path for it, worst case sign i
 
 ---
 
+## 6f. RAISED BY LOGAN 2026-09-05 — Home skeleton flash  *(fix shipped, UNVERIFIED on device)*
+Symptoms: every app open shows "Checking what's in your pantry…" for ~1s before meals appear; and
+on launch Home paints, gives way to a loading card, then returns.
+- [x] Two defects, both from `bf41c61` the same day, opposite halves of the `mealsPending` line.
+      (a) the hero-paint clause could go TRUE again after cards were visible, because `heroPainted`
+      resets on any `meals[0].image` change — so a refresh, the daily swap, or one of today's new
+      `?v=` versioned URLs redrew the shimmer over content. Now a one-way latch.
+      (b) the hold was armed for cached opens too, though `useMealSuggestions` serves disk cache
+      with NO loading state (~40ms), so every launch paid a second of shimmer for a photo already
+      on disk — undoing `43d7055`. Now armed only once `loading` has been true.
+- [ ] **VERIFY ON DEVICE: cold open shows meals immediately, with no shimmer and no flash.**
+- [ ] **VERIFY: a real generation still holds the skeleton until the hero photo paints** — that is
+      `bf41c61`'s fix and it must not have been thrown away. Needs a day with no cache.
+- [ ] **If the flash survives, do NOT add another guard.** Next single variable: `app/_layout.tsx`
+      calls `router.replace('/(tabs)')` on SIGNED_IN even when already there. A remount would reset
+      `heroPainted` and every other Home state and produce the same shape.
+
 ## 6c. Home + Pantry layout — OPEN DESIGN QUESTION, needs a decision before the trailer
 
 Not a bug list. The layout of these two tabs is unresolved and item 7 films them.
