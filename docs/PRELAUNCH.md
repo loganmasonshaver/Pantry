@@ -114,9 +114,26 @@ with a curd dip.
       and no automated check exists. Decide before launch: spot-audit the Discover pool by eye, or
       bulk-regenerate (cost = 1,370 FAL generations). Regeneration is cheap to trigger — delete the
       `image_cache` row, null `trending_meals.image`, re-invoke; the `?v=` token handles clients.
-- [ ] **Hero images are 512x512** (`image_size: "square"`) but the meal-detail hero is a tall
-      near-full-width box. Every photo in the app is being upscaled. Unmeasured, and it is a
-      one-word change to a larger size — but it changes cost, so decide deliberately.
+- [x] **CLOSED FOR THE APP 2026-09-05 — 512x512 stays. Logan looked and it is fine.**
+      Measured rather than guessed: the meal-detail hero is 500pt full-width = **1179x1500 real px**
+      at @3x, so a 512 source is upscaled **2.93x** and loses 21% of its width to `cover`. Discover
+      featured and the Home hero are 2.07x; rail cards 1.32x; thumbnails already DOWNSCALE and were
+      never affected. Flux 2 bills **$0.012/megapixel**, so the whole library to date has cost about
+      **$4.31**, and 1024 would be ~$17 to re-render plus ~$5/month more on the pipeline.
+      **Cost was never the reason not to — perceptibility was.** The A/B was real (fixed seed,
+      both put through the actual hero crop) but I showed it as a 620px crop magnified in a desktop
+      chat window, which is a view nobody ever gets. On a ~460 PPI phone, with a gradient over the
+      bottom third, a 2.93x upscale of a PHOTOGRAPH is close to invisible — food is the friendliest
+      possible content for upscaling (soft bokeh, organic texture, no hard edges, no text). Do not
+      reopen this for the app without new evidence FROM A DEVICE.
+- [x] **Square is correct and is not the thing to change.** Consumers span 0.78 (detail hero,
+      Discover rail) to 1.24 (Home hero), so no single aspect fits and 1:1 is the least-bad. Only
+      the resolution was ever in question. (`aspect_ratio: "16:9"` -> `image_size: "square"` was an
+      undiscussed migration default in `22e790a`; square turns out to be right by accident.)
+- [ ] **Resolution REOPENS for the trailer and App Store screenshots only — see §7 and §8.**
+      Different bar: full-screen, held for seconds, re-encoded by Apple, and a conversion surface
+      rather than something browsed past. `imageSize` + `seed` overrides are already shipped and
+      internal-only, so a one-off high-res render needs no code change.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
@@ -368,6 +385,14 @@ What that sweep left open:
 ## 7. Onboarding trailer  *(after 3 — the app must be final before filming)*
 - [ ] BLOCKED ON A DECISION: is any cached meal image hero-grade enough to hold 2.4 seconds? That
       frame is a third of the film.
+- [ ] **The resolution half of that question now has a number.** Full-screen is 1179x2556, so a 512
+      source is a **5x upscale** — and unlike in-app browsing (closed as imperceptible, §2b) this is
+      held still, re-encoded, and watched as an ad. **1024 does NOT solve it either (still ~2.5x).**
+      If a photo has to carry a full-screen frame, render those few dishes at 1536 or 2048 as a
+      one-off: `generate-meal-image` takes internal-only `imageSize` and `seed` overrides, so it is
+      a request-body change, not a code change, and it costs cents for a handful of dishes.
+- [ ] Note the fidelity fixes landed AFTER most of the library was generated. Whichever dishes the
+      trailer uses must be regenerated anyway (see §2b) — do the high-res render in the same pass.
 - [ ] Shot list: https://claude.ai/code/artifact/766f88c0-a922-463a-ad84-09059a351b14
 
 ## 8. App Store screenshots + description  *(after 3)*
