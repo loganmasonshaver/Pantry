@@ -432,6 +432,15 @@ export default function DiscoverScreen() {
   const personalReady = profileLoaded && pantryLoaded
   const showSkeleton = loading || !personalReady
 
+  // The number that matters: when the skeleton ACTUALLY goes. Every other mark only says which
+  // phase it was waiting on. Fires once — a later re-render must not restamp it.
+  const paintedRef = useRef(false)
+  useEffect(() => {
+    if (showSkeleton || paintedRef.current) return
+    paintedRef.current = true
+    perfMark('Discover FIRST PAINT  <-- skeleton gone')
+  }, [showSkeleton])
+
   // HYDRATE THE GATE FROM DISK. Everything `personalReady` waits for was already known last time
   // the user was here, so waiting on the network to re-learn it is what produced the ~1s empty card
   // on every cold entry. The two fetches below still run and still win — this only decides what the
@@ -447,6 +456,7 @@ export default function DiscoverScreen() {
     readDiscoverPersonal(user.id).then(p => {
       if (cancelled || !p || hydratedRef.current) return
       hydratedRef.current = true
+      perfMark('Discover PERSONAL from disk')
       setFoodDislikes(prev => prev.length ? prev : p.foodDislikes)
       setDietaryRestrictions(prev => prev.length ? prev : p.dietaryRestrictions)
       setDietType(prev => (prev && prev !== 'Classic') ? prev : p.dietType)
@@ -496,7 +506,7 @@ export default function DiscoverScreen() {
     })()
       // Set on BOTH paths — a failed pantry read must not strand the feed on a skeleton.
       .catch(() => {})
-      .finally(() => { pantryFetchedRef.current = true; setPantryLoaded(true) })
+      .finally(() => { perfMark('Discover PANTRY from network'); pantryFetchedRef.current = true; setPantryLoaded(true) })
   }, [user])
 
   // Profile-based dietary filters apply to every Discover view (always-on safety
@@ -543,6 +553,7 @@ export default function DiscoverScreen() {
         })
         // LAST, deliberately: budget feeds the "Fits your remaining kcal" shelf, and claim() is
         // first-shelf-wins, so a budget that lands after first paint re-allocates the whole page.
+        perfMark('Discover PROFILE from network')
         profileFetchedRef.current = true
         setProfileLoaded(true)
       },
@@ -575,6 +586,7 @@ export default function DiscoverScreen() {
     let cancelled = false
     readDiscoverCache(user.id).then(cached => {
       if (cancelled || !cached) return
+      perfMark('Discover FEED from disk')
       setTrending(prev => prev.length ? prev : cached) // never clobber a fetch that already landed
       hasContentRef.current = true; setLoading(false)
       prefetchMealImages(cached.slice(0, 8).map(m => m.image)) // warm the rail before scroll
@@ -585,6 +597,7 @@ export default function DiscoverScreen() {
   const fetchTrending = useCallback(async (force = false) => {
     if (!force && Date.now() - lastFetchRef.current < TRENDING_TTL_MS) return // fresh enough
     const mapped = await loadTrendingMeals()
+    perfMark('Discover FEED from network')
     if (!mapped) { setLoading(false); return }
     setTrending(mapped)
     hasContentRef.current = true
