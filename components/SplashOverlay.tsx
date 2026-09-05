@@ -1,36 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
-import { View, Text, Animated, StyleSheet, Easing, AccessibilityInfo, Platform } from 'react-native'
+import { Text, Animated, StyleSheet, Easing, AccessibilityInfo, Platform, ActivityIndicator } from 'react-native'
 
-// Branded cold-start splash overlay. Shows immediately on app launch and stays
-// visible for a minimum 2 seconds (premium feel + buys buffer time for the home
-// screen's meal cache to settle before the user sees it). _layout.tsx controls
-// when this gets hidden — typically when BOTH auth resolves AND the min time
-// elapsed.
+// Branded cold-start splash overlay. _layout.tsx decides when it hides (auth resolved AND the
+// minimum hold elapsed) and keeps it mounted until its exit animation reports finished.
 //
-// Design direction (per ui-ux-pro-max audit):
-// - Exaggerated minimalism statement wordmark (64pt weight 900) with subtle
-//   green text-shadow glow — OLED dark-mode aesthetic
-// - 2-second progress bar that fills exactly during the min splash window —
-//   feels intentional, not arbitrary (Linear / Notion pattern)
-// - Cycling tagline for personality vs. static "Loading…" (3 messages, 700ms each)
-// - Respects Settings → Accessibility → Reduce Motion (skips animations)
+// WHAT USED TO BE HERE AND WHY IT IS GONE — a 2s progress bar, a cycling tagline and a breathing
+// glow. All three animated on the JS THREAD during the busiest 2 seconds of the app's life:
+// `width` cannot use the native driver (it needs layout) and neither can `textShadowRadius`, so
+// each was writing across the bridge every frame while the bundle evaluated, auth resolved, the
+// meal cache was read and Home rendered. That contention is what made the bar stutter, and no
+// restyle of the bar would have fixed it.
+//
+// The bar was also dishonest: it filled over a FIXED timer, not real progress. A device trace has
+// Home painting cached meals at 380ms and settled by 640ms, so it was a 2-second animation of
+// nothing that also held the user ~1.4s longer than the app needed.
+//
+// Reference points Logan gave: Cal AI shows a wordmark and nothing else; MyFitnessPal shows a small
+// spinner because it genuinely takes ~2s. The rule that reconciles them is that an indicator should
+// appear only when there is a real wait — so there is no indicator by default, and a small spinner
+// fades in only if we are STILL here after SPINNER_AFTER_MS, which on a normal launch never happens.
+const SPLASH_DURATION_MS = 800
 
-const SPLASH_DURATION_MS = 2000
+// Only shows when the launch is genuinely slow (auth still unresolved). Comfortably past the ~640ms
+// a healthy cold start takes, so a normal launch never renders it at all.
+const SPINNER_AFTER_MS = 1100
 
-// EXIT. The splash used to be unmounted the instant showSplash went false — a one-frame hard cut
-// from a full-black branded screen to Home, which is what read as janky next to Cal AI and
-// MyFitnessPal. Both of those dissolve the splash over an app that is already sitting behind it.
-// 320ms is long enough to read as a dissolve rather than a blink, short enough not to feel like a
-// second wait on top of the 2s hold.
+// Long enough to read as a dissolve rather than a blink, short enough not to feel like a second
+// wait stacked on the hold.
 const SPLASH_EXIT_MS = 320
-
-const TAGLINES = [
-  'Stocking the shelves…',
-  'Sharpening the knives…',
-  'Loading your kitchen…',
-]
-
-const TAGLINE_CYCLE_MS = 700
 
 export default function SplashOverlay({ hiding = false, onHidden }: {
   // `hiding` starts the exit; the parent keeps this mounted until `onHidden` fires, so the fade
@@ -49,65 +46,30 @@ export default function SplashOverlay({ hiding = false, onHidden }: {
   // off to the app. Scales the CONTENT, never the container: the container is the black backdrop
   // and scaling that would pull its edges in and let Home leak round the sides mid-fade.
   const exitScale = useRef(new Animated.Value(1)).current
-  const progressWidth = useRef(new Animated.Value(0)).current
-  const glow = useRef(new Animated.Value(0.4)).current
-  const [taglineIdx, setTaglineIdx] = useState(0)
+  const spinnerFade = useRef(new Animated.Value(0)).current
+  const [showSpinner, setShowSpinner] = useState(false)
   const [reduceMotion, setReduceMotion] = useState(false)
-  // Don't run motion until we KNOW the user's preference — reduceMotion starts false,
-  // so without this gate a Reduce-Motion user sees a flash of the prohibited animation
-  // before isReduceMotionEnabled() resolves.
-  const [motionReady, setMotionReady] = useState(false)
 
-  // Check accessibility reduce-motion preference. If on, we skip the animated
-  // progress bar + glow pulse and show a static "Loading…" instead.
   useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(v => { setReduceMotion(v); setMotionReady(true) })
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion)
     const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion)
     return () => sub.remove()
   }, [])
 
+  // Mount the late indicator only if we are still here. Nothing animates before this fires, which
+  // is the entire point — the JS thread stays free during boot.
   useEffect(() => {
-    if (!motionReady || reduceMotion) return
+    const t = setTimeout(() => setShowSpinner(true), SPINNER_AFTER_MS)
+    return () => clearTimeout(t)
+  }, [])
 
-    // Progress bar fills exactly during the splash window — feels purposeful
-    Animated.timing(progressWidth, {
-      toValue: 1,
-      duration: SPLASH_DURATION_MS,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false, // width animations require layout (not transform)
-    }).start()
+  useEffect(() => {
+    if (!showSpinner) return
+    // Native driver: opacity only, so this cannot contend with the JS thread the way the old
+    // width and textShadowRadius animations did.
+    Animated.timing(spinnerFade, { toValue: 1, duration: 220, useNativeDriver: true }).start()
+  }, [showSpinner])
 
-    // Subtle text-shadow glow breathing — adds OLED-style life to the wordmark
-    const glowLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(glow, {
-          toValue: 1,
-          duration: 1400,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
-        }),
-        Animated.timing(glow, {
-          toValue: 0.4,
-          duration: 1400,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: false,
-        }),
-      ])
-    )
-    glowLoop.start()
-
-    // Cycle taglines every 700ms — adds personality, signals progress
-    const taglineInterval = setInterval(() => {
-      setTaglineIdx(i => (i + 1) % TAGLINES.length)
-    }, TAGLINE_CYCLE_MS)
-
-    return () => {
-      glowLoop.stop()
-      clearInterval(taglineInterval)
-    }
-  }, [reduceMotion, motionReady])
-
-  // Interpolate glow value to a shadow radius (4-12px) for subtle pulsing
   useEffect(() => {
     if (!hiding) return
     // Opacity is allowed under Reduce Motion (a plain cross-fade is not "motion"); the lift is not,
@@ -122,56 +84,35 @@ export default function SplashOverlay({ hiding = false, onHidden }: {
     Animated.parallel(anims).start(({ finished }) => { if (finished) onHidden?.() })
   }, [hiding, reduceMotion])
 
-  const shadowRadius = glow.interpolate({
-    inputRange: [0.4, 1],
-    outputRange: [4, 12],
-  })
-
   return (
     <Animated.View style={[styles.container, { opacity: fadeIn }]} pointerEvents="none">
-     <Animated.View style={[styles.content, { transform: [{ scale: exitScale }] }]}>
-      <Animated.Text
-        style={[
-          styles.wordmark,
-          // iOS supports textShadow via style; Android falls back to plain text
-          Platform.OS === 'ios' && !reduceMotion
-            ? { textShadowColor: 'rgba(74, 222, 128, 0.45)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: shadowRadius as any }
-            : null,
-        ]}
-      >
-        Pantry
-      </Animated.Text>
-
-      {/* Progress bar — exactly maps to the 2s splash duration */}
-      <View style={styles.progressTrack}>
-        <Animated.View
+      <Animated.View style={[styles.content, { transform: [{ scale: exitScale }] }]}>
+        <Text
           style={[
-            styles.progressFill,
-            reduceMotion
-              ? { width: '100%' }
-              : {
-                  width: progressWidth.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: ['0%', '100%'],
-                  }),
-                },
+            styles.wordmark,
+            // Static glow, not a loop. The brand cue survives; the per-frame bridge write that
+            // paid for it does not. iOS only — Android ignores textShadow on Text.
+            Platform.OS === 'ios' && !reduceMotion ? styles.wordmarkGlow : null,
           ]}
-        />
-      </View>
+        >
+          Pantry
+        </Text>
+      </Animated.View>
 
-      <Text style={styles.tagline}>
-        {reduceMotion ? 'Loading…' : TAGLINES[taglineIdx]}
-      </Text>
-     </Animated.View>
+      {/* Absolutely positioned so its appearance cannot shift the wordmark — a late indicator that
+          nudges the logo is worse than no indicator. */}
+      {showSpinner && (
+        <Animated.View style={[styles.spinner, { opacity: spinnerFade }]}>
+          {reduceMotion
+            ? <Text style={styles.loadingText}>Loading…</Text>
+            : <ActivityIndicator size="small" color="#666666" />}
+        </Animated.View>
+      )}
     </Animated.View>
   )
 }
 
 const styles = StyleSheet.create({
-  content: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   container: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000000',
@@ -179,32 +120,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 1000, // Float above the Stack so it covers any partial render
   },
+  content: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   wordmark: {
     fontSize: 64,
     fontWeight: '900',
     color: '#FFFFFF',
     letterSpacing: -1.5,
   },
-  // Progress bar — width matches typical wordmark visual span; fills over splash window
-  progressTrack: {
-    width: 200,
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderRadius: 1,
-    overflow: 'hidden',
-    marginTop: 32,
+  wordmarkGlow: {
+    textShadowColor: 'rgba(74, 222, 128, 0.45)',
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 10,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#4ADE80',
-    borderRadius: 1,
+  spinner: {
+    position: 'absolute',
+    bottom: 88,
+    alignItems: 'center',
   },
-  tagline: {
-    marginTop: 20,
+  loadingText: {
     fontSize: 13,
     color: '#666666',
     fontWeight: '500',
     letterSpacing: 0.3,
-    minHeight: 16, // Reserve vertical space so cycling text doesn't jitter layout
   },
 })
