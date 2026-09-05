@@ -156,10 +156,38 @@ async function generateVisualDescription(mealName: string, ingredients: string[]
   // So strip the food NOUN and keep the tint. The description writer receives "flavouring
   // concentrate (dissolves completely — tints the dish a bright colour, contributes NO solid
   // pieces)", which carries everything true about it and contains no food word Flux can render.
-  const rewritten = ingredients.map(i =>
-    INVISIBLE_INGREDIENT.test(String(i))
-      ? 'flavouring concentrate (dissolves completely — tints the dish a bright colour, contributes NO solid pieces or chunks)'
-      : String(i))
+  // Name the COLOUR, not just "a bright colour". Saying only that it tints produced a pale cream
+  // jelly on 2026-09-05 — the model has no value to use, so it falls back to the base ingredient's
+  // own colour, which for gelatin is cream. The flavour word carries the colour, so map it and emit
+  // the colour alone: Flux gets something concrete and still never sees a food noun to render.
+  // Returns the colour a flavouring produces, or null when it produces none.
+  //
+  // Two bugs worth keeping in the comment because both were silent. Bare `red` as an alternative
+  // matched INSIDE "flavoured", so every "fruit flavored ..." resolved to red; every short colour
+  // word is now \b-bounded. And the first version emitted "a distinctly coloured tone" as a
+  // fallback, which over-claims for vanilla extract and sweetener — they are colourless, and
+  // asserting a colour there is how a plain gelatin gets painted for no reason.
+  const flavourColour = (text: string): string | null => {
+    const t = text.toLowerCase()
+    if (/blue\s*raspberry|blueberr/.test(t)) return 'a deep blue-purple'
+    if (/strawberr|raspberr|cherry|watermelon|\bred\b/.test(t)) return 'a vivid red'
+    if (/orange|mango|peach|apricot|papaya/.test(t)) return 'a bright orange'
+    if (/lemon|pineapple|banana|\byellow\b/.test(t)) return 'a bright yellow'
+    if (/\blime\b|apple|\bgreen\b|kiwi|melon/.test(t)) return 'a bright green'
+    if (/grape|blackcurrant|berry|\bpurple\b/.test(t)) return 'a deep purple'
+    if (/cola|coffee|caramel|chocolate/.test(t)) return 'a deep brown'
+    // "fruit flavoured" naming no fruit — the fruit-punch default, and far closer than cream.
+    if (/\bfruit\b|punch|tropical/.test(t)) return 'a vivid red-orange'
+    return null   // vanilla, plain sweetener, salt-like flavourings: no colour to claim
+  }
+  const rewritten = ingredients.map(i => {
+    const text = String(i)
+    if (!INVISIBLE_INGREDIENT.test(text)) return text
+    const colour = flavourColour(text)
+    return colour
+      ? `flavouring concentrate (dissolves completely — tints the whole dish ${colour} throughout, contributes NO solid pieces or chunks)`
+      : 'flavouring (dissolves completely — adds no colour and NO solid pieces or chunks)'
+  })
   const changed = rewritten.filter((v, n) => v !== String(ingredients[n])).length
   if (changed) console.log(`[image] rewrote ${changed} flavouring(s) as colour-only for "${mealName}"`)
   ingredients = rewritten
