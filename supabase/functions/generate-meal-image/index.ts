@@ -146,13 +146,23 @@ function sortedKey(name: string): string {
 const INVISIBLE_INGREDIENT = /(extract|essence|drink enhancer|water enhancer|sweetener|food colou?ring|flavou?r(?:ing|ed)?\s*(?:drops?|syrup|enhancer|concentrate))/i
 
 async function generateVisualDescription(mealName: string, ingredients: string[], steps: string[] = []): Promise<string | null> {
-  // Filtered BEFORE the prompt is built, not forbidden inside it.
-  const visible = ingredients.filter(i => !INVISIBLE_INGREDIENT.test(String(i)))
-  if (visible.length < ingredients.length) {
-    console.log(`[image] dropped ${ingredients.length - visible.length} invisible ingredient(s) from the visual prompt for "${mealName}"`)
-  }
-  // Keep at least something to describe — if a recipe is ALL flavourings, fall back to the original.
-  ingredients = visible.length ? visible : ingredients
+  // REWRITTEN before the prompt is built, not removed and not forbidden inside it.
+  //
+  // Removing them was the first attempt and it over-corrected: with the enhancer gone, "Protein
+  // Jello" rendered as PLAIN GELATIN — clear and colourless — when the real dish is orange. A
+  // flavour concentrate is invisible as a SOLID and highly visible as COLOUR, and dropping it threw
+  // away the colour along with the false chunks.
+  //
+  // So strip the food NOUN and keep the tint. The description writer receives "flavouring
+  // concentrate (dissolves completely — tints the dish a bright colour, contributes NO solid
+  // pieces)", which carries everything true about it and contains no food word Flux can render.
+  const rewritten = ingredients.map(i =>
+    INVISIBLE_INGREDIENT.test(String(i))
+      ? 'flavouring concentrate (dissolves completely — tints the dish a bright colour, contributes NO solid pieces or chunks)'
+      : String(i))
+  const changed = rewritten.filter((v, n) => v !== String(ingredients[n])).length
+  if (changed) console.log(`[image] rewrote ${changed} flavouring(s) as colour-only for "${mealName}"`)
+  ingredients = rewritten
   const sysPrompt = `You are a food stylist. In ONE concise sentence (under 50 words), describe how the FINISHED dish appears when photographed for a recipe blog. Include: the dish visual form (color, texture, structure), the vessel it is served in (glass / bowl / plate / board / ramekin), and natural garnish if appropriate.
 
 CRITICAL — INGREDIENT FIDELITY: Compose the description from the SPECIFIC ingredients listed. If the dish name is generic (e.g., "Fruit", "Bowl", "Plate"), use the exact ingredient (e.g., "sliced apple" not "berries"). NEVER substitute photogenic alternatives or generic interpretations of the name.
@@ -160,6 +170,8 @@ CRITICAL — INGREDIENT FIDELITY: Compose the description from the SPECIFIC ingr
 COVERAGE — every visible ingredient must appear: After applying the visibility rules below, EVERY ingredient that ends up visible on the plate MUST be named in the description. Do not silently drop ingredients for brevity. If 6+ ingredients are visible, briefly list them all (it's fine to extend the sentence). Do not invent ingredients that aren't listed (e.g., microgreens, herbs) unless the recipe explicitly includes them.
 
 FLAVOURINGS ARE NOT THE FOOD THEY ARE NAMED AFTER: an ingredient whose name contains a food word but which is a syrup, extract, essence, powder, drink enhancer, sweetener or "X flavoured" product must NEVER be drawn as that food. "fruit flavored zero sugar water drink enhancer" is a liquid concentrate that tints the dish — it is NOT fruit pieces. "vanilla extract" is not a vanilla pod. "strawberry protein powder" is not strawberries. "banana flavour drops" are not banana slices. Drawing the named food instead of the product is the single most common way these photos end up showing something the recipe does not contain — a real example rendered diced fruit suspended in a gelatin dessert whose only fruit reference was a flavour concentrate.
+
+SET AND DISSOLVED DISHES ARE UNIFORM BUT NOT COLOURLESS: a jelly, gelatin dessert, sorbet, granita, panna cotta or anything else where the ingredients dissolve into a single mass is EVENLY coloured throughout, with no pieces, chunks, swirls or inclusions of any kind — and it is NOT clear or colourless unless the recipe genuinely contains no colouring. If a flavouring concentrate is present, say the colour it produces (a bright orange, red or amber set jelly). Both halves matter: a real example was rendered first with diced fruit floating in it, and then, after the flavouring was removed entirely, as plain colourless gelatin. Neither is the dish.
 
 EQUIPMENT IS NOT AN INGREDIENT: some creators list their container or tools in the ingredient list ("64 fl oz glass container", "baking tray", "piping bag"). These are never food and never garnish. Use them ONLY as the vessel if relevant, and never depict them as something on or in the dish.
 
