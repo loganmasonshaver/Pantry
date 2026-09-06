@@ -7,6 +7,7 @@ import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases } from '../_shared/dish-key.ts'
 import { verifyMacros } from '../_shared/macro-estimate.ts'
+import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
@@ -77,7 +78,11 @@ async function lookupMacros(name: string, grams: number): Promise<{ cal: number;
   } catch { return null }
 }
 
-async function correctMealMacros(meal: any): Promise<any> {
+// Works entirely in BATCH space: the ingredient list describes the whole recipe, so every total
+// here is the whole recipe. `servings` only widens the sanity windows — the per-serving divide
+// happens once, later, in toPerServing(). Doing it here instead would put a division in front of
+// verifyMacros, which compares a claim against these same batch ingredients.
+async function correctMealMacros(meal: any, servings = 1): Promise<any> {
   const ingredients = meal.ingredients || []
   let totalCal = 0, totalP = 0, totalC = 0, totalF = 0
   let lookedUp = 0
@@ -93,7 +98,10 @@ async function correctMealMacros(meal: any): Promise<any> {
     if (macros) {
       // Skip obviously-wrong FatSecret matches — a single ingredient over 900 kcal or 100g
       // protein almost certainly means the search matched the wrong food entry.
-      if (macros.cal > 900 || macros.p > 100) continue
+      // Scaled by servings: a 2-serving batch genuinely doubles every gram weight, and an
+      // unscaled guard would start discarding real food — which understates the total, which
+      // silently under-logs the user. The guard must move with the portion it is judging.
+      if (macros.cal > 900 * servings || macros.p > 100 * servings) continue
       totalCal += macros.cal
       totalP += macros.p
       totalC += macros.c
@@ -103,10 +111,9 @@ async function correctMealMacros(meal: any): Promise<any> {
   }
 
   // Only override LLM macros if FatSecret resolved ≥50% of ingredients AND the total is
-  // within a sane single-serving range. Outside this band → trust the LLM (database
-  // mismatch likely worse than estimate). Capped at 1200 here because generate-meals
-  // produces single meals, not meal-prep portions.
-  if (lookedUp >= ingredients.length / 2 && totalCal >= 200 && totalCal <= 1200) {
+  // within a sane range. Outside this band → trust the LLM (database mismatch likely worse
+  // than estimate). The 200–1200 window is PER SERVING, so it scales with the batch.
+  if (lookedUp >= ingredients.length / 2 && totalCal >= 200 * servings && totalCal <= 1200 * servings) {
     meal.calories = Math.round(totalCal)
     meal.protein = Math.round(totalP)
     meal.carbs = Math.round(totalC)
@@ -114,6 +121,7 @@ async function correctMealMacros(meal: any): Promise<any> {
   }
   return meal
 }
+
 
 
 Deno.serve(async (req: Request) => {
@@ -234,6 +242,24 @@ Deno.serve(async (req: Request) => {
     const calorieTarget = Math.round(calorieGoal / mealsPerDay)
     const calorieMin = Math.floor(calorieTarget * 0.85)
     const calorieMax = Math.ceil(calorieTarget * 1.15)
+    // MULTI-SERVING RECIPES. calorieTarget is per EATING OCCASION and is correct — someone on 6
+    // meals/day really does eat ~460 kcal at a time. What is wrong is asking them to COOK a
+    // 460 kcal recipe: eating occasions are not cooking occasions. So keep the portion honest and
+    // make the RECIPE bigger by giving it more servings, exactly as trending recipes do.
+    // The lever is recipe size, not day coverage — 3 recipes were never meant to feed a whole day.
+    // Measured against every live profile, this yields servings > 1 for exactly one plausible user
+    // (6 meals @ 2761 kcal → 460/serving → 2). Everyone at 3-5 meals/day gets servings === 1, for
+    // which every scale below is ×1 and this whole feature is a no-op. That is the safety property.
+    const servings = servingsForPortion(calorieTarget)
+    // BATCH bands. The model is asked for the whole recipe, and every gate that reads the
+    // ingredient list (FatSecret correction, the drops below, verifyMacros) compares against the
+    // whole recipe too. toPerServing() divides once, after all of them.
+    const batchCalorieTarget = calorieTarget * servings
+    const batchCalorieMin = calorieMin * servings
+    const batchCalorieMax = calorieMax * servings
+    const batchProteinTarget = proteinTarget * servings
+    const batchProteinMin = proteinMin * servings
+    const batchProteinMax = proteinMax * servings
     // Per-meal FAT ceiling. There's no stored fat goal, so derive a sane daily fat (~30% of
     // kcal) split per meal — stops a single meal (e.g. beef + cheese + creamy dressing +
     // buttered bread) from eating the whole day's fat. Skipped for keto/low-carb/carnivore,
@@ -241,6 +267,7 @@ Deno.serve(async (req: Request) => {
     const highFatDiet = dietaryRestrictions.some((d: string) => /keto|low[- ]?carb|carnivore/i.test(String(d)))
     const fatTarget = Math.round((calorieGoal * 0.30 / 9) / mealsPerDay)
     const fatMax = Math.max(25, Math.ceil(fatTarget * 1.15))
+    const batchFatMax = fatMax * servings
     const restrictions = dietaryRestrictions.filter((d: string) => d !== "None").join(", ") || "none"
     const restrictionsLine = restrictions !== "none"
       ? `\n- STRICT dietary requirements — NEVER violate these under any circumstances: ${restrictions}. Any meal that includes a forbidden ingredient for these restrictions must be discarded entirely.`
@@ -290,8 +317,18 @@ Deno.serve(async (req: Request) => {
     const bannedBasesLine = bannedBases.length === 0 ? "" :
       `\n- BASE INGREDIENT BAN (blocking constraint): ${bannedBases.map(b => b.toUpperCase()).join(" and ")} ${bannedBases.length > 1 ? "have" : "has"} carried roughly a third of this user's recent meals and they are sick of ${bannedBases.length > 1 ? "them" : "it"}. Do NOT build ANY of today's meals on ${bannedBases.join(" or ")} — not as the protein, not as the base, not as the headline ingredient. A trace amount as a garnish is fine. Use a DIFFERENT base from their pantry. This is a rule about the FOOD, not the title: renaming the dish does not satisfy it.`
 
+    // Only emitted when the recipe is genuinely a batch. Two things have to be said explicitly:
+    // the numbers describe the WHOLE recipe (the model's instinct is to report a plate), and the
+    // dish has to survive being portioned — a 2-serving smoothie is fine cold, 2 servings of
+    // scrambled eggs on toast is a cold second plate. Nothing else in the pipeline can judge that.
+    const servingsRule = servings > 1 ? `
+- THIS IS A BATCH RECIPE — every recipe MUST make ${servings} servings. The user eats ${mealsPerDay} times a day, so one portion is only ~${calorieTarget} kcal — too small to be worth cooking on its own. They cook once and portion it.
+  • Ingredient quantities describe the WHOLE recipe (all ${servings} servings), and the calories/protein/carbs/fat you report are the TOTAL for the whole recipe. Do NOT report one portion's numbers.
+  • prepTime is the time to cook the WHOLE recipe. Cooking ${servings} portions of a sheet-pan dish is not ${servings}× the time — be realistic, not multiplicative.
+  • ONLY suggest dishes that genuinely keep and reheat (or are eaten cold): bakes, stews, chilis, curries, sheet-pan dinners, grain and rice bowls, pasta bakes, soups, overnight oats, cold salads, smoothies portioned into the fridge. NEVER a dish that is only good the moment it leaves the pan — fried eggs, anything on toast, crisp-skinned fish, grilled cheese, tacos assembled to order.` : ""
+
     const fatLine = highFatDiet ? "" :
-      `\n- FAT CEILING (blocking constraint): every meal MUST have ≤ ${fatMax}g fat (aim ~${fatTarget}g). A single meal must NOT eat the whole day's fat budget — a beef + cheese + creamy dressing + buttered bread pileup at 50g+ fat is disqualified. Use leaner cuts, less cheese/oil, or pick a naturally leaner dish to stay under. Protein and carbs matter more than packing in fat.`
+      `\n- FAT CEILING (blocking constraint): every recipe MUST have ≤ ${batchFatMax}g fat total (aim ~${fatTarget * servings}g). A single meal must NOT eat the whole day's fat budget — a beef + cheese + creamy dressing + buttered bread pileup at 50g+ fat is disqualified. Use leaner cuts, less cheese/oil, or pick a naturally leaner dish to stay under. Protein and carbs matter more than packing in fat.`
 
     // Recipe complexity scales with cookingSkill from onboarding.
     // Minimal cooks get short weeknight meals; culinary cooks get real chef-level dishes.
@@ -396,11 +433,11 @@ Available pantry ingredients (listed oldest first — prioritize using the first
 ${ingredients.join(", ")}
 
 Rules:
-${ingredientRule}${proteinVarietyRule}
+${ingredientRule}${proteinVarietyRule}${servingsRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
-- PROTEIN DISTRIBUTION (blocking constraint): every meal MUST have ${proteinMin}g–${proteinMax}g protein (target ~${proteinTarget}g). Distribute protein EVENLY across meals — never pile into one and starve another. Above max causes poor absorption + GI discomfort.
+- PROTEIN DISTRIBUTION (blocking constraint): every recipe MUST have ${batchProteinMin}g–${batchProteinMax}g protein in TOTAL (target ~${batchProteinTarget}g). Distribute protein EVENLY across the ${genCount} recipes — never pile into one and starve another. A single SERVING above ${proteinMax}g causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
-- CALORIE DISTRIBUTION (blocking constraint): every meal MUST have ${calorieMin}–${calorieMax} kcal (target ~${calorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} meals = ${calorieTarget} per meal. Distribute calories EVENLY — meals far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}
+- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -447,7 +484,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
 - NAMING: Meal names must sound like restaurant menu items. Use culinary terms (e.g. "Lemon Herb", "Miso Glazed", "Chipotle Lime", "Thai Basil", "Pesto", "Teriyaki"). Never name a meal after a crude ingredient list (bad: "Chicken Rice Broccoli Bowl", "Peanut Butter Chicken Bowl"; good: "Thai Basil Chicken Rice Bowl", "Teriyaki Sesame Chicken").
 - Smoothies should only contain typical smoothie ingredients (fruits, protein powder, milk, yogurt, greens)
 
-Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item mentioned in steps (oil, garlic, broth, salt, pepper) appears in the ingredients array. "missing_ingredients" lists the NAMES of ingredients already in the array that aren't in the pantry:
+Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` REMINDER: quantities and macros below are for the WHOLE ${servings}-serving recipe, not one portion — do not include a "servings" field, it is set for you.` : ''} Note how EVERY item mentioned in steps (oil, garlic, broth, salt, pepper) appears in the ingredients array. "missing_ingredients" lists the NAMES of ingredients already in the array that aren't in the pantry:
 [
   {
     "id": "1",
@@ -533,16 +570,18 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
       console.log('Correcting macros via FatSecret...')
       // 3 meals at a time × 5 ingredients each = ≤15 concurrent FatSecret calls,
       // vs. the old N×M unbounded fan-out that tripped rate limits on dense batches.
-      meals = await mapLimit(meals, 3, (m: any) => correctMealMacros(m))
+      meals = await mapLimit(meals, 3, (m: any) => correctMealMacros(m, servings))
       console.log('Macros corrected')
     }
 
     // Macro band validation — drop meals (post-FatSecret correction) that violate either
     // band by 40%+. Both protein and calories enforced with 1.40× buffer so near-misses
     // pass but genuine outliers (e.g. 96g protein, 1500 cal bombs) get caught.
-    const proteinDropThreshold = proteinMax * 1.40
-    const calorieDropThreshold = calorieMax * 1.40
-    const fatDropThreshold = fatMax * 1.40 // fat-bomb guard — code-enforced, since the LLM ignores prompt caps under load
+    // Batch-scale, because macros are still batch-scale here — toPerServing() runs after
+    // verifyMacros, which needs the claim and the ingredient list in the same units.
+    const proteinDropThreshold = batchProteinMax * 1.40
+    const calorieDropThreshold = batchCalorieMax * 1.40
+    const fatDropThreshold = batchFatMax * 1.40 // fat-bomb guard — code-enforced, since the LLM ignores prompt caps under load
     const beforeBands = meals.length
     meals = meals.filter((m: any) =>
       Number(m.protein) <= proteinDropThreshold &&
@@ -634,6 +673,17 @@ Respond ONLY with a JSON array, no markdown, no explanation. Note how EVERY item
         console.log(`[macro-check] would drop ${beforeCheck - kept.length}/${beforeCheck}, leaving only ${kept.length} for ${displayCount} slots — keeping all; suspect the table or tolerances, not the meals`)
       }
     }
+
+    // ── BATCH → PER SERVING. The single divide. ──────────────────────────────────────────────
+    // Everything ABOVE this line reads the ingredient list, which is always the full recipe: the
+    // FatSecret correction overwrites macros with the ingredient sum, and verifyMacros drops a meal
+    // whose claim is under 0.65× that same sum. Handing either of those a per-serving number
+    // against a batch ingredient list is what would corrupt the macros — the FatSecret path would
+    // silently stamp the batch total back on, and verifyMacros would read a 2-serving meal as
+    // understating calories by half and drop it. Everything BELOW wants one portion: the fit
+    // ranking scores against per-occasion targets, and the client logs meal.calories verbatim.
+    meals = meals.map((m: any) => toPerServing(m, servings))
+    if (servings > 1) console.log(`Servings: ${servings} per recipe — macros divided to per-serving, ingredients left at batch scale`)
 
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
     // displayCount (3). Rank survivors by macro fit — sum of normalized squared distance

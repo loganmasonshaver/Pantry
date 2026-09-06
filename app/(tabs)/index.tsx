@@ -343,6 +343,14 @@ function MealCard({
         <View style={styles.mealMeta}>
           <Clock size={13} stroke={COLORS.textMuted} strokeWidth={1.8} />
           <Text style={styles.mealMetaText}>{meal.prepTime} min prep</Text>
+          {/* Sits with prep time, not with the macros: the macros below are one portion and must
+              stay unqualified, while "makes 2" is a fact about the COOKING, same as the clock. */}
+          {(meal.servings ?? 1) > 1 && (
+            <>
+              <View style={styles.macroDot} />
+              <Text style={styles.mealMetaText}>makes {meal.servings}</Text>
+            </>
+          )}
         </View>
         <View style={styles.mealMacros}>
           <Text style={styles.mealMacroText}>
@@ -1941,6 +1949,15 @@ export default function HomeScreen() {
                             {m.protein > 0 && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
                                 <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{m.protein}P</Text>
+                              </View>
+                            )}
+                            {/* The CAL and P pills are ONE PORTION — that is what they will eat and
+                                what logging writes. This pill is the only thing telling them the
+                                recipe cooks more than that, so without it the ingredient list on
+                                the detail screen reads as double the food the card promised. */}
+                            {(m.servings ?? 1) > 1 && (
+                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(0,212,170,0.15)', borderColor: 'rgba(0,212,170,0.25)' }]}>
+                                <Text style={[styles.heroMealPillText, { color: COLORS.accent }]}>MAKES {m.servings}</Text>
                               </View>
                             )}
                           </View>

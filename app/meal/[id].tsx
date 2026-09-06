@@ -803,8 +803,8 @@ export default function MealDetailScreen() {
                   Without this line a 4-egg cheesecake next to "278 cal" reads as a lie — it's the
                   label that makes the two numbers reconcilable. Hidden at 1 serving, where the
                   distinction doesn't exist. */}
-            {(meal as any)?.servings > 1 && (
-              <Text style={styles.servingsNote}>Makes {(meal as any).servings} servings · macros are per serving</Text>
+            {(meal.servings ?? 1) > 1 && (
+              <Text style={styles.servingsNote}>Makes {meal.servings} servings · macros are per serving</Text>
               )}
               {/* States what was CHECKED, never that the dish is safe. These tags are derived from
                   an LLM's reading of a video description, and both failure modes have happened in

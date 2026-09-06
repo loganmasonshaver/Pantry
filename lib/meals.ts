@@ -16,6 +16,12 @@ export type GeneratedMeal = {
   carbs: number
   fat: number
   ingredients: { name: string; visual: string; grams: string }[]
+  // How many portions the ingredient list makes. Macros above are PER SERVING, ingredients are the
+  // FULL BATCH — the same convention trending meals already use, so meal/[id] renders both without
+  // a special case. Set server-side from the user's meal frequency: a 6-meal/day eater's ~460 kcal
+  // portion is too small to be worth cooking on its own, so the recipe makes two. Optional because
+  // every meal cached before this shipped has no field; treat a missing value as 1.
+  servings?: number
   missing_ingredients?: string[]
   steps: (string | { title: string; detail: string })[]
   image?: string | null
