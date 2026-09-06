@@ -154,6 +154,28 @@ with a curd dip.
       rather than something browsed past. `imageSize` + `seed` overrides are already shipped and
       internal-only, so a one-off high-res render needs no code change.
 
+## 2c. ANSWERED 2026-09-05 — the "slow Supabase queries" were Metro, not the app
+Cold-start traces showed Home's profile/pantry/logs queries taking 8-11s, and every query in the app
+completing within the same ~700ms window no matter when it started. That release-together shape
+pointed at one shared gate. It was not the one it looked like.
+- [x] **Server ruled out.** curl from the dev machine against the same REST endpoint: TTFB 654 /
+      293 / 158ms across three attempts.
+- [x] **supabase-js ruled out**, by a three-way probe (`lib/netProbe.ts`, dev-only, now gated off
+      behind `PROBE_ENABLED`). `auth.getSession()` — the gate every PostgREST call awaits to attach
+      the JWT, and the prime suspect — took **0ms**. A supabase query took **92ms** once a
+      connection existed. A BARE `fetch` with no supabase-js in the path took **2322ms**, i.e. just
+      as slow as everything else. The client was never the problem.
+- [x] **It is Metro.** Query time tracks BUNDLE SIZE across four traces the same day:
+      3843 modules -> 7.7s | 3842 -> 11.2s | 1 module -> 1.5s | 1 module -> 2.1s.
+      The phone pulls the JS bundle from the Mac over the same wifi and Supabase requests contend
+      with it. A release build has no Metro and no bundle transfer.
+- [ ] **Confirm on a release build before ever touching this again**
+      (`npx expo run:ios --configuration Release`). If cold-start queries are ~100ms there, this is
+      closed permanently. **Do NOT "optimise" the Supabase client for a number measured under
+      Metro** — the same trap as reading absolute perfMark values instead of deltas.
+- [ ] Note for the release-build pass: it also settles the OTHER dev-only number still open —
+      whether Discover's remaining ~230ms tap-to-paint survives outside a dev bundle (see §6f).
+
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
 - [x] ~~Delete or wire the dead review screen first~~ — DELETED 2026-08-30. It was not a
