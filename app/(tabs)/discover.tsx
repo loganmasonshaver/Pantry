@@ -10,7 +10,6 @@ import {
   RefreshControl,
   Dimensions,
   TextInput,
-  InteractionManager,
 } from 'react-native'
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -1092,8 +1091,20 @@ export default function DiscoverScreen() {
   useEffect(() => {
     setAllShelvesReady(false)
     if (showSkeleton) return
-    const task = InteractionManager.runAfterInteractions(() => { perfMark('Discover ALL SHELVES mounted'); setAllShelvesReady(true) })
-    return () => task.cancel()
+    // requestIdleCallback, not InteractionManager: the latter is deprecated and warns at runtime
+    // ("Please refactor long tasks into smaller ones, and use 'requestIdleCallback' instead").
+    // RN provides both via Libraries/Core/setUpTimers, and its polyfill honours options.timeout.
+    //
+    // The timeout is not optional here. requestIdleCallback ALONE can wait forever on a thread that
+    // never goes idle — which is exactly the cold-start case this runs in — and the below-fold
+    // shelves would then never mount for a user who scrolls. 250ms caps that: first paint lands
+    // around 233ms, so the worst case is everything mounted by ~480ms, well before anyone can
+    // scroll two shelves down.
+    const idle = requestIdleCallback(
+      () => { perfMark('Discover ALL SHELVES mounted'); setAllShelvesReady(true) },
+      { timeout: 250 },
+    )
+    return () => cancelIdleCallback(idle)
   }, [showSkeleton, browseSections])
   const sectionsToRender = allShelvesReady ? browseSections : browseSections.slice(0, FIRST_PAINT_SHELVES)
 
