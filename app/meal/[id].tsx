@@ -20,7 +20,7 @@ const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus } from 'lucide-react-native'
+import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, Minus } from 'lucide-react-native'
 import PressableScale from '../../components/PressableScale'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
@@ -123,6 +123,13 @@ export default function MealDetailScreen() {
   const [showEditForm, setShowEditForm] = useState(false)
   const [showCreatorEdit, setShowCreatorEdit] = useState(false)
   const [portionMode, setPortionMode] = useState<PortionMode>('Measured')
+  // How many servings the user is COOKING right now. null = "however many the recipe was written
+  // for", which is the only value that survives a meal changing under the screen — an initial
+  // useState(meal.servings) would be stale, and `meal` is derived during render, not state.
+  // View-only on purpose: it scales the ingredient list and nothing else. Macros stay per serving,
+  // saving stores the authored batch, and logging is untouched — cooking four portions does not
+  // mean eating four.
+  const [cookServings, setCookServings] = useState<number | null>(null)
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
@@ -362,6 +369,29 @@ export default function MealDetailScreen() {
   } else {
     meal = null
   }
+
+  // ── Servings the user is cooking ──────────────────────────────────────────────────────────
+  // MAX 3, matching MAX_SERVINGS in _shared/servings.ts so there is one number in the codebase
+  // rather than two. It is also as far as Cook Now's promise stretches: "cook tonight with what
+  // you have" is unverifiable past a point, because pantry_items stores no quantities at all — the
+  // app cannot tell you a 4x scale empties your fridge, so it should not invite one.
+  const authoredServings = Math.max(1, Math.min(3, Number(meal?.servings) || 1))
+  const cooking = Math.max(1, Math.min(3, cookServings ?? authoredServings))
+  const servingScale = cooking / authoredServings
+  // Grams AND visual must move together. Scaling only grams left "1 cup" of coconut milk beside a
+  // doubled weight, because getMeasuredDisplay prefers `visual` verbatim for liquids and
+  // seasonings — the same pairing bug scaleVisual was written for.
+  const scaledIngredients = servingScale === 1
+    ? (meal?.ingredients ?? [])
+    : (meal?.ingredients ?? []).map((ing: any) => {
+        const grams = parseFloat(String(ing.grams ?? '').replace(/[^0-9.]/g, ''))
+        const unit = String(ing.grams ?? '').replace(/[0-9.\s]/g, '') || 'g'
+        return {
+          ...ing,
+          grams: Number.isFinite(grams) && grams > 0 ? `${Math.round(grams * servingScale)}${unit}` : ing.grams,
+          visual: scaleVisual(ing.visual, servingScale),
+        }
+      })
 
   const creator = (meal as any)?.creator ?? null
   const isCreatorOwner = !!(creator?.user_id && creator.user_id === user?.id)
@@ -806,9 +836,45 @@ export default function MealDetailScreen() {
                   Without this line a 4-egg cheesecake next to "278 cal" reads as a lie — it's the
                   label that makes the two numbers reconcilable. Hidden at 1 serving, where the
                   distinction doesn't exist. */}
-            {(meal.servings ?? 1) > 1 && (
+            {/* Its own row, never beside the Measured/Eyeball pill — that row already overflowed
+                once when a second control was put in it. Stepper first, caption under it. */}
+            <View style={styles.servingsRow}>
+              <Text style={styles.servingsLabel}>SERVINGS</Text>
+              <View style={styles.stepper}>
+                {([-1, 1] as const).map(delta => {
+                  const next = cooking + delta
+                  const disabled = next < 1 || next > 3
+                  return (
+                    <TouchableOpacity
+                      key={delta}
+                      style={[styles.stepperBtn, disabled && styles.stepperBtnDisabled]}
+                      onPress={() => setCookServings(next)}
+                      disabled={disabled}
+                      activeOpacity={0.7}
+                      // The glyphs are 12pt inside a 28pt control; without this the tap target
+                      // is under the 44pt minimum and misses land on the ingredient rows.
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                    >
+                      {delta === -1
+                        ? <Minus size={14} stroke={disabled ? COLORS.textDim : COLORS.textWhite} strokeWidth={2.5} />
+                        : <Plus size={14} stroke={disabled ? COLORS.textDim : COLORS.textWhite} strokeWidth={2.5} />}
+                    </TouchableOpacity>
+                  )
+                })}
+                <Text style={styles.stepperValue}>{cooking}</Text>
+              </View>
+            </View>
+            {/* Three different truths, and only one is ever relevant:
+                – scaled away from the recipe: say the times below were not written for this amount
+                – batch at its authored size: reconcile the batch ingredients with per-serving macros
+                – single serving, unscaled: nothing to say, so say nothing */}
+            {cooking !== authoredServings ? (
+              <Text style={styles.servingsNote}>
+                Scaled from {authoredServings} · macros stay per serving. Cooking times below were written for {authoredServings} — adjust oven and simmer times as you go.
+              </Text>
+            ) : (meal.servings ?? 1) > 1 ? (
               <Text style={styles.servingsNote}>Makes {meal.servings} servings · macros are per serving</Text>
-              )}
+            ) : null}
               {/* States what was CHECKED, never that the dish is safe. These tags are derived from
                   an LLM's reading of a video description, and both failure modes have happened in
                   production: an ingredient dropped during extraction, and a compound ingredient
@@ -841,9 +907,11 @@ export default function MealDetailScreen() {
           {(() => {
             const inPantry = (ing: any) => isAlreadyInList(ing.name, pantryNames)
             const isBasic = (ing: any) => !inPantry(ing) && isAssumedStaple(ing.name, excludedStaples)
-            const haveRows = meal.ingredients.filter(inPantry)
-            const basicRows = meal.ingredients.filter(isBasic)
-            const needRows = meal.ingredients.filter(i => !inPantry(i) && !isBasic(i))
+            // scaledIngredients, not meal.ingredients: the stepper is a VIEW. Saving, logging and
+            // editing all read meal.ingredients so they keep the recipe as authored.
+            const haveRows = scaledIngredients.filter(inPantry)
+            const basicRows = scaledIngredients.filter(isBasic)
+            const needRows = scaledIngredients.filter(i => !inPantry(i) && !isBasic(i))
 
             // Renders one ingredient row. Tap does ONE thing per section, and never writes to
             // the pantry by accident (the old whole-row "I have this" tap silently inserted
@@ -1391,6 +1459,14 @@ const styles = StyleSheet.create({
   // title. At marginTop 2 this line attached to that dead space and read as glued to the label
   // at an arbitrary distance; 8 lets it clear the row and sit as its own caption.
   servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 8 },
+  servingsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
+  servingsLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5 },
+  // Value sits LAST so the two buttons stay put as it changes width — with the number between
+  // them, stepping 1 → 2 nudges the + button sideways under the user's finger.
+  stepper: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: COLORS.cardElevated, borderRadius: 20, padding: 3 },
+  stepperBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
+  stepperBtnDisabled: { opacity: 0.35 },
+  stepperValue: { fontSize: 13, fontWeight: '700', color: COLORS.textWhite, minWidth: 22, textAlign: 'center', paddingRight: 4 },
   sectionTitle: {
     flexShrink: 1,
     fontSize: 11,
