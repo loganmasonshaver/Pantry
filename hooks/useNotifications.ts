@@ -170,8 +170,15 @@ export function useNotifications(userId: string | null) {
         // instance, in bare workflow), you have to pass it in yourself.' Linking the EAS project
         // put the id in app.json but did NOT fix this on its own; without passing it, the token
         // would only resolve after a native rebuild, and silently break again on any workflow change.
+        // ENV FIRST, Constants second. Passing it explicitly was not enough on its own: in a bare
+        // workflow expo-constants reads the config embedded at NATIVE BUILD time, so app.json's new
+        // extra.eas.projectId is invisible until `npx expo run:ios` runs again — the warning
+        // persisted through three JS reloads before this was understood. EXPO_PUBLIC_* is inlined
+        // by Metro at BUNDLE time, so it lands on a reload. The Constants reads stay as the path
+        // that works for anyone who does have a current native build and no .env entry.
         const projectId =
-          (Constants.expoConfig?.extra as any)?.eas?.projectId ??
+          process.env.EXPO_PUBLIC_EAS_PROJECT_ID ||
+          (Constants.expoConfig?.extra as any)?.eas?.projectId ||
           (Constants as any)?.easConfig?.projectId
         const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)
         await supabase
@@ -184,7 +191,11 @@ export function useNotifications(userId: string | null) {
         // did not exist, every write failed with 42703, and the health-check job that depends on
         // the token silently never alerted. Log it in dev so the next schema-shaped failure is
         // visible instead of looking identical to the simulator case.
-        __DEV__ && console.log('[notifications] push token not stored:', (e as Error)?.message)
+        // Log what Constants actually held, not just the failure — 'No projectId found' alone does
+        // not distinguish "app.json is wrong" from "the native build predates app.json".
+        __DEV__ && console.log('[notifications] push token not stored:', (e as Error)?.message,
+          '| env:', process.env.EXPO_PUBLIC_EAS_PROJECT_ID ? 'set' : 'unset',
+          '| Constants.extra.eas:', JSON.stringify((Constants.expoConfig?.extra as any)?.eas ?? null))
       }
 
       await scheduleAllReminders()

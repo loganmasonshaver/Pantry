@@ -140,11 +140,12 @@ type MealSlot = {
   entries: LogEntry[]
 }
 
-const INITIAL_SLOTS: MealSlot[] = [
-  { id: 'breakfast', label: 'Breakfast', entries: [] },
-  { id: 'lunch', label: 'Lunch', entries: [] },
-  { id: 'dinner', label: 'Dinner', entries: [] },
-]
+// Fallback only — the real list is profiles.meal_slots. Used before the profile lands and if the
+// read fails, so the screen never renders zero slots. Four, matching the column default: Snacks is
+// the pressure valve that absorbs everything which is not a main meal.
+const DEFAULT_SLOT_LABELS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
+const slotId = (label: string) => label.toLowerCase().replace(/\s+/g, '-')
+const INITIAL_SLOTS: MealSlot[] = DEFAULT_SLOT_LABELS.map(l => ({ id: slotId(l), label: l, entries: [] }))
 
 function iconForSlot(label: string): React.ElementType {
   const l = label.toLowerCase()
@@ -991,13 +992,19 @@ export default function HomeScreen() {
     perfMark('Home profile fetch START')
     supabase
       .from('profiles')
-      .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal')
+      .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal, meal_slots')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
         perfMark('Home profile fetch DONE')
         if (cancelled) return
         goalsFromNetworkRef.current = true
+        // A ref as well as state: fetchTodayLogs reads the structure while rebuilding the day, and
+        // it is a useCallback that must not take a new identity every time the list changes.
+        const fetched = Array.isArray(data?.meal_slots) && data.meal_slots.length
+          ? (data.meal_slots as string[]) : DEFAULT_SLOT_LABELS
+        mealSlotsRef.current = fetched
+        setMealSlots(fetched)
         if (!data?.food_prefs_banner_dismissed) setShowPrefBanner(true)
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
@@ -1071,6 +1078,29 @@ export default function HomeScreen() {
   const chevronRotation = chevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['180deg', '0deg'] })
 
   const [slots, setSlots] = useState<MealSlot[]>(INITIAL_SLOTS)
+  const [mealSlots, setMealSlots] = useState<string[]>(DEFAULT_SLOT_LABELS)
+  const mealSlotsRef = useRef<string[]>(DEFAULT_SLOT_LABELS)
+
+  // Persist the structure, then rebuild the day from it. Written to the profile rather than held in
+  // state, which is the entire bug: a slot that lives only in React state cannot survive the next
+  // refetch. Optimistic — the row is a list of strings, and a failed write costs a re-add, not data.
+  const saveMealSlots = useCallback(async (next: string[]) => {
+    mealSlotsRef.current = next
+    setMealSlots(next)
+    setSlots(prev => {
+      const byLabel = new Map(prev.map(s => [s.label, s]))
+      const rebuilt = next.map(l => byLabel.get(l) ?? { id: slotId(l), label: l, entries: [] })
+      // Keep any slot that still holds entries even if it is no longer in the list, so removing a
+      // slot never makes logged food disappear from the day in front of the user.
+      for (const s of prev) if (!next.includes(s.label) && s.entries.length) rebuilt.push(s)
+      return rebuilt
+    })
+    if (!user) return
+    const { error } = await supabase.from('profiles').update({ meal_slots: next }).eq('id', user.id)
+    // Read the error: supabase-js RETURNS a refused write rather than throwing, so a try/catch here
+    // would catch nothing and the slot would silently revert on the next load.
+    if (error) console.log('[slots] meal_slots update refused:', error.message)
+  }, [user?.id])
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set(['breakfast']))
   const [selectedDate, setSelectedDate] = useState(() => todayStr())
   // Sunday-start week containing `anchor`. Noon, not midnight, for the same reason every other date
@@ -1213,16 +1243,18 @@ export default function HomeScreen() {
       })
     }
 
+    // The user's OWN structure leads, in their order, whether or not anything is logged in it —
+    // this is what makes an empty custom slot survive a refetch instead of vanishing.
     const result: MealSlot[] = []
     const seen = new Set<string>()
-    for (const label of ['Breakfast', 'Lunch', 'Dinner']) {
-      result.push({ id: label.toLowerCase(), label, entries: slotMap.get(label) ?? [] })
+    for (const label of mealSlotsRef.current) {
+      result.push({ id: slotId(label), label, entries: slotMap.get(label) ?? [] })
       seen.add(label)
     }
+    // Anything logged under a slot the user has since renamed or removed still renders, after their
+    // own. Dropping it would hide real history behind a settings change.
     for (const [label, entries] of slotMap) {
-      if (!seen.has(label)) {
-        result.push({ id: label.toLowerCase().replace(/\s+/g, '-'), label, entries })
-      }
+      if (!seen.has(label)) result.push({ id: slotId(label), label, entries })
     }
     // Milestone: fire a success tick the moment logging pushes today's calories across the
     // goal. Compare prev→new total so opening the app or switching days (baseline null) never fires.
@@ -1275,6 +1307,11 @@ export default function HomeScreen() {
     const slot = slots.find(s => s.id === slotId)
     setSlots(prev => prev.filter(s => s.id !== slotId))
     setExpandedSlots(prev => { const next = new Set(prev); next.delete(slotId); return next })
+    // Remove it from the user's STRUCTURE too, or the next refetch rebuilds it from the profile and
+    // the slot reappears — the mirror image of the bug this whole change fixes.
+    if (slot && mealSlotsRef.current.includes(slot.label)) {
+      saveMealSlots(mealSlotsRef.current.filter(l => l !== slot.label))
+    }
     if (slot && user) {
       // Delete from the day being VIEWED, not always today — otherwise removing a slot
       // while looking at a past date wipes today's logs and orphans the viewed day's.
@@ -1319,8 +1356,12 @@ export default function HomeScreen() {
   const confirmAddSlot = () => {
     const trimmed = newSlotName.trim()
     if (!trimmed) return
-    const id = trimmed.toLowerCase().replace(/\s+/g, '-') + '-' + Date.now()
-    setSlots(prev => [...prev, { id, label: trimmed, entries: [] }])
+    // Case-insensitive: two slots differing only in case would map to the same slotId and to the
+    // same `slot` string on every log row, so they could never be told apart again.
+    if (mealSlotsRef.current.some(l => l.toLowerCase() === trimmed.toLowerCase())) {
+      setNewSlotName(''); setShowAddModal(false); return
+    }
+    saveMealSlots([...mealSlotsRef.current, trimmed])
     setNewSlotName('')
     setShowAddModal(false)
   }
