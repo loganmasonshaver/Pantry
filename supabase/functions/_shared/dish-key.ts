@@ -215,6 +215,16 @@ export function isSameDishDetailed(
   b: { name?: unknown; ingredients?: unknown },
 ): boolean {
   if (!isSameDish(a?.name, b?.name)) return false
+  // AN IDENTICAL NAME IS NEVER RESCUED. The rescue exists for names that merely READ alike — its
+  // own comment says "two SIMILARLY-NAMED dishes" — and it was overruling byte-identical ones:
+  // "Protein-Boosted Chocolate Smoothie" was generated 2026-09-05 20:57, entered the anti-repeat
+  // window, and was generated again VERBATIM an hour later because its ingredient list had drifted
+  // below INGREDIENT_RESCUE_MAX. A reader seeing the same dish name twice does not care that the
+  // ingredients moved; to them it is the same meal and the window failed.
+  //
+  // dishKey sorts its significant tokens, so equal keys mean the same words in any order —
+  // "Chicken Rice Bowl" and "Rice Chicken Bowl" are correctly caught here too.
+  if (dishKey(a?.name) === dishKey(b?.name)) return true
   const sa = ingredientSignature(a?.ingredients)
   const sb = ingredientSignature(b?.ingredients)
   if (sa.size === 0 || sb.size === 0) return true // no evidence to overrule the name

@@ -281,7 +281,16 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
 - [x] **2d#2 double generation — FIXED AND VERIFIED SERVER-SIDE.** Newest batch is `count: 3`
       (previous three of five were 6), and all three names are present in `recent_meal_names`. Both
       pass criteria met, no device judgement involved.
-- [ ] **A SECOND REPEAT MECHANISM EXISTS — the fix did not cover it.** "Protein-Boosted Chocolate
+- [x] **FIXED — the ingredient rescue was overruling an EXACT name match.** `isSameDishDetailed`
+      returned "not the same dish" whenever ingredient overlap fell below INGREDIENT_RESCUE_MAX,
+      even for a byte-identical name, so a repeat was rescued and kept. Its own comment scopes it to
+      "two SIMILARLY-NAMED dishes" — identical is not similar, and a reader seeing the same dish
+      name twice does not care that the ingredient list drifted. Identical `dishKey` now short-
+      circuits to true; because dishKey sorts its tokens, "Chicken Rice Bowl" vs "Rice Chicken Bowl"
+      is caught too. Three regression tests, including one asserting genuinely different food under
+      similar names is STILL rescued so the batch does not thin. Deployed.
+      VERIFY on the next few generations: no exact name repeat against `recent_meal_names`.
+- [x] **ORIGINAL NOTE, kept for the record —** "Protein-Boosted Chocolate
       Smoothie" was generated 09-05 20:57, DID reach the anti-repeat window, and was generated again
       verbatim at 09-06 03:00. Same exact string, ~1h after entering the list the model is told to
       avoid. So 2d#4 was two bugs: the lost update (fixed) and the model repeating a name that is in
@@ -291,7 +300,7 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       being longer.
 - [ ] **Also open, same batch:** "Chocolate Protein Smoothie" appeared TWICE inside the single 11:51
       response. Nothing de-duplicates a batch against itself before storing.
-- [ ] **Profile DELETES the meal cache where it should STALE it.** Logan reloaded after a meal-
+- [x] **FIXED — Profile now STALES the meal cache instead of deleting it.** Logan reloaded after a meal-
       frequency change and got the bare "Let's cook" empty state for 4-5s instead of his previous
       meals. The carryover branch in useMealSuggestions paints a PREVIOUS day's cached meals while
       the new ones generate — precisely so this never looks empty — but it needs an entry to exist.

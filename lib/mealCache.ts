@@ -61,3 +61,37 @@ export async function writeMealCache(
     // regeneration, which the server-side MEAL_GEN_CAP_PER_DAY already bounds.
   }
 }
+
+/**
+ * Mark today's cached meals as belonging to a PREVIOUS day instead of deleting them.
+ *
+ * Profile clears this cache on a diet, goal or meal-frequency change so the next open regenerates,
+ * and it used `AsyncStorage.multiRemove`. Deleting is too blunt: useMealSuggestions has a carryover
+ * branch that paints a previous day's cached meals WHILE the new ones generate, precisely so this
+ * moment never looks empty — and that branch needs an entry to exist. With the entry gone, Logan
+ * got the bare "Let's cook" empty state for 4-5 seconds instead of the meals he already had.
+ *
+ * Back-dating keeps the intent exactly ("regenerate rather than serve stale, wrong-sized
+ * suggestions" — the stale set is shown, labelled, and replaced) while restoring the carryover the
+ * app was already built to do.
+ */
+export async function staleMealCache(mode: MealCacheMode): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(mealCacheKey(mode))
+    if (!raw) return
+    const cached = JSON.parse(raw) as CachedMeals
+    if (!cached?.meals?.length) { await AsyncStorage.removeItem(mealCacheKey(mode)); return }
+    // Any past date works — the reader only asks whether it equals today. 1970 is deliberately
+    // absurd so nobody later mistakes it for a real generation date.
+    await AsyncStorage.setItem(mealCacheKey(mode), JSON.stringify({ ...cached, date: '1970-01-01' }))
+  } catch {
+    // Falling back to a delete is safe: worst case the user sees the empty state this was written
+    // to avoid, which is exactly the old behaviour.
+    try { await AsyncStorage.removeItem(mealCacheKey(mode)) } catch {}
+  }
+}
+
+/** Both modes at once — every caller so far invalidates the pair. */
+export async function staleAllMealCaches(): Promise<void> {
+  await Promise.all([staleMealCache('cookNow'), staleMealCache('mealPlan')])
+}

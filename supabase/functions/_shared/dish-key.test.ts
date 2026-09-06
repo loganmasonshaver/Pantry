@@ -289,3 +289,26 @@ test('carbs are the setting, not the subject — they never make two dishes diff
   // With no protein named on either side the guard stands aside and the token rule decides.
   assert.ok(isSameDish('Chocolate Protein Smoothie', 'Chocolate Protein Shake'))
 })
+
+// REGRESSION, from live data: "Protein-Boosted Chocolate Smoothie" was generated 2026-09-05 20:57,
+// reached profiles.recent_meal_names, and was generated again VERBATIM at 09-06 03:00. The
+// ingredient rescue overruled an exact name match because the ingredient lists had drifted apart.
+test('an identical name is a repeat no matter how far the ingredients drift', () => {
+  const a = { name: 'Protein-Boosted Chocolate Smoothie', ingredients: [{ name: 'whey protein' }, { name: 'cocoa powder' }, { name: 'banana' }] }
+  const b = { name: 'Protein-Boosted Chocolate Smoothie', ingredients: [{ name: 'greek yogurt' }, { name: 'almond milk' }, { name: 'oats' }] }
+  assert.equal(isSameDishDetailed(a, b), true)
+})
+
+test('token order does not create an escape hatch', () => {
+  const a = { name: 'Chicken Rice Bowl', ingredients: [{ name: 'chicken' }, { name: 'rice' }] }
+  const b = { name: 'Rice Chicken Bowl', ingredients: [{ name: 'tofu' }, { name: 'quinoa' }] }
+  assert.equal(isSameDishDetailed(a, b), true)
+})
+
+// The rescue must still do its job for names that merely READ alike — that is what it is for, and
+// over-blocking here would thin every batch.
+test('genuinely different food under similar names is still rescued', () => {
+  const a = { name: 'Chicken Power Bowl', ingredients: [{ name: 'chicken breast' }, { name: 'rice' }, { name: 'broccoli' }] }
+  const b = { name: 'Salmon Power Bowl', ingredients: [{ name: 'salmon' }, { name: 'quinoa' }, { name: 'asparagus' }] }
+  assert.equal(isSameDishDetailed(a, b), false)
+})
