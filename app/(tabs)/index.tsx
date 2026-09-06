@@ -29,6 +29,7 @@ import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as Svg
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { todayStr } from '@/lib/localDate'
+import { setSelectedDay } from '@/lib/selectedDay'
 import { MealImage } from '@/components/MealImage'
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAuth } from '../../context/AuthContext'
@@ -1180,6 +1181,10 @@ export default function HomeScreen() {
     })
   useEffect(() => { calorieMilestoneRef.current = null }, [selectedDate]) // new day = fresh baseline, don't celebrate the goal on a day switch
   const isToday = selectedDate === todayStr()
+  // Publish the working day so screens WITHOUT a date picker (the meal detail, chiefly) log to the
+  // day the user is looking at instead of hardcoding today. See lib/selectedDay.ts for why this is
+  // shared state rather than a nav param.
+  useEffect(() => { setSelectedDay(selectedDate) }, [selectedDate])
 
   // Anchor at noon when constructing the Date so DST transitions don't shift the day
   // backward (e.g. midnight + DST fallback = previous day on iOS).

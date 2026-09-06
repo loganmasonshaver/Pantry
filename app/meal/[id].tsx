@@ -30,6 +30,7 @@ import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples, stapleKey } from '@/constants/staples'
 import { escapeLike } from '@/lib/sqlLike'
 import { todayStr } from '@/lib/localDate'
+import { getSelectedDay } from '@/lib/selectedDay'
 import { categorizeItem } from '@/lib/categories'
 import { MealDetail } from '@/constants/mock'
 import { templates as recipeTemplates } from '@/lib/recipeTemplates'
@@ -79,6 +80,9 @@ export default function MealDetailScreen() {
     id: string; mealData?: string; source?: string; shelfKey?: string; position?: string
   }>()
   const router = useRouter()
+  // Read once per mount: the label and the insert must name the same day, and re-reading on every
+  // render would let them drift if Home changed underneath.
+  const [logTargetDay] = useState(() => getSelectedDay())
   const { user } = useAuth()
   const { isPremium, triggerUpgrade } = usePremium()
   const { registerPlacement } = useSuperwall()
@@ -514,7 +518,10 @@ export default function MealDetailScreen() {
     loggingRef.current = true
     setShowSlotPicker(false) // close immediately so a second slot can't be tapped mid-insert
     setLogging(true)
-    const today = todayStr() // LOCAL day — logged_at is the day a meal COUNTS for
+    // The day the user is WORKING ON, not necessarily today. This was `todayStr()`, so logging a
+    // meal while browsing an earlier day wrote it to today's totals — silently, and into the
+    // history every chart in the app reads from.
+    const logDay = logTargetDay
 
     // Fallback to the shared image_cache (populated by other users who've already
     // generated this meal) so meal logs render with an image even if this user
@@ -534,7 +541,7 @@ export default function MealDetailScreen() {
       carbs: meal.carbs ?? 0,
       fat: meal.fat ?? 0,
       slot,
-      logged_at: today,
+      logged_at: logDay,
       // Null rather than a guessed default when the opener didn't pass attribution — an unknown
       // source must stay unknown, not get misfiled into a bucket it never came from.
       source: source ?? null,
@@ -1019,7 +1026,11 @@ export default function MealDetailScreen() {
             disabled={logged || logging}
           >
             <Text style={styles.logButtonText}>
-              {logging ? 'Logging…' : logged ? 'Logged ✓' : 'Log Meal'}
+              {logging ? 'Logging…' : logged ? 'Logged ✓'
+                : logTargetDay === todayStr() ? 'Log Meal'
+                // Name the day whenever it is not today. This screen has no date picker of its own,
+                // so without it the destination is invisible and a mis-set day is undiscoverable.
+                : `Log to ${new Date(logTargetDay + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`}
             </Text>
           </PressableScale>
           <PressableScale

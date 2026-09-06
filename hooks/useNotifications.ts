@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as Notifications from 'expo-notifications'
+import Constants from 'expo-constants'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '@/lib/supabase'
 
@@ -163,7 +164,16 @@ export function useNotifications(userId: string | null) {
       try {
         // Push tokens are only issued on physical devices; simulators throw here.
         // Stored on the profile so server-side jobs can target this device.
-        const tokenData = await Notifications.getExpoPushTokenAsync()
+        // PASS projectId EXPLICITLY. This is a BARE workflow (ios/ is checked in), so
+        // Constants cannot always infer it from app.json — which is precisely what the failure
+        // said: 'No "projectId" found. If "projectId" can\'t be inferred from the manifest (for
+        // instance, in bare workflow), you have to pass it in yourself.' Linking the EAS project
+        // put the id in app.json but did NOT fix this on its own; without passing it, the token
+        // would only resolve after a native rebuild, and silently break again on any workflow change.
+        const projectId =
+          (Constants.expoConfig?.extra as any)?.eas?.projectId ??
+          (Constants as any)?.easConfig?.projectId
+        const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined)
         await supabase
           .from('profiles')
           .update({ expo_push_token: tokenData.data })
