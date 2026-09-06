@@ -29,6 +29,7 @@ import { SuperwallContextProvider } from '../context/SuperwallContext'
 import { ShareIntentProvider, useShareIntent } from 'expo-share-intent'
 import { supabase } from '../lib/supabase'
 import { setupCrashReporting } from '../lib/analytics'
+import { probeNetwork } from '../lib/netProbe'
 
 // Install the global error + unhandled-rejection handlers as early as
 // possible — must run before the first render so we catch boot-time crashes.
@@ -57,6 +58,11 @@ function RootLayoutNav() {
     const t = setTimeout(() => setMinSplashElapsed(true), MIN_SPLASH_MS)
     return () => clearTimeout(t)
   }, [])
+
+  // DEV-ONLY latency probe — no-ops in release. Fired here rather than later on purpose: the thing
+  // being diagnosed is queries finishing together regardless of when they start, so it has to run
+  // alongside the real ones. See lib/netProbe.ts for how to read the three marks.
+  useEffect(() => { probeNetwork() }, [])
 
   // Splash stays visible while EITHER auth is still resolving OR min display
   // duration hasn't elapsed yet. Whichever finishes last hides the splash.
