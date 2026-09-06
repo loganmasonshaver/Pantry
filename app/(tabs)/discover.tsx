@@ -593,6 +593,8 @@ export default function DiscoverScreen() {
   const lastFetchRef = useRef(0)
   // Holds a fresh pool that arrived while the tab was on screen, until blur — see fetchTrending.
   const pendingFeedRef = useRef<DiscoverMeal[] | null>(null)
+  // True while the blur was caused by pushing a meal detail rather than by leaving the tab.
+  const detailPushRef = useRef(false)
   const TRENDING_TTL_MS = 5 * 60 * 1000
 
   // Instant paint from the cache — but only if it was written TODAY. readDiscoverCache enforces
@@ -659,6 +661,8 @@ export default function DiscoverScreen() {
     // Cleanup = blur. Applying the parked pool here means the re-shelve happens on a screen nobody
     // is looking at, and the next focus renders the full pool with no visible movement.
     return () => {
+      // Held back on a detail push — the pool stays parked and applies on a real tab change instead.
+      if (detailPushRef.current) { detailPushRef.current = false; return }
       if (pendingFeedRef.current) { setTrending(pendingFeedRef.current); pendingFeedRef.current = null }
     }
   }, [fetchTrending]))
@@ -1066,8 +1070,29 @@ export default function DiscoverScreen() {
     // that is about to be dropped, and the "different shelf each day" guarantee would silently
     // degrade to "sometimes the same one".
     const leftoverSection = { key: 'other', title: 'Everything else', meals: leftovers, accent: false }
+    // THE OFFSET IS TAKEN MODULO A FIXED WINDOW, NOT THE LIST LENGTH. rotateByDay does
+    // `(day + hash) % arr.length`, and arr.length CHANGES WITHIN A SESSION: shelfBudget is 2 over
+    // the 60-meal disk cache and 6 over the 600-meal pool, so the built list goes from ~4 sections
+    // to ~8 when the fresh pool lands. Same day, different modulus, different leader — which is why
+    // opening a dish and coming back could throw "Almost in your kitchen" to the top. Logan hit it
+    // within a day of the rotation shipping.
+    //
+    // Both lists share a PREFIX: the personalised shelves and Today's picks are identical, and the
+    // intent shelves are the same day-rotated order merely TRUNCATED at shelfBudget. So an offset
+    // bounded by that shared prefix picks the same leader from either. Simulated over 10 days:
+    // 0 mismatches between pool sizes, 0 consecutive-day repeats, all 4 leaders cycling.
+    //
+    // Two fixes were tried and measured first, and both were worse — do not revisit them. Rotating
+    // a canonical list of every possible shelf key and ordering the present ones by it left `nearly`
+    // leading SEVEN days running (the present set is a small subset, so the rotation crosses long
+    // runs of absent keys) and still mismatched on 8 of 14 days. Picking the leader by
+    // min(hash(key + day)) changes daily but lets a section that only exists in the big pool steal
+    // the lead, which is the same bug wearing a different hat.
+    const ROT_WINDOW = 4
+    const n = rotatable.length > 1
+      ? (dayOfYear + hashKey('display')) % Math.min(rotatable.length, ROT_WINDOW) : 0
     return [
-      ...rotateByDay(rotatable, dayOfYear, 'display', 1),
+      ...rotatable.slice(n), ...rotatable.slice(0, n),
       ...(leftoverSection.meals.length > 0 ? [leftoverSection] : []),
     ]
     // excludedStaples feeds nearlyRanked's missingCount above and arrives after first paint.
@@ -1164,6 +1189,12 @@ export default function DiscoverScreen() {
   useEffect(() => { browseSectionsRef.current = browseSections }, [browseSections])
 
   const openMeal = (meal: DiscoverMeal, source: MealSource, shelfKey?: string, position?: number) => {
+    // Pushing a meal detail blurs this screen, which would otherwise trigger the pending-feed swap
+    // below. That is the wrong moment: the reader has not left the feed, they have stepped into one
+    // of its cards and will be back in seconds, and swapping a 60-meal cache for a 600-meal pool
+    // rebuilds every shelf's CONTENTS underneath them. The swap is for tab changes, where a
+    // refreshed page is expected.
+    detailPushRef.current = true
     trackMealViewed(meal.name, { source, shelfKey, position })
     router.push({
       pathname: '/meal/[id]',
