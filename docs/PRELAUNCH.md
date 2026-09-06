@@ -186,7 +186,7 @@ pointed at one shared gate. It was not the one it looked like.
 ## 2d. RAISED BY LOGAN 2026-09-05 (evening) — WORK THESE IN ORDER, DO NOT REORDER
 Logan asked for these to be worked strictly top to bottom. Each is unstarted.
 
-- [ ] **1. Seed `meal_slots` from onboarding's `meals_per_day`.** The structure column shipped with a
+- [x] **DONE 2026-09-05. 1. Seed `meal_slots` from onboarding's `meals_per_day`.** The structure column shipped with a
       flat default of 4; onboarding already asks how many meals a day, so asking again in Profile is
       a redundant CTA. Map number -> ordered names, and **when a name would repeat, number it
       ("Lunch #1", "Lunch #2")** — the first draft of this table had "Lunch" twice at n=5, which is
@@ -195,7 +195,7 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       **Seed ONCE.** After that `meal_slots` is the source of truth: a later change to
       `meals_per_day` must OFFER to re-seed, never silently overwrite custom names. Existing rows
       took the flat default of 4 and can be backfilled from `meals_per_day`.
-- [ ] **2. Fix the DOUBLE generation on cold start — Logan said yes to this.** Trace shows
+- [x] **DONE + VERIFIED 2026-09-05 (see 2f). 2. Fix the DOUBLE generation on cold start.** Trace shows
       `generation start +2377ms` and again `+2400ms`, with two SESSION_CHECKs and two getSessions:
       `useMealSuggestions`'s effect deps are `[userId, isPremium, mode, enabled]`, `enabled` flips
       when the pantry lands and a second dep (almost certainly `isPremium` resolving from Superwall)
@@ -312,6 +312,56 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       changes none of them — so after a Profile change Home keeps rendering the OLD meals until a
       remount, with no indication they are stale. That is also why a Profile change only appears to
       regenerate on the NEXT app launch, which is what made this look intermittent for hours.
+
+## 2g. NEXT UP — multi-serving generated meals  *(Logan's idea, designed not built)*
+**Read this with fresh eyes before building. It is the largest open change and it touches macros,
+which are the product's core promise.**
+
+**The problem.** `displayCount = Math.min(mealsPerDay, 3)` but `calorieTarget = calorieGoal /
+mealsPerDay` is NOT capped. So a 6-meal user gets three ~350 kcal "cooked" recipes covering half
+their day — snack-sized recipes for a cook-from-your-pantry surface. Three test profiles sit at 5
+and three at 6, so this is not hypothetical.
+
+**Rejected fix (mine):** size the three recipes against MEAL slots only, making them ~700 kcal. It
+is worse: that user does not eat 700 kcal at once, so they would split it silently while the card
+states macros for the whole thing.
+
+**Chosen approach (Logan's):** keep per-serving calories at `calorieGoal / mealsPerDay` — correct
+for how they actually eat — and give the recipe MULTIPLE SERVINGS, exactly as trending recipes
+already do. Batch-cook and portion is how 5-6 meal/day people really eat.
+      servings = clamp(round(~700 / perServingCalories), 1, 3)
+      3 meals -> ~700/serving, 1 serving   4 -> ~525, 1
+      5 meals -> ~420/serving, 2 servings  6 -> ~350, 2
+**This moves generated meals INTO the shape CLAUDE.md documents as correct**, not away from it:
+`calories` per serving, `ingredients` full batch, `servings` a count. `app/meal/[id].tsx` already
+renders "Makes N servings · macros are per serving" and logging already writes per-serving
+calories, so the log path needs no change — verified, not assumed.
+
+- [ ] **THE ONE FAILURE MODE THAT MATTERS: the generator must emit `calories` PER SERVING** while
+      `ingredients` describe the batch. Batch calories plus `servings: 2` would double-count every
+      log. Prompt + JSON schema change in `generate-meals`.
+- [ ] **`GeneratedMeal` has no `servings` field** (`lib/meals.ts`). The meal detail screen reads it
+      via `(meal as any)?.servings`, which is why this was invisible. Add it properly.
+- [ ] **Unresolved design question: does the pantry check run against the BATCH or the SERVING?**
+      A 2-serving batch draws twice the pantry, so a dish cookable at one serving may not be at two,
+      and missing-ingredient counts shift. Decide before building.
+- [ ] **Do NOT linearly scale ingredients to hit per-serving macros.** CLAUDE.md's rule ("that
+      produced '0.5 large eggs'"). Full batch + servings is the shape that avoids it.
+
+## 2h. Also designed, not built — scale instead of regenerating
+Logan asked why a goal change needs a whole new generation when the dish is still fine.
+- [ ] **Scale the existing meals for calorie/protein/macro changes instead of regenerating.**
+      Applies ONLY to those. Diet type and dietary restrictions must still regenerate (a vegan
+      cannot eat a scaled chicken dish); max_prep_minutes must too (scaling will not make a 45-min
+      dish take 15); meals_per_day needs MORE dishes, not bigger ones.
+      Machinery already exists: onboarding scales templates today, `scaleVisual` handles fractions
+      and ranges, and `WHOLE_UNIT_FOODS` knows eggs are 50g, bananas 120g.
+      **Round countable items to whole units** — this is the "0.5 large eggs" trap, and
+      WHOLE_UNIT_FOODS is the fix that did not exist when that rule was written.
+      **Cap the scale factor (~0.7-1.4x)**; past that the dish stops being the dish and a
+      regeneration is the better answer.
+      Bonus worth stating: a scale creates NO new dish names, so nothing enters the anti-repeat
+      window and it sidesteps the whole repeat problem. Images are already cached too.
 
 ## 2e. Trial reminder notifications — RESEARCHED 2026-09-05, not yet applied
 Logan: mimic what the highest-converting apps do, do not guess. Queue this AFTER 2d's four items.
