@@ -171,9 +171,17 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 131** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **17** in
+- **TS baseline = 130** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **16** in
   app code (`app/ lib/ components/ hooks/ context/`) and the rest Deno-global noise from
   `supabase/functions` being inside the tsconfig.
+  (Was 131/17 until 2026-09-05. The notification handler in `hooks/useNotifications.ts` returned
+  `shouldShowAlert` only; expo-notifications 55 REQUIRES `shouldShowBanner` and `shouldShowList`
+  and deprecates `shouldShowAlert`. Not noise — it meant any notification arriving while the app
+  was OPEN showed no banner and was never added to the notification list, so it vanished without a
+  trace in Notification Center. It silently affected all 7 daily reminders and the day-5 trial-end
+  notification, and was found only because a health-check push Logan was watching for never
+  appeared. THIRD time a long-standing baseline error turned out to be a live bug rather than
+  noise — see MOCK_DETECTED and GeneratedMeal.image below. "Pre-existing" is not "not a bug".)
   (Was 124/17 until 2026-09-04, when the `audit-ingredient-lines` edge function added 7 more
   `Deno`/esm.sh lines. A NEW EDGE FUNCTION RAISES THE TOTAL AND THAT IS EXPECTED — the app-code
   number is the one that must not move. The 8th error it added was NOT noise: `Deno.serve(async

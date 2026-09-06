@@ -13,9 +13,22 @@ const SCHEDULE_VERSION_KEY = 'notifications_schedule_version'
 
 // Foreground behavior: show banner + sound but never increment the badge.
 // We don't use the badge anywhere in-app, and stale badge counts confuse users.
+//
+// shouldShowBanner / shouldShowList ARE REQUIRED and shouldShowAlert is DEPRECATED as of
+// expo-notifications 55 (see NotificationBehavior in its types — the two new fields are
+// non-optional). Returning only shouldShowAlert meant the handler did not satisfy the contract, so
+// a notification arriving while the app was OPEN showed no banner AND was never added to the
+// notification list — it vanished with no trace in Notification Center afterwards. That is exactly
+// what Logan saw testing the health-check alert, and it silently applied to all 7 daily reminders
+// and the day-5 trial-end notification too.
+//
+// This was visible the whole time as a TS error on this line, inside the app-code baseline. Worth
+// recording: "pre-existing" is not the same as "not a bug" — the same lesson the MOCK_DETECTED and
+// GeneratedMeal.image entries in CLAUDE.md already teach about a stubborn baseline.
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
