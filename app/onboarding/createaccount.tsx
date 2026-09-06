@@ -1,4 +1,5 @@
 import { todayStr } from '../../lib/localDate'
+import { writeMealCache } from '../../lib/mealCache'
 import { useState, useRef } from 'react'
 import {
   View,
@@ -143,6 +144,9 @@ export default function CreateAccountScreen() {
       try {
         const raw = await AsyncStorage.getItem('onboarding_data')
         const d = raw ? JSON.parse(raw) : {}
+        // One value for both the generation and the cache entry — if they disagreed, the reader
+        // would filter out meals the generator was told were fine.
+        const prepMinutes = d.prep === '15 min' ? 15 : d.prep === '45 min' ? 45 : d.prep === '60+ min' ? 75 : 30
         const meals = await generateMeals({
           ingredients: [
             'chicken breast', 'ground beef', 'eggs', 'rice', 'pasta',
@@ -155,13 +159,22 @@ export default function CreateAccountScreen() {
           proteinGoal: parseInt(d.protein) || 150,
           mealsPerDay: parseInt(d.meals) || 3,
           cookingSkill: d.cookingSkill || 'moderate',
-          maxPrepMinutes: d.prep === '15 min' ? 15 : d.prep === '45 min' ? 45 : d.prep === '60+ min' ? 75 : 30,
+          maxPrepMinutes: prepMinutes,
           dietaryRestrictions: d.dietStyle && d.dietStyle !== 'Classic' ? [d.dietStyle] : [],
           foodDislikes: [...(d.foodDislikes || []), ...(d.foodDislikesText || '').split(',').map((s: string) => s.trim()).filter(Boolean)],
           mode: 'cookNow',
         })
-        const today = todayStr() // LOCAL date — a UTC stamp here made this cache miss on the next read
-        await AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify({ date: today, meals, dietStyle: d.dietStyle || 'Classic' }))
+        // THIS WRITE USED TO BE DISCARDED. It omitted maxPrepMinutes, and the reader treats an entry
+        // without it as an old-format one and deletes it — so these meals, already generated and
+        // already charged against the daily cap, were binned and regenerated on first open, costing
+        // a 6-8s wait at the app's first impression. The shared writer requires the field.
+        const { data: { session } } = await supabase.auth.getSession()
+        await writeMealCache('cookNow', {
+          meals,
+          maxPrepMinutes: prepMinutes,
+          userId: session?.user?.id ?? null,
+          dietStyle: d.dietStyle || 'Classic',
+        })
       } catch {}
     })()
   }

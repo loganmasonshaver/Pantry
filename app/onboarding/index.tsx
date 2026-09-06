@@ -36,6 +36,7 @@ import { supabase } from '../../lib/supabase'
 import { templates as recipeTemplates } from '../../lib/recipeTemplates'
 import { scaleVisual } from '../../lib/ingredientDisplay'
 import { todayStr } from '../../lib/localDate'
+import { writeMealCache } from '../../lib/mealCache'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
@@ -2604,7 +2605,7 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
   // target (derived from daily goal × slot distribution %). Full data persists
   // to saved_meals at finish() time — meal-detail screen renders instantly.
   useEffect(() => {
-    const meals = sampleMeals.map(m => {
+    const meals = sampleMeals.map((m, idx) => {
       const targetCal = Math.round(cals * m.calPct)
       const targetProt = Math.round(prot * m.protPct)
       const template = recipeTemplates[m.name]
@@ -2612,6 +2613,9 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
         // No template found for this name (should be rare — bank and templates are
         // kept in sync). Fall back to name + scaled cal/prot only.
         return {
+          // Same seeded_ prefix as the templated branch below — this fallback was the other way a
+          // preview meal reached the cache with no id at all.
+          id: `seeded_${idx}`,
           name: m.name, prepTime: m.prepMin,
           calories: targetCal, protein: targetProt, carbs: 0, fat: 0,
           ingredients: [], steps: [], image: null,
@@ -2628,11 +2632,20 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
           name: ing.name,
           // visual and grams are a PAIR describing one amount — scale both or the recipe
           // contradicts itself, since the Measured/Eyeball toggle reads different halves of it.
-          visual: scaleVisual(ing.visual, scale),
+          // Coerced: GeneratedMeal declares `visual: string`, and scaleVisual can return undefined
+          // for an ingredient with no visual half. An undefined here reaches the Measured/Eyeball
+          // toggle as a blank amount.
+          visual: scaleVisual(ing.visual, scale) ?? '',
           grams: `${Math.round(baseGrams * scale)}${unit}`,
         }
       })
       return {
+        // seeded_ PREFIX IS LOAD-BEARING, and it was missing. useMealSuggestions detects onboarding
+        // placeholders with `m.id?.startsWith('seeded_')` and clears them so real meals generate;
+        // with no id at all that check silently evaluated false and these previews could be served
+        // as if they were generated meals. Surfaced by the shared writer's type — the old
+        // JSON.stringify call type-checked nothing.
+        id: `seeded_${idx}`,
         name: m.name,
         prepTime: template.prepTime ?? m.prepMin,
         calories: targetCal,
@@ -2645,12 +2658,13 @@ function SPlanReveal({ data, onNext, onBack, isPrefetchOnly = false }: { data: O
       }
     })
     const payload = {
-      date: todayStr(), // LOCAL date — must match the cache readers, see lib/localDate.ts
       dietStyle: data.dietStyle || 'Classic',
       maxPrepMinutes: prepMin,
       meals,
     }
-    AsyncStorage.setItem('pantry_daily_meals_cookNow', JSON.stringify(payload)).catch(() => {})
+    // Shared writer: it stamps the local date and guarantees the shape the readers expect. This
+    // file previously hand-rolled the object and omitted `userId`; see lib/mealCache.ts.
+    writeMealCache('cookNow', payload)
   }, [sampleMeals, cals, prot, prepMin, data.dietStyle])
 
   const mealsForDisplay = sampleMeals

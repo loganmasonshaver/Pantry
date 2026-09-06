@@ -6,11 +6,13 @@ import { generateMeals, GeneratedMeal } from './meals'
 import { perfMark } from './perf'
 import { prefetchMealImages } from '../components/MealImage'
 import { takeCookNowPrefetch } from './mealPrefetch'
+import { writeMealCache, mealCacheKey, CachedMeals as SharedCachedMeals } from './mealCache'
 // Shared with the scan-time image warm — one implementation so the global image cache/cost model
 // stays identical no matter who asks for an image.
 import { fetchMealImage as fetchImage } from './mealImages'
 import { useAIConsent } from '../context/AIConsentContext'
 
+// Key and shape live in ./mealCache — see the note there on why there is exactly one of each.
 const CACHE_KEY_PREFIX = 'pantry_daily_meals'
 const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of meal names, per mode, to suppress repeats
 
@@ -40,7 +42,7 @@ const HERO_IMAGE_WAIT_MS = 22000
 // userId stamps ownership so the cache survives sign-out (restored for the same user on
 // re-login) without leaking to a different account on a shared device — reads that don't match
 // the current user are treated as a miss. Absent userId = legacy/onboarding write, accepted.
-type CachedMeals = { date: string; meals: GeneratedMeal[]; maxPrepMinutes?: number; regenCount?: number; userId?: string }
+type CachedMeals = SharedCachedMeals
 
 
 export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
@@ -163,7 +165,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes,
       // and regenCount to track how many manual refreshes have been used today (cap enforced in regenerate()).
       const maxPrep = profile?.max_prep_minutes || 30
-      await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
+      await writeMealCache(mode, { meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId })
       perfMark(`cache WRITE post-generate (${generated.length} meals, ${todayStr()}, cap ${maxPrep})`)
 
       // Keep 24 names (~8 gens) rather than 12: a heavy day is 1 auto-fire + 3 rerolls = 12 names,
@@ -212,7 +214,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
       ;(async () => {
         await Promise.all(jobs)
-        await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: mealsToImage, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
+        await writeMealCache(mode, { meals: mealsToImage, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId })
       })()
 
       // mealsToImage, not `generated` — it carries whichever photos arrived during the wait.
@@ -271,7 +273,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                       })
                     }
                   }))
-                  await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, regenCount: cached.regenCount ?? 0, userId }))
+                  await writeMealCache(mode, { meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes!, regenCount: cached.regenCount ?? 0, userId })
                 })()
               }
               return
@@ -385,7 +387,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                     })
                   }
                 }))
-                await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes, regenCount: cached.regenCount ?? 0, userId }))
+                await writeMealCache(mode, { meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes!, regenCount: cached.regenCount ?? 0, userId })
               })()
             }
             return
