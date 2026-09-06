@@ -204,6 +204,24 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       `recent_meal_names`. That is also why five distinct meal names appeared for a three-meal batch.
       Fix = a ref keyed on what has already been generated for, so a late dep change cannot re-fire.
       Touches the generation path; do it with Logan watching.
+      **VERIFY AFTER FIXING — server-side, no device needed.** Trigger one generation, then:
+      ```sql
+      -- A) exactly ONE batch per timestamp. Today shows 6 meals sharing 20:57 and 6 sharing 11:51,
+      --    where a batch is three. After the fix each generation must produce ONE group of ~3.
+      select date_trunc('minute', created_at) as gen, count(*), array_agg(name)
+      from generated_meals where user_id = '<uid>'
+      group by 1 order by 1 desc limit 5;
+
+      -- B) EVERY name from that batch must appear in the anti-repeat window. Today only 3 of the 6
+      --    from 20:57 are there — "Egg White and Spinach Frittata" is missing, which is why it came
+      --    back a day after 09-04. That gap IS the bug, so closing it is the pass criterion.
+      select recent_meal_names from profiles where id = '<uid>';
+      ```
+      PASS = one group of ~3 per generation AND every one of those names present in
+      `recent_meal_names`. FAIL = any batch whose names are only partly in the window: the lost
+      update is still happening.
+      DO NOT tune RECENT_MEMORY as part of this. The window is 30 and is not too short; it is being
+      truncated by the race. Tuning it would mask the fix and make the result unreadable.
 - [x] **3. ANSWERED — NOT A BUG. Changing meal frequency in Profile clears the meal cache.**
       Logan changed Meals Per Day once during testing. `meals_per_day` is one of four `GoalField`
       values (`profile.tsx:585`), and saving any of them runs
