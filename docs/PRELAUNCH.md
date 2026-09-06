@@ -313,9 +313,10 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       remount, with no indication they are stale. That is also why a Profile change only appears to
       regenerate on the NEXT app launch, which is what made this look intermittent for hours.
 
-## 2g. NEXT UP — multi-serving generated meals  *(Logan's idea, designed not built)*
-**Read this with fresh eyes before building. It is the largest open change and it touches macros,
-which are the product's core promise.**
+## 2g. BUILT 2026-09-05 — multi-serving generated meals  *(Logan's idea)*
+**Shipped in `cf18cae`, deployed, NOT yet seen on device against a 6-meal profile.**
+The design below is preserved because the reasoning still holds; three of its four checkboxes were
+answered differently once the pipeline was actually read, and those corrections are the value:
 
 **The problem.** `displayCount = Math.min(mealsPerDay, 3)` but `calorieTarget = calorieGoal /
 mealsPerDay` is NOT capped. So a 6-meal user gets three ~350 kcal "cooked" recipes covering half
@@ -337,16 +338,35 @@ already do. Batch-cook and portion is how 5-6 meal/day people really eat.
 renders "Makes N servings · macros are per serving" and logging already writes per-serving
 calories, so the log path needs no change — verified, not assumed.
 
-- [ ] **THE ONE FAILURE MODE THAT MATTERS: the generator must emit `calories` PER SERVING** while
-      `ingredients` describe the batch. Batch calories plus `servings: 2` would double-count every
-      log. Prompt + JSON schema change in `generate-meals`.
-- [ ] **`GeneratedMeal` has no `servings` field** (`lib/meals.ts`). The meal detail screen reads it
-      via `(meal as any)?.servings`, which is why this was invisible. Add it properly.
-- [ ] **Unresolved design question: does the pantry check run against the BATCH or the SERVING?**
-      A 2-serving batch draws twice the pantry, so a dish cookable at one serving may not be at two,
-      and missing-ingredient counts shift. Decide before building.
-- [ ] **Do NOT linearly scale ingredients to hit per-serving macros.** CLAUDE.md's rule ("that
-      produced '0.5 large eggs'"). Full batch + servings is the shape that avoids it.
+- [x] **WRONG — the prompt is NOT where the double-count lives.** This said the fix was "prompt +
+      JSON schema". Two server gates read the ingredient array and cannot see the prompt:
+      `correctMealMacros` OVERWRITES `calories` with the FatSecret sum over the ingredients (both
+      keys are set in prod), so a per-serving claim gets the batch total stamped back on top with
+      the model fully compliant; and `verifyMacros` drops a meal at claimed/estimated < 0.65, which
+      a per-serving claim against a 2-serving list hits at exactly 0.50 — every batch recipe
+      dropped. **The pipeline now stays in BATCH space and divides ONCE in `toPerServing`, after
+      both gates.** `servings` is computed server-side, so the prompt is a hint, not the guarantee.
+      Two thresholds had to scale or they would eat real food: FatSecret's 200–1200 window (per
+      serving) and its >900 kcal per-ingredient "wrong match" guard, which at 2× grams starts
+      discarding legitimate ingredients and *understating* the total.
+- [x] **`servings` is a real field** on `GeneratedMeal` and `MealDetail`; the `(meal as any)` reads
+      are gone.
+- [x] **The pantry question was a non-question.** `useMealSuggestions` sends
+      `pantryItems.map(i => i.name)`, `pantry_items` has no quantity column, and nothing is deducted
+      on cook. A 2-serving batch draws the same pantry as a 1-serving one because quantity is not
+      modelled anywhere. Do not build a quantity model to answer it.
+- [x] **Ingredients are not scaled** — batch list + `servings` count, per CLAUDE.md.
+- [x] **The problem was smaller than this section claimed.** Measured on all 18 live profiles
+      BEFORE building: 16 return `servings === 1` (a literal no-op — every scaled band ×1). Only two
+      trip it, both on 6 meals/day, and one of those is a 1000 kcal junk profile. The effective
+      trigger is a portion under **~467 kcal**; the 5-meal users this section singled out sit at 541
+      and 615 and were never broken. Those profiles are pinned in `_shared/servings.test.ts` so the
+      inertness is a test rather than a claim. Build it anyway — 6 meals/day at 2500–3000 kcal is a
+      real post-launch cohort — but not believing 30% of users are affected today.
+- [ ] **UNVERIFIED ON DEVICE.** No live generation has run against a 6-meal profile. What to check:
+      the card shows ONE portion's kcal/protein with a "makes 2" marker beside prep time, the detail
+      screen prints "Makes 2 servings · macros are per serving", and the ingredient list is visibly
+      a 2-portion batch. Function logs print `Servings: 2 per recipe` when it fires.
 
 ## 2h. Also designed, not built — scale instead of regenerating
 Logan asked why a goal change needs a whole new generation when the dish is still fine.
