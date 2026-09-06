@@ -23,7 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
-import { Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
+import { Check, Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -1098,6 +1098,30 @@ export default function HomeScreen() {
   const [slots, setSlots] = useState<MealSlot[]>(INITIAL_SLOTS)
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set(['breakfast']))
   const [selectedDate, setSelectedDate] = useState(() => todayStr())
+  // Sunday-start week containing `anchor`. Noon, not midnight, for the same reason every other date
+  // helper in this file uses it: a midnight Date lands on the previous day under some DST offsets.
+  const weekOf = (anchor: string): string[] => {
+    const start = new Date(anchor + 'T12:00:00')
+    start.setDate(start.getDate() - start.getDay())
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(start); d.setDate(start.getDate() + i); return todayStr(d)
+    })
+  }
+  // Which days in the visible week have any log, for the strip's filled circles. Keyed on the WEEK,
+  // not on selectedDate, so tapping through days inside one week costs no extra query.
+  const [loggedDays, setLoggedDays] = useState<Set<string>>(new Set())
+  const visibleWeek = weekOf(selectedDate)
+  const weekStart = visibleWeek[0]
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    supabase.from('meal_logs').select('logged_at')
+      .eq('user_id', user.id).gte('logged_at', weekStart).lte('logged_at', weekOf(weekStart)[6])
+      .then(({ data }) => {
+        if (!cancelled) setLoggedDays(new Set((data ?? []).map((r: any) => String(r.logged_at))))
+      })
+    return () => { cancelled = true }
+  }, [user?.id, weekStart])
   useEffect(() => { calorieMilestoneRef.current = null }, [selectedDate]) // new day = fresh baseline, don't celebrate the goal on a day switch
   const isToday = selectedDate === todayStr()
 
@@ -1334,14 +1358,6 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.headerGreeting}>
-            <Text style={styles.hiText}>
-              {new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 17 ? 'Good afternoon' : 'Good evening'}, {user?.user_metadata?.full_name?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'there'}
-            </Text>
-            <Text style={styles.greetText}>
-              {totalCal === 0 ? "Let's start tracking today" : totalCal >= calorieGoal ? 'Goal reached! Nice work' : 'Ready for your next meal?'}
-            </Text>
-          </View>
         </View>
 
         {/* ── "Your plan is ready" — first-run preview after onboarding paywall ── */}
@@ -1440,6 +1456,51 @@ export default function HomeScreen() {
           <TouchableOpacity onPress={goForwardDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <ChevronRight size={20} stroke={isToday ? '#333' : COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
+        </View>
+
+        {/* ── Week strip (MyFitnessPal / Cal AI pattern) ──
+            Replaces the greeting that used to sit above the day nav. The greeting cost two lines to
+            say nothing actionable; this costs about the same height and answers "have I logged this
+            week", which is the question the screen exists for.
+
+            The day nav ABOVE is kept deliberately rather than folded in: the strip only reaches the
+            current week, and the chevrons are the only way further back. MyFitnessPal makes the same
+            split — a date label plus a strip.
+
+            Today is a SOLID accent ring, not the dashed one MyFitnessPal uses: RN renders
+            `borderStyle: 'dashed'` unreliably on a view with a borderRadius on iOS, and a ring that
+            silently draws solid on some builds is worse than one that was never dashed. */}
+        <View style={styles.weekStrip}>
+          {visibleWeek.map(d => {
+            const isSel = d === selectedDate
+            const isTodayCell = d === todayStr()
+            const future = d > todayStr()
+            // The set is fetched per week, so a meal logged since won't be in it — OR in the live
+            // total for the day being viewed, which is what keeps the circle honest right after a log.
+            const logged = loggedDays.has(d) || (d === selectedDate && totalCal > 0)
+            return (
+              <TouchableOpacity
+                key={d}
+                disabled={future}
+                activeOpacity={0.7}
+                onPress={() => setSelectedDate(d)}
+                style={styles.weekCell}
+              >
+                <Text style={[styles.weekLetter, isSel && styles.weekLetterSel, future && styles.weekDim]}>
+                  {new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'narrow' })}
+                </Text>
+                <View style={[
+                  styles.weekDot,
+                  future && styles.weekDotFuture,
+                  isTodayCell && !logged && styles.weekDotToday,
+                  logged && styles.weekDotLogged,
+                  isSel && styles.weekDotSelected,
+                ]}>
+                  {logged && <Check size={15} stroke="#000" strokeWidth={3} />}
+                </View>
+              </TouchableOpacity>
+            )
+          })}
         </View>
 
         {/* ── Hero Dashboard Card ── */}
@@ -2115,7 +2176,6 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 4 },
   headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   brandText: { fontSize: 18, fontWeight: '800', color: '#4ADE80', letterSpacing: -0.3 },
-  headerGreeting: { gap: 2 },
   prefBanner: {
     marginHorizontal: 20,
     marginBottom: 16,
@@ -2205,8 +2265,6 @@ const styles = StyleSheet.create({
   },
   avatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.trackDark },
   avatarInitial: { fontSize: 14, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
-  hiText: { fontSize: 22, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
-  greetText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500' },
   macroCard: { marginHorizontal: 20, marginBottom: 32, borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12 },
   macroSectionLabel: { fontSize: 10, fontWeight: '700', color: '#4ADE80', textTransform: 'uppercase', letterSpacing: 2 },
   macroCalorieText: { fontSize: 32, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
@@ -2364,6 +2422,27 @@ const styles = StyleSheet.create({
   logSlotChipTextActive: { color: '#4ADE80' },
 
   // Hero dashboard card
+  weekStrip: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  weekCell: { flex: 1, alignItems: 'center', gap: 8 },
+  weekLetter: { fontSize: 12, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5 },
+  weekLetterSel: { color: COLORS.textWhite },
+  weekDim: { color: '#3A3A3A' },
+  weekDot: {
+    width: 30, height: 30, borderRadius: 15,
+    borderWidth: 1.5, borderColor: '#2A2A2A',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  weekDotFuture: { borderColor: '#191919' },
+  weekDotToday: { borderColor: COLORS.accent },
+  weekDotLogged: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  // Last in the style array so it wins the BORDER on a logged day while the green fill survives —
+  // a logged + selected day has to read as both.
+  weekDotSelected: { borderColor: COLORS.textWhite, borderWidth: 2 },
+
   dayNav: {
     flexDirection: 'row',
     alignItems: 'center',
