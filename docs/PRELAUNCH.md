@@ -277,6 +277,33 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       response) is a separate defect — the generator returned it and nothing de-duplicated the
       batch against itself before storing.
 
+## 2f. VERIFIED 2026-09-05, and what it uncovered
+- [x] **2d#2 double generation — FIXED AND VERIFIED SERVER-SIDE.** Newest batch is `count: 3`
+      (previous three of five were 6), and all three names are present in `recent_meal_names`. Both
+      pass criteria met, no device judgement involved.
+- [ ] **A SECOND REPEAT MECHANISM EXISTS — the fix did not cover it.** "Protein-Boosted Chocolate
+      Smoothie" was generated 09-05 20:57, DID reach the anti-repeat window, and was generated again
+      verbatim at 09-06 03:00. Same exact string, ~1h after entering the list the model is told to
+      avoid. So 2d#4 was two bugs: the lost update (fixed) and the model repeating a name that is in
+      the window (open). INVESTIGATE the prompt side — is `recentMealNames` actually reaching the
+      model, is it truncated, and does `clusterDishes`/`matchesRecentDish` collapse it before it
+      gets there? Do NOT lengthen RECENT_MEMORY; a window that is being ignored gets no better by
+      being longer.
+- [ ] **Also open, same batch:** "Chocolate Protein Smoothie" appeared TWICE inside the single 11:51
+      response. Nothing de-duplicates a batch against itself before storing.
+- [ ] **Profile DELETES the meal cache where it should STALE it.** Logan reloaded after a meal-
+      frequency change and got the bare "Let's cook" empty state for 4-5s instead of his previous
+      meals. The carryover branch in useMealSuggestions paints a PREVIOUS day's cached meals while
+      the new ones generate — precisely so this never looks empty — but it needs an entry to exist.
+      `multiRemove` in all four Profile handlers destroys the carryover source. Marking the entry
+      stale (e.g. dating it to yesterday) would trigger carryover instead and keep the intent
+      ("regenerate rather than serve wrong-sized suggestions") intact.
+- [ ] **Related: the cache clear does not touch in-memory `meals` state.** Nothing re-runs the load
+      on focus — the effect deps are `[userId, isPremium, mode, enabled]` and clearing AsyncStorage
+      changes none of them — so after a Profile change Home keeps rendering the OLD meals until a
+      remount, with no indication they are stale. That is also why a Profile change only appears to
+      regenerate on the NEXT app launch, which is what made this look intermittent for hours.
+
 ## 2e. Trial reminder notifications — RESEARCHED 2026-09-05, not yet applied
 Logan: mimic what the highest-converting apps do, do not guess. Queue this AFTER 2d's four items.
 
