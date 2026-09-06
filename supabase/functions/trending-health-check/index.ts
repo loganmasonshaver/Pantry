@@ -97,6 +97,36 @@ Deno.serve(async (req: Request) => {
     console.log(`[health] alert: ${alert}`)
   }
 
+  // PERSIST THE RESULT. Both of this function's reporting channels were dead, and it has been
+  // running on a cron reporting to nobody since 20260812002000_schedule_trending_health_check.sql:
+  //
+  //   1. pushToOps needs profiles.expo_push_token, and getExpoPushTokenAsync() has been failing
+  //      with 'No "projectId" found' — app.json has an empty `extra`, so the app is not linked to
+  //      an EAS project and no token was ever written. (Fix is `eas login` + `eas init`, which
+  //      needs Logan's credentials.)
+  //   2. The Response below goes to pg_net, which abandons the request before it completes. That
+  //      is the exact reason pipeline_runs was created for generate-trending-meals — this function
+  //      never got the same treatment.
+  //
+  // A row in pipeline_runs depends on nothing external: no EAS project, no device, no notification
+  // permission. Push stays as the nice-to-have on top. Read the last check with:
+  //   select created_at, funnel from pipeline_runs where provider = 'health-check'
+  //   order by id desc limit 7;
+  try {
+    const { error: logErr } = await db.from('pipeline_runs').insert({
+      dry_run: true, provider: 'health-check', stored: rows?.length ?? 0,
+      // utc_hour is recorded because this check is only MEANINGFUL after the pipeline has run.
+      // The crons are 08:00 UTC (generate) and 08:20 UTC (this). Triggered manually before 08:00 it
+      // reports "NO meals generated for <today UTC>" — which is true and not a problem, because the
+      // day's run has not happened yet. I raised exactly that false alarm running it at 01:13 UTC.
+      // A row with utc_hour well below 8 is an off-window manual run; ignore its verdict.
+      funnel: { healthy, date, count: rows?.length ?? 0, problems, alert, utc_hour: new Date().getUTCHours() },
+    })
+    // Read the error rather than assume it: supabase-js returns a refused write, it does not throw,
+    // so a bare try/catch around .insert() catches nothing. Three call sites failed silently this way.
+    if (logErr) console.log(`[health] pipeline_runs insert REFUSED: ${logErr.message}`)
+  } catch (e) { console.log(`[health] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
+
   return new Response(JSON.stringify({ healthy, date, count: rows?.length ?? 0, problems, alert }), {
     // Always 200 — this endpoint reports health, it doesn't have health. A 500 here would make the
     // cron's own error logs indistinguishable from the outage it's reporting.
