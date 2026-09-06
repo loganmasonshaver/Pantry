@@ -224,6 +224,33 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     }
   }
 
+  // ONE AUTOMATIC GENERATION PER (user, mode, day).
+  //
+  // The effect's deps are [userId, isPremium, mode, enabled]. `enabled` flips when the pantry lands
+  // and a second dep — isPremium resolving from Superwall — flipped ~23ms later, re-running it and
+  // firing a SECOND generation. Logan's trace caught it twice: `generation start +2377ms` and
+  // `+2400ms`, and generated_meals shows six meals sharing one timestamp where a batch is three.
+  //
+  // The existing `cancelled` flag does not help: it suppresses STATE UPDATES from a superseded run,
+  // it does not abort an in-flight network call. Both batches completed and both were paid for.
+  //
+  // Worse than the money — and the reason this also closes the repeated-meals report — is that only
+  // ONE batch's names reach profiles.recent_meal_names. Both generations read the old window, each
+  // merges only its OWN names into it, and the later write wins. A lost update. Half of every
+  // double generation is therefore invisible to the anti-repeat check and free to come back the
+  // next day, which is exactly what "Egg White and Spinach Frittata" did on 09-04 -> 09-05.
+  //
+  // AN IN-FLIGHT LOCK, NOT A DAILY ONE. Released the moment the generation settles, either way.
+  // A per-day lock was the first cut and it was wrong: Profile clears the meal cache on a diet,
+  // goal or meal-frequency change SO THAT the next open regenerates, and a day-long guard would
+  // silently swallow that. The bug is two calls racing 23ms apart, and an in-flight lock is exactly
+  // the scope that fixes it.
+  //
+  // Keyed rather than a plain boolean so a day rollover or account switch is never blocked by a
+  // stale lock. Manual rerolls pass forceGenerate and bypass it entirely — they are gated by
+  // MAX_DAILY_REGENS on the client and MEAL_GEN_CAP_PER_DAY on the server.
+  const generatingForRef = useRef<string | null>(null)
+
   const fetchAndGenerate = async (forceGenerate = false) => {
     if (!userId) return
     setError(null)
@@ -284,10 +311,31 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         }
       }
 
+      // GUARD HERE, not at the top of this function. Every cache path above returns before this
+      // line, so claiming the key earlier would also mark a cache-SERVING call as "generated" — and
+      // then suppress the legitimate regeneration after Profile clears the cache on a diet, goal or
+      // meal-frequency change. The guard belongs on the expensive call, not on the function.
+      if (!forceGenerate) {
+        const genKey = `${userId}_${mode}_${todayStr()}`
+        if (generatingForRef.current === genKey) {
+          perfMark('generation SUPPRESSED — one already running for this user/mode/day')
+          return
+        }
+        generatingForRef.current = genKey
+      }
+      perfMark('generation start (accepted)')
       setLoading(true)
       const generated = await generate()
+      // Released as soon as this generation SETTLES, not held for the day. The bug is two calls
+      // racing ~23ms apart, so an in-flight lock is enough — and a daily lock would break a
+      // behaviour that is deliberate: Profile clears the cache on a diet, goal or meal-frequency
+      // change precisely so the next open regenerates, and a day-long guard would swallow it.
+      generatingForRef.current = null
       if (generated) { setMeals(generated); setStale(false) }
     } catch (err: any) {
+      // Release the per-day guard so a FAILED generation can be retried. Holding it here would
+      // leave the user with no meals and no automatic second attempt until tomorrow.
+      generatingForRef.current = null
       __DEV__ && console.log('MEAL ERROR v3:', err.message)
       __DEV__ && console.log('MEAL ERROR status:', err?.context?.status)
       // Read the response body — use clone so we don't consume it
@@ -419,7 +467,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Cache miss. THIS is what needs the pantry — bail until it has loaded and let the
       // `enabled` flip re-run the effect.
       if (!enabled) { perfMark('cache miss — waiting on pantry before generating'); return }
-      if (!cancelled) { perfMark('generation start'); fetchAndGenerate() }
+      // The mark moved INTO fetchAndGenerate's guard: logging 'generation start' here claimed a
+      // generation had begun even when the guard then suppressed it, which is exactly the kind of
+      // trace that sends the next reader after the wrong thing.
+      if (!cancelled) { perfMark('generation requested'); fetchAndGenerate() }
     })()
     return () => { cancelled = true }
   }, [userId, isPremium, mode, enabled])
