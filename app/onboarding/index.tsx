@@ -37,6 +37,7 @@ import { templates as recipeTemplates } from '../../lib/recipeTemplates'
 import { scaleVisual } from '../../lib/ingredientDisplay'
 import { todayStr } from '../../lib/localDate'
 import { writeMealCache } from '../../lib/mealCache'
+import { slotsForMealsPerDay } from '../../lib/mealSlots'
 import { useAuth } from '../../context/AuthContext'
 import { useSuperwall, useSuperwallEvents, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
@@ -3996,6 +3997,11 @@ export default function Onboarding() {
           diet_type: finalData.dietStyle || 'Classic', // Classic / Pescatarian / Vegetarian / Vegan
           onboarding_completed: true, // authoritative "finished onboarding" signal — routing reads this
           meals_per_day: parseInt(finalData.meals),
+          // Seed the slot structure from the count the user just gave. Onboarding already asked;
+          // making them name their meals again in Profile would be a second question for
+          // information we hold. From here on meal_slots is the source of truth — see
+          // lib/mealSlots.ts and the re-seed prompt in Profile.
+          meal_slots: slotsForMealsPerDay(parseInt(finalData.meals)),
           cooking_skill: finalData.cookingSkill || null,
           max_prep_minutes: prepToMinutes(finalData.prep),
           // last_active_at, not last_active. `last_active` was a date column that existed only in

@@ -30,6 +30,7 @@ import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { todayStr } from '@/lib/localDate'
 import { setSelectedDay } from '@/lib/selectedDay'
+import { DEFAULT_SLOT_LABELS, slotId } from '@/lib/mealSlots'
 import { MealImage } from '@/components/MealImage'
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAuth } from '../../context/AuthContext'
@@ -141,10 +142,8 @@ type MealSlot = {
 }
 
 // Fallback only — the real list is profiles.meal_slots. Used before the profile lands and if the
-// read fails, so the screen never renders zero slots. Four, matching the column default: Snacks is
-// the pressure valve that absorbs everything which is not a main meal.
-const DEFAULT_SLOT_LABELS = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
-const slotId = (label: string) => label.toLowerCase().replace(/\s+/g, '-')
+// read fails, so the screen never renders zero slots. Both live in lib/mealSlots.ts so the seeding
+// in onboarding, the re-seed in Profile and this screen cannot drift to different names.
 const INITIAL_SLOTS: MealSlot[] = DEFAULT_SLOT_LABELS.map(l => ({ id: slotId(l), label: l, entries: [] }))
 
 function iconForSlot(label: string): React.ElementType {

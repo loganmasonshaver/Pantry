@@ -25,6 +25,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import { perfMark } from '@/lib/perf'
+import { slotsForMealsPerDay } from '@/lib/mealSlots'
 import { useSuperwall, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackWeightLogged } from '@/lib/analytics'
@@ -535,6 +536,7 @@ type Profile = {
   carbs_goal: number | null
   fat_goal: number | null
   meals_per_day: number | null
+  meal_slots: string[] | null
   max_prep_minutes: number | null
   weight_kg: number | null
   target_weight_kg: number | null
@@ -607,6 +609,35 @@ export default function ProfileScreen() {
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
     perfMark('meal cache CLEARED by Profile (goal edit) — regeneration after this is intended')
     setEditGoal(null)
+
+    // MEAL FREQUENCY ALSO SHAPES THE DAY'S SLOTS — but only OFFER to re-seed them. Overwriting
+    // silently would wipe any slot the user renamed or added, from a screen that only asked about a
+    // number. Skipped entirely when the stored structure already matches the new count, so someone
+    // correcting a typo is not asked a question with no consequence.
+    if (editGoal.field === 'meals_per_day') {
+      const next = slotsForMealsPerDay(num)
+      const current = profile?.meal_slots ?? []
+      const same = current.length === next.length && current.every((l, i) => l === next[i])
+      if (!same) {
+        Alert.alert(
+          'Update your meal slots?',
+          `Your day is set up as ${current.length ? current.join(', ') : 'the default'}. Change it to ${next.join(', ')}?\n\nYour logged meals are not affected.`,
+          [
+            { text: 'Keep mine', style: 'cancel' },
+            {
+              text: 'Update',
+              onPress: async () => {
+                const { error: slotErr } = await supabase.from('profiles').update({ meal_slots: next }).eq('id', user.id)
+                // Read the error — supabase-js RETURNS a refused write instead of throwing, so a
+                // try/catch would catch nothing and the change would silently revert on next load.
+                if (slotErr) { Alert.alert('Save failed', slotErr.message); return }
+                setProfile(p => p ? { ...p, meal_slots: next } : p)
+              },
+            },
+          ],
+        )
+      }
+    }
   }
 
   // Dietary restrictions modal
@@ -702,7 +733,7 @@ export default function ProfileScreen() {
     // Profile goals + starting weight
     supabase
       .from('profiles')
-      .select('calorie_goal, protein_goal, meals_per_day, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions, diet_type, age, gender, height_cm, activity_level, fitness_goal')
+      .select('calorie_goal, protein_goal, meals_per_day, meal_slots, max_prep_minutes, weight_kg, target_weight_kg, dietary_restrictions, diet_type, age, gender, height_cm, activity_level, fitness_goal')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
