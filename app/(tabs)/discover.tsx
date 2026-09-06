@@ -87,9 +87,16 @@ const hashKey = (k: string) => { let h = 0; for (let i = 0; i < k.length; i++) h
 // even a large section in a few days.
 // Day index used by every rotation on this screen. Module-level so the hero and the shelves
 // cannot drift onto different days.
+// DEV-ONLY day offset. Every rotation on this screen keys off dayOfYearNow(), so bumping this by 1
+// and letting Fast Refresh reload shows exactly what the page looks like tomorrow. Without it, the
+// shelf rotation joins the list of variety fixes that need DAYS to confirm and therefore never get
+// confirmed. MUST be 0 in committed code — the `__DEV__` guard means a release build ignores it
+// either way, but a non-zero value here would silently desync dev from prod.
+const DEV_DAY_OFFSET = 0
+
 const dayOfYearNow = () => Math.floor(
   (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
-)
+) + (__DEV__ ? DEV_DAY_OFFSET : 0)
 
 const rotateByDay = <T,>(arr: T[], day: number, key: string, stride: number): T[] => {
   if (arr.length < 2) return arr
@@ -949,6 +956,23 @@ export default function DiscoverScreen() {
     // on a 35-meal pool a user with a full pantry would pull almost everything into "Almost in
     // your kitchen" and leave the rest of the page bare.
     const PERSONAL_CAP = 8
+
+    // WHICH MEALS, not just their order. Ties inside a missing-count tier were already broken by
+    // hash(id + day), but that only ever REORDERED the same shelf: a pantry that does not change
+    // produces the same 8 near-cookable dishes every day, so the shelf — and with it the whole page
+    // — read as never updating. That is the staleness Logan reported, and moving the shelf down the
+    // page does not touch it.
+    //
+    // So take a WINDOW of the eligible meals rather than the top 8, and advance it by a whole shelf
+    // per day: 24 eligible gives three genuinely distinct sets before repeating. Every member is
+    // still drawn from the ranked, verified, low-missing list, so the shelf's promise holds — a day
+    // 2 meal missing 2 ingredients is still "almost in your kitchen"; it just is not the single
+    // best one. Display order is re-sorted by missing count afterwards so the shelf still reads
+    // best-first regardless of where the window landed.
+    const NEARLY_WINDOW = PERSONAL_CAP * 3
+    const nearlyMissing = new Map(nearlyRanked.map(x => [x.m.id, x.missing]))
+    const nearlyWindow = rotateByDay(
+      nearlyRanked.slice(0, NEARLY_WINDOW).map(x => x.m), dayOfYear, 'nearly', PERSONAL_CAP)
     const cookedProtein = lastCooked ? detectPrimaryProtein({ name: lastCooked, ingredients: [] }) : null
 
     // WHICH personalised shelf leads rotates daily. claim() is first-shelf-wins, so the leader
@@ -962,7 +986,8 @@ export default function DiscoverScreen() {
     // Built as thunks because claim() mutates `taken` — the rotation has to change the ORDER THE
     // CLAIMS RUN IN, not just the order they are displayed, or rotating would be cosmetic.
     const personalShelves = [
-      { key: 'nearly', run: () => claim(nearlyRanked.map(x => x.m), PERSONAL_CAP) },
+      { key: 'nearly', run: () => claim(nearlyWindow, PERSONAL_CAP)
+          .sort((a, b) => (nearlyMissing.get(a.id) ?? 99) - (nearlyMissing.get(b.id) ?? 99)) },
       { key: 'because', run: () => cookedProtein && cookedProtein !== 'other'
           ? claim(browseGrid.filter(m => detectPrimaryProtein(m) === cookedProtein), PERSONAL_CAP)
           : [] },
@@ -1007,9 +1032,26 @@ export default function DiscoverScreen() {
     // spread. Reordered, not filtered: nothing is removed from the page.
     const leftovers = spreadByArchetype(browseGrid.filter(m => !taken.has(m.id)))
 
-    return [
-      // Rendered in the SAME rotated order the claims ran in. Listing them fixed here while the
-      // claims rotated would put a shelf that got second pick at the top of the page.
+    // DISPLAY ORDER IS NOW DECOUPLED FROM CLAIM ORDER, and that separation is the whole fix.
+    //
+    // These used to be one list: the personalised shelves claimed first AND rendered first, on the
+    // reasoning that a shelf which got second pick should not lead the page. True, but it made
+    // "Almost in your kitchen" the row under the hero every single day — and its own daily rotation
+    // could not help, because the other two personalised shelves are structurally empty for most
+    // users. `fits` needs something logged TODAY and `because` needs a last-cooked meal whose name
+    // hits DISCOVER_PROTEIN_KEYWORDS; with neither, the empty-section filter leaves exactly one
+    // personalised shelf and it leads forever. Verified against a live profile: 0 logs today, last
+    // cooked "Whole Milk" -> 'other'. Rotating three shelves when two cannot populate is a no-op.
+    //
+    // Claim order is UNCHANGED — `nearly` still gets first pick, so its contents keep the quality
+    // its title promises. Only the position rotates. The alternative (rotating the claims too) was
+    // costed and rejected: on first paint the pool is the 60-meal disk cache, and `today` plus two
+    // intent shelves claim up to 42 of it before `nearly` would run, so the shelf would routinely
+    // fall under the 2-meal threshold and VANISH from the exact screen this is meant to freshen.
+    //
+    // "Everything else" stays pinned last — it is the catch-all, not a shelf, and leading with it
+    // would read as the page having nothing to say.
+    const rotatable = [
       ...personalOrder.map(sh => ({
         key: sh.key,
         title: sh.key === 'nearly' ? 'Almost in your kitchen'
@@ -1020,8 +1062,15 @@ export default function DiscoverScreen() {
       })),
       { key: 'today', title: "Today's picks", meals: today, accent: false },
       ...intent.map(sec => ({ ...sec, accent: false })),
-      { key: 'other', title: 'Everything else', meals: leftovers, accent: false },
     ].filter(sec => sec.meals.length > 0)
+    // Filtered BEFORE rotating, deliberately: rotating first would let the index land on a section
+    // that is about to be dropped, and the "different shelf each day" guarantee would silently
+    // degrade to "sometimes the same one".
+    const leftoverSection = { key: 'other', title: 'Everything else', meals: leftovers, accent: false }
+    return [
+      ...rotateByDay(rotatable, dayOfYear, 'display', 1),
+      ...(leftoverSection.meals.length > 0 ? [leftoverSection] : []),
+    ]
     // excludedStaples feeds nearlyRanked's missingCount above and arrives after first paint.
   }, [browseGrid, budget, pantryNames, lastCooked, excludedStaples])
 

@@ -218,8 +218,26 @@ session that wrote it.
       testable same-day.)
 - [ ] **Discover hero is a dish not served before**, and does not change again once the page has
       settled. (`a14c9b4`)
-- [ ] **"Almost in your kitchen" does not lead the page every day**, and its internal order differs
-      from the previous day. (`37b9ba1`)
+- [x] **SUPERSEDED — `37b9ba1` never worked, and the reason is worth keeping.** It rotated which of
+      the THREE personalised shelves leads, but the other two are structurally empty for most users:
+      `fits` needs something logged TODAY, `because` needs a last-cooked meal whose name hits
+      `DISCOVER_PROTEIN_KEYWORDS`. Checked against Logan's live profile — 0 logs today, last cooked
+      "Whole Milk" (not a protein keyword) — so the empty-section filter left exactly one shelf and
+      it led every day. Rotating three items where two cannot populate is a no-op.
+- [ ] **VERIFY: a DIFFERENT section sits under the hero each day.** Display order is now decoupled
+      from claim order and rotates across all shelves; "Everything else" stays pinned last. Claim
+      order is unchanged, so `nearly` still gets first pick and keeps its contents. Simulated over 8
+      days: the leader cycles all 4 sections and `nearly` leads 2 of 8 instead of 8 of 8.
+- [ ] **VERIFY: "Almost in your kitchen" shows DIFFERENT MEALS day to day, not just reordered ones.**
+      This is the half `37b9ba1` never addressed and the actual source of the stale feel — a pantry
+      that does not change produced the same 8 dishes daily, reordered. It now takes a 24-meal window
+      of the ranked list and advances it a full shelf per day: 3 distinct sets before repeating,
+      confirmed by simulation. Every member is still verified + low-missing, and the shelf is
+      re-sorted best-first for display.
+- [ ] **HOW TO VERIFY WITHOUT WAITING DAYS:** `DEV_DAY_OFFSET` at the top of
+      `app/(tabs)/discover.tsx` — bump it by 1, let Fast Refresh reload, and the page renders as
+      tomorrow. `__DEV__`-guarded, so a release build ignores it. **It must be 0 in committed code.**
+      Step 0 -> 1 -> 2 -> 3 and confirm both bullets above, then set it back.
 
 - [ ] **Photo-gated meal swap.** When a generation lands while meals are on screen, the old meals
       hold until the NEW hero's photo is ready, then cross-fade in (300ms). The tell is the ABSENCE
