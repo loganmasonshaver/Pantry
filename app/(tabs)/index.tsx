@@ -18,7 +18,7 @@ import {
   RefreshControl,
   Keyboard,
 } from 'react-native'
-import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
+import Reanimated, { FadeIn, FadeOut, LinearTransition, SlideInRight, SlideInLeft } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -1115,6 +1115,8 @@ export default function HomeScreen() {
   // Per-day totals, not just "has a row". A single logged coffee should not earn the same mark as a
   // tracked day — see dayState below.
   const [weekStats, setWeekStats] = useState<Map<string, { cal: number; slots: Set<string> }>>(new Map())
+  // +1 = moved forward in time, -1 = back. Only used to pick which side the new week slides in from.
+  const [weekDir, setWeekDir] = useState(1)
   useEffect(() => {
     if (!user) return
     let cancelled = false
@@ -1171,6 +1173,9 @@ export default function HomeScreen() {
       // Never past today: a future week has nothing in it and stranding the user there means
       // every circle is empty with no obvious way back.
       const target = todayStr(next) > todayStr() ? todayStr() : todayStr(next)
+      // Direction drives the entering animation below. Set before the state change so the re-render
+      // that swaps the week already knows which way it came from.
+      setWeekDir(shift > 0 ? 1 : -1)
       setSelectedDate(target)
     })
   useEffect(() => { calorieMilestoneRef.current = null }, [selectedDate]) // new day = fresh baseline, don't celebrate the goal on a day switch
@@ -1519,8 +1524,20 @@ export default function HomeScreen() {
             Today is a SOLID accent ring, not the dashed one MyFitnessPal uses: RN renders
             `borderStyle: 'dashed'` unreliably on a view with a borderRadius on iOS, and a ring that
             silently draws solid on some builds is worse than one that was never dashed. */}
+        {/* Keyed on weekStart so React remounts the row when the week changes — that remount is what
+            gives `entering` something to animate. Without it the same element just re-renders with
+            new children and the swipe has no visible feedback at all, which is exactly how it
+            shipped: only the date at the top changed.
+            Sliding in from the side the gesture came from is the whole cue — it says "there is more
+            over there" in a way a fade cannot. Reduce Motion is handled globally by
+            ReducedMotionConfig in _layout, so this jumps to its end state rather than needing a
+            gate here. */}
         <GestureDetector gesture={weekSwipe}>
-          <View style={styles.weekStrip}>
+          <Reanimated.View
+            key={weekStart}
+            entering={(weekDir > 0 ? SlideInRight : SlideInLeft).duration(220)}
+            style={styles.weekStrip}
+          >
             {visibleWeek.map(d => {
               const isSel = d === selectedDate
               const isTodayCell = d === todayStr()
@@ -1551,7 +1568,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               )
             })}
-          </View>
+          </Reanimated.View>
         </GestureDetector>
 
         {/* ── Hero Dashboard Card ── */}
@@ -1968,7 +1985,7 @@ export default function HomeScreen() {
 
         {/* ── Daily Meal Log — Cards ── */}
         <View style={styles.logSection}>
-          <Text style={styles.logTitle}>Daily Meal Log</Text>
+          <Text style={styles.logTitle}>Daily meal log</Text>
 
           <View style={{ marginTop: 10, gap: 8 }}>
             {slots.map((slot) => {
@@ -2429,7 +2446,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#4ADE80',
   },
-  logTitle: { fontSize: 12, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 2, textTransform: 'uppercase' },
+  // Matches sectionTitle ("Cook from your pantry") exactly. It was a 12pt muted uppercase caption,
+  // which put the two headers of the same screen in two different typographic systems — the eye read
+  // one as a section and the other as a label on the card below it.
+  logTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
   logPillBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: '#2A2A2A', borderRadius: 20, paddingVertical: 8, paddingHorizontal: 12 },
   logPillBtnText: { fontSize: 12, fontWeight: '600', color: COLORS.textWhite },
   slotCard: { backgroundColor: COLORS.cardElevated, borderRadius: 14, borderWidth: 1, borderColor: COLORS.trackDark, overflow: 'hidden' },
