@@ -229,14 +229,35 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       `createaccount.tsx:164`) stamp this cache WITHOUT `maxPrepMinutes` or `userId`, which the
       reader treats as old-format and discards. Harmless today because a regeneration follows
       onboarding anyway, but it is a guaranteed miss and worth aligning.
-- [ ] **4. A chocolate shake appeared in consecutive generations — bug or intended?** Logan is
-      worried the no-repeat window is not working. **LOOK DEEP, DO NOT GUESS.** Known so far: exact
-      dish names did NOT repeat — the last batch was Cottage Cheese and Savory Green Bowl / Greek
-      Yogurt and Pineapple Power Parfait / Protein-Boosted Chocolate Smoothie, and none of the 20
-      names in `recent_meal_names` duplicate. But BASE FOODS repeat heavily inside that window
-      (cottage cheese x3, yogurt x3), so the suspicion is that `RECENT_MEMORY`/`overusedBases` gates
-      dish NAMES while ingredient monotony passes straight through. Confirm against `dish-key.ts`
-      (`overusedBases`, `clusterDishes`, `isSameDish`) rather than from the names alone.
+- [x] **4. ANSWERED WITH CERTAINTY — it is a REAL bug, and it is the SAME bug as item 2.**
+      `generated_meals` is a permanent, timestamped record (written server-side by generate-meals
+      precisely because "a generation not recorded at the moment it happens is gone for good"), so
+      this needed no guessing. Facts:
+        09-05 20:57  Protein-Boosted Chocolate Smoothie / Greek Yogurt and Pineapple Power Parfait /
+                     Cottage Cheese and Savory Green Bowl / Greek Yogurt and Salsa Protein Dip /
+                     Egg and Potato Breakfast Hash / **Egg White and Spinach Frittata**
+        09-05 11:51  Greek Yogurt and Cinnamon Granola Power Bowl / **Chocolate Protein Smoothie** /
+                     Egg White and Spinach Scramble with Cheese / Cottage Cheese and Pesto Pasta
+                     Salad / **Chocolate Protein Smoothie** / Cheesy Egg and Spinach Breakfast Wrap
+        09-04 11:21  Savory Yogurt and Egg Scramble / Garlic Butter Chicken and Rice /
+                     **Egg White and Spinach Frittata**
+      - **Egg White and Spinach Frittata repeated 09-04 -> 09-05.** Logan was right.
+      - **"Chocolate Protein Smoothie" appears TWICE INSIDE the 11:51 batch** — a duplicate within a
+        single generation, which no anti-repeat window can catch.
+      - **SIX meals share the 20:57 timestamp and six share 11:51** — three-meal batches. That is
+        the double-fire from item 2, recorded in the data.
+      - **Only THREE of the 20:57 six are in `profiles.recent_meal_names`.** The Frittata is not.
+      **MECHANISM — a lost update.** Both concurrent generations read `recent_meal_names`, each
+      computes `clusterDishes([...its own names, ...theOldList]).slice(0, 30)`, and both write. The
+      second write has never seen the first batch's names, so it overwrites them. Half of every
+      double generation is therefore INVISIBLE to the anti-repeat window and free to come back the
+      next day — which is exactly what the Frittata did.
+      **CONSEQUENCE FOR THE QUEUE: fixing item 2 fixes item 4.** The repeats are not a variety-tuning
+      problem and RECENT_MEMORY (30) is not too short; the window is being silently truncated by a
+      race. Do NOT tune the window. Fix the double-fire, then re-measure.
+      **STILL OPEN AFTER THAT:** the within-batch duplicate at 11:51 (same name twice in one
+      response) is a separate defect — the generator returned it and nothing de-duplicated the
+      batch against itself before storing.
 
 ## 2e. Trial reminder notifications — RESEARCHED 2026-09-05, not yet applied
 Logan: mimic what the highest-converting apps do, do not guess. Queue this AFTER 2d's four items.
