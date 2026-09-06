@@ -220,6 +220,46 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       dish NAMES while ingredient monotony passes straight through. Confirm against `dish-key.ts`
       (`overusedBases`, `clusterDishes`, `isSameDish`) rather than from the names alone.
 
+## 2e. Trial reminder notifications — RESEARCHED 2026-09-05, not yet applied
+Logan: mimic what the highest-converting apps do, do not guess. Queue this AFTER 2d's four items.
+
+**What is actually measured, from `~/founder-research/growth-teardowns/` (his own corroborated data,
+★★★★ — the highest-rated row in the whole ledger):**
+- Sunflower: adding trial reminders gave **+48% revenue, +46% trial conversions, +30% trial starts,
+  +70% annual revenue**. Founder verbatim: *"We had a +48% revenue bump by adding in trial
+  reminders. It was insane."* Their priming copy: *"We want you to try Sunflower for free / we'll
+  remind you before your trial ends."*
+- Pingo: the trial-TIMELINE page was the single biggest paywall lift, beating value-prop and
+  testimonial variants. Structure: *"Today you unlock Pingo -> in 5 days we remind you -> you'll be
+  charged; try it free."*
+- Halo: *"Try Halo free / we'll notify when trial ends."*
+- SYNTHESIS action #1: *"free 7 days · we'll remind you 2 days before · cancel anytime"*.
+
+**THE CRITICAL DISTINCTION, and the reason not to just rewrite the notification:** every measured
+lift above comes from the PROMISE OF A REMINDER MADE BEFORE PURCHASE, on the paywall/priming screen
+— not from the notification's wording. Pantry already makes that promise (onboarding step at
+`app/onboarding/index.tsx:3098`, "We'll remind you before your trial ends") and already delivers a
+day-5 local notification from SuperwallContext. So the high-leverage half is BUILT. Do not "improve"
+the notification and log it as a conversion win; it is the delivery of a promise, and its job is to
+not undo the reassurance that was sold.
+
+**No verbatim notification copy is publicly documented.** Superwall's own free-trial-reminders page
+provides Title/Subtitle/Body/Delay fields and NO defaults or examples — checked directly. Anyone
+claiming exact wording from the top apps is guessing.
+
+- [ ] **Rewrite the day-5 BODY, which currently sells instead of reassuring.** It reads "Lock in
+      unlimited scans, saved meals, and AI suggestions before you get charged." That is an upsell
+      plus a charge warning with no cancel path — the opposite of the low-risk framing every source
+      above says produced the lift. Mirror the promise instead: what happens, when, and that they
+      are in control. Timing (day 5 of 7 = 2 days before) already matches the synthesis exactly —
+      DO NOT change it.
+- [ ] **Consider a second notification on the final day** ("Your trial ends today"). General
+      practice is a 3-touch pattern and "more than one reminder builds trust", but this is NOT in
+      the corroborated founder data — treat as a test, not a known win. Check first whether it
+      duplicates Apple's own 24-hour trial-ending notification for auto-renewable subscriptions.
+- [ ] **Log the prediction in `MY-EXPERIMENTS.md` BEFORE shipping any change here** — pricing/paywall
+      bets are exactly what that file exists for, and the result is worth more than the teardowns.
+
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
 - [x] ~~Delete or wire the dead review screen first~~ — DELETED 2026-08-30. It was not a
