@@ -24,7 +24,7 @@ import { useRouter } from 'expo-router'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
 import { Check, Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
-import { Swipeable } from 'react-native-gesture-handler'
+import { Swipeable, Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -1112,16 +1112,67 @@ export default function HomeScreen() {
   const [loggedDays, setLoggedDays] = useState<Set<string>>(new Set())
   const visibleWeek = weekOf(selectedDate)
   const weekStart = visibleWeek[0]
+  // Per-day totals, not just "has a row". A single logged coffee should not earn the same mark as a
+  // tracked day — see dayState below.
+  const [weekStats, setWeekStats] = useState<Map<string, { cal: number; slots: Set<string> }>>(new Map())
   useEffect(() => {
     if (!user) return
     let cancelled = false
-    supabase.from('meal_logs').select('logged_at')
+    supabase.from('meal_logs').select('logged_at, calories, slot')
       .eq('user_id', user.id).gte('logged_at', weekStart).lte('logged_at', weekOf(weekStart)[6])
       .then(({ data }) => {
-        if (!cancelled) setLoggedDays(new Set((data ?? []).map((r: any) => String(r.logged_at))))
+        if (cancelled) return
+        const m = new Map<string, { cal: number; slots: Set<string> }>()
+        for (const r of (data ?? []) as any[]) {
+          const d = String(r.logged_at)
+          const e = m.get(d) ?? { cal: 0, slots: new Set<string>() }
+          e.cal += Number(r.calories) || 0
+          if (r.slot) e.slots.add(String(r.slot))
+          m.set(d, e)
+        }
+        setWeekStats(m)
+        setLoggedDays(new Set(m.keys()))
       })
     return () => { cancelled = true }
   }, [user?.id, weekStart])
+
+  // THREE STATES, not two. "Any log at all" was the first cut and it devalues the mark immediately:
+  // log one coffee and the day is as green as a fully tracked one, so after a week every circle is
+  // green and the row says nothing. Equally, gating the check on HITTING the calorie goal punishes
+  // accurate logging on a light day — the mark should reward TRACKING, which the app controls, not
+  // the eating, which it does not.
+  //   'done'    — 2+ meal slots logged, OR half the calorie goal reached. Green fill + check.
+  //   'partial' — something logged, but not enough to call the day tracked. Accent ring, no fill.
+  //   'empty'   — nothing.
+  // Whichever hits first, so a genuine two-meal day still completes and a 1,400-cal single meal does
+  // too. Both thresholds are one number each if this reads as too easy or too strict on device.
+  const dayState = (d: string): 'done' | 'partial' | 'empty' => {
+    const live = d === selectedDate ? { cal: totalCal, slots: new Set(slots.filter(x => x.entries.length).map(x => x.label)) } : null
+    const st = live && (live.cal > 0 || live.slots.size) ? live : weekStats.get(d)
+    if (!st || (st.cal === 0 && st.slots.size === 0)) return 'empty'
+    if (st.slots.size >= 2 || (calorieGoal > 0 && st.cal >= calorieGoal * 0.5)) return 'done'
+    return 'partial'
+  }
+
+  // Swipe the strip left/right a week at a time. activeOffsetX means a mostly-vertical drag still
+  // scrolls the page — without it the strip would steal the scroll gesture on every touch.
+  // failOffsetY keeps it from firing on a diagonal flick that was meant as a scroll.
+  const weekSwipe = Gesture.Pan()
+    // Callback on the JS thread: it calls setSelectedDate, and RNGH v2 treats gesture callbacks as
+    // worklets by default when Reanimated is present.
+    .runOnJS(true)
+    .activeOffsetX([-18, 18])
+    .failOffsetY([-14, 14])
+    .onEnd(e => {
+      if (Math.abs(e.translationX) < 40) return
+      const shift = e.translationX > 0 ? -7 : 7   // drag RIGHT = go back, matching a calendar
+      const next = new Date(selectedDate + 'T12:00:00')
+      next.setDate(next.getDate() + shift)
+      // Never past today: a future week has nothing in it and stranding the user there means
+      // every circle is empty with no obvious way back.
+      const target = todayStr(next) > todayStr() ? todayStr() : todayStr(next)
+      setSelectedDate(target)
+    })
   useEffect(() => { calorieMilestoneRef.current = null }, [selectedDate]) // new day = fresh baseline, don't celebrate the goal on a day switch
   const isToday = selectedDate === todayStr()
 
@@ -1350,13 +1401,11 @@ export default function HomeScreen() {
       >
 
         <View style={styles.header}>
+          {/* Avatar removed: Profile already has its own tab, so this was a second door to the same
+              place taking a full row's height at the top of the screen. Its 40pt plus the header's
+              own bottom margin is what lifts the calendar and everything under it. */}
           <View style={styles.headerTopRow}>
             <Text style={styles.brandText}>Pantry</Text>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitial}>
-                {(user?.user_metadata?.full_name ?? user?.email ?? 'U').charAt(0).toUpperCase()}
-              </Text>
-            </View>
           </View>
         </View>
 
@@ -1470,38 +1519,40 @@ export default function HomeScreen() {
             Today is a SOLID accent ring, not the dashed one MyFitnessPal uses: RN renders
             `borderStyle: 'dashed'` unreliably on a view with a borderRadius on iOS, and a ring that
             silently draws solid on some builds is worse than one that was never dashed. */}
-        <View style={styles.weekStrip}>
-          {visibleWeek.map(d => {
-            const isSel = d === selectedDate
-            const isTodayCell = d === todayStr()
-            const future = d > todayStr()
-            // The set is fetched per week, so a meal logged since won't be in it — OR in the live
-            // total for the day being viewed, which is what keeps the circle honest right after a log.
-            const logged = loggedDays.has(d) || (d === selectedDate && totalCal > 0)
-            return (
-              <TouchableOpacity
-                key={d}
-                disabled={future}
-                activeOpacity={0.7}
-                onPress={() => setSelectedDate(d)}
-                style={styles.weekCell}
-              >
-                <Text style={[styles.weekLetter, isSel && styles.weekLetterSel, future && styles.weekDim]}>
-                  {new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'narrow' })}
-                </Text>
-                <View style={[
-                  styles.weekDot,
-                  future && styles.weekDotFuture,
-                  isTodayCell && !logged && styles.weekDotToday,
-                  logged && styles.weekDotLogged,
-                  isSel && styles.weekDotSelected,
-                ]}>
-                  {logged && <Check size={15} stroke="#000" strokeWidth={3} />}
-                </View>
-              </TouchableOpacity>
-            )
-          })}
-        </View>
+        <GestureDetector gesture={weekSwipe}>
+          <View style={styles.weekStrip}>
+            {visibleWeek.map(d => {
+              const isSel = d === selectedDate
+              const isTodayCell = d === todayStr()
+              const future = d > todayStr()
+              const state = dayState(d)
+              return (
+                <TouchableOpacity
+                  key={d}
+                  disabled={future}
+                  activeOpacity={0.7}
+                  onPress={() => setSelectedDate(d)}
+                  style={styles.weekCell}
+                >
+                  <Text style={[styles.weekLetter, isSel && styles.weekLetterSel, future && styles.weekDim]}>
+                    {new Date(d + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'narrow' })}
+                  </Text>
+                  <View style={[
+                    styles.weekDot,
+                    future && styles.weekDotFuture,
+                    // Today reads as "in progress", not as a miss — it is still being earned.
+                    isTodayCell && state !== 'done' && styles.weekDotToday,
+                    state === 'partial' && styles.weekDotPartial,
+                    state === 'done' && styles.weekDotLogged,
+                    isSel && styles.weekDotSelected,
+                  ]}>
+                    {state === 'done' && <Check size={15} stroke="#000" strokeWidth={3} />}
+                  </View>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </GestureDetector>
 
         {/* ── Hero Dashboard Card ── */}
         {/* The card's own height changes with the rows, so it needs its own layout animation —
@@ -2174,7 +2225,7 @@ const styles = StyleSheet.create({
   // paddingBottom 12 -> 8: part of ~34pt trimmed above the meal hero so the whole card clears
   // the tab bar at rest. It used to sit ~20pt below the fold, so you had to scroll to see it.
   header: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 4 },
-  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  headerTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
   brandText: { fontSize: 18, fontWeight: '800', color: '#4ADE80', letterSpacing: -0.3 },
   prefBanner: {
     marginHorizontal: 20,
@@ -2438,6 +2489,9 @@ const styles = StyleSheet.create({
   },
   weekDotFuture: { borderColor: '#191919' },
   weekDotToday: { borderColor: COLORS.accent },
+  // Something logged, not enough to count as tracked. Dimmer than today's ring so a partial past
+  // day is visibly less than a done one without reading as a failure.
+  weekDotPartial: { borderColor: COLORS.accentDim, borderWidth: 2 },
   weekDotLogged: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
   // Last in the style array so it wins the BORDER on a logged day while the green fill survives —
   // a logged + selected day has to read as both.
