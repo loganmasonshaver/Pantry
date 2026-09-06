@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Dimensions,
   TextInput,
+  InteractionManager,
 } from 'react-native'
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
@@ -1024,6 +1025,29 @@ export default function DiscoverScreen() {
     // excludedStaples feeds nearlyRanked's missingCount above and arrives after first paint.
   }, [browseGrid, budget, pantryNames, lastCooked, excludedStaples])
 
+  // MOUNT THE FOLD FIRST, THE REST AFTER INTERACTIONS.
+  //
+  // Only the hero and roughly the first shelf are on screen at first paint, but every section was
+  // being mounted up front — each one a grid of RailCards with their own images. Rendering two and
+  // letting the rest land a frame later turns "mount the whole page" into "mount what is visible",
+  // which is where the ~165ms between FEED-from-disk and FIRST PAINT was going.
+  //
+  // This defers RENDERING, not the shelving computation. browseSections stays one memo on purpose:
+  // claim() is first-shelf-wins, so the sections are only correct as a set — computing them
+  // piecemeal would let a later shelf take meals a earlier one should have claimed.
+  //
+  // Resets whenever browseSections changes identity, so the blur-time feed swap re-defers too. That
+  // costs nothing: by then the screen is not being looked at.
+  const FIRST_PAINT_SHELVES = 2
+  const [allShelvesReady, setAllShelvesReady] = useState(false)
+  useEffect(() => {
+    setAllShelvesReady(false)
+    if (showSkeleton) return
+    const task = InteractionManager.runAfterInteractions(() => { perfMark('Discover ALL SHELVES mounted'); setAllShelvesReady(true) })
+    return () => task.cancel()
+  }, [showSkeleton, browseSections])
+  const sectionsToRender = allShelvesReady ? browseSections : browseSections.slice(0, FIRST_PAINT_SHELVES)
+
   // Per-meal missing counts for the "Almost in your kitchen" badges. Recomputed with the same
   // inputs as the section itself so the two can't disagree.
   const missingByMeal = useMemo(() => {
@@ -1215,9 +1239,32 @@ export default function DiscoverScreen() {
             The filter chips deliberately STAY: results derive from `filtered`, so searching inside
             "High Protein" already works, and hiding the chip would hide that it applies. */}
         {!searching && (showSkeleton ? (
-          <View style={[styles.featuredHero, styles.featuredSkeleton]}>
-            <Compass size={32} stroke="#333" strokeWidth={1.5} />
-          </View>
+          // SHAPED LIKE THE PAGE IT BECOMES. This used to be one empty 340pt card with a compass in
+          // it, and everything below was gated off — so the screen read as BROKEN rather than as
+          // loading, which is what made a 369ms wait feel like a blank screen. Mirroring the real
+          // layout (hero, then shelf headers over a 2-up grid) does not make anything faster; it
+          // makes the same wait legible, and it keeps working even if the time later drops to 80ms.
+          //
+          // Deliberately STATIC — no shimmer. This screen has now been bitten twice by JS-thread
+          // animations running while the app is busy (the splash progress bar, the glow loop), and
+          // the shape alone does the work a shimmer was there to do.
+          <>
+            <View style={[styles.featuredHero, styles.featuredSkeleton]}>
+              <Compass size={32} stroke="#333" strokeWidth={1.5} />
+            </View>
+            {[0, 1].map(row => (
+              <View key={row} style={{ marginTop: 28 }}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.skelBar, { width: row === 0 ? 190 : 140 }]} />
+                </View>
+                <View style={styles.browseGrid}>
+                  {Array.from({ length: row === 0 ? 4 : 2 }).map((_, i) => (
+                    <View key={i} style={[styles.browseCell, styles.skelCard]} />
+                  ))}
+                </View>
+              </View>
+            ))}
+          </>
         ) : featured ? (
           <Animated.View entering={FadeIn.duration(350)}>
           <PressableScale
@@ -1291,7 +1338,7 @@ export default function DiscoverScreen() {
             look at"; a grid answers "show me everything", which is the mode someone is in when they
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
-        {!searching && !showSkeleton && browseSections.map(section => {
+        {!searching && !showSkeleton && sectionsToRender.map(section => {
           const shown = shownCount(section.key, section.meals.length)
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
@@ -1613,6 +1660,10 @@ const styles = StyleSheet.create({
   },
 
   browseGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 20, gap: 14 },
+  // Skeleton placeholders. Same geometry as the real header and cards so nothing jumps when the
+  // content replaces them — a skeleton whose boxes are the wrong size is its own kind of glitch.
+  skelBar: { height: 20, borderRadius: 6, backgroundColor: '#141414' },
+  skelCard: { height: 225, borderRadius: 18, backgroundColor: '#141414' },
   browseCell: { width: GRID_CELL_W },
   // Section headers read as editorial headlines, not as system labels. The previous treatment
   // (12px, ALL CAPS, letterSpacing 2, accent green) is the standard generated-UI tell: it shouts,
