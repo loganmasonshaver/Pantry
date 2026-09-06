@@ -371,12 +371,18 @@ export default function MealDetailScreen() {
   }
 
   // ── Servings the user is cooking ──────────────────────────────────────────────────────────
-  // MAX 3, matching MAX_SERVINGS in _shared/servings.ts so there is one number in the codebase
-  // rather than two. It is also as far as Cook Now's promise stretches: "cook tonight with what
-  // you have" is unverifiable past a point, because pantry_items stores no quantities at all — the
-  // app cannot tell you a 4x scale empties your fridge, so it should not invite one.
-  const authoredServings = Math.max(1, Math.min(3, Number(meal?.servings) || 1))
-  const cooking = Math.max(1, Math.min(3, cookServings ?? authoredServings))
+  // authoredServings is NEVER clamped to MAX_SERVINGS. That constant caps what the GENERATOR
+  // produces; a creator's recipe is whatever they wrote, and 67 of 192 live trending rows are
+  // above 3 (49 of them at exactly 4, and they run to 15). Clamping the recipe to 3 desynced a
+  // third of Discover: the stepper read 3 against a caption saying "Makes 4", and because the
+  // scale came out 3/3 = 1 the ingredients silently stayed at the untouched 4-serving amounts.
+  const authoredServings = Math.max(1, Math.round(Number(meal?.servings) || 1))
+  // The ceiling follows the recipe, with a floor of 3 so a single-serving dish can still be
+  // batch-cooked for the week. Scaling ABOVE what the creator wrote has no upside — the recipe
+  // already is the batch — and Cook Now cannot warn that a bigger scale empties the fridge,
+  // because pantry_items stores no quantities at all.
+  const maxCookServings = Math.max(authoredServings, 3)
+  const cooking = Math.max(1, Math.min(maxCookServings, cookServings ?? authoredServings))
   const servingScale = cooking / authoredServings
   // Grams AND visual must move together. Scaling only grams left "1 cup" of coconut milk beside a
   // doubled weight, because getMeasuredDisplay prefers `visual` verbatim for liquids and
@@ -841,27 +847,38 @@ export default function MealDetailScreen() {
             <View style={styles.servingsRow}>
               <Text style={styles.servingsLabel}>SERVINGS</Text>
               <View style={styles.stepper}>
-                {([-1, 1] as const).map(delta => {
-                  const next = cooking + delta
-                  const disabled = next < 1 || next > 3
+                {/* − VALUE + in that order. The value sat after both buttons in the first build
+                    to stop it shifting the + as its width changed; on device that reads as
+                    "minus plus three", i.e. a broken control. stepperValue carries a fixed
+                    minWidth instead, which holds the + still through 1-15 without the confusion. */}
+                {(() => {
+                  const step = (delta: -1 | 1) => {
+                    const next = cooking + delta
+                    const disabled = next < 1 || next > maxCookServings
+                    return (
+                      <TouchableOpacity
+                        style={[styles.stepperBtn, disabled && styles.stepperBtnDisabled]}
+                        onPress={() => setCookServings(next)}
+                        disabled={disabled}
+                        activeOpacity={0.7}
+                        // The glyphs are 14pt inside a 28pt control; without this the tap target
+                        // is under the 44pt minimum and misses land on the ingredient rows.
+                        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      >
+                        {delta === -1
+                          ? <Minus size={14} stroke={disabled ? COLORS.textDim : COLORS.textWhite} strokeWidth={2.5} />
+                          : <Plus size={14} stroke={disabled ? COLORS.textDim : COLORS.textWhite} strokeWidth={2.5} />}
+                      </TouchableOpacity>
+                    )
+                  }
                   return (
-                    <TouchableOpacity
-                      key={delta}
-                      style={[styles.stepperBtn, disabled && styles.stepperBtnDisabled]}
-                      onPress={() => setCookServings(next)}
-                      disabled={disabled}
-                      activeOpacity={0.7}
-                      // The glyphs are 12pt inside a 28pt control; without this the tap target
-                      // is under the 44pt minimum and misses land on the ingredient rows.
-                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
-                    >
-                      {delta === -1
-                        ? <Minus size={14} stroke={disabled ? COLORS.textDim : COLORS.textWhite} strokeWidth={2.5} />
-                        : <Plus size={14} stroke={disabled ? COLORS.textDim : COLORS.textWhite} strokeWidth={2.5} />}
-                    </TouchableOpacity>
+                    <>
+                      {step(-1)}
+                      <Text style={styles.stepperValue}>{cooking}</Text>
+                      {step(1)}
+                    </>
                   )
-                })}
-                <Text style={styles.stepperValue}>{cooking}</Text>
+                })()}
               </View>
             </View>
             {/* Three different truths, and only one is ever relevant:
@@ -872,8 +889,8 @@ export default function MealDetailScreen() {
               <Text style={styles.servingsNote}>
                 Scaled from {authoredServings} · macros stay per serving. Cooking times below were written for {authoredServings} — adjust oven and simmer times as you go.
               </Text>
-            ) : (meal.servings ?? 1) > 1 ? (
-              <Text style={styles.servingsNote}>Makes {meal.servings} servings · macros are per serving</Text>
+            ) : authoredServings > 1 ? (
+              <Text style={styles.servingsNote}>Makes {authoredServings} servings · macros are per serving</Text>
             ) : null}
               {/* States what was CHECKED, never that the dish is safe. These tags are derived from
                   an LLM's reading of a video description, and both failure modes have happened in
@@ -1461,12 +1478,11 @@ const styles = StyleSheet.create({
   servingsNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', marginTop: 8 },
   servingsRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
   servingsLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5 },
-  // Value sits LAST so the two buttons stay put as it changes width — with the number between
-  // them, stepping 1 → 2 nudges the + button sideways under the user's finger.
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: COLORS.cardElevated, borderRadius: 20, padding: 3 },
   stepperBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 15 },
   stepperBtnDisabled: { opacity: 0.35 },
-  stepperValue: { fontSize: 13, fontWeight: '700', color: COLORS.textWhite, minWidth: 22, textAlign: 'center', paddingRight: 4 },
+  // minWidth 26 holds a two-digit count (creator recipes run to 15) without the + button moving.
+  stepperValue: { fontSize: 14, fontWeight: '700', color: COLORS.textWhite, minWidth: 26, textAlign: 'center' },
   sectionTitle: {
     flexShrink: 1,
     fontSize: 11,
