@@ -498,6 +498,9 @@ export default function MealDetailScreen() {
       p_ingredients: meal!.ingredients,
       p_steps: meal!.steps,
       p_image_url: imageToSave,
+      // Without this the batch/per-serving reconciliation is lost on save: ingredients stay at
+      // full batch while the "Makes N servings" line that explains them disappears.
+      p_servings: meal!.servings ?? 1,
     })
     setSaving(false)
     if (error) {
@@ -1119,7 +1122,7 @@ export default function MealDetailScreen() {
             // Refresh meal data from DB
             if (user && meal.id) {
               const { data } = await supabase.from('saved_meals')
-                .select('name, prep_time, calories, protein, carbs, fat, ingredients, steps')
+                .select('name, prep_time, calories, protein, carbs, fat, ingredients, steps, servings')
                 .eq('id', meal.id)
                 .single()
               if (data) {

@@ -49,6 +49,9 @@ type SavedMeal = {
   is_user_created: boolean
   tags: string[]
   image?: string | null
+  // Portions the ingredient list makes. Must survive the round trip through this screen or the
+  // detail view loses the line that reconciles batch ingredients with per-serving macros.
+  servings?: number | null
 }
 
 function deriveTags(meal: { protein: number | null; prep_time: number | null }): string[] {
@@ -98,6 +101,7 @@ function MealCard({ meal, onUnsave, onEdit }: { meal: SavedMeal; onUnsave: () =>
       steps: meal.steps ?? [],
       image: meal.image,
       is_user_created: meal.is_user_created,
+      servings: meal.servings ?? 1,
     })
     router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData } })
   }
@@ -259,7 +263,7 @@ export default function SavedScreen() {
     if (!hasContentRef.current) setLoading(true) // spinner only when there's nothing to show yet
     const { data, error } = await supabase
       .from('saved_meals')
-      .select('id, name, prep_time, calories, protein, carbs, fat, ingredients, steps, is_user_created, image_url')
+      .select('id, name, prep_time, calories, protein, carbs, fat, ingredients, steps, is_user_created, image_url, servings')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
     if (!error && data) {
@@ -377,6 +381,7 @@ export default function SavedScreen() {
       steps: removed.meal.steps,
       image_url: removed.meal.image ?? null,
       is_user_created: removed.meal.is_user_created,
+      servings: removed.meal.servings ?? 1,
     })
     setMeals(prev => {
       const next = [...prev]
