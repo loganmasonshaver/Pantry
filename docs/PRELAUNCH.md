@@ -169,12 +169,56 @@ pointed at one shared gate. It was not the one it looked like.
       3843 modules -> 7.7s | 3842 -> 11.2s | 1 module -> 1.5s | 1 module -> 2.1s.
       The phone pulls the JS bundle from the Mac over the same wifi and Supabase requests contend
       with it. A release build has no Metro and no bundle transfer.
+- [x] **HEALTH-CHECK ALERTING PROVEN END TO END 2026-09-05.** `expo_push_token` is written and the
+      persisted row now reads `"alert": "sent"` instead of `"FAILED: ops user has no
+      expo_push_token"`. Three things had to land: pipeline_runs persistence, the EAS project link,
+      and — the one that actually mattered — `EXPO_PUBLIC_EAS_PROJECT_ID`, because in a BARE
+      workflow expo-constants reads the config embedded at NATIVE BUILD time, so app.json's
+      projectId stays invisible until `npx expo run:ios` runs again. That is why the warning
+      survived three JS reloads.
 - [ ] **Confirm on a release build before ever touching this again**
       (`npx expo run:ios --configuration Release`). If cold-start queries are ~100ms there, this is
       closed permanently. **Do NOT "optimise" the Supabase client for a number measured under
       Metro** — the same trap as reading absolute perfMark values instead of deltas.
 - [ ] Note for the release-build pass: it also settles the OTHER dev-only number still open —
       whether Discover's remaining ~230ms tap-to-paint survives outside a dev bundle (see §6f).
+
+## 2d. RAISED BY LOGAN 2026-09-05 (evening) — WORK THESE IN ORDER, DO NOT REORDER
+Logan asked for these to be worked strictly top to bottom. Each is unstarted.
+
+- [ ] **1. Seed `meal_slots` from onboarding's `meals_per_day`.** The structure column shipped with a
+      flat default of 4; onboarding already asks how many meals a day, so asking again in Profile is
+      a redundant CTA. Map number -> ordered names, and **when a name would repeat, number it
+      ("Lunch #1", "Lunch #2")** — the first draft of this table had "Lunch" twice at n=5, which is
+      the exact collision the case-insensitive add-guard rejects. Rough shape:
+      3 = Breakfast/Lunch/Dinner · 4 = +Snack · 5 = +Morning snack · 6 = +Evening snack.
+      **Seed ONCE.** After that `meal_slots` is the source of truth: a later change to
+      `meals_per_day` must OFFER to re-seed, never silently overwrite custom names. Existing rows
+      took the flat default of 4 and can be backfilled from `meals_per_day`.
+- [ ] **2. Fix the DOUBLE generation on cold start — Logan said yes to this.** Trace shows
+      `generation start +2377ms` and again `+2400ms`, with two SESSION_CHECKs and two getSessions:
+      `useMealSuggestions`'s effect deps are `[userId, isPremium, mode, enabled]`, `enabled` flips
+      when the pantry lands and a second dep (almost certainly `isPremium` resolving from Superwall)
+      flips ~23ms later and re-runs it. The `cancelled` guard only suppresses STATE UPDATES — it does
+      not abort the in-flight call, so both batches complete and are paid for, and only one reaches
+      `recent_meal_names`. That is also why five distinct meal names appeared for a three-meal batch.
+      Fix = a ref keyed on what has already been generated for, so a late dep change cannot re-fire.
+      Touches the generation path; do it with Logan watching.
+- [ ] **3. Why did a regeneration fire ~9pm on app open?** Logan expected generation at a different
+      time and it ran on its own after a close/reopen. **INVESTIGATE, DO NOT GUESS.** Facts to start
+      from: the trending cron is 08:00 UTC and is a different system from per-user meal generation;
+      the trace shows `cache miss — waiting on pantry before generating` then generation, so the
+      day-keyed meal cache missed. Establish WHY it missed (day rollover? timezone? cache key?)
+      before proposing anything. CLAUDE.md warns the meal cache is keyed by date + timezone and has
+      been corrupted by image writes before.
+- [ ] **4. A chocolate shake appeared in consecutive generations — bug or intended?** Logan is
+      worried the no-repeat window is not working. **LOOK DEEP, DO NOT GUESS.** Known so far: exact
+      dish names did NOT repeat — the last batch was Cottage Cheese and Savory Green Bowl / Greek
+      Yogurt and Pineapple Power Parfait / Protein-Boosted Chocolate Smoothie, and none of the 20
+      names in `recent_meal_names` duplicate. But BASE FOODS repeat heavily inside that window
+      (cottage cheese x3, yogurt x3), so the suspicion is that `RECENT_MEMORY`/`overusedBases` gates
+      dish NAMES while ingredient monotony passes straight through. Confirm against `dish-key.ts`
+      (`overusedBases`, `clusterDishes`, `isSameDish`) rather than from the names alone.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
