@@ -163,8 +163,10 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
   const remaining = goal - consumed
   const isOver = remaining < 0
   const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
-  const size = 124
-  const strokeWidth = 9
+  // 124 -> 84. The ring no longer carries the number, so it only has to read as a progress dial.
+  // This is the single biggest line-item in the card's height.
+  const size = 84
+  const strokeWidth = 8
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
 
@@ -204,63 +206,43 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
           strokeDashoffset={isOver ? 0 : animProgress.interpolate({ inputRange: [0, 1], outputRange: [circumference, 0] })}
           strokeLinecap="round" />
       </Svg>
+      {/* The percentage, not the number. The kcal figure now lives beside the ring at a size a
+          124pt ring could never have given it, and repeating it inside would be the same value
+          twice in one row. */}
       <View style={{ position: 'absolute', alignItems: 'center' }}>
-        <Text style={{ fontSize: 30, fontWeight: '800', color: isOver ? '#EF4444' : COLORS.textWhite, letterSpacing: -0.8 }}>{isOver ? `-${Math.abs(remaining).toLocaleString()}` : displayRemaining.toLocaleString()}</Text>
-        <Text style={{ fontSize: 10.5, fontWeight: '700', color: isOver ? '#EF4444' : '#4ADE80', textTransform: 'uppercase', letterSpacing: 1.2 }}>{isOver ? 'OVER' : 'KCAL LEFT'}</Text>
+        <Text style={{ fontSize: 15, fontWeight: '800', color: isOver ? '#EF4444' : COLORS.textWhite, letterSpacing: -0.3 }}>
+          {goal > 0 ? `${Math.round((consumed / goal) * 100)}%` : '—'}
+        </Text>
       </View>
     </View>
   )
 }
+
+// One macro as a compact tile. Replaces the stacked full-width MacroBar rows: three of these in a
+// row is ~54pt where the old protein bar plus the carbs/fat accordion plus its toggle was ~110pt,
+// AND it shows all three without a tap. The accordion is retired with it — a control whose only
+// job was hiding two numbers that now fit.
+function MacroTileInner({ label, consumed, goal, color }: { label: string; consumed: number; goal: number; color: string }) {
+  const pct = goal > 0 ? Math.min(consumed / goal, 1) : 0
+  return (
+    <View style={{ flex: 1, gap: 5 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+        <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textWhite }}>{Math.round(consumed)}</Text>
+        <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>/{Math.round(goal)}g</Text>
+      </View>
+      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</Text>
+      <View style={{ height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+        <View style={{ width: `${pct * 100}%`, height: '100%', backgroundColor: color, borderRadius: 2 }} />
+      </View>
+    </View>
+  )
+}
+const MacroTile = memo(MacroTileInner)
 
 // Memoized: Home re-renders on every state change (macros toggle, meal loads, focus), and this
 // subtree is an SVG ring. Its inputs are two numbers, so a shallow compare is exact.
 const CalorieGauge = memo(CalorieGaugeInner)
 
-function MacroBarInner({ label, consumed, goal, color, emphasized = false }: { label: string; consumed: number; goal: number; color: string; emphasized?: boolean }) {
-  const progress = goal > 0 ? Math.min(consumed / goal, 1) : 0
-  // scaleX, not width. Width is a LAYOUT prop: it cannot use the native driver, so every bar ran
-  // 1800ms of JS-thread work and forced a layout pass per frame. A transform runs natively and
-  // triggers no layout, which is what made the macros card hitch whenever anything re-rendered.
-  const animScale = useRef(new RNAnimated.Value(0)).current
-
-  useEffect(() => {
-    animScale.setValue(0)
-    RNAnimated.timing(animScale, { toValue: progress, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start()
-    return () => animScale.stopAnimation() // halt in-flight animation on unmount
-  }, [consumed, goal])
-
-  // Emphasized = the headline macro (Protein on home). Thicker bar + bigger text
-  // signals visual priority without hiding secondary macros behind a tap.
-  const barHeight = emphasized ? 10 : 5
-  const dotSize = emphasized ? 9 : 6
-  const labelSize = emphasized ? 15 : 13
-  const valueSize = emphasized ? 16 : 13
-
-  return (
-    <View style={{ gap: 6 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <View style={{ width: dotSize, height: dotSize, borderRadius: dotSize / 2, backgroundColor: color }} />
-          <Text style={{ fontSize: labelSize, fontWeight: emphasized ? '700' : '600', color: COLORS.textWhite }}>{label}</Text>
-        </View>
-        <Text style={{ fontSize: valueSize, fontWeight: '700', color: COLORS.textWhite }}>{consumed}<Text style={{ color: COLORS.textMuted, fontWeight: '500' }}> / {goal}g</Text></Text>
-      </View>
-      <View style={{ height: barHeight, backgroundColor: 'rgba(255,255,255,0.10)', borderRadius: barHeight / 2, overflow: 'hidden' }}>
-        {progress > 0 && (
-          // Full-width fill anchored left and scaled horizontally, so 0->progress reads identically
-          // to the old width animation without touching layout.
-          <RNAnimated.View style={{
-            height: barHeight, backgroundColor: color, borderRadius: barHeight / 2,
-            width: '100%', transformOrigin: 'left', transform: [{ scaleX: animScale }],
-          }} />
-        )}
-      </View>
-    </View>
-  )
-}
-
-// Memoized for the same reason — four of these render on Home, all with primitive props.
-const MacroBar = memo(MacroBarInner)
 
 // The resting state of the meal card — what Home shows before you've asked for today's meals.
 //
@@ -816,28 +798,14 @@ export default function HomeScreen() {
   // Kitchen-staples ask moved INTO the scan review flow (a "Also have these?" chip row in
   // PantryScanModal) — the old post-scan "Kitchen basics?" popup interrupted the moment right
   // after a scan, so it was removed. Seasonings (salt/pepper/oil) are now assumed by meal-gen.
-  // Macros card: compact (protein only) vs expanded (all 3). User's choice
-  // persists across sessions. Default compact since Pantry's audience cares
-  // most about protein; carbs/fat are one tap away if they want them.
-  const [macrosExpanded, setMacrosExpanded] = useState(false)
-  // One animated value (0=collapsed, 1=expanded) drives BOTH the carbs/fat accordion height AND
-  // the hero card resize, so they glide together instead of the old LayoutAnimation snap that made
-  // the "Cook from pantry" line skip. JS-driven (height can't use the native driver), 280ms.
-  // No animated height any more. Frame analysis of a device recording showed the accordion
-  // updating only 3 times in 117ms (~20fps) on a 120Hz screen, with dead frames between each
-  // step, while a native ScrollView in the same recording moved on every frame. Animating a
-  // LAYOUT prop has to round-trip through a shadow-tree commit, and those do not happen per
-  // frame — so a height animation physically cannot be smooth, whichever thread drives it.
-  // LayoutAnimation interpolates layout natively instead, which is what it exists for.
+  // The macros accordion is GONE — all three macros are tiles in the card now, so there is no
+  // collapsed/expanded state, no persisted preference, and no toggle. Its removal also retires a
+  // long-running frame problem recorded here: animating the accordion's HEIGHT could never be
+  // smooth, because a layout prop has to round-trip through a shadow-tree commit and those do not
+  // happen per frame (measured at ~20fps on a 120Hz screen). Nothing animates height any more.
+  // The stored 'pantry_macros_expanded' key is simply left behind; reading it would resurrect a
+  // control that no longer exists.
 
-  // Deliberately NOT started from an effect on macrosExpanded. Doing that put a full re-render of
-  // this 2400-line component between the tap and the first frame, which is what made the toggle
-  // feel slow to respond. The press handler kicks the animation off directly instead.
-  useEffect(() => {
-    AsyncStorage.getItem('pantry_macros_expanded').then(v => {
-      if (v === 'true') setMacrosExpanded(true) // no open-animation on launch: LayoutAnimation only runs when explicitly armed
-    })
-  }, [])
   // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
   // macros card eats ~76px, so the photo + title + pills stay framed above the tab bar either way).
   // Meal-hero height is MEASURED, not hand-tuned: it's whatever vertical space is left between
@@ -856,7 +824,11 @@ export default function HomeScreen() {
   // remainder (`viewportH - cardTop - 12`), pinning its bottom edge 12pt above the tab bar no matter
   // what sat above it — so every point trimmed upstream was handed straight back to the photo and
   // the log stayed permanently below the fold. Three earlier trims in this file were spent that way.
-  const LOG_PEEK = 128
+  // 128 -> 190. Raised WITH the calorie-card compaction above, not instead of it: the card gave
+  // back ~100pt and the photo would have absorbed every point of it, which is what happened to the
+  // three earlier trims this comment already warns about. At 190 the log clears Lunch and reaches
+  // Dinner's header, and the photo still gains a little rather than shrinking.
+  const LOG_PEEK = 190
   const heroFit = useMemo(() => {
     if (!viewportH || !heroSectionY) return 288 // pre-measure default; replaced on first layout
     const cardTop = heroSectionY + heroHeaderH
@@ -870,8 +842,10 @@ export default function HomeScreen() {
   // title and pills stay framed above the tab bar in both states. This was frozen at the smaller
   // size during the choppiness investigation because gliding it via an animated `height` stepped
   // at ~20fps. LinearTransition on the container animates the change natively, so it can come back.
-  const heroExpandedH = Math.max(HERO_MIN, heroFit - 76)
-  const heroHeight = macrosExpanded ? heroExpandedH : heroFit
+  // The macros accordion is retired, so the calorie card no longer changes height and the hero has
+  // nothing to give back. heroExpandedH (heroFit - 76, the space the expanded accordion used to
+  // take) went with it — nothing read it any more.
+  const heroHeight = heroFit
 
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
@@ -1580,60 +1554,37 @@ export default function HomeScreen() {
         {/* The card's own height changes with the rows, so it needs its own layout animation —
             otherwise its dark background snaps to the new size while the contents animate. */}
         <Reanimated.View layout={LinearTransition.duration(420)} style={styles.heroCard}>
-          <View style={{ alignItems: 'center', marginBottom: 4 }}>
-            <CalorieGauge consumed={totalCal} goal={calorieGoal} />
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
-              <Flame size={13} stroke="#4ADE80" strokeWidth={2} fill="rgba(74,222,128,0.25)" />
-              <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
-                {totalCal > 0 ? `${totalCal.toLocaleString()} consumed` : 'Keep logging!'}
+          {/* NUMBER LEFT, RING RIGHT. Was a 124pt centred ring with the number inside, then a
+              "consumed" line, then a full-width protein bar, then an accordion toggle — four stacked
+              rows for four numbers, ~250pt. This is two rows, ~150pt, and it shows MORE: carbs and
+              fat are visible without a tap.
+
+              The reclaimed height does NOT come out of the meal photo. LOG_PEEK reserves a fixed
+              slice for the log and the hero photo takes the entire remainder, so anything trimmed
+              here is handed to the photo unless LOG_PEEK rises with it — which is exactly what
+              swallowed the last three trims in this file. It is raised below. */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.kcalBig}>
+                {(calorieGoal - totalCal) < 0 ? `-${Math.abs(calorieGoal - totalCal).toLocaleString()}` : (calorieGoal - totalCal).toLocaleString()}
               </Text>
+              <Text style={styles.kcalLabel}>{(calorieGoal - totalCal) < 0 ? 'KCAL OVER' : 'KCAL LEFT'}</Text>
+              {/* "consumed" folded onto its own tight line rather than a separate centred row with
+                  its own icon and margins. Same information, a third of the height. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
+                <Flame size={12} stroke="#4ADE80" strokeWidth={2} fill="rgba(74,222,128,0.25)" />
+                <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
+                  {totalCal > 0 ? `${totalCal.toLocaleString()} consumed of ${calorieGoal.toLocaleString()}` : 'Keep logging!'}
+                </Text>
+              </View>
             </View>
+            <CalorieGauge consumed={totalCal} goal={calorieGoal} />
           </View>
 
-          <View style={{ gap: 10 }}>
-            {/* Default compact = Protein only, shown emphasized (thicker bar +
-                bigger text). When expanded to all 3, protein drops back to
-                standard size so there's no glitchy size delta between bars. */}
-            {/* Always emphasized. This used to be `emphasized={!macrosExpanded}`, which resized the
-                Protein row INSTANTLY on tap — bar 10->5px, dot 9->6, fonts 15->13 — while the
-                accordion below it glided over 280ms. Measured at a perfect 8ms worst frame on a
-                120Hz display in both directions, so what read as "choppy on open" was never
-                dropped frames: it was this one un-animated jump inside an otherwise smooth
-                transition. Protein is the headline macro on Home regardless of the other two
-                being visible, so keeping it emphasized is also the more honest hierarchy. */}
-            <MacroBar label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} emphasized />
-            {/* Carbs+Fat rows. Mounted/unmounted rather than height-animated — LayoutAnimation
-                (armed in the toggle below) interpolates the reflow natively. */}
-            {macrosExpanded && (
-              <Reanimated.View
-                entering={FadeIn.duration(280)}
-                exiting={FadeOut.duration(200)}
-                style={{ gap: 10, paddingTop: 10 }}
-              >
-                <MacroBar label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
-                <MacroBar label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
-              </Reanimated.View>
-            )}
-            <TouchableOpacity
-              onPress={() => {
-                const next = !macrosExpanded
-                // Animation FIRST: this writes a shared value and starts on the UI thread
-                // immediately, so motion begins on touch instead of after React has reconciled
-                // this whole screen. setState still runs, but it no longer gates the first frame.
-                // No LayoutAnimation here: it is a no-op under the New Architecture, which Expo 55
-                // enables by default — configureNext silently did nothing and everything snapped.
-                // Reanimated's LinearTransition/FadeIn on the views below is the Fabric equivalent.
-                setMacrosExpanded(next)
-                // Fire and forget — a disk write has no business in a tap handler's critical path.
-                AsyncStorage.setItem('pantry_macros_expanded', next ? 'true' : 'false').catch(() => {})
-              }}
-              activeOpacity={0.7}
-              style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 12 }}
-            >
-              <Text style={{ fontSize: 12, color: COLORS.textMuted, fontWeight: '600' }}>
-                {macrosExpanded ? 'Show less ▴' : 'Show carbs & fat ▾'}
-              </Text>
-            </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 14, marginTop: 16 }}>
+            <MacroTile label="Protein" consumed={totalPro} goal={proteinGoal} color={COLORS.macroProtein} />
+            <MacroTile label="Carbs" consumed={totalCarbs} goal={carbsGoal} color={COLORS.macroCarbs} />
+            <MacroTile label="Fat" consumed={totalFat} goal={fatGoal} color={COLORS.macroFat} />
           </View>
         </Reanimated.View>
 
@@ -2539,6 +2490,9 @@ const styles = StyleSheet.create({
     minWidth: 100,
     textAlign: 'center',
   },
+  kcalBig: { fontSize: 40, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -1.5, lineHeight: 44 },
+  kcalLabel: { fontSize: 10.5, fontWeight: '700', color: '#4ADE80', textTransform: 'uppercase', letterSpacing: 1.2 },
+
   heroCard: {
     marginHorizontal: 20,
     // 24 -> 14: the reclaimed 10pt is handed to heroHeight below rather than shortening the page,
