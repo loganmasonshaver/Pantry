@@ -164,6 +164,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // and regenCount to track how many manual refreshes have been used today (cap enforced in regenerate()).
       const maxPrep = profile?.max_prep_minutes || 30
       await AsyncStorage.setItem(`${CACHE_KEY_PREFIX}_${mode}`, JSON.stringify({ date: todayStr(), meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId }))
+      perfMark(`cache WRITE post-generate (${generated.length} meals, ${todayStr()}, cap ${maxPrep})`)
 
       // Keep 24 names (~8 gens) rather than 12: a heavy day is 1 auto-fire + 3 rerolls = 12 names,
       // which flushed the entire old window and let yesterday's dinner come straight back.
@@ -337,13 +338,19 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       if (servedFromCacheRef.current === runKey) { setCacheChecked(true); return }
       perfMark(`cache read start (${mode})`)
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
+      // WHY a miss happened, not just THAT one did. Four different branches below discard the cache
+      // and every one of them produced the same single 'cache miss' line in the trace, which is why
+      // Logan's unexplained regeneration could not be pinned down from a log. Each is now named.
+      if (!raw) perfMark('cache MISS: no entry stored')
       if (raw && !cancelled) {
         const cached: CachedMeals = JSON.parse(raw)
         // Cache belongs to a different account on this device — don't serve it; regenerate.
         if (cached.userId && cached.userId !== userId) {
+          perfMark(`cache MISS: different user (cached ${String(cached.userId).slice(0, 8)} vs ${String(userId).slice(0, 8)})`)
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         } else if (cached.maxPrepMinutes === undefined) {
           // Invalidate if no maxPrepMinutes stored (old cache format) — forces regeneration with correct prep constraint
+          perfMark('cache MISS: no maxPrepMinutes (old format)')
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         } else if (cached.date === todayStr() && cached.meals.length > 0) {
           // Filter out any meals that somehow slipped past the prep cap
@@ -384,8 +391,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             return
           }
           // Seeded: treat as cache miss — clear and generate real meals
+          perfMark(`cache MISS: ${isSeeded ? 'seeded placeholders only' : `all ${cached.meals.length} meals over prep cap ${cached.maxPrepMinutes}`}`)
           await AsyncStorage.removeItem(`${CACHE_KEY_PREFIX}_${mode}`)
         } else if (cached.meals.length > 0) {
+          perfMark(`cache MISS: stale day (cached ${cached.date} vs today ${todayStr()})`)
           // A PREVIOUS day's meals, painted while today's generate underneath. They are still
           // cookable from the same pantry and still inside the 30-name anti-repeat window, so they
           // are not wrong — only not new. Showing them beats 6-8s of skeleton, and the UI labels
