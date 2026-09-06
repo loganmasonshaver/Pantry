@@ -204,13 +204,31 @@ Logan asked for these to be worked strictly top to bottom. Each is unstarted.
       `recent_meal_names`. That is also why five distinct meal names appeared for a three-meal batch.
       Fix = a ref keyed on what has already been generated for, so a late dep change cannot re-fire.
       Touches the generation path; do it with Logan watching.
-- [ ] **3. Why did a regeneration fire ~9pm on app open?** Logan expected generation at a different
-      time and it ran on its own after a close/reopen. **INVESTIGATE, DO NOT GUESS.** Facts to start
-      from: the trending cron is 08:00 UTC and is a different system from per-user meal generation;
-      the trace shows `cache miss — waiting on pantry before generating` then generation, so the
-      day-keyed meal cache missed. Establish WHY it missed (day rollover? timezone? cache key?)
-      before proposing anything. CLAUDE.md warns the meal cache is keyed by date + timezone and has
-      been corrupted by image writes before.
+- [x] **3. ANSWERED — NOT A BUG. Changing meal frequency in Profile clears the meal cache.**
+      Logan changed Meals Per Day once during testing. `meals_per_day` is one of four `GoalField`
+      values (`profile.tsx:585`), and saving any of them runs
+      `multiRemove(['pantry_daily_meals_cookNow','pantry_daily_meals_mealPlan'])` on purpose:
+      "Calorie/protein/meals/prep all size meal generation — drop the cached daily meals so they
+      regenerate to the new target instead of serving stale, wrong-sized suggestions." Correct
+      behaviour. Dietary restrictions, diet type and a macro recalculation do the same.
+      HOW IT WAS FOUND, since three wrong theories died first: the four-session trace showed 3 HITS
+      and 1 MISS, and session 1 hit the cache WITHOUT generating — so a valid cache went invalid
+      with nothing generating in between, which killed the leading "app killed mid-generation"
+      theory outright. Also ruled out by reading: the date key (todayStr is local, not UTC),
+      maxPrepMinutes undefined (profile has 30, writer defaults `|| 30`), prepTime stored as a
+      string (the generator returns a number and the edge function already filters it), and
+      mealPrefetch as a rogue writer (it writes the full correct shape).
+      The four Profile clears are now perfMark'd — a deliberate wipe and a cache lost to an app kill
+      both surface as `cache MISS: no entry stored` on the next open, and only the mark tells them
+      apart. Every cache-miss branch in `useMealSuggestions` is named too, so a genuine one can be
+      diagnosed from a single log instead of another session of guessing.
+      **NOTE FOR ITEM 1:** seeding `meal_slots` from `meals_per_day` means one edit will re-seed the
+      slots AND wipe the meal cache. Coherent, but say so in the UI — the user is changing more than
+      they may realise.
+      **STILL OPEN under this:** the onboarding writers (`onboarding/index.tsx:2653`,
+      `createaccount.tsx:164`) stamp this cache WITHOUT `maxPrepMinutes` or `userId`, which the
+      reader treats as old-format and discards. Harmless today because a regeneration follows
+      onboarding anyway, but it is a guaranteed miss and worth aligning.
 - [ ] **4. A chocolate shake appeared in consecutive generations — bug or intended?** Logan is
       worried the no-repeat window is not working. **LOOK DEEP, DO NOT GUESS.** Known so far: exact
       dish names did NOT repeat — the last batch was Cottage Cheese and Savory Green Bowl / Greek

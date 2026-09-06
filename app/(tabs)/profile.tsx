@@ -24,6 +24,7 @@ import { useRouter } from 'expo-router'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
+import { perfMark } from '@/lib/perf'
 import { useSuperwall, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackWeightLogged } from '@/lib/analytics'
@@ -604,6 +605,7 @@ export default function ProfileScreen() {
     // Calorie/protein/meals/prep all size meal generation — drop the cached daily meals so
     // they regenerate to the new target instead of serving stale, wrong-sized suggestions.
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
+    perfMark('meal cache CLEARED by Profile (goal edit) — regeneration after this is intended')
     setEditGoal(null)
   }
 
@@ -633,6 +635,7 @@ export default function ProfileScreen() {
     // violate their new restrictions until the next midnight rollover. Without this
     // wipe, the cache stays valid for 24h and silently serves the old (now-invalid) set.
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
+    perfMark('meal cache CLEARED by Profile (dietary restrictions) — regeneration after this is intended')
     setShowDietModal(false)
   }
 
@@ -645,6 +648,7 @@ export default function ProfileScreen() {
     // Diet shapes what meals we suggest — drop the daily cache so the change takes
     // effect immediately instead of after the next midnight rollover.
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
+    perfMark('meal cache CLEARED by Profile (diet type) — regeneration after this is intended')
     setShowDietTypeModal(false)
   }
 
@@ -840,6 +844,7 @@ export default function ProfileScreen() {
     if (saveErr) { Alert.alert('Save failed', saveErr.message); return }
     // Recalculated calorie/protein goals resize meals — invalidate the cached daily meals.
     await AsyncStorage.multiRemove(['pantry_daily_meals_cookNow', 'pantry_daily_meals_mealPlan'])
+    perfMark('meal cache CLEARED by Profile (macro recalculation) — regeneration after this is intended')
     setShowCalcModal(false)
 
     // Animate numbers counting up
