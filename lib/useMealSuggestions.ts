@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
-import { generationKey, isGenerating, beginGeneration, endGeneration, subscribeGeneration } from './mealGenerationBus'
+import { generationKey, isGenerating, beginGeneration, endGeneration, publishGenerated, publishMealImage, subscribeGeneration } from './mealGenerationBus'
 import { perfMark } from './perf'
 import { prefetchMealImages } from '../components/MealImage'
 import { takeCookNowPrefetch } from './mealPrefetch'
@@ -203,6 +203,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         // mealsToImage above is what carries the photo across.
         const id = mealsToImage[i].id
         setMeals(prev => prev.map(p => (p.id === id ? { ...p, image } : p)))
+        // ...and on the OTHER screen. This setMeals belongs to one hook instance; Home and Pantry
+        // each hold their own, so without this the second screen keeps whatever the `end` event
+        // carried — the hero photo at best — and meals 2 and 3 shimmer forever.
+        publishMealImage(generationKey(userId, mode), String(id), image)
       })
 
       // HOLD THE SWAP FOR THE HERO'S PHOTO — but only when something is already on screen.
@@ -346,7 +350,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Publishing the meals with the release is what makes the OTHER screen update: it holds its
       // own React state and never re-reads the cache after mount, so a regenerate on Pantry used to
       // leave Home showing the previous deck with no sign anything had happened.
+      // Publish either way. A forced regeneration that ran alongside an in-flight one never
+      // claimed the lock and must not release someone else's — but its meals still have to reach
+      // the other screen.
       if (claimedBusKey) { endGeneration(claimedBusKey, generated ?? null); claimedBusKey = null }
+      else publishGenerated(busKey, generated ?? null)
       if (generated) { setMeals(generated); setStale(false) }
     } catch (err: any) {
       // Release so a FAILED generation can be retried — holding it would leave the user with no
@@ -526,6 +534,13 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         // on Home at all, and it beats inventing a second indicator for the same fact. Only when
         // meals are on screen; with nothing to show, the skeleton is the signal.
         if (mealsRef.current.length > 0) setStale(true)
+        return
+      }
+      if (e.type === 'image') {
+        // Patched by ID, never by index — the same rule the local patch follows, because this deck
+        // may still be the PREVIOUS one if the swap has not happened yet, and an index write would
+        // paste today's photo onto yesterday's dish.
+        setMeals(prev => prev.map(p => (String(p.id) === e.mealId ? { ...p, image: e.image } : p)))
         return
       }
       setLoading(false)

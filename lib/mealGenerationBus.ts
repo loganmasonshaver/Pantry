@@ -15,6 +15,11 @@ import type { GeneratedMeal } from './meals'
 export type GenerationEvent =
   | { type: 'begin'; key: string }
   | { type: 'end'; key: string; meals: GeneratedMeal[] | null }
+  // Photos arrive one at a time, LONG after the generation itself settles — the hero is waited for,
+  // meals 2 and 3 land while the reader is on page 1. Each one used to be applied with a setMeals
+  // on the originating instance only, so the other screen received the deck with at most the hero
+  // photo and sat on two shimmering cards forever. The `end` event alone can never carry these.
+  | { type: 'image'; key: string; mealId: string; image: string }
 
 const inFlight = new Set<string>()
 const subscribers = new Set<(e: GenerationEvent) => void>()
@@ -44,7 +49,21 @@ export function beginGeneration(key: string): boolean {
 /** Always call this, including on failure — `meals: null` releases the lock without publishing. */
 export function endGeneration(key: string, meals: GeneratedMeal[] | null): void {
   inFlight.delete(key)
+  publishGenerated(key, meals)
+}
+
+/**
+ * Publish a finished deck WITHOUT releasing the lock. A forced regeneration that ran while another
+ * was already in flight never claimed the lock, and must not release someone else's — but its
+ * meals still have to reach the other screen.
+ */
+export function publishGenerated(key: string, meals: GeneratedMeal[] | null): void {
   emit({ type: 'end', key, meals })
+}
+
+/** One photo landing, patched by meal id on every screen. */
+export function publishMealImage(key: string, mealId: string, image: string): void {
+  emit({ type: 'image', key, mealId, image })
 }
 
 export function subscribeGeneration(cb: (e: GenerationEvent) => void): () => void {
