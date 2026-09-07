@@ -10,6 +10,9 @@ export type MealDetail = {
   id: string
   name: string
   prepTime: number
+  // Hands-off time (chill/soak/marinate). See GeneratedMeal.restTime — only active time counts
+  // against the user's prep budget, so this can be hours without disqualifying a dish.
+  restTime?: number
   calories: number
   protein: number
   carbs: number

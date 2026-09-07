@@ -11,6 +11,12 @@ export type GeneratedMeal = {
   // cached meals predate the field.
   slot?: 'breakfast' | 'lunch' | 'dinner' | 'any'
   prepTime: number
+  // HANDS-OFF minutes — chilling, soaking, marinating — where the cook does nothing. Separate from
+  // prepTime because only ACTIVE time is filtered against the user's max-prep budget: folding a
+  // soak into prepTime is what made the model shrink an overnight oats rest to "15 minutes to
+  // allow oats to soften" so the dish would fit a 30-minute cap. Optional; absent on meals cached
+  // before this shipped, and 0 on anything ready the moment the work is done.
+  restTime?: number
   calories: number
   protein: number
   carbs: number

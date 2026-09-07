@@ -11,7 +11,7 @@ import {
   cleanIngredientName, formatHalf, getMeasuredDisplay, getWholeUnitDisplay,
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
-  formatQuarter, scaleVisual, countMissingIngredients,
+  formatQuarter, scaleVisual, countMissingIngredients, formatRestTime,
 } from './ingredientDisplay.ts'
 
 // ── the two already-fixed bugs, pinned so they cannot come back ────────────────────────────────
@@ -578,4 +578,28 @@ test('fl oz survives instead of falling through to the stored metric string', ()
 test('adding water to the liquid list does not capture watermelon', () => {
   // \b must not match inside "watermelon" — it is a solid and belongs on the grams path.
   assert.equal(getMeasuredDisplay('watermelon', '300g', 'a handful'), '300g')
+})
+
+// ── formatRestTime ────────────────────────────────────────────────────────────────────────────
+test('formatRestTime says nothing when there is nothing to wait for', () => {
+  assert.equal(formatRestTime(0), null)
+  assert.equal(formatRestTime(undefined), null)
+  assert.equal(formatRestTime(null), null)
+  assert.equal(formatRestTime(-30), null)
+})
+
+test('formatRestTime keeps short waits exact — 20 min and 45 min are different decisions', () => {
+  assert.equal(formatRestTime(20), '20 min')
+  assert.equal(formatRestTime(45), '45 min')
+  assert.equal(formatRestTime(89), '89 min')
+})
+
+test('formatRestTime rounds long waits to the half hour', () => {
+  // The real case: overnight oats need ~480 minutes, and nobody plans that to the minute.
+  assert.equal(formatRestTime(480), '8 hr')
+  assert.equal(formatRestTime(487), '8 hr')
+  assert.equal(formatRestTime(90), '1.5 hr')
+  assert.equal(formatRestTime(120), '2 hr')
+  // 1h45m is an exact tie between 1.5 and 2; rounding up is the safer direction for a wait.
+  assert.equal(formatRestTime(105), '2 hr')
 })

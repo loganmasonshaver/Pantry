@@ -585,3 +585,17 @@ export function countMissingIngredients(
     return true
   }).length
 }
+
+// Hands-off time, phrased the way a cook thinks about it. Returns null when there is nothing to
+// say, so callers can render the pill conditionally without a truthiness dance on 0.
+//
+// Rounded to the half hour above 90 minutes: nobody plans an overnight soak to the minute, and
+// "8 hr" is easier to act on than "487 min". Below that the exact number still matters — a 20
+// minute chill and a 45 minute chill are different decisions about dinner.
+export function formatRestTime(minutes: unknown): string | null {
+  const m = Math.round(Number(minutes))
+  if (!Number.isFinite(m) || m <= 0) return null
+  if (m < 90) return `${m} min`
+  const rounded = Math.round((m / 60) * 2) / 2
+  return `${rounded} hr`
+}

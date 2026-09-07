@@ -28,6 +28,7 @@ import { Swipeable, Gesture, GestureDetector } from 'react-native-gesture-handle
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
+import { formatRestTime } from '@/lib/ingredientDisplay'
 import { todayStr } from '@/lib/localDate'
 import { setSelectedDay } from '@/lib/selectedDay'
 import { DEFAULT_SLOT_LABELS, slotId } from '@/lib/mealSlots'
@@ -360,6 +361,14 @@ function MealCard({
         <View style={styles.mealMeta}>
           <Clock size={13} stroke={COLORS.textMuted} strokeWidth={1.8} />
           <Text style={styles.mealMetaText}>{meal.prepTime} min prep</Text>
+          {/* Hands-off time is the difference between "dinner tonight" and "start it now, eat it
+              tomorrow". Hiding it is what let a recipe claim 5 minutes for an overnight soak. */}
+          {formatRestTime(meal.restTime) && (
+            <>
+              <View style={styles.macroDot} />
+              <Text style={styles.mealMetaText}>+{formatRestTime(meal.restTime)} rest</Text>
+            </>
+          )}
           {/* Sits with prep time, not with the macros: the macros below are one portion and must
               stay unqualified, while "makes 2" is a fact about the COOKING, same as the clock. */}
           {(meal.servings ?? 1) > 1 && (
@@ -1964,6 +1973,11 @@ export default function HomeScreen() {
                             {m.prepTime > 0 && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
                                 <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{m.prepTime} MIN</Text>
+                              </View>
+                            )}
+                            {formatRestTime(m.restTime) && (
+                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+                                <Text style={styles.heroMealPillText}>+{formatRestTime(m.restTime)!.toUpperCase()}</Text>
                               </View>
                             )}
                             <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
