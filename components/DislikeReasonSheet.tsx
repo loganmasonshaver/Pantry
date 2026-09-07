@@ -56,17 +56,18 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      {/* Tap-outside dismiss. The sheet asks a question the user never opted into, so leaving must
-          be at least as easy as answering — backing out still keeps the thumbs-down itself. */}
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        {/* A Modal is its own window and cannot read the app root's insets, so SafeAreaView is a
-            no-op here without a provider INSIDE the modal. Without this the sheet's buttons sit
-            on the home indicator.
-            The provider MUST carry the bottom-anchoring itself: SafeAreaProvider renders with
-            flex:1, so it fills the backdrop entirely and the backdrop's justifyContent stops
-            reaching the sheet. Without providerFill the sheet renders at the TOP of the screen,
-            title under the Dynamic Island — which is what shipped and what the device showed. */}
-        <SafeAreaProvider style={styles.providerFill}>
+      {/* A Modal is its own WINDOW and react-native-safe-area-context cannot read the app root's
+          insets from it, so both the hook and SafeAreaView yield 0 without a provider INSIDE the
+          modal — otherwise the buttons sit on the home indicator.
+          The provider is the OUTERMOST child, matching PantryScanModal. It renders with flex:1 of
+          its own, so putting it BETWEEN the backdrop and the sheet made it fill the backdrop and
+          swallow the backdrop's justifyContent — which drew the sheet at the top of the screen
+          with its title behind the Dynamic Island. Nesting is the fix; duplicating the layout onto
+          the provider was not. */}
+      <SafeAreaProvider>
+        {/* Tap-outside dismiss. The sheet asks a question the user never opted into, so leaving
+            must be at least as easy as answering — backing out still keeps the thumbs-down. */}
+        <Pressable style={styles.backdrop} onPress={onClose}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <SafeAreaView edges={['bottom']}>
               <View style={styles.grabber} />
@@ -112,16 +113,14 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
               )}
             </SafeAreaView>
           </Pressable>
-        </SafeAreaProvider>
-      </Pressable>
+        </Pressable>
+      </SafeAreaProvider>
     </Modal>
   )
 }
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  // Repeats the backdrop's anchoring because SafeAreaProvider's own flex:1 sits between the two.
-  providerFill: { flex: 1, justifyContent: 'flex-end' },
   sheet: { backgroundColor: '#1A1A1A', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 },
   grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#3A3A3A', alignSelf: 'center', marginBottom: 14 },
   title: { color: COLORS.text, fontSize: 20, fontWeight: '700' },
