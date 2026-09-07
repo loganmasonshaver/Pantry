@@ -311,7 +311,7 @@ Deno.serve(async (req: Request) => {
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
-    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed, replaceTrending = false, bypassCache = false } = await req.json()
+    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed, replaceTrending = false, bypassCache = false, guidanceScale, promptExpansion } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
 
     // Declared HERE, above the cache lookup, because the cache-HIT path backfills
@@ -483,6 +483,20 @@ Deno.serve(async (req: Request) => {
             // pinning the seed you are comparing two different pictures, not two resolutions.
             image_size: (isInternal && imageSize) ? imageSize : "square",
             ...(isInternal && seed !== undefined ? { seed } : {}),
+            // PROMPT ADHERENCE. Never sent until now, so every image in the library was rendered at
+            // fal's default (~2.5-3.5 on a 0-20 scale) — the low end. This is the parameter that
+            // governs how literally Flux follows the description, which is exactly the failure seen
+            // on the parfait: Stage 1 named "bright orange segments" and the render had none.
+            // Left UNSET by default on purpose. Raising it globally is an unmeasured change to
+            // every photo in the app, and high guidance burns an image — oversaturated, plasticky,
+            // over-contrasted food. Overridable internally so it can be A/B'd against a FIXED SEED,
+            // which is the only way to compare adherence rather than two different pictures.
+            ...(isInternal && guidanceScale !== undefined ? { guidance_scale: guidanceScale } : {}),
+            // fal may paraphrase the prompt through another model before Flux sees it. Whether that
+            // is on by default is undocumented, and if it is, months of description work has been
+            // rewritten in flight — a candidate source of dropped elements in its own right.
+            // Same treatment: overridable, default untouched, decided by measurement.
+            ...(isInternal && promptExpansion !== undefined ? { enable_prompt_expansion: promptExpansion } : {}),
             num_images: 1,
             output_format: "jpeg",
           }),

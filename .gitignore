@@ -68,3 +68,4 @@ supabase/.temp/
 # If reproducible edge-function builds are ever wanted, the real setup is a deno.json +
 # a committed lock + `deno check --frozen` in CI — at which point remove this line.
 deno.lock
+image-ab/
