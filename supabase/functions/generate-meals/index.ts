@@ -126,8 +126,15 @@ async function correctMealMacros(meal: any, servings = 1): Promise<any> {
   const applied = lookedUp >= ingredients.length / 2 && totalCal >= 200 * servings && totalCal <= 1200 * servings
   // Which source won is invisible downstream — the model's own number and FatSecret's sum both
   // end up in the same field. They disagree by 20-30% on real recipes, in an inconsistent
-  // direction, so without this line there is no way to tell an inflated lookup from a model that
+  // direction, so without this there is no way to tell an inflated lookup from a model that
   // simply wrote too much food.
+  //
+  // Written to a TABLE, not just console. Edge function logs are only reachable through the
+  // dashboard — there is no `supabase functions logs` in this CLI and no management token on this
+  // machine — so a console-only diagnostic is one nobody can actually read back. pipeline_runs is
+  // already the sink for this kind of thing.
+  meal._fsTrace = { name: meal.name, model: meal.calories, fs: Math.round(totalCal),
+                    resolved: `${lookedUp}/${ingredients.length}`, applied, items: trace }
   console.log(`[fatsecret] "${meal.name}" model=${meal.calories} fs=${Math.round(totalCal)} (${lookedUp}/${ingredients.length} resolved) → ${applied ? 'OVERWROTE' : 'kept model'} | ${trace.join(' · ')}`)
   if (applied) {
     meal.calories = Math.round(totalCal)
@@ -820,7 +827,9 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       await db.from("generated_meals").insert(
         meals.map((m: any) => ({
           user_id: user.id,
-          meal_data: m,
+          // Strip the diagnostic — meal_data is the permanent record of the MEAL, and this history
+          // is read back as `recentDetailed` on every later generation.
+          meal_data: (({ _fsTrace, ...rest }: any) => rest)(m),
           name: String(m?.name ?? "").trim(),
           mode,
         })),
@@ -829,8 +838,23 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       console.log("generated_meals insert failed:", (e as Error).message)
     }
 
-    // Return meals immediately, images will be fetched by a separate function
-    return new Response(JSON.stringify(meals.map((m: any) => ({ ...m, image: null }))), {
+    // Macro-source diagnostics. Its own try/catch and never allowed to fail the response — this is
+    // instrumentation, and the user already paid for the generation.
+    try {
+      const traces = meals.map((m: any) => m?._fsTrace).filter(Boolean)
+      if (traces.length > 0) {
+        await db.from("pipeline_runs").insert({
+          provider: 'generate-meals-macros', dry_run: true, stored: traces.length,
+          funnel: { user: user.id, mode, servings, calorieTarget, batchCalorieTarget, meals: traces },
+        })
+      }
+    } catch (e) {
+      console.log("macro trace insert failed:", (e as Error).message)
+    }
+
+    // Return meals immediately, images will be fetched by a separate function. _fsTrace is
+    // diagnostics and must never reach the client cache.
+    return new Response(JSON.stringify(meals.map((m: any) => { const { _fsTrace, ...rest } = m; return { ...rest, image: null } })), {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
