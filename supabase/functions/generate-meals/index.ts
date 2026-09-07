@@ -1123,7 +1123,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       // as designed, not a filter failing, and only these three numbers make that visible.
       funnel.proteinTarget = proteinTarget
       funnel.proteinCandidates = meals.map((m: any) => Number(m?.protein) || 0)
-      meals = meals
+      const scored = meals
         .map((m: any) => {
           const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
           const cDelta = (Number(m.calories) - calorieTarget) / Math.max(calorieTarget, 1)
@@ -1133,6 +1133,22 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           const fitScore = pDelta * pDelta + cDelta * cDelta + fExcess * fExcess
           return { ...m, _fitScore: fitScore }
         })
+
+      // EVERY INPUT THE SORT BELOW USES, recorded before it runs. proteinCandidates alone could not
+      // explain run 32, which showed 33/43/33 out of a field holding 48, 46 and 44 — those numbers
+      // prove a better option existed and say nothing about WHY it lost. fitScore weighs calories
+      // and fat alongside protein, and `repeat` outranks the score entirely, so the choice is only
+      // auditable with all four in the row.
+      funnel.rankCandidates = scored.map((m: any) => ({
+        name: String(m?.name ?? ''),
+        p: Number(m?.protein) || 0,
+        c: Number(m?.calories) || 0,
+        f: Number(m?.fat) || 0,
+        repeat: !!m?._repeat,
+        fit: Math.round((Number(m?._fitScore) || 0) * 1000) / 1000,
+      }))
+
+      meals = scored
         // Freshness outranks macro fit: a slightly worse-fitting new dish beats a perfect-fitting
         // repeat, since the repeat is the thing users actually notice and complain about.
         .sort((a: any, b: any) => (a._repeat === b._repeat ? a._fitScore - b._fitScore : (a._repeat ? 1 : -1)))
