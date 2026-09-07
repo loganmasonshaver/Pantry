@@ -51,7 +51,7 @@ async function fsSignedUrl(params: Record<string, string>): Promise<string> {
   return `${FS_URL}?${qs}`
 }
 
-async function lookupMacros(name: string, grams: number): Promise<{ cal: number; p: number; c: number; f: number } | null> {
+async function lookupMacros(name: string, grams: number): Promise<{ cal: number; p: number; c: number; f: number; matched: string; per100: number } | null> {
   try {
     const searchUrl = await fsSignedUrl({ method: "foods.search", search_expression: name, max_results: "1" })
     const searchRes = await fetch(searchUrl)
@@ -74,6 +74,14 @@ async function lookupMacros(name: string, grams: number): Promise<{ cal: number;
       p: Math.round(Number(serving.protein) * scale * 10) / 10,
       c: Math.round(Number(serving.carbohydrate) * scale * 10) / 10,
       f: Math.round(Number(serving.fat) * scale * 10) / 10,
+      // Diagnostics only. foods.search with max_results=1 takes FatSecret's top hit for a plain
+      // string, which is not necessarily the generic raw food — "red potatoes" can match a dressed
+      // or prepared entry, and that would inflate every recipe containing it. The matched name and
+      // its density are the only way to tell that apart from the model simply writing too much
+      // food, and neither is recoverable after the fact: generated_meals stores the corrected
+      // total, never the per-ingredient lookups that produced it.
+      matched: String(item.food_name ?? '?'),
+      per100: metricAmount > 0 ? Math.round(Number(serving.calories) * 100 / metricAmount) : 0,
     }
   } catch { return null }
 }
@@ -94,8 +102,10 @@ async function correctMealMacros(meal: any, servings = 1): Promise<any> {
     return lookupMacros(ing.name, grams)
   })
 
+  const trace: string[] = []
   for (const macros of results) {
     if (macros) {
+      trace.push(`${macros.matched}@${macros.per100}/100g=${macros.cal}`)
       // Skip obviously-wrong FatSecret matches — a single ingredient over 900 kcal or 100g
       // protein almost certainly means the search matched the wrong food entry.
       // Scaled by servings: a 2-serving batch genuinely doubles every gram weight, and an
@@ -113,7 +123,13 @@ async function correctMealMacros(meal: any, servings = 1): Promise<any> {
   // Only override LLM macros if FatSecret resolved ≥50% of ingredients AND the total is
   // within a sane range. Outside this band → trust the LLM (database mismatch likely worse
   // than estimate). The 200–1200 window is PER SERVING, so it scales with the batch.
-  if (lookedUp >= ingredients.length / 2 && totalCal >= 200 * servings && totalCal <= 1200 * servings) {
+  const applied = lookedUp >= ingredients.length / 2 && totalCal >= 200 * servings && totalCal <= 1200 * servings
+  // Which source won is invisible downstream — the model's own number and FatSecret's sum both
+  // end up in the same field. They disagree by 20-30% on real recipes, in an inconsistent
+  // direction, so without this line there is no way to tell an inflated lookup from a model that
+  // simply wrote too much food.
+  console.log(`[fatsecret] "${meal.name}" model=${meal.calories} fs=${Math.round(totalCal)} (${lookedUp}/${ingredients.length} resolved) → ${applied ? 'OVERWROTE' : 'kept model'} | ${trace.join(' · ')}`)
+  if (applied) {
     meal.calories = Math.round(totalCal)
     meal.protein = Math.round(totalP)
     meal.carbs = Math.round(totalC)
