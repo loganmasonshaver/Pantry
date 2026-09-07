@@ -251,7 +251,7 @@ const CalorieGauge = memo(CalorieGaugeInner)
 // full-width box crops the dish out of frame. So the card earns attention from real data (your
 // actual pantry count), the accent language the app already uses for "something good is here"
 // (see planReadyCard), and one slow breathing halo — not from borrowed art.
-function MealCardResting({ pantryCount, onPress }: { pantryCount: number; onPress: () => void }) {
+function MealCardResting({ pantryCount, onPress, error, errorCode }: { pantryCount: number; onPress: () => void; error?: string | null; errorCode?: string | null }) {
   const breathe = useRef(new RNAnimated.Value(0)).current
   useEffect(() => {
     const loop = RNAnimated.loop(
@@ -289,15 +289,25 @@ function MealCardResting({ pantryCount, onPress }: { pantryCount: number; onPres
           style={StyleSheet.absoluteFill}
         />
       </RNAnimated.View>
-      <Text style={styles.restingTitle}>Get tonight's meals</Text>
+      <Text style={styles.restingTitle}>{error ? "Couldn't get tonight's meals" : "Get tonight's meals"}</Text>
+      {/* Home was the ONLY surface that dropped the error on the floor — Pantry and cook-reveal
+          both render it. Without this a failed generation looks identical to a fresh one: the card
+          says "Let's cook", the tap fails silently, and the user taps forever. That is what a
+          daily-cap hit looked like on this screen. */}
       <Text style={styles.restingSub}>
-        {pantryCount > 0
-          ? `Built from the ${pantryCount} things in your pantry`
-          : 'Built from what\'s in your pantry'}
+        {error
+          ? error
+          : pantryCount > 0
+            ? `Built from the ${pantryCount} things in your pantry`
+            : 'Built from what\'s in your pantry'}
       </Text>
-      <View style={styles.restingCTA}>
-        <Text style={styles.restingCTAText}>Let's cook</Text>
-      </View>
+      {/* No CTA once the daily cap is hit — the same rule Pantry and cook-reveal already apply,
+          since tapping cannot succeed until tomorrow. */}
+      {errorCode !== 'meal_cap_reached' && (
+        <View style={styles.restingCTA}>
+          <Text style={styles.restingCTAText}>{error ? 'Try again' : "Let's cook"}</Text>
+        </View>
+      )}
     </TouchableOpacity>
   )
 }
@@ -540,7 +550,7 @@ export default function HomeScreen() {
   // gate, sharing the 'cookNow' cache — so anyone who opened Pantry first (which is where you add
   // ingredients) got auto-generation anyway. The behaviour depended on which tab you happened to
   // open first, which is an accident, not a decision.
-  const { meals, loading, stale, cacheChecked, retry } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  const { meals, loading, stale, cacheChecked, retry, error: mealsError, errorCode: mealsErrorCode } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
   // The section used to render NOTHING — not even its heading — until Home's own pantry query
   // came back, because the block below was gated on `pantryFetched`. That is the 2-3s of blank
   // space before the shimmer: the hook cannot report `loading` yet, since it is not enabled until
@@ -1986,7 +1996,7 @@ export default function HomeScreen() {
               // here means the cache was checked, no meals exist and nothing is loading — i.e. a
               // generation that failed or was capped. Tapping retries. The empty-pantry case never
               // gets here; it is handled by its own block above, gated on pantryNames.size === 0.
-              <MealCardResting pantryCount={pantryNames.size} onPress={retry} />
+              <MealCardResting pantryCount={pantryNames.size} onPress={retry} error={mealsError} errorCode={mealsErrorCode} />
             ) : null}
           </Reanimated.View>
         )}
