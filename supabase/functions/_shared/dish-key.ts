@@ -271,6 +271,16 @@ const BASE_FOODS: string[] = [
   "oats", "rice", "potato", "pasta", "quinoa", "granola",
 ].sort((a, b) => b.length - a.length)
 
+// Bases a meal can actually be BUILT ON to reach a protein target, as opposed to bases that merely
+// contain protein. Cheese, cream cheese and peanut butter are deliberately absent: they carry
+// protein but are fat-dominant, and nobody anchors a 40g meal on them — banning one of those costs
+// the deck nothing, which is exactly why they belong on the cheap side of this line.
+const PROTEIN_BASES = new Set([
+  "cottage cheese", "greek yogurt", "egg white", "protein powder", "ground beef", "chicken salad",
+  "chicken", "beef", "turkey", "pork", "salmon", "tuna", "shrimp", "tofu", "paneer",
+  "yogurt", "egg", "lentil", "chickpea", "bean",
+])
+
 /** Base foods a dish is built on, read from its name and (when present) its ingredient list. */
 export function detectBases(name: unknown, ingredients?: unknown): Set<string> {
   let hay = ` ${String(name ?? "").toLowerCase()} `
@@ -304,8 +314,8 @@ export function detectBases(name: unknown, ingredients?: unknown): Set<string> {
 // counts were 2-3 and indistinguishable from noise.
 export function overusedBases(
   dishes: ReadonlyArray<{ name?: unknown; ingredients?: unknown }>,
-  { window = 15, topK = 2, minCount = 3, minShare = 0.25 }:
-    { window?: number; topK?: number; minCount?: number; minShare?: number } = {},
+  { window = 15, topK = 2, minCount = 3, minShare = 0.25, maxProteinBans = 1 }:
+    { window?: number; topK?: number; minCount?: number; minShare?: number; maxProteinBans?: number } = {},
 ): string[] {
   const recent = dishes.slice(0, window)
   if (recent.length === 0) return []
@@ -315,11 +325,40 @@ export function overusedBases(
       counts.set(base, (counts.get(base) ?? 0) + 1)
     }
   }
-  return [...counts.entries()]
+  const ranked = [...counts.entries()]
     .filter(([, n]) => n >= minCount && n / recent.length >= minShare)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, topK)
     .map(([base]) => base)
+
+  // AT MOST ONE PROTEIN BASE PER RUN, and this number is measured, not chosen.
+  //
+  // topK=2 was sized for "roughly six usable protein bases" but nothing stopped BOTH bans landing
+  // on protein, and in practice they did: across five consecutive live runs the ban was
+  // granola+chicken, protein-powder+cottage-cheese, greek-yogurt+potato, greek-yogurt+protein-
+  // powder, egg+greek-yogurt. Four of the five took two protein sources off the shelf before the
+  // model saw the pantry, and greek yogurt alone was banned in three.
+  //
+  // That is a feedback loop rather than a variety win. A narrow pantry makes the same bases recur
+  // BECAUSE it is narrow; the guard reads the recurrence as fatigue and removes them; the model
+  // then has less to build on, returns weaker and more repetitive candidates, and the next run
+  // bans again. Run 27 is the counter-example and the reason for the rule: it is the only one of
+  // the five that took a CARB as its second ban (greek yogurt + potato), and the only one that
+  // reached the ranker with seven candidates instead of three — with every meal at or above the
+  // protein target.
+  //
+  // So the budget is spent on the axis the user has plenty of. Ban order still follows overuse, so
+  // the most-repeated food is still the first to go; a SECOND protein is simply skipped in favour
+  // of the next non-protein offender, and if there is none, fewer bans is the correct answer.
+  const out: string[] = []
+  let proteinBans = 0
+  for (const base of ranked) {
+    if (out.length >= topK) break
+    const isProtein = PROTEIN_BASES.has(base)
+    if (isProtein && proteinBans >= maxProteinBans) continue
+    if (isProtein) proteinBans++
+    out.push(base)
+  }
+  return out
 }
 
 // ── Dish FORM ───────────────────────────────────────────────────────────────────────────────────

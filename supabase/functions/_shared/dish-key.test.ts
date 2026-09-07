@@ -400,3 +400,46 @@ test('capByDistinctDishes drops blanks and keeps order newest-first', () => {
   const kept = capByDistinctDishes(['Beef Taco Bowl', '', null, 'Chicken Fried Rice'], 30)
   assert.deepEqual(kept, ['Beef Taco Bowl', 'Chicken Fried Rice'])
 })
+
+// ── the base ban must not empty the protein shelf ──────────────────────────────────────────────
+// Written from five consecutive live runs (funnel ids 25-29) in which the ban was granola+chicken,
+// protein-powder+cottage-cheese, greek-yogurt+potato, greek-yogurt+protein-powder and
+// egg+greek-yogurt. Four of five removed TWO protein sources before the model saw the pantry.
+
+const rep = (name: string, n = 15) => Array.from({ length: n }, () => ({ name }))
+
+test('two overused PROTEIN bases cost only one ban — the shelf keeps something to build on', () => {
+  // Run 26's shape: protein powder and cottage cheese both saturating the window.
+  const banned = overusedBases(rep('Cottage Cheese Protein Powder Bowl'))
+  assert.equal(banned.length, 1)
+  assert.deepEqual(banned, ['cottage cheese'])
+})
+
+test('a protein AND a carb still cost two bans — run 27, the only good run of the five', () => {
+  // greek yogurt + potato is exactly the ban that left seven candidates and every meal on target.
+  assert.deepEqual(overusedBases(rep('Greek Yogurt Potato Bowl')), ['greek yogurt', 'potato'])
+})
+
+test('the variety budget spends on carbs first when both are overused', () => {
+  // Nothing here is protein, so topK is free to take both.
+  assert.deepEqual(overusedBases(rep('Rice Potato Bowl')), ['potato', 'rice'])
+})
+
+test('the MOST overused protein is the one that gets banned, not the first alphabetically', () => {
+  const history = [...rep('Cottage Cheese Bowl', 12), ...rep('Egg Scramble', 3)]
+  assert.deepEqual(overusedBases(history), ['cottage cheese'])
+})
+
+test('maxProteinBans is a knob, and raising it restores the old behaviour exactly', () => {
+  const history = rep('Cottage Cheese Protein Powder Bowl')
+  assert.deepEqual(
+    overusedBases(history, { maxProteinBans: 2 }),
+    ['cottage cheese', 'protein powder'],
+  )
+})
+
+test('fat-dominant bases are not protected — banning them costs the deck nothing', () => {
+  // peanut butter and cheese carry protein but nobody anchors a 40g meal on them, so they stay
+  // bannable and leave the real protein budget untouched.
+  assert.deepEqual(overusedBases(rep('Peanut Butter Cheese Toast')), ['cheese', 'peanut butter'])
+})
