@@ -5,7 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
-import { flavourMismatches } from '../_shared/flavour-match.ts'
+import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-match.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
@@ -958,6 +958,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     {
       const hits = meals.flatMap((m: any) => flavourMismatches(m?.name, m?.ingredients, ingredients))
       funnel.flavourMismatches = hits.length
+      // The denominator. A zero above means nothing unless the check was actually exercised — no
+      // dish reaching for a flavourable staple looks identical to a rule that worked perfectly.
+      funnel.flavourOpportunities = meals.reduce(
+        (n: number, m: any) => n + flavourOpportunities(m?.ingredients, ingredients), 0)
       if (hits.length > 0) {
         funnel.flavourMismatchDetail = hits.map(h => `${h.ingredient} -> ${h.plainAlternative}`)
         console.log(`Flavour mismatch: ${hits.map(h => `"${h.ingredient}" where "${h.plainAlternative}" was on the shelf`).join('; ')}`)
@@ -1042,6 +1046,18 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // a bucket the budget could not see, and it used it: a 10-min prep with a 20-min bake filed as
     // "restTime" passed a 15-minute budget and cost the user half an hour. Rest stays exempt — a
     // soak you walk away from is not time spent — but oven time is time spent.
+    // Recorded BEFORE the filter, so the funnel holds the meals this gate rejected as well as the
+    // ones it kept. `droppedByPrepTime` alone cannot tell "oven time is now counted" (the fix
+    // working) from "the budget is now too tight" (over-filtering) — that needs the raw numbers.
+    // It also surfaces the misfile this gate was built for: rest between 20 and 90 minutes on a
+    // dish that bakes is oven time still wearing rest's clothes, and rest is exempt from the budget.
+    funnel.timesSeen = meals.map((m: any) => ({
+      name: String(m?.name ?? ''),
+      prep: Number(m?.prepTime || 0),
+      cook: Number(m?.cookTime || 0),
+      rest: Number(m?.restTime || 0),
+    }))
+    funnel.maxPrepMinutes = maxPrepMinutes
     meals = meals.filter((m: any) => Number(m.prepTime || 0) + Number(m.cookTime || 0) <= maxPrepMinutes)
     if (beforePrep - meals.length > 0) {
       console.log(`Prep-time validation: dropped ${beforePrep - meals.length}/${beforePrep} meals whose prep+cook exceeded maxPrepMinutes=${maxPrepMinutes}`)

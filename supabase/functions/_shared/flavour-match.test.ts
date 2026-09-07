@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { flavourMismatches } from './flavour-match.ts'
+import { flavourMismatches, flavourOpportunities } from './flavour-match.ts'
 
 const PANTRY = ['Cottage Cheese', 'Protein Powder', 'Chocolate Protein Powder', 'Pineapple', 'Oat Milk', 'Cinnamon']
 
@@ -77,4 +77,38 @@ test('the longer flavour name wins, so salted caramel is not reported as caramel
 test('nothing to say about an empty or malformed meal', () => {
   assert.deepEqual(flavourMismatches('', [], []), [])
   assert.deepEqual(flavourMismatches(null, [null, undefined, ''], PANTRY), [])
+})
+
+// flavourOpportunities — the denominator that makes a zero mismatch count mean something.
+
+test('opportunity: a flavourable base with BOTH variants on the shelf counts', () => {
+  assert.equal(flavourOpportunities(['protein powder'], PANTRY), 1)
+  assert.equal(flavourOpportunities(['chocolate protein powder'], PANTRY), 1)
+})
+
+test('no opportunity when only ONE variant is stocked — there was no choice to get wrong', () => {
+  assert.equal(flavourOpportunities(['protein powder'], ['Protein Powder', 'Pineapple']), 0)
+  assert.equal(flavourOpportunities(['oat milk'], PANTRY), 0)
+})
+
+test('no opportunity for an ingredient that is not a flavourable staple', () => {
+  assert.equal(flavourOpportunities(['pineapple', 'cinnamon'], PANTRY), 0)
+})
+
+test('every mismatch is also an opportunity — mismatches are a strict subset', () => {
+  const ings = ['cottage cheese', 'chocolate protein powder', 'pineapple', 'oat milk', 'cinnamon']
+  const misses = flavourMismatches('Cottage Cheese and Fruit Protein Muffin-Top Bake', ings, PANTRY)
+  assert.ok(flavourOpportunities(ings, PANTRY) >= misses.length)
+})
+
+test('the disambiguating case: plain powder chosen IS an opportunity with zero mismatches', () => {
+  const ings = ['cottage cheese', 'protein powder', 'pineapple']
+  assert.equal(flavourMismatches('Pineapple Bake', ings, PANTRY).length, 0)
+  assert.equal(flavourOpportunities(ings, PANTRY), 1) // rule worked, and we can prove it was tested
+})
+
+test('opportunities tolerate empty and malformed input', () => {
+  assert.equal(flavourOpportunities([], PANTRY), 0)
+  assert.equal(flavourOpportunities([null, undefined, ''], PANTRY), 0)
+  assert.equal(flavourOpportunities(['protein powder'], []), 0)
 })

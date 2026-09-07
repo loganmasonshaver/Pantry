@@ -93,3 +93,28 @@ export function flavourMismatches(
   }
   return out
 }
+
+/**
+ * How many times the mismatch check COULD have fired.
+ *
+ * Counts ingredients whose base staple sits in the pantry in BOTH plain and flavoured form — the
+ * only situation where the model had a choice it could get wrong. Without this a zero in
+ * `flavourMismatches` is ambiguous: the prompt rule may have worked, or no dish may have reached
+ * for a flavourable staple at all. Only a zero measured against a NON-ZERO opportunity count is
+ * evidence the rule took. Mismatches are always a subset of opportunities.
+ */
+export function flavourOpportunities(
+  ingredients: readonly unknown[],
+  pantry: readonly unknown[],
+): number {
+  const pantryNorm = (pantry ?? []).map(p => norm((p as any)?.name ?? p)).filter(Boolean)
+  let n = 0
+  for (const raw of ingredients ?? []) {
+    const base = baseOf(norm(String((raw as any)?.name ?? raw ?? "")))
+    if (!base) continue
+    const sameBase = pantryNorm.filter(p => baseOf(p) === base)
+    // Both variants must actually be on the shelf, or there was no decision to make.
+    if (sameBase.some(p => flavourOf(p) === null) && sameBase.some(p => flavourOf(p) !== null)) n++
+  }
+  return n
+}
