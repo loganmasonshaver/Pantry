@@ -7,6 +7,7 @@ import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
+import { scaleToTarget } from '../_shared/scale-recipe.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -669,6 +670,35 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     const proteinDropThreshold = batchProteinMax * 1.40
     const calorieDropThreshold = batchCalorieMax * 1.40
     const fatDropThreshold = batchFatMax * 1.40 // fat-bomb guard — code-enforced, since the LLM ignores prompt caps under load
+    // SIZE THE FOOD TO THE TARGET. Runs after the correction (so it works from grounded numbers,
+    // not the model's, which are 1.7-1.8x) and BEFORE every gate that judges calories.
+    //
+    // This is the fix for over-shoot that a filter cannot be. The ranking already sorts by macro
+    // fit and slices the best 3 of 10, so a meal arriving at 1.4x target IS the closest the model
+    // produced — a harder drop starves the deck instead of improving it. Changing the quantities
+    // is the only lever left.
+    //
+    // Counted ingredients are never touched, so "0.5 large eggs" cannot be produced. See
+    // _shared/scale-recipe.ts; the rule is structural, not a rounding step afterwards.
+    let scaledToTargetCount = 0
+    {
+      meals = meals.map((m: any) => {
+        const res = scaleToTarget(m?.ingredients, Number(m?.calories), batchCalorieTarget)
+        if (res.macroFactor === 1) return m
+        scaledToTargetCount++
+        console.log(`[scale] "${m?.name}" ${res.reason}`)
+        return {
+          ...m,
+          ingredients: res.ingredients,
+          calories: Math.round(Number(m.calories) * res.macroFactor),
+          protein: Math.round(Number(m.protein) * res.macroFactor),
+          carbs: Math.round(Number(m.carbs) * res.macroFactor),
+          fat: Math.round(Number(m.fat) * res.macroFactor),
+        }
+      })
+      if (scaledToTargetCount > 0) console.log(`Scaled ${scaledToTargetCount}/${meals.length} meals toward ${batchCalorieTarget} kcal`)
+    }
+
     // FUNNEL. Every number below is one this function ALREADY computes for a console line, and
     // console lines are dashboard-only. Collecting them into a row turns "how many candidates were
     // fresh?" from an inference off the sort order into a query. Every threshold in this file was
@@ -679,6 +709,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       displayCount, servings, calorieTarget, batchCalorieTarget,
       bannedBases, bannedForms, maxPrepMinutes,
       pantryItems: ingredients.length, windowNames: recentServed.length,
+      scaledToTarget: scaledToTargetCount,
     }
 
     const beforeBands = meals.length
