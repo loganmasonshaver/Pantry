@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
+import { generationKey, isGenerating, beginGeneration, endGeneration, subscribeGeneration } from './mealGenerationBus'
 import { perfMark } from './perf'
 import { prefetchMealImages } from '../components/MealImage'
 import { takeCookNowPrefetch } from './mealPrefetch'
@@ -259,10 +260,12 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // Keyed rather than a plain boolean so a day rollover or account switch is never blocked by a
   // stale lock. Manual rerolls pass forceGenerate and bypass it entirely — they are gated by
   // MEAL_GEN_CAP_PER_DAY on the server, which the client now READS rather than mirroring.
-  const generatingForRef = useRef<string | null>(null)
 
   const fetchAndGenerate = async (forceGenerate = false) => {
     if (!userId) return
+    // Per CALL, not per render — this must be the key THIS invocation claimed, so the catch below
+    // can only ever release a lock it actually took.
+    let claimedBusKey: string | null = null
     setError(null)
     setErrorCode(null)
 
@@ -324,14 +327,15 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // line, so claiming the key earlier would also mark a cache-SERVING call as "generated" — and
       // then suppress the legitimate regeneration after Profile clears the cache on a diet, goal or
       // meal-frequency change. The guard belongs on the expensive call, not on the function.
-      if (!forceGenerate) {
-        const genKey = `${userId}_${mode}_${todayStr()}`
-        if (generatingForRef.current === genKey) {
-          perfMark('generation SUPPRESSED — one already running for this user/mode/day')
-          return
-        }
-        generatingForRef.current = genKey
+      // SHARED across screens, not a ref. Home and Pantry each mount this hook and both are alive
+      // in the tab navigator, so a per-instance ref could not see the other one — each would pass
+      // its own guard and fire a second paid generation for the same user.
+      const busKey = generationKey(userId, mode)
+      if (!forceGenerate && isGenerating(busKey)) {
+        perfMark('generation SUPPRESSED — one already running for this user/mode')
+        return
       }
+      claimedBusKey = beginGeneration(busKey) ? busKey : null
       perfMark('generation start (accepted)')
       setLoading(true)
       const generated = await generate()
@@ -339,12 +343,15 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // racing ~23ms apart, so an in-flight lock is enough — and a daily lock would break a
       // behaviour that is deliberate: Profile clears the cache on a diet, goal or meal-frequency
       // change precisely so the next open regenerates, and a day-long guard would swallow it.
-      generatingForRef.current = null
+      // Publishing the meals with the release is what makes the OTHER screen update: it holds its
+      // own React state and never re-reads the cache after mount, so a regenerate on Pantry used to
+      // leave Home showing the previous deck with no sign anything had happened.
+      if (claimedBusKey) { endGeneration(claimedBusKey, generated ?? null); claimedBusKey = null }
       if (generated) { setMeals(generated); setStale(false) }
     } catch (err: any) {
-      // Release the per-day guard so a FAILED generation can be retried. Holding it here would
-      // leave the user with no meals and no automatic second attempt until tomorrow.
-      generatingForRef.current = null
+      // Release so a FAILED generation can be retried — holding it would leave the user with no
+      // meals and no automatic second attempt. null meals means "stop waiting", not "here they are".
+      if (claimedBusKey) { endGeneration(claimedBusKey, null); claimedBusKey = null }
       __DEV__ && console.log('MEAL ERROR v3:', err.message)
       __DEV__ && console.log('MEAL ERROR status:', err?.context?.status)
       // Read the response body — use clone so we don't consume it
@@ -496,6 +503,37 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   const retry = async () => {
     await fetchAndGenerate(true)
   }
+
+  // Mirror so the bus callback below can read the current deck without re-subscribing on every
+  // meals change (which would tear down and rebuild the subscription mid-generation).
+  const mealsRef = useRef<GeneratedMeal[]>([])
+  useEffect(() => { mealsRef.current = meals }, [meals])
+
+  // Listen for a generation started by the OTHER screen. Without this, a regenerate on Pantry left
+  // Home showing the previous deck with no spinner and no update — Home holds its own React state
+  // and nothing re-reads the cache after mount. Both halves matter: `begin` is what makes the
+  // regenerate button feel like it did something on every screen, `end` is what actually swaps the
+  // meals in.
+  useEffect(() => {
+    if (!userId) return
+    const mine = generationKey(userId, mode)
+    return subscribeGeneration(e => {
+      if (e.key !== mine) return
+      if (e.type === 'begin') {
+        setLoading(true)
+        // `stale` already drives Home's sweep bar and breathing dot — the "work is happening"
+        // affordance built for the carryover path. Reusing it is why a Pantry regenerate now shows
+        // on Home at all, and it beats inventing a second indicator for the same fact. Only when
+        // meals are on screen; with nothing to show, the skeleton is the signal.
+        if (mealsRef.current.length > 0) setStale(true)
+        return
+      }
+      setLoading(false)
+      // null means the generation failed. Leave the existing meals alone rather than blanking the
+      // screen — the screen that started it owns showing the error.
+      if (e.meals) { setMeals(e.meals); setStale(false); setError(null); setErrorCode(null) }
+    })
+  }, [userId, mode])
 
   // Read the SERVER's count. Cheap (one indexed row) and it is the only number that survives a
   // Profile change, an app reinstall, or a second device. Re-read whenever a generation settles —
