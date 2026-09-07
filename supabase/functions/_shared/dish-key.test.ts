@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { dishKey, isSameDish, matchesRecentDish, clusterDishes, ingredientSignature, ingredientOverlap, isSameDishDetailed, detectBases, overusedBases, proteinFamilies } from './dish-key.ts'
+import { dishKey, isSameDish, matchesRecentDish, clusterDishes, clusterDishCounts, ingredientSignature, ingredientOverlap, isSameDishDetailed, detectBases, overusedBases, proteinFamilies, dishArchetype, overusedArchetypes, capByDistinctDishes } from './dish-key.ts'
 
 const REMEMBERED = [
   'Thai Peanut Sauce Chicken Rice Bowl',            // 1 — shown today
@@ -311,4 +311,92 @@ test('genuinely different food under similar names is still rescued', () => {
   const a = { name: 'Chicken Power Bowl', ingredients: [{ name: 'chicken breast' }, { name: 'rice' }, { name: 'broccoli' }] }
   const b = { name: 'Salmon Power Bowl', ingredients: [{ name: 'salmon' }, { name: 'quinoa' }, { name: 'asparagus' }] }
   assert.equal(isSameDishDetailed(a, b), false)
+})
+
+// ── dish FORM ──────────────────────────────────────────────────────────────────────────────────
+// Every one of these names was actually generated for one user between 2026-09-02 and 09-07.
+const REAL_SHAKES = [
+  'Protein Powder and Yogurt Smoothie Bowl',
+  'Chocolate Protein Smoothie',
+  'Protein-Boosted Chocolate Smoothie',
+  'Tropical Protein Smoothie',
+  'Protein Powder and Oat Milk Berry Smoothie',
+  'Bulgarian Yogurt and Fruit Smoothie',
+]
+
+test('dishArchetype sees the form a rename hides', () => {
+  // The last of these shares exactly ONE token with the fourth, so isSameDish is false — this is
+  // the escape route that let an eighth smoothie through in fourteen generations.
+  assert.equal(isSameDish(REAL_SHAKES[5], REAL_SHAKES[3]), false)
+  assert.equal(dishArchetype(REAL_SHAKES[5]), 'smoothie')
+  assert.equal(dishArchetype(REAL_SHAKES[3]), 'smoothie')
+})
+
+test('dishArchetype reads the form, not the flavouring', () => {
+  assert.equal(dishArchetype('Savory Cottage Cheese and Potato Bake'), 'bake')
+  assert.equal(dishArchetype('Greek Yogurt and Granola Power Bowl'), 'bowl')
+  assert.equal(dishArchetype('Greek Yogurt and Granola Power Bowls'), 'bowl') // singularised
+  assert.equal(dishArchetype(''), '')
+  assert.equal(dishArchetype(null), '')
+})
+
+test('overusedArchetypes bans only genuinely over-served forms', () => {
+  // 5 smoothies in 15 meals = 33%, over both the 25% share and the count of 3.
+  const history = [...REAL_SHAKES.slice(1), ...Array.from({ length: 10 }, (_, i) => `Chicken Dish ${i}`)]
+    .map(name => ({ name }))
+  assert.deepEqual(overusedArchetypes(history), ['smoothie'])
+})
+
+test('overusedArchetypes bans nothing on a varied history', () => {
+  const varied = ['Beef Taco Bowl', 'Chicken Fried Rice', 'Salmon Bake', 'Egg Scramble',
+                  'Turkey Wrap', 'Lentil Soup', 'Pork Skillet', 'Tuna Salad'].map(name => ({ name }))
+  assert.deepEqual(overusedArchetypes(varied), [])
+})
+
+test('overusedArchetypes never bans more than topK, so a thin pantry keeps options', () => {
+  const monotonous = Array.from({ length: 15 }, (_, i) =>
+    ({ name: i % 3 === 0 ? 'A Smoothie' : i % 3 === 1 ? 'B Bowl' : 'C Bake' }))
+  assert.ok(overusedArchetypes(monotonous).length <= 2)
+})
+
+// ── the stored window ──────────────────────────────────────────────────────────────────────────
+test('capByDistinctDishes keeps repeats so the served-count survives', () => {
+  const served = ['Tropical Protein Smoothie', 'Beef Bolognese Pasta', 'Chocolate Protein Smoothie']
+  const kept = capByDistinctDishes(served, 30)
+  assert.equal(kept.length, 3, 'no name is evicted')
+  const counts = clusterDishCounts(kept)
+  const smoothie = counts.find(c => c.count > 1)
+  assert.ok(smoothie, 'the repeated dish reports a count above one')
+  assert.equal(smoothie!.count, 2)
+})
+
+// The regression this replaces: clusterDishes kept ONE name per dish, so the window it produced
+// could never report a count above 1 no matter how often a dish was served.
+test('the old collapsing behaviour could not report any repeat', () => {
+  const served = ['Tropical Protein Smoothie', 'Beef Bolognese Pasta', 'Chocolate Protein Smoothie']
+  const collapsed = clusterDishes(served)
+  assert.ok(collapsed.length < served.length, 'clusterDishes drops the twin')
+  assert.equal(clusterDishCounts(collapsed).every(c => c.count === 1), true)
+})
+
+test('capByDistinctDishes still bounds the window to maxDistinct DISHES', () => {
+  // Genuinely distinct dishes, which "Unique Dish Number 1/2/3 Plate" is NOT — those share four of
+  // five tokens and isSameDish correctly collapses them, so the first version of this test was
+  // asserting against 40 names that represent far fewer dishes.
+  const proteins = ['Chicken', 'Beef', 'Turkey', 'Salmon', 'Tofu', 'Shrimp', 'Lentil', 'Pork']
+  const forms = ['Bowl', 'Wrap', 'Soup', 'Skillet', 'Curry']
+  const many = proteins.flatMap(p => forms.map(f => `${p} ${f}`))
+  assert.equal(many.length, 40)
+  assert.equal(capByDistinctDishes(many, 30).length, 30)
+})
+
+test('capByDistinctDishes bounds total length so one runaway dish cannot grow it', () => {
+  const spam = Array.from({ length: 200 }, () => 'Chocolate Protein Smoothie')
+  const kept = capByDistinctDishes(spam, 30, 60)
+  assert.equal(kept.length, 60)
+})
+
+test('capByDistinctDishes drops blanks and keeps order newest-first', () => {
+  const kept = capByDistinctDishes(['Beef Taco Bowl', '', null, 'Chicken Fried Rice'], 30)
+  assert.deepEqual(kept, ['Beef Taco Bowl', 'Chicken Fried Rice'])
 })

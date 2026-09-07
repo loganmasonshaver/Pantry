@@ -321,3 +321,99 @@ export function overusedBases(
     .slice(0, topK)
     .map(([base]) => base)
 }
+
+// ── Dish FORM ───────────────────────────────────────────────────────────────────────────────────
+// The noun a photograph of the dish would show. A DELIBERATE DUPLICATE of lib/dishArchetype.ts,
+// which is the client copy used for Discover shelf spreading — the two runtimes cannot share a
+// module (the client never imports from supabase/functions, and doing so would couple a device
+// build to the edge runtime's files). Keep the two in step; the noise list below is the only part
+// that differs, because Discover's names come from creators and these come from the model.
+//
+// This exists here because name similarity provably cannot catch a rewording that keeps only the
+// form: "Bulgarian Yogurt and Fruit Smoothie" shares exactly one token with "Tropical Protein
+// Smoothie", so isSameDish returns false — while it was the EIGHTH smoothie in 14 generations.
+// Form is the signal that survives an aggressive rename, and it was already in the codebase,
+// wired only into Discover.
+const ARCHETYPE_NOISE = new Set([
+  "protein", "high", "low", "fat", "free", "no", "baked", "air", "fryer", "easy", "quick",
+  "simple", "style", "homemade", "healthy", "best", "classic", "fresh", "the", "a", "an", "of",
+  "with", "and", "in", "on", "over", "topped", "served", "microwave", "oven", "minute", "min",
+  "recipe", "double", "loaded", "savory", "creamy",
+])
+// "bake" is NOT noise here, though the client copy lists it. As a TRAILING noun it is the form
+// itself — "Savory Cottage Cheese and Potato Bake" is a bake, and stripping the word left
+// "potato", which is an ingredient, not a shape. "baked" stays noise because it is an adjective:
+// "Baked Protein Oats" is correctly an oat dish. Caught by a test, not by reading.
+
+export function dishArchetype(name: unknown): string {
+  const words = String(name ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)
+    .filter(w => w && !ARCHETYPE_NOISE.has(w))
+  const last = words[words.length - 1]
+  if (!last) return ""
+  // Same crude singularisation dishKey uses, so "Bowls" and "Bowl" collide.
+  return last.length > 3 && last.endsWith("s") && !/(ss|us|is)$/.test(last) ? last.slice(0, -1) : last
+}
+
+/**
+ * Dish FORMS leaning on the recent feed hard enough to be worth banning for one generation.
+ *
+ * Same shape and thresholds as overusedBases above, on purpose: those were calibrated against a
+ * real 29-meal history rather than chosen for roundness, and forms behave like bases — a modest
+ * pantry supports only a handful, so banning more than topK leaves the model nothing to build.
+ */
+export function overusedArchetypes(
+  dishes: ReadonlyArray<{ name?: unknown }>,
+  { window = 15, topK = 2, minCount = 3, minShare = 0.25 }:
+    { window?: number; topK?: number; minCount?: number; minShare?: number } = {},
+): string[] {
+  const recent = dishes.slice(0, window)
+  if (recent.length === 0) return []
+  const counts = new Map<string, number>()
+  for (const d of recent) {
+    const a = dishArchetype(d?.name)
+    if (a) counts.set(a, (counts.get(a) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .filter(([, n]) => n >= minCount && n / recent.length >= minShare)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, topK)
+    .map(([a]) => a)
+}
+
+/**
+ * Trim a name history to `maxDistinct` DISHES while keeping every name that was actually served.
+ *
+ * Replaces clusterDishes() for the stored window, and the difference is the whole point.
+ * clusterDishes keeps one name per dish, so the stored window is already collapsed — and
+ * clusterDishCounts, which the prompt uses to say "(served 7x)", then reads it back and can only
+ * ever report 1. Measured on a live window: 26 names, 26 dishes, zero counts above one, while the
+ * same meals AS SERVED contained a smoothie eight times. The escalation that would have told the
+ * model to stop was structurally unreachable.
+ *
+ * Worse, collapsing EVICTS: the newest name wins and its older twin is deleted, so a repeat erases
+ * the evidence of the thing it repeated.
+ *
+ * Counting distinct dishes rather than names keeps both properties — the window still remembers
+ * `maxDistinct` different dishes, and the counts survive. maxLength bounds the array so one
+ * runaway dish cannot grow it without limit.
+ */
+export function capByDistinctDishes(
+  names: readonly unknown[],
+  maxDistinct: number = RECENT_MEMORY,
+  maxLength: number = RECENT_MEMORY * 2,
+): string[] {
+  const kept: string[] = []
+  const representatives: string[] = []
+  for (const raw of names) {
+    const name = String(raw ?? "").trim()
+    if (!name) continue
+    const isKnown = representatives.some(r => isSameDish(r, name))
+    if (!isKnown) {
+      if (representatives.length >= maxDistinct) break
+      representatives.push(name)
+    }
+    kept.push(name)
+    if (kept.length >= maxLength) break
+  }
+  return kept
+}

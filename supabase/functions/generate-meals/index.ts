@@ -5,7 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
-import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishes, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases } from '../_shared/dish-key.ts'
+import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros } from '../_shared/macro-estimate.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
@@ -234,8 +234,14 @@ Deno.serve(async (req: Request) => {
     }))
     const detailedKeys = new Set(recentDetailed.map((r: RecentDish) => dishKey(r.name)))
 
+    // TWO views of the same window, and conflating them is what silently disabled the served-count
+    // escalation. `recentServed` is the raw sequence WITH duplicates — it is the only thing
+    // clusterDishCounts can derive a count from, and it reads the full stored length because the
+    // window now holds every name served rather than one per dish. `recentMealNames` stays
+    // deduped and capped for the matching paths, where duplicates only cost comparisons.
+    const recentServed = sanitizeList(recentRow?.recent_meal_names ?? [], RECENT_MEMORY * 2)
     const recentMealNames = Array.from(new Set([
-      ...sanitizeList(recentRow?.recent_meal_names ?? [], RECENT_MEMORY),
+      ...recentServed,
       ...sanitizeList(rawRecent, RECENT_MEMORY),
     ])).slice(0, RECENT_MEMORY)
     // Fingerprints for the code-level drop below. The prompt line alone was never enough:
@@ -314,7 +320,11 @@ Deno.serve(async (req: Request) => {
     // With COUNTS. A deduped list says a cottage cheese bowl was served; the count says seven of
     // the last ten were, which is the part that actually reads as "stop". Ordered worst-first so
     // the offenders lead.
-    const recentCounts = clusterDishCounts(recentMealNames).sort((a, b) => b.count - a.count)
+    // Counted from recentServed, NOT recentMealNames: the latter is Set-deduped, so a dish served
+    // five times appeared once and every count came out 1. Falls back to the deduped list for a
+    // user whose window predates the raw-name write.
+    const recentCounts = clusterDishCounts(recentServed.length > 0 ? recentServed : recentMealNames)
+      .sort((a, b) => b.count - a.count)
     const recentDishes = recentCounts.map(c => (c.count > 1 ? `${c.name} (served ${c.count}x)` : c.name))
     const recentMealsLine = recentDishes.length > 0
       ? `\nALREADY SERVED RECENTLY — do not suggest these dishes OR a reworded version of one: ${recentDishes.join(", ")}.` +
@@ -337,6 +347,15 @@ Deno.serve(async (req: Request) => {
       : (Array.isArray(rawRecent) ? rawRecent : []).map((n: unknown) => ({ name: n }))
     const bannedBases = overusedBases(overuseHistory)
     if (bannedBases.length > 0) console.log(`Base ban: ${bannedBases.join(", ")} (from ${overuseHistory.length} recent meals)`)
+    // FORM ban, mirroring the base ban above and sharing its calibrated thresholds. Bases stop the
+    // model reaching for the same FOOD; this stops it reaching for the same SHAPE. Both are needed:
+    // a smoothie built on yogurt instead of protein powder defeats the base ban while still being
+    // the eighth smoothie in fourteen generations.
+    const bannedForms = overusedArchetypes(overuseHistory)
+    if (bannedForms.length > 0) console.log(`Form ban: ${bannedForms.join(", ")} (from ${overuseHistory.length} recent meals)`)
+    const bannedFormsLine = bannedForms.length === 0 ? "" :
+      `\n- DISH FORM BAN (blocking constraint): this user has been served ${bannedForms.map(f => `a ${f}`).join(" and ")} over and over — it is the single thing they complain about. Do NOT return ANY meal that is ${bannedForms.map(f => `a ${f}`).join(" or ")}, however it is flavoured, based or named. A different fruit in the blender is the SAME dish to them. Return a different FORM entirely.`
+
     const bannedBasesLine = bannedBases.length === 0 ? "" :
       `\n- BASE INGREDIENT BAN (blocking constraint): ${bannedBases.map(b => b.toUpperCase()).join(" and ")} ${bannedBases.length > 1 ? "have" : "has"} carried roughly a third of this user's recent meals and they are sick of ${bannedBases.length > 1 ? "them" : "it"}. Do NOT build ANY of today's meals on ${bannedBases.join(" or ")} — not as the protein, not as the base, not as the headline ingredient. A trace amount as a garnish is fine. Use a DIFFERENT base from their pantry. This is a rule about the FOOD, not the title: renaming the dish does not satisfy it.`
 
@@ -465,7 +484,7 @@ ${ingredientRule}${proteinVarietyRule}${servingsRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every recipe MUST have ${batchProteinMin}g–${batchProteinMax}g protein in TOTAL (target ~${batchProteinTarget}g). Distribute protein EVENLY across the ${genCount} recipes — never pile into one and starve another. A single SERVING above ${proteinMax}g causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
-- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}
+- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}${bannedFormsLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
 - HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. The returned number AND the actual recipe steps must both be achievable in that time or less. prepTime must be the REALISTIC time to make this dish — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -676,8 +695,16 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         rescued++
         console.log(`Ingredient rescue: "${name}" reads as a repeat by name but its food differs — kept`)
       }
+      // FORM repeat. Name similarity provably cannot catch a rewording that keeps only the shape:
+      // "Bulgarian Yogurt and Fruit Smoothie" shares ONE token with "Tropical Protein Smoothie",
+      // so every name-based check returns false — and it was the eighth smoothie in fourteen
+      // generations. Restricted to the BANNED forms rather than any recent form, because the
+      // window legitimately holds six "bowl" dishes and marking all of them would sort most of the
+      // deck to the back. overusedArchetypes applies the same measured thresholds as the base ban.
+      const formRepeat = bannedForms.includes(dishArchetype(name))
       const isRepeat =
         detailedMatch ||
+        formRepeat ||
         matchesRecentDish(name, nameOnlyRecent) ||
         matchesRecentDish(name, shownThisBatch)
       shownThisBatch.push(name)
@@ -793,18 +820,23 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // they stay eligible. Deduped by fingerprint, not raw string, to keep the window dense with
     // distinct dishes instead of near-identical spellings of one.
     try {
-      // Deduped by SAMENESS, not by exact dishKey. The old key check never fired once — measured
-      // on a live window, 29 names produced 29 distinct keys while representing ~17 real dishes, so
-      // 30 slots were remembering roughly 17 things. clusterDishes collapses the restatements, so
-      // the same 30 slots now hold 30 genuinely distinct dishes.
+      // Capped by DISTINCT DISHES, keeping every name actually served. This used to call
+      // clusterDishes, which keeps one name per dish — and that quietly disabled the strongest
+      // anti-repeat signal in the prompt. clusterDishCounts reads this window back to tell the
+      // model "(served 7x)", but a pre-collapsed window can only ever report 1. Measured live: 26
+      // names, 26 dishes, zero counts above one, while the same meals AS SERVED contained a
+      // smoothie eight times.
       //
-      // This is the answer to "should the window be shorter?" — no. It was never too long, it was
-      // half full of the model repeating itself. Shrinking it to 21 names would have remembered 13
-      // dishes instead of 14; this remembers close to 30.
-      const nextRecent = clusterDishes([
+      // Collapsing also EVICTED: the newest name won and its older twin was deleted, so each
+      // repeat erased the evidence of the thing it repeated. "Tropical Protein Smoothie"
+      // disappeared from the window the moment a fourth smoothie was generated.
+      //
+      // Counting dishes rather than names keeps both — still RECENT_MEMORY distinct dishes
+      // remembered, and the counts survive to reach the prompt.
+      const nextRecent = capByDistinctDishes([
         ...meals.map((m: any) => String(m?.name ?? "").trim()),
         ...recentMealNames,
-      ]).slice(0, RECENT_MEMORY)
+      ], RECENT_MEMORY)
       // Service-role write to the caller's own verified row; no entitlement data involved.
       // Never allowed to fail the response — the user already paid for this generation.
       await db.from("profiles").update({ recent_meal_names: nextRecent }).eq("id", user.id)
