@@ -8,7 +8,9 @@
 #
 # Usage:
 #   export CRON_SECRET=...              # Supabase → Vault, or the value you set as the function secret
-#   bash scripts/describe-image.sh recipe.json
+#   bash scripts/describe-image.sh recipe.json            # description only, free
+#   bash scripts/describe-image.sh recipe.json --render    # actually render it (~$0.003)
+#   bash scripts/describe-image.sh recipe.json --render 7  # ...with a fixed seed, for an A/B
 #
 # recipe.json is the meal as the client would send it:
 #   { "mealName": "...", "ingredients": ["..."], "steps": [{"title":"...","detail":"..."}] }
@@ -16,6 +18,8 @@ set -euo pipefail
 
 PROJECT_REF="${SUPABASE_PROJECT_REF:-fdafjnkqqtpsjtddbfdz}"
 RECIPE="${1:-}"
+MODE="${2:-}"
+SEED="${3:-}"
 
 if [ -z "${CRON_SECRET:-}" ]; then
   echo "CRON_SECRET is not set. Read it from Supabase → Vault, then: export CRON_SECRET=..." >&2
@@ -26,14 +30,24 @@ if [ -z "$RECIPE" ] || [ ! -f "$RECIPE" ]; then
   exit 1
 fi
 
-# describeOnly is added here rather than being required in the file, so the same recipe JSON can be
-# reused for a real generation by dropping this script.
+# --render turns this into a REAL generation. bypassCache goes with it, because a dish that already
+# has an image would otherwise return the broken one forever — the cache check is unconditional by
+# design so a client cannot force paid regeneration.
 BODY=$(python3 -c "
 import json, sys
 d = json.load(open(sys.argv[1]))
-d['describeOnly'] = True
+if sys.argv[2] == '--render':
+    d['bypassCache'] = True
+    d['replaceTrending'] = True   # overwrite the trending row too, not just the cache
+    if sys.argv[3]: d['seed'] = int(sys.argv[3])
+else:
+    d['describeOnly'] = True
 print(json.dumps(d))
-" "$RECIPE")
+" "$RECIPE" "$MODE" "$SEED")
+
+if [ "$MODE" = "--render" ]; then
+  echo "rendering for real (~\$0.003, overwrites the cached image)..." >&2
+fi
 
 curl -sS -X POST "https://${PROJECT_REF}.supabase.co/functions/v1/generate-meal-image" \
   -H "Authorization: Bearer ${CRON_SECRET}" \

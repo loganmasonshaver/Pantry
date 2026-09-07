@@ -311,7 +311,7 @@ Deno.serve(async (req: Request) => {
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
   try {
-    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed, replaceTrending = false } = await req.json()
+    const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed, replaceTrending = false, bypassCache = false } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
 
     // Declared HERE, above the cache lookup, because the cache-HIT path backfills
@@ -357,7 +357,15 @@ Deno.serve(async (req: Request) => {
     // Third variant: same words, any order. Catches the reorder duplicates described at sortedKey().
     const orderKey = sortedKey(mealName)
     const lookupKeys = [...new Set([cacheKey, legacyKey, orderKey].filter(Boolean))] as string[]
-    const { data: cachedRows } = await db.from('image_cache').select('meal_key, image_url').in('meal_key', lookupKeys)
+    // INTERNAL-ONLY cache bypass. Without it a dish that already has an image can never be
+    // re-rendered without direct DB access, which is why "regenerate the stale images" has had no
+    // mechanism: every call to fix one returns the broken one. Same trust level as seed and
+    // imageSize, and deliberately NOT the client bypass a security sweep removed in ef2630f — a
+    // signed-in user must never be able to force paid regeneration and drain the quota.
+    const skipCache = isInternal && bypassCache === true
+    const { data: cachedRows } = skipCache
+      ? { data: null }
+      : await db.from('image_cache').select('meal_key, image_url').in('meal_key', lookupKeys)
     const hit = cachedRows?.find((r: any) => r.meal_key === cacheKey) ?? cachedRows?.[0]
     if (hit?.image_url) {
       if (hit.meal_key !== cacheKey) {
