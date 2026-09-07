@@ -1,163 +1,187 @@
-# Handoff — 2026-09-05 (evening)
+# Handoff — 2026-09-07 (early hours)
 
-Replaces the 2026-09-05 midday handoff (in git history). **46 commits** since 12:20.
-`git log --since="2026-09-05 12:20"` carries the reasoning; this file holds only what git does not.
+Replaces the 2026-09-05 evening handoff. **24 commits** since `41453b4`.
+`git log --since="2026-09-06 18:00"` carries the reasoning for every fix; this file holds only what
+git does not — what is UNRESOLVED, what is UNVERIFIED, and the design decisions Logan has already
+made so the next session does not re-derive them.
 
-**State:** everything committed, pushed, deployed. Tree clean. **278 tests**
+**State:** everything committed, pushed, deployed. Tree clean.
+**TS baseline 130 total / 16 app-code.** **348 tests**
 (`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`).
-**TS baseline 130 total / 16 app-code** — DOWN from 131/17, see §0.
 
 ---
 
-## 0. READ FIRST — the lesson this session actually taught
+## 1. ⚠️ START HERE — the feedback board, Phase 1, APPROVED AND NOT BUILT
 
-**"Pre-existing" is not "not a bug."** I quoted the app-code baseline as 17 all session and twice
-dismissed an error in `useNotifications.ts:17` as noise. It was the reason **no notification ever
-appeared while the app was open** — `expo-notifications@55` requires `shouldShowBanner` and
-`shouldShowList`, and the handler returned only the deprecated `shouldShowAlert`. It silently
-affected all 7 daily reminders and the day-5 trial-end notification. Found only because a push
-Logan was watching for never arrived.
+Logan approved the design and asked for **one phase at a time, prompted for the next**, and for the
+logic to be reviewed before shipping. Do not build phases 2-3 until he says go.
 
-That is the **third** time in this repo a stubborn baseline error was a live bug (MOCK_DETECTED and
-`GeneratedMeal.image` are the other two, both already in CLAUDE.md). Baseline is now 130/16.
+### The chips — final, agreed after two rounds
 
-Second lesson, cheaper: **rule out the environment first.** Hours went into "slow Supabase queries"
-that turned out to be Metro saturating the wifi — query time tracked bundle size almost perfectly
-(3843 modules → 7.7s, 1 module → 1.5s). CLAUDE.md already says this.
+> **Seen this too often · Photo doesn't match the dish · Ingredients don't add up ·
+> Doesn't fit my macros · Didn't taste good**
 
----
+Five, not four, because **each drives a different action** and collapsing any two throws away the
+distinction that makes them worth collecting:
 
-## 1. ⚠️ THE BIG ONE — read `docs/PRELAUNCH.md` §2g before building anything
+| Chip | Action | Scope |
+|---|---|---|
+| Seen this too often | suppress this dish, hard | this user |
+| Photo doesn't match | flag image for regeneration — **dish untouched** | global (images are shared) |
+| Ingredients don't add up | recipe bug + funnel row — **dish untouched** | global |
+| Doesn't fit my macros | recheck their targets; feeds the calorie-band work | this user |
+| Didn't taste good | suppress the food family | this user, aggregate → global |
 
-**Multi-serving generated meals.** Designed in detail, NOT built, and it touches macros — the
-product's core promise. Logan explicitly asked the next session to **re-read it with fresh eyes,
-check the logic is sound, and sharpen it** rather than implement it blind.
+### Why Phase 1 is a GENERATION bug, not a support feature
 
-Summary: `displayCount = Math.min(mealsPerDay, 3)` but `calorieTarget = calorieGoal / mealsPerDay`
-is not capped, so a 6-meal user gets three ~350 kcal "cooked" recipes. Logan's fix — keep
-per-serving calories correct and give the recipe 2 servings, exactly as trending recipes already
-do — is better than mine (which was to make the recipes bigger). Full reasoning, the servings rule,
-and the three things to get right are in §2g.
+`meal_ratings` (id, user_id, meal_name, rating, created_at, trending_meal_id) has **no reason
+column**, and `dislikedMeals` feeds straight into the meal prompt as "do NOT suggest these or
+anything similar". So today every thumbs-down teaches the model the same lesson — and **two of the
+five reasons must NOT suppress the dish at all.** A broken photo currently kills a perfectly good
+recipe forever. That is the defect Phase 1 fixes; the feedback channel is the side effect.
 
-**The one that would corrupt the product if missed:** the generator must emit `calories` PER
-SERVING while `ingredients` describe the batch. Batch calories with `servings: 2` doubles every
-log. The convention is already proven for trending meals — copy it, do not reinvent it.
+Only ONE of the five is currently handled correctly, and by coincidence.
 
-**Genuinely unresolved and worth a fresh opinion:** does the pantry check run against the BATCH or
-the SERVING? A 2-serving batch draws twice the pantry.
+### Decisions already made — do not relitigate
 
-§2h is the sibling idea (scale existing meals instead of regenerating on a goal change) — also
-designed, not built, lower risk.
+* **"Doesn't fit my macros", NOT "macros look wrong."** Users cannot judge accuracy (they would have
+  to weigh the food) but they can judge fit — 533 kcal against a 420 slot is obvious. It also maps
+  to a measured hole: **14 of 39 meals land above the calorie band and below the drop threshold**,
+  where nothing acts.
+* **"Didn't taste good" replaces "Just not for me."** Sharper signal, same user intent.
+* `meal_ratings.trending_meal_id` **already exists**, so global demotion of a badly-rated shared
+  Discover row needs no schema work.
+* Known weakness, accepted: the thumbs-down lives on the detail screen, usually BEFORE cooking, so
+  taste feedback is weakest exactly where it is collected. The strong version is a post-**Log Meal**
+  prompt — that is Phase 4, not now.
+* Optional and deliberately deferred: "Photo doesn't match" could **fix itself** — bust the cache key
+  and call `generate-meal-image` with `replaceTrending: true`. That whole path was built today. Too
+  clever for an unproven signal, cheap to add later.
 
----
+### Phase 2 — feedback capture (planned, not built)
+One private `feedback` table, RLS self-insert only:
+`user_id, kind ('bug'|'idea'), body, screen, app_version, meal_id, funnel_run_id, created_at`.
+Three entry points: **Profile → "Help & feedback"**, the **"No photo for this one"** card, the **Home
+generation-error card**. The last two already exist and already render.
 
-## 2. WHAT THE REPEATED-MEALS BUG ACTUALLY WAS — two bugs, not one
+**Profile currently has NO support or contact row at all** — only Privacy Policy and Terms. That is a
+submission-readiness gap, not just UX: a user with a problem has exactly one outlet, the App Store.
 
-Logan reported a chocolate shake and a frittata coming back. `generated_meals` is a permanent
-timestamped record, so this was measured, not guessed:
+### Phase 3 — review prompt (Logan confirmed: BEFORE launch)
+`expo-store-review` is **not installed**. Fire at the `cook-reveal` peak (the code calls it "THE
+PEAK"), gated on ≥2nd session, with a cooldown.
 
-1. **A lost update (FIXED, VERIFIED).** The effect's deps are `[userId, isPremium, mode, enabled]`;
-   `enabled` flipped when the pantry landed and `isPremium` resolved ~23ms later, firing a SECOND
-   generation. `cancelled` suppresses state updates, it never aborts an in-flight call. Both batches
-   completed — six meals share one timestamp where a batch is three — and only ONE batch's names
-   reached `recent_meal_names`, because both read the old window and the later write won. Half of
-   every double generation was therefore invisible to the anti-repeat check.
-   Now an **in-flight** lock (`generatingForRef`). Verified server-side: newest batch is 3, and all
-   three names are in the window.
-2. **The ingredient rescue overruling an identical name (FIXED, needs a few generations to judge).**
-   `isSameDishDetailed` returned "not the same dish" whenever ingredient overlap fell below
-   `INGREDIENT_RESCUE_MAX`, **even for a byte-identical name** — so "Protein-Boosted Chocolate
-   Smoothie" was rescued and regenerated verbatim an hour after entering the window. Identical
-   `dishKey` now short-circuits to true.
+**Compliance is non-negotiable and was researched, not assumed:**
+* **No sentiment gating.** Apple treats filtered feedback as review manipulation; stated consequence
+  is expulsion from the Developer Program.
+* **No question before the prompt.** Apple's HIG: "Don't ask the user any questions before or while
+  presenting the rating button or card." This kills the "Enjoying Pantry? 👍/👎" pattern Logan saw in
+  a video **even if both branches offer a review**.
+* Max **3 prompts per 365 days**; iOS may show nothing. Never build logic that assumes it appeared.
+* **`isAvailableAsync()` returns false on TestFlight** — Phase 3 cannot be tested there.
 
-**Two placement mistakes were caught before shipping #1**, both of which would have traded one bug
-for another: guarding at the top of `fetchAndGenerate` would have suppressed the regeneration
-Profile deliberately triggers, and a per-DAY lock would have done the same. The guard belongs on the
-expensive call, and it must be released when the generation settles.
-
-**STILL OPEN:** "Chocolate Protein Smoothie" appeared TWICE inside one 11:51 response. Nothing
-de-duplicates a batch against itself before storing. Separate from both fixes above.
-
-**Do NOT lengthen `RECENT_MEMORY`.** It is 30 and was never too short.
-
----
-
-## 3. THE UNEXPLAINED REGENERATIONS WERE NOT A BUG
-
-Hours went into this. Changing **Meals Per Day** (or any `GoalField`, or diet type, or a macro
-recalc) clears the meal cache **on purpose** — Profile's own comment says so. Logan had changed it.
-
-Four theories died first, all by reading rather than shipping a fix: app killed mid-generation
-(disproved by his own four-session trace — one session HIT the cache without generating and the next
-still missed), the date key (`todayStr` is local), `maxPrepMinutes` undefined, `prepTime` stored as
-a string, and `mealPrefetch` as a rogue writer.
-
-**Instrumentation was kept, not reverted**, so the next real miss costs minutes not a session: every
-miss branch in `useMealSuggestions` is named, every cache WRITE is marked, and all four Profile
-wipes log their reason — a deliberate wipe and a cache lost to an app kill both read as
-"no entry stored" otherwise.
-
-**Also found here:** nothing re-runs meal loading on focus (deps are `[userId, isPremium, mode,
-enabled]`; clearing AsyncStorage changes none of them), so a Profile change only appears to
-regenerate on the NEXT launch. That is what made this look intermittent for hours.
+Not building: public voting, roadmap, upvotes, email. The `kind` column makes voting a later table,
+not a rewrite.
 
 ---
 
-## 4. NEGATIVE RESULTS — do not retry these
+## 2. UNRESOLVED — things Logan raised that have no commit
 
-- **A canonical-list rotation for Discover shelves left `nearly` leading SEVEN days running**, and
-  still mismatched on 8 of 14 days. `min(hash(key+day))` fails differently — a section that only
-  exists in the big pool steals the lead. The shipped fix takes the offset modulo a FIXED window
-  (the prefix both pool sizes share). All three were simulated before any was written; only the
-  third survived.
-- **A LAYERED DISHES build-order rule for image prompts does not work.** It is in the prompt, it
-  reaches the model, and the description still lists coconut after the ganache on every run. Same
-  shape as the merged-ingredient finding.
-- **`InteractionManager` is deprecated** and the replacement needs `{ timeout }` — `requestIdleCallback`
-  alone can wait forever on a thread that never idles, which is exactly the cold-start case.
-
----
-
-## 5. THINGS SHIPPED THAT ARE STILL UNVERIFIED ON DEVICE
-
-Per the standing rule, these must not be assumed working:
-
-- **Discover shelf rotation + "Almost in your kitchen" contents** — day-keyed, so use
-  `DEV_DAY_OFFSET` at the top of `app/(tabs)/discover.tsx` (bump 0→1→2→3, reload between, set back
-  to 0). Simulated: leader cycles all 4 sections, contents give 3 distinct sets.
-- **Profile now STALES the meal cache instead of deleting it**, so the carryover paints previous
-  meals while new ones generate. Logan saw the bare "Let's cook" empty state before this.
-- **The calorie card redesign + `LOG_PEEK` 190.** Judge the 40pt number, 84pt ring and LOG_PEEK on
-  device — each is one value.
-- **The week strip**: swipe between weeks, three-state day marks, `Log to <date>` on the meal
-  detail button when it is not today.
-- **A real generation still holding the skeleton until the hero photo paints** (`bf41c61`'s fix,
-  which the Home skeleton work must not have thrown away). Needs a day with no cache.
+* **Home screen layout redesign.** He wants the single-meal hero view GONE and the three meals shown
+  like the Pantry list. Open question he said he would decide: **all three on one row, or each meal
+  its own row.** He leans own-row ("looks better but more space costly") and wants the **daily meal
+  log visible half-way up** so it is not scroll-only. Pantry-screen ingredients can move up into the
+  space the meal card vacates. My opinion when asked: own-row reads better; the cost is the log
+  getting pushed down, which is the thing he explicitly wants to avoid — so the two goals fight and
+  he has not picked.
+* **Discover freshness signal** (also `docs/PRELAUNCH.md` §2j). Users cannot tell Discover updates
+  daily. His ideas: a gold/green "NEW" bracket on recent cards, or ordering each shelf newest-first.
+  **Not investigated.** The thing to check first: shelf rotation is deliberately DAY-KEYED to vary
+  order, so a strict newest-first sort would fight it.
+* **Chocolate protein powder in a fruit parfait.** The 04:46 batch put chocolate powder with
+  pineapple when the pantry ALSO has plain "Protein Powder". A flavour-coherence miss, not a bug.
+* **Technique lies.** "Grilled Chicken and Pesto Plate" is pan-seared in its own steps. Measured at
+  **1 of 51** — deliberately NOT gated, because the pipeline already drops ~25% of candidates and a
+  2% failure does not justify a seventh gate. Revisit only if it passes ~10%.
 
 ---
 
-## 6. THE 1,370 IMAGES ARE STILL THE BIGGEST UNRESOLVED PRODUCT RISK
+## 3. UNVERIFIED ON DEVICE — everything below shipped today and has never been seen
 
-Unchanged from this morning and still §2b. Every cached image predates the prompt fixes. Two for two
-on the ones Logan happened to open were wrong. The tooling now exists (`replaceTrending`, cache-bust
-by URL, a `describeOnly` path for stage 1) — what is missing is the call: spot-audit by eye, or bulk
-regenerate at ~$4.
+Per the standing rule these must not be assumed working:
+
+* **Servings stepper** on meal detail (1..max, ceiling follows the recipe). Step 1→3 and confirm the
+  macro bar does NOT move — it is per serving by design.
+* **Pantry refresh lighting Home's sweep bar**, and Home holding the new meals afterwards. Also
+  meals 2 and 3 filling in on Home while Pantry ran the generation.
+* **The no-photo fallback** — a capped meal shows a static plate icon and "No photo for this one",
+  never an endless shimmer.
+* **Home's generation-error card** — a failed generation now says why, and hides the CTA on
+  `meal_cap_reached`.
+* **`restTime`** rendering as "20 min prep · +8 hr rest" on Home card, hero pill, Pantry and detail.
+* **The Pantry ↻ button** now reads the SERVER quota; it should grey out on its own after 6
+  generations rather than failing when tapped.
+* Discover: the 6 repaired images. **Logan's device may still show the old YouTube thumbnails** —
+  `expo-image` caches by URI and his deck predates the fix. Not a bug; it self-heals on the next
+  fetch.
 
 ---
 
-## 7. ENVIRONMENT
+## 4. THINGS THAT WILL BITE THE NEXT SESSION
 
-- **`EXPO_PUBLIC_EAS_PROJECT_ID` is in `.env`** (gitignored, not a secret — it is in committed
-  `app.json` too). This is a BARE workflow, so `expo-constants` reads the config embedded at NATIVE
-  BUILD time; `app.json` alone does not reach a JS reload. That is why the push-token warning
-  survived three reloads and two of my "fixes".
-- The health check now reports through TWO channels: a push (`alert: "sent"` proven) and a
-  `pipeline_runs` row. It had been running on a cron since 2026-08-12 telling nobody anything.
-  Read it with:
-  `select created_at, funnel from pipeline_runs where provider='health-check' order by id desc limit 7;`
-  Its cron is 08:20 UTC and it only fires a push when UNHEALTHY — silence is the healthy state.
-  A row with `utc_hour` well below 8 is an off-window manual run; ignore its verdict.
-- Metro must run from `/Users/loganshaver/pantry` with `npx expo start --dev-client`. Without
-  `--dev-client` it comes up in Expo Go, which cannot run this app.
-- `npx supabase db query --linked --file <f>` reads prod. The Vault holds `cron_service_role_key`
-  and IS readable from SQL, which is how every manual edge-function call authenticates.
+* **Caps are DERIVED now.** `supabase/functions/_shared/caps.ts` — `MEAL_GEN_CAP_PER_DAY = 6`,
+  `IMAGE_GEN_DAILY_CAP = 6 × 3 + 6 = 24`. Do not edit one without the other; they drifted apart once
+  and shipped a live bug. `lib/useMealSuggestions.ts` keeps a DISPLAY-ONLY mirror of the meal cap
+  because a device build must not import edge-runtime files.
+* **Resetting Logan's caps for testing** (he hits them constantly):
+  `update scan_usage set count = 0 where user_id = <his> and scan_type in ('meal_gen','image_gen') and day = current_date;`
+* **The funnel is now queryable** — this is the single biggest tooling win of the session and it
+  should be the FIRST thing consulted before theorising about generation:
+  ```sql
+  select created_at, stored, funnel from pipeline_runs
+  where provider='generate-meals-funnel' order by id desc limit 1;
+  ```
+  It carries candidates asked/returned, every gate's drops, flagged-vs-fresh, the bans in force, the
+  forms shown, and which source set each meal's macros.
+* **Two counters lied today and both were caught by reading the funnel, not the code.**
+  `droppedByFat` and `notCookable` were each read AFTER their filter, so they reported zero on
+  success. If a new gate is added, record its counter where the drop happens.
+* **The TDZ trap is real and recurring.** `funnel` used before declaration produced TS2448/TS2454 —
+  a ReferenceError on every generation. The baseline moving 130 → 132 caught it in seconds. Watch
+  the DELTA, not the total.
+* **fal-ai/flux-2 bills per MEGAPIXEL** at $0.012; Pantry renders 512×512 = 0.262 MP ≈ **$0.0031 per
+  image**. Resolution is SETTLED — Logan judged the current upscale fine and explicitly dropped it.
+  The comment in `generate-meal-image` calling the resolution "the problem" is stale as a
+  recommendation.
+
+---
+
+## 5. NEGATIVE RESULTS — do not retry these
+
+* **A naive "berry" entry in `DEFINING_FOODS` does not work.** `tokens()` stems "blueberries" to
+  "blueberry", never "berry", so a genuine blueberry smoothie reads as berry-less. It works only as a
+  defining food AND a `SYNONYMS` group. The original exclusion comment was right; the conclusion was
+  not.
+* **"protein" and "powder" cannot be members of `GRAIN_DERIVATIVE`.** The escape hatch reads the DISH
+  NAME, so a meal called "Protein Powder and Coffee Overnight Oats" turned the filter off — on the
+  exact recipe it was written for.
+* **Do not strip "orphan" oils and seasonings from ingredient lists.** "Heat a pan" implies the oil
+  and "Season" implies the salt; stripping them UNDERSTATES macros. Only substantive ingredients over
+  15 g are phantom. That exemption is the difference between removing 153 kcal of genuine phantom and
+  537 kcal, most of it real cooking fat.
+* **Do not tighten the upper calorie drop.** The ranking already picks the best 3 of 10, so a meal at
+  1.4× target IS the closest the model produced — filtering harder starves the deck. `scale-recipe.ts`
+  is the correct version of that instinct: change the food, not the filter.
+* **Do not lengthen `RECENT_MEMORY`.** Still 30, still never the problem.
+
+---
+
+## 6. STILL OPEN FROM BEFORE THIS SESSION
+
+* **`docs/PRELAUNCH.md` §2b — the ~1,400 cached images predate the prompt fixes.** Unchanged and
+  still the biggest unresolved product risk. Note the catch discovered today: repairing an image
+  updates the shared library but **not any deck a user is already holding**.
+* **§2h — scale instead of regenerating** on a goal change. Designed, not built. Much of the
+  machinery now exists in `_shared/scale-recipe.ts`.
+* **§2i — the pantry variety unlock.** Deferred with the numbers, including why the cheap version
+  does not work (`missing_ingredients` is empty by design in cookNow).
