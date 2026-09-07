@@ -128,7 +128,7 @@ with a curd dip.
       The rule triggers on mashed/blended/mixed/stirred/folded/dissolved/melted/whisked. Extending
       the list is one line, but it is UNMEASURED and the LAYERED DISHES rule added the same day did
       not take, so do it with a before/after on several dishes, not one sample.
-- [ ] **⚠️ MOST CACHED IMAGES WERE GENERATED UNDER THE BROKEN PROMPT — but it is 194, not 1,370.**
+- [x] **CLOSED 2026-09-07 — audited, and NOT a launch blocker. It is 194 images, not 1,370, and they are mostly fine.**
       MEASURED 2026-09-07 with `scripts/date-image-library.py`. The storage list endpoint returns
       `created_at` and `meal-images` is a public bucket, so the whole library dates itself against
       the commit dates of every prompt change — anon key only, no cost. There WAS an automated
@@ -152,6 +152,29 @@ with a curd dip.
       launch risk. Worklist: run the script, take the rows where `live_in_discover` is true.
       Regeneration is cheap to trigger — delete the `image_cache` row, null `trending_meals.image`,
       re-invoke; the `?v=` token handles clients.
+
+      **AUDITED 2026-09-07 — DO NOT BULK REGENERATE. The premise does not hold.** Eight of the 194
+      were sampled at random and looked at: seven are correct and appetizing (chocolate-strawberry
+      smoothie, bacon chicken crack bowl, mini blueberry cheesecake, PB fudge balls, choc-PB protein
+      bar, soya chunks chilla, paneer dosa). One is flawed — `biscoff-paneer-cheesecake` has garbled
+      fake lettering on the biscuit — and that is a diffusion text-rendering artifact, which none of
+      the prompt fixes address, so it is not evidence for regenerating either.
+
+      "Generated under the broken prompt" was never evidence that an image IS broken. The three
+      known-bad ones were found because Logan looked at them. Nobody had looked at the rest.
+
+      Regenerating also has a cost that is not the $0.60: measured the same day, Flux drops a named
+      element roughly 1 render in 11 (one live recipe, 11 renders; six seeds at current settings all
+      correct). A bulk regen re-rolls ~194 mostly-good images at that rate with no verification step,
+      so it would quietly make some of them worse.
+
+      **Replaced by:** regenerate individually when an image is actually reported wrong. The
+      thumbs-down reason `photo_mismatch` (shipped 2026-09-07) is the detector, and
+      `scripts/describe-image.sh --render` is the one-command fix. A stochastic tail is cheaper to
+      detect than to prevent.
+
+      Also verified while auditing: all 206 Discover rows resolve — 0 broken storage links, 0 still
+      on a YouTube thumbnail, 0 with no image.
 
       **Read "live" as "live in DISCOVER".** Generated-meal images are keyed in `image_cache`,
       which is service-role only, so a file marked not-live is not proof nobody is served it —
