@@ -16,7 +16,7 @@ const PANTRY = [
 ]
 const ASSUMED = ['salt','black pepper','cooking oil','olive oil','butter','all-purpose flour','sugar',
   'garlic powder','onion powder','paprika','cumin','chili powder','oregano','basil','Italian seasoning',
-  'cinnamon','red pepper flakes']
+  'cinnamon','red pepper flakes','ice cubes']
 
 // The two real meals that prompted this. The model declared the garnish and hid the tortilla.
 const WRAP = [
@@ -79,4 +79,19 @@ test('an unreadable ingredient name never disqualifies a meal', () => {
   assert.equal(isInPantry('', PANTRY), true)
   assert.deepEqual(findMissing([{ name: '', grams: '10g' }], PANTRY, ASSUMED), { structural: [], garnish: [] })
   assert.deepEqual(findMissing(undefined, PANTRY, ASSUMED), { structural: [], garnish: [] })
+})
+
+// Ice is assumed stock — but the entry must stay "ice cubes". isInPantry matches substrings both
+// ways, so a bare 'ice' makes "rice" and "juice" resolve as in-pantry and they stop being flagged
+// as missing. That would be silent: rice is a real staple in the pantry this ships against.
+test('assumed ice covers a recipe line that just says "ice"', () => {
+  assert.equal(isInPantry('ice', ASSUMED), true)
+  assert.equal(isInPantry('crushed ice', ASSUMED), true)
+})
+
+test('assumed ice does NOT swallow rice or juice', () => {
+  assert.equal(isInPantry('rice', ASSUMED), false)
+  assert.equal(isInPantry('cooked rice', ASSUMED), false)
+  assert.equal(isInPantry('brown rice', ASSUMED), false)
+  assert.equal(isInPantry('orange juice', ASSUMED), false)
 })

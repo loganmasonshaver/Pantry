@@ -11,7 +11,7 @@ import {
   cleanIngredientName, formatHalf, getMeasuredDisplay, getWholeUnitDisplay,
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
-  formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat,
+  formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat, snapDisplayMinutes,
   formatRestBadge, formatTimeBreakdown, formatTimeLine,
 } from './ingredientDisplay.ts'
 
@@ -692,4 +692,41 @@ test('the detail screen keeps the real numbers, and drops the parts that are zer
   assert.equal(formatTimeBreakdown(10, 20, 480), '10 min prep · 20 min cook · 8 hr rest')
   // A no-cook dish says "5 min", not "5 min prep" — there is nothing to distinguish it from.
   assert.equal(formatTimeBreakdown(5, 0, 0), '5 min')
+})
+
+// ── 5-minute display granularity ───────────────────────────────────────────────────────────────
+
+test('a 3-minute prep shows as 5 — the model cannot tell 3 from 5 and the card should not imply it can', () => {
+  assert.equal(formatTimeToEat(3, 0), '5 min')
+  assert.equal(formatTimeBreakdown(3, 0, 0), '5 min')
+})
+
+test('snapping rounds UP, so the shown time is never less than the recipe claims', () => {
+  assert.equal(snapDisplayMinutes(1), 5)
+  assert.equal(snapDisplayMinutes(6), 10)
+  assert.equal(snapDisplayMinutes(21), 25)
+})
+
+test('times already on a 5 are untouched', () => {
+  assert.equal(formatTimeToEat(10, 20), '30 min')
+  assert.equal(formatTimeToEat(5, 0), '5 min')
+  assert.equal(snapDisplayMinutes(30), 30)
+})
+
+test('card total and detail breakdown reconcile after snapping — the reason parts snap, not the sum', () => {
+  // 7 + 20 = 27. Snapping the TOTAL would print "30 min" over "7 min prep · 20 min cook".
+  assert.equal(formatTimeToEat(7, 20), '30 min')
+  assert.equal(formatTimeBreakdown(7, 20, 0), '10 min prep · 20 min cook')
+})
+
+test('zero and junk stay zero — a no-cook dish must not gain a phantom 5 minutes of oven', () => {
+  assert.equal(snapDisplayMinutes(0), 0)
+  assert.equal(snapDisplayMinutes(undefined), 0)
+  assert.equal(snapDisplayMinutes('soon'), 0)
+  assert.equal(formatTimeBreakdown(5, 0, 0), '5 min')
+})
+
+test('activeMinutes stays EXACT — the prep budget filters on it and must not inherit the rounding', () => {
+  assert.equal(activeMinutes(3, 0), 3)
+  assert.equal(activeMinutes(7, 20), 27)
 })

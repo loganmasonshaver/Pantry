@@ -666,8 +666,25 @@ export function activeMinutes(prepTime: unknown, cookTime: unknown): number {
 // The headline number on a card: one figure answering "how soon do I eat". The breakdown belongs
 // on the detail screen, where there is room to say which half is work — on a pill "10 min + 20 min"
 // only raises the question of what the second number is.
+// DISPLAY granularity. The model emits prepTime to the minute and that is false precision — nothing
+// it knows distinguishes a 3-minute yogurt bowl from a 5-minute one, and "3 min" sitting beside
+// "10 min" and "30 min" reads as a measurement when it is an estimate. Snapping UP keeps it an
+// under-promise: the shown number is never less time than the recipe claims.
+//
+// Applied to prep and cook SEPARATELY, not to the total, so the card and the detail breakdown
+// cannot disagree — 7 prep + 20 cook shows "30 min" on the card and "10 min prep · 20 min cook"
+// underneath, which still sums. Snapping the total alone would have printed 30 over 7 + 20 = 27.
+//
+// activeMinutes stays exact on purpose: it is the raw figure, and the server's prep-time gate
+// filters on the same unrounded numbers.
+export function snapDisplayMinutes(minutes: unknown): number {
+  const n = Number(minutes)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.max(5, Math.ceil(n / 5) * 5)
+}
+
 export function formatTimeToEat(prepTime: unknown, cookTime: unknown): string {
-  return `${activeMinutes(prepTime, cookTime)} min`
+  return `${snapDisplayMinutes(prepTime) + snapDisplayMinutes(cookTime)} min`
 }
 
 // How a wait reads on a CARD: a word, never a number.
@@ -704,8 +721,9 @@ export function formatTimeLine(prepTime: unknown, cookTime: unknown, restTime: u
 export function formatTimeBreakdown(prepTime: unknown, cookTime: unknown, restTime: unknown): string {
   const p = Number(prepTime)
   const c = Number(cookTime)
-  const prep = Number.isFinite(p) && p > 0 ? Math.round(p) : 0
-  const cook = Number.isFinite(c) && c > 0 ? Math.round(c) : 0
+  // Same snap as the card, or the two screens disagree about the same dish.
+  const prep = snapDisplayMinutes(p)
+  const cook = snapDisplayMinutes(c)
   const rest = formatRestTime(restTime)
   // Nothing to break down: the overwhelming case is a no-cook dish, and "5 min prep" only adds a
   // word to "5 min".

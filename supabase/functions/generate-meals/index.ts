@@ -478,7 +478,11 @@ Deno.serve(async (req: Request) => {
     if (dietLower.includes('vegan') || dietLower.includes('dairy-free')) excludedStaples.push('butter')
     if (dietLower.includes('gluten-free')) excludedStaples.push('all-purpose flour')
     const ASSUMED = ['salt', 'black pepper', 'cooking oil', 'olive oil', 'butter', 'all-purpose flour', 'sugar',
-      'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili powder', 'oregano', 'basil', 'Italian seasoning', 'cinnamon', 'red pepper flakes']
+      'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili powder', 'oregano', 'basil', 'Italian seasoning', 'cinnamon', 'red pepper flakes',
+      // "ice cubes", never bare "ice" — isInPantry matches on substrings, so 'ice' would make
+      // rice and juice permanently in-stock and they would silently stop showing as missing.
+      // The head-noun rule still matches a recipe line that just says "ice".
+      'ice cubes']
       .filter(s => !excludedStaples.includes(s.toLowerCase()))
     const excludedClause = excludedStaples.length
       ? ` EXCEPTION — the user has told us they do NOT keep: ${excludedStaples.join(', ')}; treat those as missing if a recipe needs them.`
