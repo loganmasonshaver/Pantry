@@ -733,15 +733,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       }
       meals = [...inBand, ...uncorrected]
     }
-    // FAT is a FLOORED drop, not a hard one: on a fatty pantry (beef/cheese/dressings) almost every
-    // meal exceeds the cap, so hard-dropping collapsed the list to a single meal. Drop fat-bombs
-    // ONLY while ≥ displayCount lean meals remain; otherwise keep them and let the ranking below
-    // (one-sided fat penalty) surface the leanest displayCount. Prefer lean, never starve the list.
-    let droppedByFat = 0
-    if (!highFatDiet) {
-      const lean = meals.filter((m: any) => Number(m.fat) <= fatDropThreshold)
-      if (lean.length >= displayCount) { droppedByFat = meals.length - lean.length; meals = lean }
-    }
+    let droppedByFat = 0 // set by the fat drop, which runs AFTER the repeat marking below
     // UNDER-SIZED meals. There was no lower bound at all: the calorie drop above is one-sided, so a
     // 378 kcal "meal" against a 525 kcal slot shipped untouched. Mirroring the upper drop would not
     // have caught it — calorieMin / 1.40 is 0.61x target, and that meal was 0.72x. Measured across
@@ -759,11 +751,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     if (bigEnough.length >= displayCount) { droppedBySmall = meals.length - bigEnough.length; meals = bigEnough }
     funnel.afterBands = meals.length
     funnel.droppedByBands = beforeBands - meals.length
-    funnel.droppedByFat = droppedByFat
     funnel.droppedBySmall = droppedBySmall
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedByFat ? `, ${droppedByFat} fat-bombs > ${Math.round(fatDropThreshold)}g` : ''}${droppedBySmall ? `, ${droppedBySmall} under ${Math.round(calorieDropLow)} kcal` : ''})`)
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedBySmall ? `, ${droppedBySmall} under ${Math.round(calorieDropLow)} kcal` : ''})`)
     }
 
     // Repeat suppression, code-enforced. Marked rather than hard-dropped: on a thin pantry the
@@ -818,6 +809,34 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     funnel.fresh = meals.length - repeatCount
     funnel.ingredientRescues = rescued
     if (rescued > 0) console.log(`Ingredient rescue fired ${rescued}x this generation`)
+
+    // FAT DROP — moved here, AFTER the repeat marking, and it is not a cosmetic reorder.
+    // Measured on the first funnel row: 10 candidates in, the fat filter took FOUR, and of the six
+    // survivors exactly ONE was fresh. Running before the repeat marking made it blind to the only
+    // thing it could trade against, so it was choosing lean-and-repeated over fatty-and-fresh —
+    // the exact opposite of the ranking's own priority, which sorts freshness ABOVE macro fit
+    // because "the repeat is the thing users actually notice and complain about".
+    //
+    // Still floored on count, and now also on freshness: a fat-bomb is dropped only when doing so
+    // costs no fresh candidate. Nothing is lost by keeping a fatty fresh dish — the ranking's
+    // one-sided fat penalty already sorts it below a lean one, so it only reaches the user when
+    // there was nothing leaner to show.
+    if (!highFatDiet) {
+      const lean = meals.filter((m: any) => Number(m.fat) <= fatDropThreshold)
+      const freshAll = meals.filter((m: any) => !m._repeat).length
+      const freshLean = lean.filter((m: any) => !m._repeat).length
+      if (lean.length >= displayCount && freshLean === freshAll) {
+        droppedByFat = meals.length - lean.length
+        meals = lean
+      } else if (lean.length >= displayCount) {
+        console.log(`Fat drop skipped: it would cost ${freshAll - freshLean} of ${freshAll} fresh candidate(s) — a repeat is the more visible failure`)
+      }
+    }
+    if (droppedByFat > 0) console.log(`Fat drop: ${droppedByFat} fat-bomb(s) over ${Math.round(fatDropThreshold)}g removed`)
+    // Recorded HERE, not with the other band counters — the drop now happens after them, and
+    // reading it earlier would have logged a permanent zero.
+    funnel.droppedByFat = droppedByFat
+    funnel.afterFat = meals.length
     if (repeatCount > 0) {
       console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
     }
