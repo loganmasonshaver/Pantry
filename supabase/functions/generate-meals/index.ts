@@ -6,7 +6,7 @@ import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
-import { verifyMacros } from '../_shared/macro-estimate.ts'
+import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -123,7 +123,28 @@ async function correctMealMacros(meal: any, servings = 1): Promise<any> {
   // Only override LLM macros if FatSecret resolved ≥50% of ingredients AND the total is
   // within a sane range. Outside this band → trust the LLM (database mismatch likely worse
   // than estimate). The 200–1200 window is PER SERVING, so it scales with the batch.
-  const applied = lookedUp >= ingredients.length / 2 && totalCal >= 200 * servings && totalCal <= 1200 * servings
+  let source = 'fatsecret'
+  let applied = lookedUp >= ingredients.length / 2 && totalCal >= 200 * servings && totalCal <= 1200 * servings
+
+  // FALLBACK. FatSecret is not an enhancement here — without it the whole feature goes dark, and
+  // that was invisible until the model-vs-corrected numbers became readable. Measured on a live
+  // generation the model reported 1420/1450/1500 kcal against an 840 batch target; the calorie
+  // drop fires at batchCalorieMax * 1.40 = 1352, so ALL THREE would have been discarded and the
+  // user would have got an empty deck and a refund. Two missing env vars or one API outage does
+  // that to every generation, silently.
+  //
+  // estimateMacros is the same local reference table verifyMacros already trusts to DROP meals,
+  // and on real recipes it landed within 20-30% of FatSecret. Using it to correct is strictly
+  // better than shipping the model's own numbers, which are the thing every gate here exists to
+  // distrust. Coverage gate is MACRO_TOLERANCE.minCoverage, the same bar verifyMacros uses.
+  if (!applied) {
+    const est = estimateMacros(ingredients)
+    if (est.coverage >= MACRO_TOLERANCE.minCoverage && est.kcal >= 200 * servings && est.kcal <= 1200 * servings) {
+      totalCal = est.kcal; totalP = est.protein; totalC = est.carbs; totalF = est.fat
+      applied = true
+      source = 'local-table'
+    }
+  }
   // Which source won is invisible downstream — the model's own number and FatSecret's sum both
   // end up in the same field. They disagree by 20-30% on real recipes, in an inconsistent
   // direction, so without this there is no way to tell an inflated lookup from a model that
@@ -134,8 +155,11 @@ async function correctMealMacros(meal: any, servings = 1): Promise<any> {
   // machine — so a console-only diagnostic is one nobody can actually read back. pipeline_runs is
   // already the sink for this kind of thing.
   meal._fsTrace = { name: meal.name, model: meal.calories, fs: Math.round(totalCal),
-                    resolved: `${lookedUp}/${ingredients.length}`, applied, items: trace }
-  console.log(`[fatsecret] "${meal.name}" model=${meal.calories} fs=${Math.round(totalCal)} (${lookedUp}/${ingredients.length} resolved) → ${applied ? 'OVERWROTE' : 'kept model'} | ${trace.join(' · ')}`)
+                    resolved: `${lookedUp}/${ingredients.length}`, applied, source, items: trace }
+  // Read by the band filter: a meal whose macros were never corrected carries the MODEL's numbers,
+  // which run 1.7-1.8x target, and dropping it on those is punishing it for our own missing data.
+  meal._macrosCorrected = applied
+  console.log(`[macros] "${meal.name}" model=${meal.calories} corrected=${Math.round(totalCal)} via ${applied ? source : 'nothing'} (${lookedUp}/${ingredients.length} via FatSecret) | ${trace.join(' · ')}`)
   if (applied) {
     meal.calories = Math.round(totalCal)
     meal.protein = Math.round(totalP)
@@ -645,11 +669,39 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     const proteinDropThreshold = batchProteinMax * 1.40
     const calorieDropThreshold = batchCalorieMax * 1.40
     const fatDropThreshold = batchFatMax * 1.40 // fat-bomb guard — code-enforced, since the LLM ignores prompt caps under load
+    // FUNNEL. Every number below is one this function ALREADY computes for a console line, and
+    // console lines are dashboard-only. Collecting them into a row turns "how many candidates were
+    // fresh?" from an inference off the sort order into a query. Every threshold in this file was
+    // calibrated from a one-off manual measurement — the comments say so — and this is what makes
+    // that continuous instead of archaeological.
+    const funnel: Record<string, unknown> = {
+      genCountAsked: genCount, modelReturned: meals.length,
+      displayCount, servings, calorieTarget, batchCalorieTarget,
+      bannedBases, bannedForms, maxPrepMinutes,
+      pantryItems: ingredients.length, windowNames: recentServed.length,
+    }
+
     const beforeBands = meals.length
-    meals = meals.filter((m: any) =>
+    const inBand = meals.filter((m: any) =>
       Number(m.protein) <= proteinDropThreshold &&
       Number(m.calories) <= calorieDropThreshold
     )
+    // The drop is hard while enough meals survive it, and floored when they do not — because a
+    // meal whose macros could not be corrected is carrying the MODEL's numbers, and those run
+    // 1.7-1.8x target. Dropping it on that basis punishes the meal for OUR missing data and empties
+    // the deck. That is not hypothetical: on a live generation the model reported 1420/1450/1500
+    // against an 840 batch target, all three above the 1352 drop line, so a FatSecret outage would
+    // have returned nothing at all. A corrected meal over the line IS a genuine calorie bomb and
+    // still goes.
+    if (inBand.length >= displayCount) {
+      meals = inBand
+    } else {
+      const uncorrected = meals.filter((m: any) => !inBand.includes(m) && m._macrosCorrected === false)
+      if (uncorrected.length > 0) {
+        console.log(`Macro bands: keeping ${uncorrected.length} meal(s) whose macros could not be corrected — the model's own numbers are not grounds to drop them`)
+      }
+      meals = [...inBand, ...uncorrected]
+    }
     // FAT is a FLOORED drop, not a hard one: on a fatty pantry (beef/cheese/dressings) almost every
     // meal exceeds the cap, so hard-dropping collapsed the list to a single meal. Drop fat-bombs
     // ONLY while ≥ displayCount lean meals remain; otherwise keep them and let the ranking below
@@ -674,6 +726,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     let droppedBySmall = 0
     const bigEnough = meals.filter((m: any) => Number(m.calories) >= calorieDropLow)
     if (bigEnough.length >= displayCount) { droppedBySmall = meals.length - bigEnough.length; meals = bigEnough }
+    funnel.afterBands = meals.length
+    funnel.droppedByBands = beforeBands - meals.length
+    funnel.droppedByFat = droppedByFat
+    funnel.droppedBySmall = droppedBySmall
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
       console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedByFat ? `, ${droppedByFat} fat-bombs > ${Math.round(fatDropThreshold)}g` : ''}${droppedBySmall ? `, ${droppedBySmall} under ${Math.round(calorieDropLow)} kcal` : ''})`)
@@ -727,6 +783,9 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       if (isRepeat) repeatCount++
       return { ...m, _repeat: isRepeat }
     })
+    funnel.flaggedRepeat = repeatCount
+    funnel.fresh = meals.length - repeatCount
+    funnel.ingredientRescues = rescued
     if (rescued > 0) console.log(`Ingredient rescue fired ${rescued}x this generation`)
     if (repeatCount > 0) {
       console.log(`Repeat filter: ${repeatCount}/${meals.length} candidates matched a recent dish (${meals.length - repeatCount} fresh, need ${displayCount})`)
@@ -773,11 +832,15 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // the other validity filters lets the ranking backfill from candidates that DO fit the budget.
     // Left as a HARD drop, not floored: "I have 30 minutes" is the user's constraint, not a
     // preference, and a 45-minute recipe is not a milder failure than a shorter deck.
+    funnel.afterMacroCheck = meals.length
     const beforePrep = meals.length
     meals = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
     if (beforePrep - meals.length > 0) {
       console.log(`Prep-time validation: dropped ${beforePrep - meals.length}/${beforePrep} meals that exceeded maxPrepMinutes=${maxPrepMinutes}`)
     }
+
+    funnel.afterPrepTime = meals.length
+    funnel.droppedByPrepTime = beforePrep - meals.length
 
     // ── BATCH → PER SERVING. The single divide. ──────────────────────────────────────────────
     // Everything ABOVE this line reads the ingredient list, which is always the full recipe: the
@@ -821,8 +884,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         (shownRepeats > 0 ? ` — ${shownRepeats} repeat(s) had to fill the deck (not enough fresh)` : ''),
       )
     }
-    // Strip the marker whether or not the ranking above ran — it must never reach the client cache.
-    meals = meals.map((m: any) => { const { _repeat, ...rest } = m; return rest })
+    // Strip the markers whether or not the ranking above ran — they must never reach the client
+    // cache, and _macrosCorrected must not reach generated_meals either, since that history is read
+    // back as recentDetailed on every later generation.
+    meals = meals.map((m: any) => { const { _repeat, _macrosCorrected, ...rest } = m; return rest })
 
     // If every candidate got filtered out (bad input, impossible macro/prep constraints),
     // refund the slot — the user got nothing usable, so it shouldn't count against their cap.
@@ -886,18 +951,20 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       console.log("generated_meals insert failed:", (e as Error).message)
     }
 
-    // Macro-source diagnostics. Its own try/catch and never allowed to fail the response — this is
-    // instrumentation, and the user already paid for the generation.
+    // Diagnostics. Own try/catch and never allowed to fail the response — this is instrumentation,
+    // and the user already paid for the generation.
     try {
       const traces = meals.map((m: any) => m?._fsTrace).filter(Boolean)
-      if (traces.length > 0) {
-        await db.from("pipeline_runs").insert({
-          provider: 'generate-meals-macros', dry_run: true, stored: traces.length,
-          funnel: { user: user.id, mode, servings, calorieTarget, batchCalorieTarget, meals: traces },
-        })
-      }
+      funnel.shown = meals.length
+      funnel.formsShown = meals.map((m: any) => dishArchetype(m?.name))
+      funnel.namesShown = meals.map((m: any) => String(m?.name ?? ''))
+      funnel.macroSources = traces.map((t: any) => t.applied ? t.source : 'uncorrected')
+      await db.from("pipeline_runs").insert({
+        provider: 'generate-meals-funnel', dry_run: true, stored: meals.length,
+        funnel: { user: user.id, mode, ...funnel, macros: traces },
+      })
     } catch (e) {
-      console.log("macro trace insert failed:", (e as Error).message)
+      console.log("funnel insert failed:", (e as Error).message)
     }
 
     // Return meals immediately, images will be fetched by a separate function. _fsTrace is
