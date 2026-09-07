@@ -463,3 +463,52 @@ test('recoverMergedIngredients is a no-op when the model already matched the sou
   assert.equal(recovered.length, 0)
   assert.equal(ingredients.length, 2)
 })
+
+// ── grain derivatives ──────────────────────────────────────────────────────────────────────────
+// "Protein Powder and Coffee Overnight Oats" was generated on 2026-09-07 from a pantry with no
+// rolled oats: the model substituted granola, kept the name, and left step 3 saying "to allow oats
+// to soften". It closed its own gap because `oat milk` contributes the token `oat` — the identical
+// hole MEAT_DERIVATIVE was written to close for `chicken broth`.
+const OATS_NO_OATS = [
+  { name: 'chocolate protein powder' }, { name: 'oat milk' }, { name: 'brewed coffee' },
+  { name: 'granola' }, { name: 'cinnamon' },
+]
+
+test('oat milk does not satisfy a dish named for oats', () => {
+  assert.deepEqual(nameIngredientGaps('Protein Powder and Coffee Overnight Oats', OATS_NO_OATS), ['oat'])
+})
+
+test('real oats close the gap', () => {
+  assert.deepEqual(
+    nameIngredientGaps('Protein Powder and Coffee Overnight Oats', [...OATS_NO_OATS, { name: 'rolled oats' }]),
+    [],
+  )
+})
+
+test('granola does not stand in for oats', () => {
+  // Granola IS made of oats, and that is exactly why the model reached for it. It bakes hard and
+  // never softens, so a dish whose whole method is an overnight soak cannot be built from it.
+  assert.deepEqual(nameIngredientGaps('Overnight Oats', [{ name: 'granola' }, { name: 'oat milk' }]), ['oat'])
+})
+
+test('a name that says the derivative turns the filter off', () => {
+  // "Oat Milk Latte" is genuinely about the milk — the same escape hatch MEAT_DERIVATIVE gets for
+  // "Chicken Broth Ramen".
+  assert.deepEqual(nameIngredientGaps('Oat Milk Latte', [{ name: 'oat milk' }, { name: 'espresso' }]), [])
+})
+
+test('rice flour is not rice', () => {
+  assert.deepEqual(nameIngredientGaps('Chicken Rice Bowl', [{ name: 'chicken breast' }, { name: 'rice flour' }]), ['rice'])
+  assert.deepEqual(nameIngredientGaps('Chicken Rice Bowl', [{ name: 'chicken breast' }, { name: 'cooked rice' }]), [])
+})
+
+// Regression on my own rule: "protein" and "powder" were briefly in GRAIN_DERIVATIVE, and because
+// the escape hatch reads the DISH NAME, that made the check inert on the exact meal it was written
+// for. A term that shows up in dish names cannot be a member of that set.
+test('a derivative term common in dish names does not disable the check', () => {
+  assert.deepEqual(nameIngredientGaps('Protein Powder Overnight Oats', [{ name: 'oat milk' }, { name: 'whey protein powder' }]), ['oat'])
+})
+
+test('flavour-led foods are unaffected — a chocolate protein shake is still chocolate', () => {
+  assert.deepEqual(nameIngredientGaps('Chocolate Protein Shake', [{ name: 'chocolate protein powder' }, { name: 'oat milk' }]), [])
+})

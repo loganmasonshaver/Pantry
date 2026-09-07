@@ -322,6 +322,30 @@ const MEAT_LIKE = new Set([
 // is deliberately absent: "low fat beef mince" is real beef and must not read as a derivative.
 const MEAT_DERIVATIVE = /\b(broth|stock|bouillon|consomm[eé]|seasoning|spice|rub|powder|flavou?r(?:ing|ed)?|extract|essence|base|granules?|cubes?|tallow|lard|dripping|suet|gelatin[e]?|collagen)\b/i
 
+// Starches you EAT AS THE FOOD, where a liquid or flour made from them is not a substitute.
+//
+// Exactly the MEAT_DERIVATIVE argument one food group over, and the same bug: "Protein Powder and
+// Coffee Overnight Oats" was generated with oat milk, granola and no oats at all, and closed its
+// own gap because `oat milk` contributes the token `oat`. The pantry it came from has no rolled
+// oats, so the model substituted granola and kept the name — while step 3 still said "to allow
+// oats to soften". You cannot soften oats you do not have.
+//
+// Kept SEPARATE from the flavour-led foods for the reason already documented above: a chocolate
+// protein powder genuinely makes a chocolate dish, and coconut milk genuinely makes a curry
+// coconutty. Nobody eats a bowl of oat milk and calls it oats.
+const GRAIN_LIKE = new Set(['oat', 'rice', 'quinoa', 'pasta', 'noodle', 'couscous', 'potato'])
+
+// Forms in which a grain is the SOURCE of an ingredient rather than the ingredient. "Bran" and
+// "starch" are fractions of the grain, not the grain. Bare "cooked"/"rolled"/"instant" are
+// deliberately absent — those describe the grain itself and must still satisfy the name.
+//
+// "protein" and "powder" were in this list for one draft and made it inert on the very meal it was
+// written for: the escape hatch below turns the filter OFF when the DISH NAME contains a
+// derivative word, and the dish is called "Protein Powder and Coffee Overnight Oats". A term that
+// appears in dish names is not a safe member of this set, and neither word describes a grain
+// derivative anyway.
+const GRAIN_DERIVATIVE = /\b(milk|flour|water|syrup|bran|starch)\b/i
+
 export function nameIngredientGaps(name: string, ingredients: any[] | undefined): string[] {
   const nameTokens = tokens(name)
   if (nameTokens.size === 0) return []
@@ -338,11 +362,17 @@ export function nameIngredientGaps(name: string, ingredients: any[] | undefined)
     ? ingTokens
     : tokens(lines.filter(l => !MEAT_DERIVATIVE.test(l)).join(' '))
 
+  // Same escape hatch the meat pool gets: when the NAME itself says the derivative ("Oat Milk
+  // Latte", "Rice Flour Pancakes"), the creator means the derivative and the plain set is right.
+  const grainSubstantive = GRAIN_DERIVATIVE.test(name)
+    ? ingTokens
+    : tokens(lines.filter(l => !GRAIN_DERIVATIVE.test(l)).join(' '))
+
   const gaps: string[] = []
   for (const food of DEFINING_FOODS) {
     const stem = singular(food)
     if (!nameTokens.has(stem)) continue
-    const pool = MEAT_LIKE.has(stem) ? substantive : ingTokens
+    const pool = MEAT_LIKE.has(stem) ? substantive : GRAIN_LIKE.has(stem) ? grainSubstantive : ingTokens
     if (pool.has(stem)) continue
     if ((SYNONYMS[food] ?? []).some(alt => pool.has(singular(alt)))) continue
     gaps.push(food)

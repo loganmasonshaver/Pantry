@@ -9,6 +9,7 @@ import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDis
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
+import { nameIngredientGaps } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
@@ -559,6 +560,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
   • NON-DAIRY MILK (oat/almond/soy) and egg whites: oat/almond milk is thin and slightly sweet — fine in smoothies, oats, cereal, coffee, NOT a 1:1 dairy swap for savory cream sauces. Egg whites are NOT whole eggs — good for scrambles/omelets/protein, but can't fry sunny-side-up or make a rich custard.
   • CONDIMENTS/DRESSINGS (ranch, salsa, ketchup, BBQ): finishing sauces in SMALL amounts — never a primary base dumped in by the cup (also blows the fat/calorie budget).
   • NAME THE PREPARED FORM, NOT THE PANTRY ITEM (blocking). When a pantry item has to be transformed before anyone can eat it, the ingredient NAME must be what actually goes into the dish: coffee beans → "brewed coffee" or "espresso"; dry pasta cooked in the steps → "cooked pasta"; uncooked rice → "cooked rice"; whole spices you grind → "ground <spice>". The ingredient name is BOTH the line the cook reads AND the description the dish photo is generated from, so writing "coffee beans" for a shot of espresso puts a pile of whole roasted beans on top of the finished oatmeal. If a step says "brewed coffee", the ingredient must say brewed coffee too.
+  • NAME THE DISH AFTER WHAT THE PANTRY ACTUALLY SAYS (blocking). Do not upgrade a generic pantry item into a specific one in the title. If the pantry says "leafy greens", the dish is not a "Spinach Frittata" — it is a "Greens Frittata". If it says "yogurt", do not title it "Greek Yogurt". Naming a food the user does not own is the same broken promise as omitting one, and it is the single most common one: six of the last fifty-one meals claimed spinach while using generic leafy greens.
   • UNITS MUST MATCH THE STATE (blocking): a solid is measured in grams, a liquid in ml. An ingredient carrying a volume unit IS a liquid and must be named as one — "30ml coffee beans" is not a thing. If you find yourself writing ml beside a solid, the name is wrong, not the unit.
 - CRITICAL: You do NOT need to use every pantry ingredient. Only include ingredients that make culinary sense for THIS specific meal. It is BETTER to skip a pantry ingredient than to force it into a meal where it doesn't belong.
 - CUISINE COHERENCE IS MANDATORY: Every meal must fit ONE identifiable cuisine or style (Italian, Mexican, Asian/Thai/Chinese/Japanese, Mediterranean, American comfort, Middle Eastern, Indian, etc.). Before picking ingredients, decide the cuisine FIRST, then only include pantry items that belong in that cuisine. Do NOT create cuisine mash-ups (e.g. no peanut butter in Italian pasta, no soy sauce in Mediterranean bowls, no curry powder in Tex-Mex).
@@ -791,6 +793,32 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       }
       funnel.notCookable = meals.filter((m: any) => m._notCookable).length
       funnel.afterCookable = meals.length
+    }
+
+    // DOES THE DISH CONTAIN WHAT ITS NAME PROMISES? The inverse of the cookability check above,
+    // and invisible to it: there, an ingredient was in the recipe but not the pantry; here the
+    // ingredient is missing from the RECIPE ITSELF while everything listed is on hand.
+    //
+    // "Protein Powder and Coffee Overnight Oats" was generated from a pantry with no rolled oats.
+    // The model substituted granola, kept the name, and left step 3 saying "to allow oats to
+    // soften" — a dish whose entire method is soaking something it does not contain.
+    //
+    // nameIngredientGaps already existed for the trending pipeline (it caught "Marry Me Chicken
+    // Pasta" with no chicken) and simply was never wired in here.
+    {
+      const beforeGaps = meals.length
+      const honest = meals.filter((m: any) => {
+        const gaps = nameIngredientGaps(String(m?.name ?? ''), m?.ingredients)
+        if (gaps.length > 0) console.log(`[name-gap] "${m?.name}" promises ${gaps.join(', ')} and lists none`)
+        return gaps.length === 0
+      })
+      // Floored, like every other drop in this file. A false positive here costs a good dinner,
+      // and the food lexicon behind it is a fixed list that will not cover every phrasing.
+      if (honest.length >= displayCount && honest.length < beforeGaps) {
+        console.log(`Name gaps: dropped ${beforeGaps - honest.length}/${beforeGaps} whose title promised a food they do not contain`)
+        meals = honest
+      }
+      funnel.nameGaps = beforeGaps - honest.length
     }
 
     // Repeat suppression, code-enforced. Marked rather than hard-dropped: on a thin pantry the
