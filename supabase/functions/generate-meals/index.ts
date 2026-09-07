@@ -815,7 +815,11 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           console.log(`Cookability: ${meals.filter((m: any) => m._notCookable).length} meal(s) need a missing structural ingredient, but only ${cookable.length} fully-cookable candidates remain — keeping them rather than showing a short deck`)
         }
       }
-      funnel.notCookable = meals.filter((m: any) => m._notCookable).length
+      // Counts the meals this gate REJECTED, not the ones still carrying the flag. Reading it after
+      // the filter reported 0 while three candidates had just been dropped — a counter that is
+      // always zero on success is worse than no counter, because it reads as "nothing happened".
+      funnel.notCookable = beforeCookable - meals.length
+      funnel.notCookableKept = meals.filter((m: any) => m._notCookable).length
       funnel.afterCookable = meals.length
     }
 
