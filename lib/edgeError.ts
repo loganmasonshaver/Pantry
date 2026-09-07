@@ -25,3 +25,23 @@ export async function edgeErrorInfo(
 
   return { message, code: body.code ?? null }
 }
+
+
+// A TRANSPORT failure — the request never completed a round trip — as opposed to the Edge Function
+// answering with an error status. The distinction decides whether a completed batch is worth
+// looking for: a non-2xx means the SERVER decided something (cap hit, bad input) and no finished
+// work exists, while a transport failure says nothing at all about whether the work happened.
+//
+// The case this exists for is iOS suspending the network stack seconds after the user switches
+// apps. The fetch dies; the Edge Function runs to completion, stores its result, increments the
+// daily cap and bills OpenAI. supabase-js reports only "Failed to send a request to the Edge
+// Function", which reads like a failure and is not one.
+//
+// Lives here rather than beside its caller because lib/meals.ts constructs a Supabase client at
+// module load and cannot be imported by a plain node test. This module has no imports at all.
+export function isTransportFailure(error: any): boolean {
+  // supabase-js names the class; the message test is the fallback if that name ever changes.
+  if (error?.name === 'FunctionsFetchError') return true
+  if (typeof error?.context?.status === 'number') return false // the server answered — not transport
+  return /failed to send a request/i.test(String(error?.message ?? ''))
+}

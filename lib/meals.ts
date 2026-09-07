@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { trackAIError } from './analytics'
-import { edgeErrorInfo } from './edgeError'
+import { edgeErrorInfo, isTransportFailure } from './edgeError'
 
 export type GeneratedMeal = {
   id: string
@@ -110,6 +110,9 @@ export async function generateMeals({
     },
   })
 
+  // Captured BEFORE the call so a rescue can never hand back an EARLIER generation's batch.
+  const startedAt = new Date().toISOString()
+
   let { data, error } = await invoke()
 
   // JWT can expire mid-session; force a token refresh then retry once
@@ -125,6 +128,25 @@ export async function generateMeals({
     data = retry.data
     error = retry.error
     __DEV__ && console.log('[generateMeals] retry result →', { hasData: !!data, retryError: (error as any)?.message, status: (error as any)?.context?.status })
+  }
+
+  // THE APP WAS BACKGROUNDED MID-GENERATION, and the work is not lost.
+  //
+  // iOS suspends the network stack seconds after the user switches apps, so the in-flight fetch
+  // dies while the Edge Function runs happily to completion — it stores generated_meals, has
+  // already incremented the daily cap and has already paid OpenAI. supabase-js reports that as
+  // FunctionsFetchError, which is a TRANSPORT failure and says nothing about whether the work
+  // happened. Observed on run 31: the client showed "Failed to send a request to the Edge
+  // Function" while three finished meals sat in the table.
+  //
+  // Without this the user loses one of six daily generations AND spends a second one retrying,
+  // for a request that already succeeded and was already billed.
+  if (error && isTransportFailure(error)) {
+    const rescued = await rescueCompletedBatch(startedAt, mode)
+    if (rescued.length > 0) {
+      __DEV__ && console.log(`[generateMeals] transport failed but the server finished — rescued ${rescued.length} meals`)
+      return rescued
+    }
   }
 
   if (error) {
@@ -145,4 +167,36 @@ async function toUserFacingMealError(error: any): Promise<Error> {
   if (code) friendly.code = code
   friendly.context = error?.context // keep for diagnostics downstream
   return friendly
+}
+
+
+
+// Look for a batch this call produced. Rows from ONE generation share a single created_at, which
+// is what makes a batch identifiable; `since` is the timestamp taken before the invoke, so an
+// older successful generation can never be mistaken for this one.
+//
+// Tried twice. The fetch can die while the app is still backgrounded and the function is still
+// running, so the first look can legitimately be too early — the retry costs one query and covers
+// the race. RLS on generated_meals grants SELECT scoped to the caller, so no user filter is needed
+// here and none should be trusted from the client anyway.
+async function rescueCompletedBatch(since: string, mode: string): Promise<GeneratedMeal[]> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 2000))
+    try {
+      const { data, error } = await supabase
+        .from('generated_meals')
+        .select('meal_data, created_at')
+        .eq('mode', mode)
+        .gt('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(12)
+      if (error || !data?.length) continue
+      // Never mix two batches: keep only the newest timestamp present.
+      const newest = data[0].created_at
+      return data.filter(r => r.created_at === newest).map(r => r.meal_data) as GeneratedMeal[]
+    } catch {
+      // A rescue that throws must never replace the real error the caller is about to report.
+    }
+  }
+  return []
 }
