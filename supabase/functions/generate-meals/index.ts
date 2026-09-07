@@ -1094,6 +1094,15 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // reaches the user only when there genuinely aren't enough fresh survivors to fill the deck.
     {
       const beforeRank = meals.length
+      // PROTEIN FIT IS MEASURED HERE AND HAS ALMOST NO AUTHORITY. Recorded because working that
+      // out by hand took a full session: nothing in the pipeline enforces a protein FLOOR — the
+      // band filter below is upper-bound only, scaleToTarget sizes the food to the CALORIE target
+      // and protein merely rides along proportionally, and in this sort freshness outranks fit
+      // outright. With the deck routinely arriving at four candidates for three slots, fit decides
+      // only which single meal is dropped. So a shown meal far under target is the system working
+      // as designed, not a filter failing, and only these three numbers make that visible.
+      funnel.proteinTarget = proteinTarget
+      funnel.proteinCandidates = meals.map((m: any) => Number(m?.protein) || 0)
       meals = meals
         .map((m: any) => {
           const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
@@ -1109,6 +1118,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         .sort((a: any, b: any) => (a._repeat === b._repeat ? a._fitScore - b._fitScore : (a._repeat ? 1 : -1)))
         .slice(0, displayCount)
         .map((m: any) => { const { _fitScore, ...rest } = m; return rest })
+      funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       const shownRepeats = meals.filter((m: any) => m._repeat).length
       console.log(
         `Macro rank: kept top ${Math.min(displayCount, beforeRank)}/${beforeRank} by freshness then target fit` +
