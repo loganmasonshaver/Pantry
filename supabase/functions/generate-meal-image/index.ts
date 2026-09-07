@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { verifyUser } from '../_shared/auth.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { IMAGE_GEN_DAILY_CAP } from '../_shared/caps.ts'
+import { dishArchetype } from '../_shared/dish-key.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 // Photographic direction, varied per DISH and stable for it.
@@ -22,12 +23,31 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 function photoVariant(mealName: string): string {
   let h = 0
   for (let i = 0; i < mealName.length; i++) h = (h * 31 + mealName.charCodeAt(i)) >>> 0
-  const ANGLE = [
-    'straight overhead flat-lay',
-    'three-quarter angle at table height',
-    'low fifteen-degree angle close to the surface',
-    'tight forty-five-degree crop filling the frame',
-  ]
+  // A TALL VESSEL CANNOT BE SHOT FROM STRAIGHT ABOVE. Seen from directly overhead a full glass is
+  // just a brown circle, so the model splits the difference: it draws the glass in profile but
+  // keeps the flat-lay's floor plane, single uniform surface and raked cast shadow. The two
+  // readings conflict and the result looks like a glass LYING ON ITS SIDE on the tablecloth —
+  // while the liquid still sits level and fills to the rim, which is impossible either way.
+  // Reported on "Protein-Powered Chocolate Smoothie", whose name hashed to the overhead angle.
+  //
+  // Keyed on the TRAILING NOUN, so a "Smoothie Bowl" is correctly still a bowl and keeps the
+  // overhead option — it is the vessel that cannot take the angle, not the ingredients.
+  const TALL_VESSEL = new Set([
+    'smoothie', 'shake', 'milkshake', 'latte', 'cappuccino', 'espresso', 'coffee', 'juice',
+    'tea', 'cocoa', 'lemonade', 'frappe', 'drink', 'mocktail', 'spritzer',
+  ])
+  const ANGLE = TALL_VESSEL.has(dishArchetype(mealName))
+    ? [
+      'three-quarter angle at table height',
+      'low fifteen-degree angle close to the surface',
+      'tight forty-five-degree crop filling the frame',
+    ]
+    : [
+      'straight overhead flat-lay',
+      'three-quarter angle at table height',
+      'low fifteen-degree angle close to the surface',
+      'tight forty-five-degree crop filling the frame',
+    ]
   // BACKDROP ONLY — deliberately no plate/bowl/dish here. These four strings used to name a
   // vessel too ("pale ceramic plate on a warm oak board"), which silently overrode the vessel
   // Stage 1 had already chosen and, worse, could only ever express ONE. Kala Chana Protein Balls
