@@ -25,6 +25,11 @@ export type GeneratedMeal = {
   missing_ingredients?: string[]
   steps: (string | { title: string; detail: string })[]
   image?: string | null
+  // Set once image fetching has genuinely FINISHED and produced nothing — the daily image cap,
+  // an API failure, or all retries exhausted. `image: null` alone cannot express this: it means
+  // both "not fetched yet" and "will never arrive", so a card had no way to stop shimmering and
+  // sat in a loading animation forever. A user who hits the image cap saw permanent skeletons.
+  imageUnavailable?: boolean
 }
 
 export async function generateMeals({

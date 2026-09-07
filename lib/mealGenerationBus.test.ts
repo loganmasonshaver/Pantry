@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  generationKey, isGenerating, beginGeneration, endGeneration, publishGenerated, publishMealImage,
+  generationKey, isGenerating, beginGeneration, endGeneration, publishGenerated, publishMealImage, publishMealImageFailed,
   subscribeGeneration, __resetGenerationBus,
 } from './mealGenerationBus.ts'
 
@@ -103,4 +103,17 @@ test('publishGenerated delivers meals without touching the lock', () => {
   publishGenerated(KEY, [{ id: '9', name: 'Forced' } as never])
   assert.equal((got as any[])[0].name, 'Forced')
   assert.equal(isGenerating(KEY), true, 'the other generation still holds it')
+})
+
+// A photo that will NEVER arrive has to travel too, or the other screen shimmers forever on a
+// meal this one has already given up on — which is what a user sees the moment they hit the
+// daily image cap.
+test('a failed photo is broadcast like a successful one', () => {
+  __resetGenerationBus()
+  const seen: string[] = []
+  subscribeGeneration(e => { if (e.type === 'imageFailed') seen.push(e.mealId) })
+  beginGeneration(KEY)
+  endGeneration(KEY, [{ id: '1', name: 'A' } as never])
+  publishMealImageFailed(KEY, '1')
+  assert.deepEqual(seen, ['1'])
 })

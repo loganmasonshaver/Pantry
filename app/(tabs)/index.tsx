@@ -345,6 +345,13 @@ function MealCard({
     >
       {meal.image && meal.image.startsWith('http') ? (
         <MealImage uri={meal.image} style={styles.mealImageReal} recyclingKey={String(meal.id)} transition={0} />
+      ) : meal.imageUnavailable ? (
+        // SETTLED, not loading. A shimmer here ran forever once the daily image cap was hit —
+        // the meal is perfectly cookable, only the photo is missing, and an endless loading
+        // animation says "broken" instead.
+        <View style={styles.mealImagePlaceholder}>
+          <Utensils size={22} stroke="#6A6A6A" strokeWidth={1.6} />
+        </View>
       ) : (
         <ShimmerBox style={styles.mealImagePlaceholder} />
       )}
@@ -1932,10 +1939,16 @@ export default function HomeScreen() {
                             // first frame: it narrates instead of going blank, so the page count
                             // never changes under a finger mid-swipe.
                             <View style={styles.heroMealImage}>
-                              <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
+                              {/* Only shimmer while a photo is still COMING. Once fetching has
+                                  settled with nothing (the daily image cap is the usual reason),
+                                  the animation is a lie — it kept running forever and read as the
+                                  app being stuck rather than the dish simply having no picture. */}
+                              {!m.imageUnavailable && <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />}
                               <View style={styles.heroMealPlating}>
                                 <Utensils size={26} stroke="#5A5A5A" strokeWidth={1.4} />
-                                <Text style={styles.heroMealPlatingText}>Plating your dish…</Text>
+                                <Text style={styles.heroMealPlatingText}>
+                                  {m.imageUnavailable ? 'No photo for this one' : 'Plating your dish…'}
+                                </Text>
                               </View>
                             </View>
                           )}

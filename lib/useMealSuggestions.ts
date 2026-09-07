@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
-import { generationKey, isGenerating, beginGeneration, endGeneration, publishGenerated, publishMealImage, subscribeGeneration } from './mealGenerationBus'
+import { generationKey, isGenerating, beginGeneration, endGeneration, publishGenerated, publishMealImage, publishMealImageFailed, subscribeGeneration } from './mealGenerationBus'
 import { perfMark } from './perf'
 import { prefetchMealImages } from '../components/MealImage'
 import { takeCookNowPrefetch } from './mealPrefetch'
@@ -195,7 +195,17 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         if (meal.image) return
         const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
         const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
-        if (!image) return
+        if (!image) {
+          // SETTLED, not pending. fetchImage has already exhausted its retries, so this photo is
+          // never arriving — the daily image cap is the common cause and it does not block the
+          // meal, only the picture. Without saying so the card shimmers forever, which is how a
+          // capped user concludes the app is broken.
+          const failedId = mealsToImage[i].id
+          mealsToImage[i] = { ...mealsToImage[i], imageUnavailable: true }
+          setMeals(prev => prev.map(p => (p.id === failedId ? { ...p, imageUnavailable: true } : p)))
+          publishMealImageFailed(generationKey(userId, mode), String(failedId))
+          return
+        }
         mealsToImage[i] = { ...mealsToImage[i], image }
         // Patched by ID, NOT by index. With the swap below now able to run late, `prev` may still
         // be YESTERDAY's meals when an image lands — an index write would paste today's photo onto
@@ -534,6 +544,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         // on Home at all, and it beats inventing a second indicator for the same fact. Only when
         // meals are on screen; with nothing to show, the skeleton is the signal.
         if (mealsRef.current.length > 0) setStale(true)
+        return
+      }
+      if (e.type === 'imageFailed') {
+        setMeals(prev => prev.map(p => (String(p.id) === e.mealId ? { ...p, imageUnavailable: true } : p)))
         return
       }
       if (e.type === 'image') {

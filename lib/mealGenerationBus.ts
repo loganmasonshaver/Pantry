@@ -20,6 +20,9 @@ export type GenerationEvent =
   // on the originating instance only, so the other screen received the deck with at most the hero
   // photo and sat on two shimmering cards forever. The `end` event alone can never carry these.
   | { type: 'image'; key: string; mealId: string; image: string }
+  // A photo that will never arrive is as important to broadcast as one that did — without it the
+  // other screen shimmers forever on a meal this one has already given up on.
+  | { type: 'imageFailed'; key: string; mealId: string }
 
 const inFlight = new Set<string>()
 const subscribers = new Set<(e: GenerationEvent) => void>()
@@ -64,6 +67,11 @@ export function publishGenerated(key: string, meals: GeneratedMeal[] | null): vo
 /** One photo landing, patched by meal id on every screen. */
 export function publishMealImage(key: string, mealId: string, image: string): void {
   emit({ type: 'image', key, mealId, image })
+}
+
+/** Image fetching finished and produced nothing — stop every screen shimmering on this meal. */
+export function publishMealImageFailed(key: string, mealId: string): void {
+  emit({ type: 'imageFailed', key, mealId })
 }
 
 export function subscribeGeneration(cb: (e: GenerationEvent) => void): () => void {
