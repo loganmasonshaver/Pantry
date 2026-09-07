@@ -876,11 +876,22 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // Pasta" with no chicken) and simply was never wired in here.
     {
       const beforeGaps = meals.length
+      const gapDetail: string[] = []
       const honest = meals.filter((m: any) => {
         const gaps = nameIngredientGaps(String(m?.name ?? ''), m?.ingredients)
-        if (gaps.length > 0) console.log(`[name-gap] "${m?.name}" promises ${gaps.join(', ')} and lists none`)
+        if (gaps.length > 0) {
+          gapDetail.push(`${String(m?.name ?? '')} -> ${gaps.join(', ')}`)
+          console.log(`[name-gap] "${m?.name}" promises ${gaps.join(', ')} and lists none`)
+        }
         return gaps.length === 0
       })
+      // WHICH dish promised WHAT, not just how many. This gate has taken exactly 2 of 10 on two
+      // consecutive runs and the count cannot say whether the model keeps misnaming dishes (the
+      // gate working, and the drops correct) or the fixed food lexicon over-fires on a phrasing it
+      // does not cover (a good dinner lost). Those need opposite responses. The cookability gate
+      // sat at 4 of 10 for the same reason until its names were recorded, and the answer turned
+      // out to be a plural bug nobody could see from a number.
+      funnel.nameGapDetail = gapDetail
       // Floored, like every other drop in this file. A false positive here costs a good dinner,
       // and the food lexicon behind it is a fixed list that will not cover every phrasing.
       if (honest.length >= displayCount && honest.length < beforeGaps) {
