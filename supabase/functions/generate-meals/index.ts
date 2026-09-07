@@ -601,9 +601,24 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       const lean = meals.filter((m: any) => Number(m.fat) <= fatDropThreshold)
       if (lean.length >= displayCount) { droppedByFat = meals.length - lean.length; meals = lean }
     }
+    // UNDER-SIZED meals. There was no lower bound at all: the calorie drop above is one-sided, so a
+    // 378 kcal "meal" against a 525 kcal slot shipped untouched. Mirroring the upper drop would not
+    // have caught it — calorieMin / 1.40 is 0.61x target, and that meal was 0.72x. Measured across
+    // every meal ever generated, NOTHING falls under 0.70x, so a mirrored bound is inert by
+    // construction. 0.75x is the line where a dish stops being a meal for its slot, and it catches
+    // the two real cases in the history (a 378 kcal smoothie and a 381 kcal frittata).
+    //
+    // FLOORED, like the fat drop directly above and the macro-check below. A hard drop here could
+    // starve the deck on a thin pantry, where small dishes may be all the model can build — and an
+    // under-sized meal is a far milder failure than an empty screen. Floored also means this can
+    // never reduce the deck below displayCount, which is why it needs no simulation to be safe.
+    const calorieDropLow = batchCalorieTarget * 0.75
+    let droppedBySmall = 0
+    const bigEnough = meals.filter((m: any) => Number(m.calories) >= calorieDropLow)
+    if (bigEnough.length >= displayCount) { droppedBySmall = meals.length - bigEnough.length; meals = bigEnough }
     const droppedByBands = beforeBands - meals.length
     if (droppedByBands > 0) {
-      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedByFat ? `, ${droppedByFat} fat-bombs > ${Math.round(fatDropThreshold)}g` : ''})`)
+      console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedByFat ? `, ${droppedByFat} fat-bombs > ${Math.round(fatDropThreshold)}g` : ''}${droppedBySmall ? `, ${droppedBySmall} under ${Math.round(calorieDropLow)} kcal` : ''})`)
     }
 
     // Repeat suppression, code-enforced. Marked rather than hard-dropped: on a thin pantry the
@@ -679,6 +694,25 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       }
     }
 
+    // Prep-time validation — drop meals whose claimed prepTime exceeds the user's budget.
+    // The LLM occasionally returns a 30-min recipe when the user asked for ≤10 min — usually
+    // a hallucinated "prepTime: 25" alongside a recipe that actually IS doable in 10. Dropping
+    // is cleaner than clamping: clamping would lie to the user about how long it takes.
+    //
+    // RUNS BEFORE THE RANK/SLICE. It used to run after, which made it the one filter that could
+    // ONLY shrink the deck: the slice had already thrown away the reserves, so a single dropped
+    // meal meant the user saw 2 instead of 3 while perfectly valid candidates had been discarded
+    // moments earlier. 15% of every meal ever shown sits exactly ON the 30-minute ceiling, so the
+    // model runs right at the limit and one hallucinated "35" was all it took. Ordering it with
+    // the other validity filters lets the ranking backfill from candidates that DO fit the budget.
+    // Left as a HARD drop, not floored: "I have 30 minutes" is the user's constraint, not a
+    // preference, and a 45-minute recipe is not a milder failure than a shorter deck.
+    const beforePrep = meals.length
+    meals = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
+    if (beforePrep - meals.length > 0) {
+      console.log(`Prep-time validation: dropped ${beforePrep - meals.length}/${beforePrep} meals that exceeded maxPrepMinutes=${maxPrepMinutes}`)
+    }
+
     // ── BATCH → PER SERVING. The single divide. ──────────────────────────────────────────────
     // Everything ABOVE this line reads the ingredient list, which is always the full recipe: the
     // FatSecret correction overwrites macros with the ingredient sum, and verifyMacros drops a meal
@@ -723,17 +757,6 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     }
     // Strip the marker whether or not the ranking above ran — it must never reach the client cache.
     meals = meals.map((m: any) => { const { _repeat, ...rest } = m; return rest })
-
-    // Prep-time validation — drop meals whose claimed prepTime exceeds the user's budget.
-    // The LLM occasionally returns a 30-min recipe when the user asked for ≤10 min — usually
-    // a hallucinated "prepTime: 25" alongside a recipe that actually IS doable in 10. Dropping
-    // is cleaner than clamping: clamping would lie to the user about how long it takes.
-    const originalCount = meals.length
-    meals = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
-    const droppedCount = originalCount - meals.length
-    if (droppedCount > 0) {
-      console.log(`Prep-time validation: dropped ${droppedCount}/${originalCount} meals that exceeded maxPrepMinutes=${maxPrepMinutes}`)
-    }
 
     // If every candidate got filtered out (bad input, impossible macro/prep constraints),
     // refund the slot — the user got nothing usable, so it shouldn't count against their cap.
