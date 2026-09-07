@@ -128,11 +128,34 @@ with a curd dip.
       The rule triggers on mashed/blended/mixed/stirred/folded/dissolved/melted/whisked. Extending
       the list is one line, but it is UNMEASURED and the LAYERED DISHES rule added the same day did
       not take, so do it with a before/after on several dishes, not one sample.
-- [ ] **⚠️ ALL 1,370 CACHED IMAGES WERE GENERATED UNDER THE BROKEN PROMPT.** Only this one row has
-      been corrected. There is no way to tell which of the rest are wrong without looking at them,
-      and no automated check exists. Decide before launch: spot-audit the Discover pool by eye, or
-      bulk-regenerate (cost = 1,370 FAL generations). Regeneration is cheap to trigger — delete the
-      `image_cache` row, null `trending_meals.image`, re-invoke; the `?v=` token handles clients.
+- [ ] **⚠️ MOST CACHED IMAGES WERE GENERATED UNDER THE BROKEN PROMPT — but it is 194, not 1,370.**
+      MEASURED 2026-09-07 with `scripts/date-image-library.py`. The storage list endpoint returns
+      `created_at` and `meal-images` is a public bucket, so the whole library dates itself against
+      the commit dates of every prompt change — anon key only, no cost. There WAS an automated
+      check available all along; nobody had looked for one.
+
+      2054 images in the bucket, 206 of them referenced by `trending_meals`:
+
+      | images | live in Discover | newest prompt era they were written under |
+      |---|---|---|
+      | 50 | 12 | **current** (soaked cereal + real negative prompt, 2026-09-05) |
+      | 18 | 14 | flavourings stripped before description |
+      | 1029 | 179 | ingredient coverage tightened (2026-05-28) |
+      | 27 | 0 | incorporated ingredients made invisible |
+      | 22 | 0 | ingredient-faithful prompt |
+      | 120 | 1 | two-stage Gemini→Flux pipeline |
+      | 788 | 0 | predate the two-stage pipeline entirely |
+
+      **So the decision is much smaller than it looked.** 194 stale images are live in Discover;
+      the 788 oldest — the ones that make this item frightening — are serving nobody. At 512x512
+      that is **$0.60** to regenerate the entire Discover surface, which is an afternoon, not a
+      launch risk. Worklist: run the script, take the rows where `live_in_discover` is true.
+      Regeneration is cheap to trigger — delete the `image_cache` row, null `trending_meals.image`,
+      re-invoke; the `?v=` token handles clients.
+
+      **Read "live" as "live in DISCOVER".** Generated-meal images are keyed in `image_cache`,
+      which is service-role only, so a file marked not-live is not proof nobody is served it —
+      only that Discover is not.
 - [x] **CLOSED FOR THE APP 2026-09-05 — 512x512 stays. Logan looked and it is fine.**
       Measured rather than guessed: the meal-detail hero is 500pt full-width = **1179x1500 real px**
       at @3x, so a 512 source is upscaled **2.93x** and loses 21% of its width to `cover`. Discover
