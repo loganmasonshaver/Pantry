@@ -364,7 +364,12 @@ Deno.serve(async (req: Request) => {
         const { error: backfillErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: hit.image_url }, { onConflict: 'meal_key' })
         if (backfillErr) console.log('Backfill FAILED:', cacheKey, backfillErr.message)
       }
-      await backfillTrendingImage(db, mealName, hit.image_url, isInternal)
+      // replaceTrending is honoured HERE too, and that is the whole repair path. Passing it only on
+      // the cache-MISS branch below meant a deliberate fix silently did nothing whenever the image
+      // already existed — which is the normal case, since a user opening the meal in Discover
+      // generates and caches it. Six live rows sat on their YouTube thumbnail with a perfectly good
+      // AI image in image_cache, unreachable, because repair could only reach uncached dishes.
+      await backfillTrendingImage(db, mealName, hit.image_url, isInternal, isInternal && replaceTrending)
       return new Response(JSON.stringify({ image: hit.image_url }), { headers: jsonHeaders })
     }
 

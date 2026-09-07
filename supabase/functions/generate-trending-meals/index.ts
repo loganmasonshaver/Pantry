@@ -1714,7 +1714,17 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // own internal rate limit so concurrent calls are safe.
     console.log('Stage: image generation (parallel)')
     const imgStart = Date.now()
-    const { data: inserted } = await db.from('trending_meals').select('id, name, ingredients').eq('generated_at', today())
+    // Today's rows PLUS any earlier one still without an AI image. generate-meal-image's own
+    // comment claims "the pipeline and the cron still self-heal rows" — they did not: this select
+    // was today-only, so a meal whose image failed during its own run kept its YouTube thumbnail
+    // forever. On 2026-09-06 that was 6 of 12, and every other run in the previous week was 100%,
+    // which is what a transient FAL saturation looks like: recoverable, never retried.
+    //
+    // Cheap by construction — it matches only BROKEN rows, so a healthy pool adds nothing beyond
+    // today's batch, and retention already bounds how far back rows exist.
+    const { data: inserted } = await db.from('trending_meals')
+      .select('id, name, ingredients, steps, generated_at, image')
+      .or(`generated_at.eq.${today()},image.not.like.%/storage/v1/object/public/%`)
     if (inserted) {
       // Generate in small waves instead of firing all ~18 at FAL at once. The
       // simultaneous burst saturated FAL's rate limit, so even generate-meal-image's
@@ -1745,7 +1755,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // separate dollop — but it can only apply that if it can read the steps. Omitting them
             // is why a Burger Bowl's greek-yogurt-based burger sauce rendered as a white blob of
             // sour cream sitting on top instead of a sauce mixed through the dish.
-            body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [] }),
+            // replaceTrending so a RETRY can overwrite the YouTube thumbnail it is there to replace.
+            // Without it the backfill is gap-fill-only and every repair is a no-op on exactly the
+            // rows that need one.
+            body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [], replaceTrending: true }),
           })
           const imgData = await imgRes.json()
           if (imgData.image) {
