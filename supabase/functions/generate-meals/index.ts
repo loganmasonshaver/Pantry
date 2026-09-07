@@ -5,6 +5,7 @@ import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
+import { flavourMismatches } from '../_shared/flavour-match.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
@@ -555,6 +556,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
 - PRE-PREPARED PANTRY ITEMS (chicken salad, hummus, rotisserie chicken, deli meat, tuna salad, leftovers) are ALREADY COOKED AND SEASONED. Use them as-is or as a component — never write steps that cook them from raw, and never name the dish as though you did. A meal built on chicken salad is a "Chicken Salad Plate" or "Chicken Salad Sandwich", never "Pan-Seared Chicken".
 - If the honest name for what you have made is unappealing ("Chicken Salad with Potatoes and Greens"), that is a signal the MEAL is wrong, not the name. Pick a different, genuinely cohesive dish instead of dressing up an assembly with a better title.
 - REAL, ESTABLISHED DISHES ONLY (mandatory): every meal must be a genuine, widely-recognized dish that real people already make and that is proven to taste good — the kind you'd find on a restaurant menu, a popular recipe site, or in common home cooking (e.g. "Beef Taco Bowl", "Chicken Fried Rice", "Greek Yogurt Parfait", "Cheeseburger & Fries"). Do NOT invent new dishes, novel fusions, or made-up "power bowl / protein bowl" combinations. If the pantry can't authentically make a known dish, pick the CLOSEST established dish and use pantry items ONLY where they genuinely belong in it. Name each meal after the real dish it actually is — never an invented marketing name.
+- FLAVOURED PANTRY ITEMS ARE A FLAVOUR DECISION, NOT A NEUTRAL INGREDIENT. When the pantry lists both a flavoured and a plain version of the same thing — "Chocolate Protein Powder" alongside "Protein Powder", "Vanilla Greek Yogurt" alongside "Greek Yogurt" — use the PLAIN one, unless the dish is genuinely built on that flavour and its NAME says so. The macros are identical either way, which is exactly why this gets missed: chocolate protein powder in a pineapple bake costs nothing nutritionally and makes the dish taste wrong. If you want the flavour, commit to it in the dish name.
 - USE INGREDIENTS IN THEIR CORRECT FORM AND STATE (mandatory): the pantry names each item's specific form — respect it, and match the dish, the cooking steps, and prepTime to that form. Never silently swap to a different form. If the on-hand form doesn't fit a dish, either use it correctly or pick a dish where it IS authentic.
   • CHEESE: sliced/deli cheese → burgers, melts, grilled cheese, patty melts, sandwiches. For bowls, nachos, chili, or pasta, cheese must be SHREDDED and melted into the hot food — NEVER cold slices draped on top. Cottage cheese and cream cheese do NOT melt like cheddar — don't use them as melting cheese.
   • PROTEIN STATE: raw proteins (raw chicken, ground beef, raw shrimp, fish fillets) MUST be cooked in the steps with realistic prep time — never in a no-cook or ≤10-min dish. Ready-to-eat proteins (deli meat, rotisserie chicken, canned tuna/chicken, pre-cooked bacon, hard-boiled eggs) are used as-is — never "seared" or "cooked from raw".
@@ -940,6 +942,26 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     funnel.droppedByDislike = beforeDislike - meals.length
     if (beforeDislike - meals.length > 0) {
       console.log(`Dislike ban: dropped ${beforeDislike - meals.length}/${beforeDislike} meals the user has rejected`)
+    }
+
+    // FLAVOUR COHERENCE — MEASURED, NOT ENFORCED (yet).
+    //
+    // Counting before gating, on purpose. The failure is real — a cottage cheese and PINEAPPLE bake
+    // built on chocolate protein powder while plain powder sat in the same pantry — but nobody
+    // knows whether it happens once in fifty generations or once in five, and this pipeline already
+    // drops ~25% of candidates through six gates. A seventh gate for an unmeasured problem is how
+    // the deck starves. The technique-lie check was measured at 1 in 51 and correctly NOT gated;
+    // this gets the same treatment until the funnel says otherwise.
+    //
+    // Recorded WHERE IT IS MEASURED. Two counters in this file have already lied by being read
+    // after their own filter, and both were caught by reading the funnel rather than the code.
+    {
+      const hits = meals.flatMap((m: any) => flavourMismatches(m?.name, m?.ingredients, ingredients))
+      funnel.flavourMismatches = hits.length
+      if (hits.length > 0) {
+        funnel.flavourMismatchDetail = hits.map(h => `${h.ingredient} -> ${h.plainAlternative}`)
+        console.log(`Flavour mismatch: ${hits.map(h => `"${h.ingredient}" where "${h.plainAlternative}" was on the shelf`).join('; ')}`)
+      }
     }
 
     // FAT DROP — moved here, AFTER the repeat marking, and it is not a cosmetic reorder.
