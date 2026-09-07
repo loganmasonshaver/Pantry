@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameIngredientGaps, realIngredients, recoverMergedIngredients, sectionHeadingIngredient } from './recipe-integrity.ts'
+import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameIngredientGaps, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
@@ -511,4 +511,74 @@ test('a derivative term common in dish names does not disable the check', () => 
 
 test('flavour-led foods are unaffected — a chocolate protein shake is still chocolate', () => {
   assert.deepEqual(nameIngredientGaps('Chocolate Protein Shake', [{ name: 'chocolate protein powder' }, { name: 'oat milk' }]), [])
+})
+
+// ── berry, the generic promise ────────────────────────────────────────────────────────────────
+// "Bulgarian Yogurt and Berry Smoothie" shipped 2026-09-07 with yogurt, protein powder, orange
+// juice, oat milk and cinnamon. No berries, no fruit at all.
+test('a Berry dish with no berry in it is a gap', () => {
+  assert.deepEqual(
+    nameIngredientGaps('Bulgarian Yogurt and Berry Smoothie',
+      [{ name: 'bulgarian yogurt' }, { name: 'chocolate protein powder' }, { name: 'orange juice' }, { name: 'oat milk' }]),
+    ['berry'],
+  )
+})
+
+// The reason "berry" was originally excluded from DEFINING_FOODS, and why it needs the synonym
+// group: tokens() stems "blueberries" to "blueberry", never to "berry".
+test('any specific berry satisfies a generic Berry name', () => {
+  assert.deepEqual(nameIngredientGaps('Berry Protein Smoothie', [{ name: 'blueberries' }, { name: 'protein powder' }]), [])
+  assert.deepEqual(nameIngredientGaps('Mixed Berry Bowl', [{ name: 'strawberries' }, { name: 'greek yogurt' }]), [])
+})
+
+test('the specific berries still work on their own', () => {
+  assert.deepEqual(nameIngredientGaps('Blueberry Pancakes', [{ name: 'blueberries' }, { name: 'eggs' }]), [])
+  assert.deepEqual(nameIngredientGaps('Blueberry Pancakes', [{ name: 'flour' }, { name: 'eggs' }]), ['blueberry'])
+})
+
+// ── steps vs ingredients ──────────────────────────────────────────────────────────────────────
+const BOLOGNESE_STEPS = [
+  { title: 'Boil Pasta', detail: 'Cook pasta according to package directions in salted water.' },
+  { title: 'Sauté Beef', detail: 'In a pan, brown the ground beef with diced onion and minced garlic.' },
+  { title: 'Combine', detail: 'Toss the cooked pasta with the sauce until well coated.' },
+]
+const BOLOGNESE_INGS = [
+  { name: 'ground beef', grams: '90g' }, { name: 'tomato sauce', grams: '180g' },
+  { name: 'all-purpose flour', grams: '42g' }, { name: 'garlic', grams: '6g' },
+  { name: 'yellow onion', grams: '40g' }, { name: 'olive oil', grams: '4ml' },
+]
+
+test('a step that cooks pasta with no pasta listed is a ghost', () => {
+  assert.deepEqual(ghostIngredients(BOLOGNESE_STEPS, BOLOGNESE_INGS, []), ['pasta'])
+})
+
+test('an ingredient in the list closes the ghost', () => {
+  assert.deepEqual(ghostIngredients(BOLOGNESE_STEPS, [...BOLOGNESE_INGS, { name: 'penne pasta', grams: '115g' }], []), [])
+})
+
+test('assumed staples are not ghosts', () => {
+  const steps = [{ title: 'Toast', detail: 'Toast the bread and butter it.' }]
+  assert.deepEqual(ghostIngredients(steps, [{ name: 'bread', grams: '60g' }], ['butter']), [])
+})
+
+test('the phantom flour is an orphan and the oil is not', () => {
+  // 42g of flour appears in no step — 153 kcal summed into the macros. The 4ml of olive oil is
+  // implied by "In a pan, brown the ground beef" and must not be stripped.
+  const orphans = unusedIngredients(BOLOGNESE_STEPS, BOLOGNESE_INGS).map((i: any) => i.name)
+  assert.deepEqual(orphans, ['all-purpose flour'])
+})
+
+test('a seasoning a step only gestures at is never stripped', () => {
+  const steps = [{ title: 'Season', detail: 'Season to taste.' }]
+  const ings = [{ name: 'salt', grams: '3g' }, { name: 'black pepper', grams: '1g' }, { name: 'paprika', grams: '2g' }]
+  assert.deepEqual(unusedIngredients(steps, ings), [])
+})
+
+test('a small quantity is left alone — being wrong there costs more than being right', () => {
+  assert.deepEqual(unusedIngredients([{ title: 'Mix', detail: 'Mix it all.' }], [{ name: 'chia seeds', grams: '5g' }]), [])
+})
+
+test('head-noun matching means "cooked rice" is satisfied by a step saying "rice"', () => {
+  const steps = [{ title: 'Serve', detail: 'Spoon the rice into a bowl.' }]
+  assert.deepEqual(unusedIngredients(steps, [{ name: 'cooked rice', grams: '150g' }]), [])
 })

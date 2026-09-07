@@ -244,9 +244,13 @@ const tokens = (t: string): Set<string> =>
   new Set((t ?? '').toLowerCase().match(/[a-zÀ-ɏ]+/g)?.map(singular) ?? [])
 
 // Foods distinctive enough that naming a dish after one is a promise about its contents. Excludes
-// preparation words (baked, crispy), vessels (bowl, wrap) and vague ones (berry, veggie).
+// preparation words (baked, crispy), vessels (bowl, wrap) and vague ones (veggie).
+//
+// "berry" IS included, unlike the other vague words, because it is a promise a reader can check:
+// a Berry Smoothie with no berry in it is a lie whichever berry was meant. It only works paired
+// with a SYNONYMS entry — see the note there.
 const DEFINING_FOODS = [
-  'blueberry', 'strawberry', 'raspberry', 'blackberry', 'cranberry', 'banana', 'mango', 'pineapple',
+  'berry', 'blueberry', 'strawberry', 'raspberry', 'blackberry', 'cranberry', 'banana', 'mango', 'pineapple',
   'apple', 'peach', 'cherry', 'lemon', 'lime', 'orange', 'avocado', 'pumpkin', 'zucchini',
   'spinach', 'broccoli', 'mushroom', 'carrot', 'tomato', 'cucumber', 'potato', 'corn',
   'chicken', 'beef', 'steak', 'pork', 'bacon', 'sausage', 'turkey', 'lamb', 'salmon', 'tuna',
@@ -293,6 +297,20 @@ const SYNONYMS: Record<string, string[]> = {
   corn: ['mais', 'sweetcorn'],
   blueberry: ['borówki', 'borówka'],
   date: ['medjool'],
+  // A generic promise, satisfied by any specific berry. It has to be BOTH a defining food and a
+  // synonym group: on its own it produced false gaps, because tokens() stems "blueberries" to
+  // "blueberry" and never to "berry", so a genuine blueberry smoothie read as berry-less. That is
+  // why the list above originally excluded it — the exclusion was right, the conclusion was not.
+  // "Bulgarian Yogurt and Berry Smoothie" shipped on 2026-09-07 with yogurt, protein powder,
+  // orange juice, oat milk and cinnamon. No berries. No fruit at all.
+  berry: ['blueberry', 'strawberry', 'raspberry', 'blackberry', 'cranberry', 'mixed berries', 'berries'],
+  // "toast" is a food AND a verb, and the step-level check needs both readings. "Toast the bread"
+  // must be satisfied by a listed bread; "serve with toast" with no bread anywhere is a genuine
+  // ghost — a real generation ended on exactly that line with no bread in the recipe or the pantry.
+  // The residual false positive is "toast the pecans" in a recipe with no bread, which costs one
+  // candidate out of ten and is absorbed by the floor on the drop.
+  toast: ['bread', 'sourdough', 'baguette', 'bagel', 'english muffin', 'brioche'],
+  bread: ['toast', 'sourdough', 'baguette', 'brioche'],
 }
 
 /**
@@ -584,4 +602,90 @@ export function recoverMergedIngredients<T extends { name?: string; grams?: stri
     }
   }
   return { ingredients: list, recovered }
+}
+
+// ── Do the steps and the ingredient list describe the same dish? ────────────────────────────────
+//
+// The generation prompt already carries this as a BLOCKING rule — "EVERY single item referenced in
+// any step MUST appear in the ingredients array. No exceptions." Measured across 48 real
+// generations it is violated in 12.5% of meals, which puts it in the same category as the macro
+// bands and the repeat filter: a prompt line that needs a code backstop.
+//
+// Both directions are broken, and they fail differently:
+//
+//   GHOST — a step tells you to cook something the list does not contain. "Beef Bolognese Pasta"
+//   said "Cook pasta according to package directions" and listed no pasta; another dish said
+//   "toast" and listed no bread. The recipe is simply unfollowable.
+//
+//   ORPHAN — an ingredient nothing ever uses. The same Bolognese listed 42g of all-purpose flour,
+//   mentioned nowhere, standing in for the pasta it did not have. That is not merely untidy: macros
+//   are computed by SUMMING the ingredient list, so 42g of phantom flour is 153 real calories on
+//   the card. Across the 48 meals there were 537 kcal of food nobody is ever told to cook.
+
+// Foods worth scanning steps for. Narrower than DEFINING_FOODS on purpose: this list has to be
+// things a step would name as an object of cooking, and every entry is a potential meal-dropper.
+const STEP_FOODS = [
+  'pasta', 'noodle', 'spaghetti', 'macaroni', 'rice', 'quinoa', 'couscous', 'oat', 'oatmeal',
+  'tortilla', 'bread', 'toast', 'bun', 'pita', 'naan', 'bagel', 'cracker', 'potato',
+  'chicken', 'beef', 'steak', 'pork', 'bacon', 'sausage', 'turkey', 'salmon', 'tuna', 'shrimp',
+  'tofu', 'egg', 'yogurt', 'granola', 'lentil', 'chickpea',
+]
+
+// Fats and seasonings are exempt from the ORPHAN direction. "Heat a pan over medium heat" implies
+// the oil beside it, and "Season" implies the salt — flagging those would strip real food out of
+// the macros to satisfy a wording nit. The orphan check is only for substantive ingredients.
+const IMPLIED_BY_TECHNIQUE = /\b(oil|butter|ghee|salt|pepper|spice|seasoning|powder|herbs?|flakes?|zest|water|cooking spray)\b/i
+
+const stepBlob = (steps: unknown): string =>
+  (Array.isArray(steps) ? steps : [])
+    .map(s => (typeof s === 'string' ? s : `${(s as any)?.title ?? ''} ${(s as any)?.detail ?? ''}`))
+    .join(' ')
+
+/** Foods the steps tell you to cook that appear nowhere in the ingredient list. */
+export function ghostIngredients(
+  steps: unknown,
+  ingredients: any[] | undefined,
+  assumedStaples: readonly string[] = [],
+): string[] {
+  const stepTokens = tokens(stepBlob(steps))
+  if (stepTokens.size === 0) return []
+  const ingTokens = tokens(realIngredients(ingredients)
+    .map(i => (typeof i === 'string' ? i : String((i as any)?.name ?? ''))).join(' '))
+  const assumedTokens = tokens(assumedStaples.join(' '))
+
+  const out: string[] = []
+  for (const food of STEP_FOODS) {
+    const stem = singular(food)
+    if (!stepTokens.has(stem)) continue
+    if (ingTokens.has(stem)) continue
+    if (assumedTokens.has(stem)) continue
+    if ((SYNONYMS[food] ?? []).some(alt => ingTokens.has(singular(alt)))) continue
+    out.push(food)
+  }
+  return out
+}
+
+/**
+ * Ingredients no step ever refers to — phantom food that is nonetheless summed into the macros.
+ *
+ * Matched on the ingredient's HEAD noun as well as its full name, so "cooked rice" is satisfied by
+ * a step that just says "rice". Fats and seasonings are skipped (see IMPLIED_BY_TECHNIQUE), as is
+ * anything under `minGrams`, where being wrong costs more than being right.
+ */
+export function unusedIngredients(
+  steps: unknown,
+  ingredients: any[] | undefined,
+  { minGrams = 15 }: { minGrams?: number } = {},
+): any[] {
+  const blob = stepBlob(steps).toLowerCase()
+  if (!blob.trim()) return []
+  const stepTokens = tokens(blob)
+  return realIngredients(ingredients).filter(i => {
+    const name = String((typeof i === 'string' ? i : (i as any)?.name) ?? '')
+    if (!name.trim() || IMPLIED_BY_TECHNIQUE.test(name)) return false
+    const grams = parseFloat(String((i as any)?.grams ?? '').replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(grams) || grams < minGrams) return false
+    const words = [...tokens(name)]
+    return !words.some(w => stepTokens.has(w))
+  })
 }

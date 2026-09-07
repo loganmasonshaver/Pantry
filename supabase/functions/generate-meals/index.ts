@@ -9,7 +9,7 @@ import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDis
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
-import { nameIngredientGaps } from '../_shared/recipe-integrity.ts'
+import { nameIngredientGaps, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
@@ -662,6 +662,39 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       })
     }
 
+    // Declared here, immediately after the model returns, because the phantom-ingredient strip
+    // below writes to it and runs BEFORE the macro correction. Sitting further down produced
+    // TS2448/TS2454 — a temporal dead zone, which in this file is a ReferenceError on every
+    // generation. Same trap generate-meal-image hit with `db`; the baseline delta caught it again.
+    const funnel: Record<string, unknown> = {
+      genCountAsked: genCount, modelReturned: meals.length,
+      displayCount, servings, calorieTarget, batchCalorieTarget,
+      bannedBases, bannedForms, maxPrepMinutes,
+      pantryItems: ingredients.length, windowNames: recentServed.length,
+    }
+
+    // STRIP PHANTOM FOOD, before anything sums the ingredient list. An ingredient no step ever
+    // refers to is not merely untidy: macros are computed by SUMMING these lines, so the 42g of
+    // all-purpose flour that "Beef Bolognese Pasta" listed and never used — standing in for the
+    // pasta it did not have — is 153 real calories on the user's card. Measured across 48 real
+    // generations there were 537 kcal of food nobody is ever told to cook.
+    //
+    // Fats and seasonings are exempt inside unusedIngredients: "Heat a pan over medium heat"
+    // implies the oil beside it, and stripping that would UNDERSTATE the macros to satisfy a
+    // wording nit. Only substantive ingredients over 15g are removed.
+    {
+      let strippedTotal = 0
+      meals = meals.map((m: any) => {
+        const unused = unusedIngredients(m?.steps, m?.ingredients)
+        if (unused.length === 0) return m
+        strippedTotal += unused.length
+        console.log(`[phantom] "${m?.name}" lists ${unused.map((u: any) => `${u.grams} ${u.name}`).join(', ')} and never uses ${unused.length > 1 ? 'them' : 'it'} — removed`)
+        const drop = new Set(unused)
+        return { ...m, ingredients: (m.ingredients ?? []).filter((i: any) => !drop.has(i)) }
+      })
+      funnel.phantomIngredients = strippedTotal
+    }
+
     // Correct macros using FatSecret nutrition data
     if (fsKey && fsSecret) {
       console.log('Correcting macros via FatSecret...')
@@ -706,19 +739,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         }
       })
       if (scaledToTargetCount > 0) console.log(`Scaled ${scaledToTargetCount}/${meals.length} meals toward ${batchCalorieTarget} kcal`)
-    }
-
-    // FUNNEL. Every number below is one this function ALREADY computes for a console line, and
-    // console lines are dashboard-only. Collecting them into a row turns "how many candidates were
-    // fresh?" from an inference off the sort order into a query. Every threshold in this file was
-    // calibrated from a one-off manual measurement — the comments say so — and this is what makes
-    // that continuous instead of archaeological.
-    const funnel: Record<string, unknown> = {
-      genCountAsked: genCount, modelReturned: meals.length,
-      displayCount, servings, calorieTarget, batchCalorieTarget,
-      bannedBases, bannedForms, maxPrepMinutes,
-      pantryItems: ingredients.length, windowNames: recentServed.length,
-      scaledToTarget: scaledToTargetCount,
+      funnel.scaledToTarget = scaledToTargetCount
     }
 
     const beforeBands = meals.length
@@ -796,6 +817,28 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       }
       funnel.notCookable = meals.filter((m: any) => m._notCookable).length
       funnel.afterCookable = meals.length
+    }
+
+    // CAN YOU ACTUALLY FOLLOW THE STEPS? A recipe that says "Cook pasta according to package
+    // directions" and lists no pasta is unfollowable, whatever else is right about it. The prompt
+    // carries this as a blocking rule already — "EVERY single item referenced in any step MUST
+    // appear in the ingredients array" — and 3 of 48 real generations broke it anyway.
+    //
+    // Complementary to the name check below rather than overlapping: this reads the STEPS, that
+    // reads the TITLE. "Beef Bolognese Pasta" fails both; a dish whose steps say "toast" while its
+    // title says nothing about bread fails only this one.
+    {
+      const beforeGhosts = meals.length
+      const followable = meals.filter((m: any) => {
+        const ghosts = ghostIngredients(m?.steps, m?.ingredients, ASSUMED)
+        if (ghosts.length > 0) console.log(`[ghost] "${m?.name}" tells you to cook ${ghosts.join(', ')} and lists none`)
+        return ghosts.length === 0
+      })
+      if (followable.length >= displayCount && followable.length < beforeGhosts) {
+        console.log(`Ghost ingredients: dropped ${beforeGhosts - followable.length}/${beforeGhosts} whose steps need something they do not list`)
+        meals = followable
+      }
+      funnel.ghostIngredients = beforeGhosts - followable.length
     }
 
     // DOES THE DISH CONTAIN WHAT ITS NAME PROMISES? The inverse of the cookability check above,
