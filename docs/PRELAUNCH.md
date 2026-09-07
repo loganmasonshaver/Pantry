@@ -368,6 +368,38 @@ calories, so the log path needs no change — verified, not assumed.
       screen prints "Makes 2 servings · macros are per serving", and the ingredient list is visibly
       a 2-portion batch. Function logs print `Servings: 2 per recipe` when it fires.
 
+## 2i. POST-LAUNCH — pantry variety unlock  *(designed 2026-09-06, deliberately NOT built)*
+The repeat complaints bottom out in a fact no prompt rule can move. Measured on the live account:
+
+    51 generated meals  ->  26 distinct dishes   (46% repeats)
+    pantry: 56 items, but only 9 produce and NO pasta / bread / tortillas / oats
+    carbs available: rice, potatoes, granola, protein cereal, plantain chips
+
+Every savory dish is therefore protein + rice or potatoes, which is why chicken-and-potatoes and
+yogurt bowls keep returning. Three fresh dishes a day against a 30-dish memory exhausts this
+pantry in about ten days.
+
+**The obvious cheap version does not work.** `missing_ingredients` looked like the data to
+aggregate — it is not: only **6 of 51** meals have any, and they are garnishes (parsley x2,
+chives, lemon juice, banana, parmesan, pasta). That is by design, since the cookNow prompt tells
+the model to use ONLY pantry items and set `missing_ingredients: []`. The system is built never to
+want anything, so it never records what it could not make.
+
+Doing it properly is a new generation pass ("given this pantry, which 5 additions unlock the most
+distinct dishes?") plus a Grocery-tab surface. That is a feature, roughly a day.
+
+**Deferred on purpose.** Pre-launch, and the evidence is one pantry belonging to the developer,
+who regenerates five times an hour while testing — not a user. Design it against the
+`generate-meals-funnel` rows once real users have produced some. The payoff if it works: it turns
+the top churn complaint into the reason to use the grocery loop, which is a core differentiator.
+
+## 2j. Discover freshness signal — Logan's idea 2026-09-06, not yet specced
+Users cannot tell Discover is updated daily. Options he is weighing: a gold/green "NEW" bracket or
+pill on recently added cards, or ordering each shelf newest-first. Not investigated yet — needs a
+look at whether `trending_meals` carries a usable added-at date per row and how it interacts with
+the day-keyed shelf rotation (which deliberately varies order per day, and would fight a strict
+newest-first sort).
+
 ## 2h. Also designed, not built — scale instead of regenerating
 Logan asked why a goal change needs a whole new generation when the dish is still fine.
 - [ ] **Scale the existing meals for calorie/protein/macro changes instead of regenerating.**
