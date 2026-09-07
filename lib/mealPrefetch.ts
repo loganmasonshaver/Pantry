@@ -2,6 +2,7 @@ import { todayStr } from './localDate'
 import { writeMealCache } from './mealCache'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
+import { suppressesDish } from './dislikeReasons'
 import { generateMeals, GeneratedMeal } from './meals'
 import { fetchMealImage } from './mealImages'
 
@@ -63,12 +64,17 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
     const { data: ratings } = await supabase
       .from('meal_ratings')
-      .select('meal_name, rating')
+      .select('meal_name, rating, reason')
       .eq('user_id', userId)
       .gte('created_at', since)
       .order('created_at', { ascending: false })
       .limit(100)
-    const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
+    // Only the reasons that are ABOUT THE DISH suppress it. A wrong photo or a broken recipe is
+  // a bug report on a meal the user may well want again — feeding those into the prompt's
+  // "do NOT suggest these or anything similar" line is how one bad image used to delete a good
+  // recipe from someone's future permanently. A reason-less row (everything rated before the
+  // sheet shipped) still suppresses, which is exactly what it does today.
+  const dislikedMeals = ratings?.filter(r => r.rating === -1 && suppressesDish((r as any).reason)).map(r => r.meal_name) ?? []
     const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
 
     let recentMealNames: string[] = []

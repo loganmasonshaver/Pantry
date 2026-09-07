@@ -44,6 +44,7 @@ import AILogModal from '../../components/AILogModal'
 import { Shimmer } from '../../components/Shimmer'
 import PressableScale from '../../components/PressableScale'
 import FoodSearchModal from '../../components/FoodSearchModal'
+import DislikeReasonSheet, { DislikeFeedback } from '../../components/DislikeReasonSheet'
 import EditPortionModal from '../../components/EditPortionModal'
 import PantryScanModal from '../../components/PantryScanModal'
 import AsyncStorage from '@react-native-async-storage/async-storage'
@@ -1072,14 +1073,37 @@ export default function HomeScreen() {
       await supabase.from('meal_ratings').delete()
         .eq('user_id', user.id).eq('meal_name', meal.name)
     } else {
+      // Written with no reason FIRST, so backing out of the sheet still records the thumbs-down —
+      // a reason-less row, which is what every rating stored before the sheet is, and it suppresses.
       await supabase.from('meal_ratings').upsert({
         user_id: user.id,
         meal_name: meal.name,
         rating: next,
+        reason: null,
+        reason_ingredients: null,
       }, { onConflict: 'user_id,meal_name' })
       // Show learning feedback so user sees the AI improving
-      showRatingToast(next === 1 ? "Got it — we'll suggest more like this" : "Noted — we'll skip this kind of meal")
+      if (next === -1) setReasonMeal(meal)
+      else showRatingToast("Got it — we'll suggest more like this")
     }
+  }
+
+  // The sheet's answer lands on the row rateMeal just wrote. Only two of the five reasons suppress
+  // the dish — a wrong photo or a broken recipe is a bug report about a meal the user may still
+  // want, and useMealSuggestions reads `reason` to tell them apart.
+  const submitDislikeReason = async ({ reason, ingredients }: DislikeFeedback) => {
+    const meal = reasonMeal
+    if (!user || !meal) return
+    await supabase.from('meal_ratings')
+      .update({ reason, reason_ingredients: ingredients.length > 0 ? ingredients : null })
+      .eq('user_id', user.id).eq('meal_name', meal.name)
+    showRatingToast(
+      // Say what actually happens: these two leave the dish in rotation, so "we'll skip this"
+      // would be a straight lie about what we did with the report.
+      reason === 'photo_mismatch' || reason === 'recipe_wrong'
+        ? "Thanks — we'll take a look at this one"
+        : "Noted — we'll skip this one",
+    )
   }
 
   const showRatingToast = (message: string) => {
@@ -1351,6 +1375,9 @@ export default function HomeScreen() {
   }
 
   const [ratings, setRatings] = useState<Record<string, 1 | -1>>({})
+  // The meal whose thumbs-down is waiting on a reason. Holds the meal itself, not a flag, because
+  // the sheet needs its ingredient list for the taste follow-up.
+  const [reasonMeal, setReasonMeal] = useState<GeneratedMeal | null>(null)
   const [showRatingToast_, setShowRatingToast_] = useState(false)
   const [ratingToastMessage, setRatingToastMessage] = useState('')
   const ratingToastOpacity = useRef(new RNAnimated.Value(0)).current
@@ -2271,6 +2298,18 @@ export default function HomeScreen() {
           // (The staples ask now lives inside the scan review flow, not a post-scan popup.)
           await loadPantryNames()
         }}
+      />
+
+      <DislikeReasonSheet
+        visible={reasonMeal !== null}
+        mealName={reasonMeal?.name ?? ''}
+        ingredients={(reasonMeal?.ingredients ?? []).map(i => i.name).filter(Boolean)}
+        onClose={() => setReasonMeal(null)}
+        onSubmit={submitDislikeReason}
+        // Offered, never written. food_dislikes goes into the meal prompt as an allergen-strength
+        // hard exclusion and also filters Discover, so one tap on a bad recipe must not put a food
+        // there on the user's behalf.
+        onIngredientsNamed={names => router.push({ pathname: '/food-preferences', params: { suggest: names.join('|') } })}
       />
 
     </SafeAreaView>

@@ -13,7 +13,7 @@ import {
   Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { ChevronLeft, Check, X } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '../lib/supabase'
@@ -46,11 +46,17 @@ export default function FoodPreferencesScreen() {
   // True if the initial load failed — blocks save() so we never overwrite real prefs
   // with the empty state a failed fetch leaves behind.
   const [loadFailed, setLoadFailed] = useState(false)
+  // How many chips arrived pre-staged from a meal's "didn't taste good" follow-up, so the copy can
+  // explain why they are sitting there unsaved.
+  const [stagedCount, setStagedCount] = useState(0)
+  const { suggest } = useLocalSearchParams<{ suggest?: string }>()
   const inputRef = useRef<TextInput>(null)
 
   useEffect(() => {
     loadPreferences()
-  }, [user])
+    // `suggest` is in the deps because loadPreferences reads it: staged chips arrive as a route
+    // param, and a load that fired before it was available would drop them silently.
+  }, [user, suggest])
 
   const loadPreferences = async () => {
     if (!user) { setLoading(false); return }
@@ -72,8 +78,24 @@ export default function FoodPreferencesScreen() {
     const dislikes: string[] = data?.food_dislikes ?? []
     const knownSelected = dislikes.filter(d => DISLIKE_CHIPS.includes(d))
     const custom = dislikes.filter(d => !DISLIKE_CHIPS.includes(d))
-    setSelected(knownSelected)
-    setCustomChips(custom)
+
+    // Arrived from a "didn't taste good" follow-up, carrying the ingredients the user pointed at.
+    // They are staged as unsaved chips, NOT written: this column is injected into the meal prompt
+    // as an allergen-strength hard exclusion and also filters Discover, so it is far too broad an
+    // outcome to apply on the user's behalf from one tap on a bad recipe. They see them here, in
+    // the screen that says what the list does, and press Save — or back out and keep only the
+    // dish-level skip the thumbs-down already recorded.
+    const staged = String(suggest ?? '').split('|').map(n => n.trim()).filter(Boolean)
+    const stagedKnown = staged.filter(n => DISLIKE_CHIPS.some(c => c.toLowerCase() === n.toLowerCase()))
+      .map(n => DISLIKE_CHIPS.find(c => c.toLowerCase() === n.toLowerCase())!)
+    const stagedCustom = staged
+      .filter(n => !DISLIKE_CHIPS.some(c => c.toLowerCase() === n.toLowerCase()))
+      .map(n => n.charAt(0).toUpperCase() + n.slice(1))
+
+    const dedupe = (list: string[]) => Array.from(new Map(list.map(v => [v.toLowerCase(), v])).values())
+    setSelected(dedupe([...knownSelected, ...stagedKnown]))
+    setCustomChips(dedupe([...custom, ...stagedCustom]))
+    setStagedCount(staged.length)
     setInputText('')
     setLoading(false)
   }
@@ -194,7 +216,9 @@ export default function FoodPreferencesScreen() {
           >
             <Text style={styles.title}>What do you want to avoid?</Text>
             <Text style={styles.subtitle}>
-              These will never appear in your meal suggestions.
+              {stagedCount > 0
+                ? `Added below from the meal you rated. Save to never see ${stagedCount > 1 ? 'them' : 'it'} again — or go back to skip just that recipe.`
+                : 'These will never appear in your meal suggestions.'}
             </Text>
 
             {/* ── Suggestions (hide selected ones) ── */}

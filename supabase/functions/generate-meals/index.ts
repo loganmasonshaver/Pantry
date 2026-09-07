@@ -925,6 +925,23 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     funnel.ingredientRescues = rescued
     if (rescued > 0) console.log(`Ingredient rescue fired ${rescued}x this generation`)
 
+    // DISLIKE BAN — enforced in code, not asked for in the prompt.
+    //
+    // A thumbs-down used to be one sentence in the prompt ("do NOT suggest these or anything
+    // similar"). That is a request, and this model's answer to a list of names it must avoid is
+    // measurably a REWORDED version of one — the entire reason isSameDish and matchesRecentDish
+    // exist. So the dish the user rejected could come back under a new adjective.
+    //
+    // A HARD drop, like the prep-time gate and for the same reason: "never show me this again" is
+    // the user's constraint, not a preference the ranking may trade away. The client only sends the
+    // dislikes whose REASON is about the dish — a wrong photo or a broken recipe leaves it in.
+    const beforeDislike = meals.length
+    meals = meals.filter((m: any) => !matchesRecentDish(m.name, dislikedMeals))
+    funnel.droppedByDislike = beforeDislike - meals.length
+    if (beforeDislike - meals.length > 0) {
+      console.log(`Dislike ban: dropped ${beforeDislike - meals.length}/${beforeDislike} meals the user has rejected`)
+    }
+
     // FAT DROP — moved here, AFTER the repeat marking, and it is not a cosmetic reorder.
     // Measured on the first funnel row: 10 candidates in, the fat filter took FOUR, and of the six
     // survivors exactly ONE was fresh. Running before the repeat marking made it blind to the only

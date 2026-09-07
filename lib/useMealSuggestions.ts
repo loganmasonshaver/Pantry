@@ -2,6 +2,7 @@ import { todayStr } from './localDate'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
+import { suppressesDish } from './dislikeReasons'
 import { generateMeals, GeneratedMeal } from './meals'
 import { generationKey, isGenerating, beginGeneration, endGeneration, publishGenerated, publishMealImage, publishMealImageFailed, subscribeGeneration } from './mealGenerationBus'
 import { perfMark } from './perf'
@@ -134,7 +135,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
           .limit(200), // bound the list serialized into the GPT prompt (token cost + truncation risk)
         supabase
           .from('meal_ratings')
-          .select('meal_name, rating')
+          .select('meal_name, rating, reason')
           .eq('user_id', userId)
           .gte('created_at', since)
           .order('created_at', { ascending: false })
@@ -144,7 +145,12 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // Oldest items first — GPT prompt will prioritize using them up
       const ingredients = pantryItems?.map(i => i.name) || []
 
-      const dislikedMeals = ratings?.filter(r => r.rating === -1).map(r => r.meal_name) ?? []
+      // Only the reasons that are ABOUT THE DISH suppress it. A wrong photo or a broken recipe is
+  // a bug report on a meal the user may well want again — feeding those into the prompt's
+  // "do NOT suggest these or anything similar" line is how one bad image used to delete a good
+  // recipe from someone's future permanently. A reason-less row (everything rated before the
+  // sheet shipped) still suppresses, which is exactly what it does today.
+  const dislikedMeals = ratings?.filter(r => r.rating === -1 && suppressesDish((r as any).reason)).map(r => r.meal_name) ?? []
       const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
 
       // Suppress repeats from recent generations. This device-local copy is now only a redundancy

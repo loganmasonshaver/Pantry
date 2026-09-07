@@ -24,6 +24,7 @@ import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp,
 import PressableScale from '../../components/PressableScale'
 import RecipeFormModal from '@/components/RecipeFormModal'
 import CreatorRecipeModal from '@/components/CreatorRecipeModal'
+import DislikeReasonSheet, { DislikeFeedback } from '@/components/DislikeReasonSheet'
 import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -113,6 +114,7 @@ export default function MealDetailScreen() {
   const loggingRef = useRef(false) // synchronous double-log guard (slot picker → insert)
   const [logged, setLogged] = useState(false)
   const [userRating, setUserRating] = useState<1 | -1 | null>(null)
+  const [reasonSheetOpen, setReasonSheetOpen] = useState(false)
   const [ratingToast, setRatingToast] = useState<string | null>(null)
   const ratingToastOpacity = useRef(new Animated.Value(0)).current
   // Undo toast for the "I don't keep this" staple opt-out — the opt-out is one-tap and
@@ -234,12 +236,18 @@ export default function MealDetailScreen() {
       await supabase.from('meal_ratings').delete()
         .eq('user_id', user.id).eq('meal_name', meal.name)
     } else {
+      // The rating is written FIRST, with no reason, and the sheet updates it after. Backing out
+      // of the sheet therefore still records the thumbs-down — a reason-less row, which is exactly
+      // what every rating stored before the sheet existed is, and it suppresses.
       await supabase.from('meal_ratings').upsert({
         user_id: user.id,
         meal_name: meal.name,
         rating: next,
+        reason: null,
+        reason_ingredients: null,
       }, { onConflict: 'user_id,meal_name' })
-      showRatingToast(next === 1 ? "Got it — we'll suggest more like this" : "Noted — we'll skip this kind of meal")
+      if (next === -1) setReasonSheetOpen(true)
+      else showRatingToast("Got it — we'll suggest more like this")
     }
     // For creator-uploaded recipes (not AI-generated), the rating also moves a
     // global vote_score that drives the trending feed for everyone. Delta math
@@ -250,6 +258,23 @@ export default function MealDetailScreen() {
         supabase.rpc('increment_vote_score', { meal_id: id, delta }).then(() => {}, () => {})
       }
     }
+  }
+
+  // The sheet's answer lands on the row rateMeal just wrote. Only two of the five reasons suppress
+  // the dish; the other three are bug reports about a recipe the user may well want again, and
+  // useMealSuggestions reads `reason` to decide which is which.
+  const submitDislikeReason = async ({ reason, ingredients }: DislikeFeedback) => {
+    if (!user || !meal) return
+    await supabase.from('meal_ratings')
+      .update({ reason, reason_ingredients: ingredients.length > 0 ? ingredients : null })
+      .eq('user_id', user.id).eq('meal_name', meal.name)
+    showRatingToast(
+      reason === 'photo_mismatch' || reason === 'recipe_wrong'
+        // Say what actually happens. These two leave the dish in rotation, and a "we'll skip this"
+        // toast after a photo complaint would be a straight lie about what we did.
+        ? "Thanks — we'll take a look at this one"
+        : "Noted — we'll skip this one",
+    )
   }
 
   // NOTE: the AI-image generation effect used to live here, above `let meal`. Its dependency
@@ -1252,6 +1277,18 @@ export default function MealDetailScreen() {
           // Navigate back so home screen re-fetches with updated meal
           router.back()
         }}
+      />
+      <DislikeReasonSheet
+        visible={reasonSheetOpen}
+        mealName={meal?.name ?? ''}
+        ingredients={(meal?.ingredients ?? []).map(i => i.name).filter(Boolean)}
+        onClose={() => setReasonSheetOpen(false)}
+        onSubmit={submitDislikeReason}
+        // Named ingredients are OFFERED to the food filter, never written to it. food_dislikes is
+        // injected into the meal prompt as an allergen-strength hard exclusion AND filters
+        // Discover, so writing "pineapple" there off one bad parfait would delete pineapple from
+        // the whole app. The user opts into that on the screen whose own words explain it.
+        onIngredientsNamed={names => router.push({ pathname: '/food-preferences', params: { suggest: names.join('|') } })}
       />
     </SafeAreaView>
   )
