@@ -9,6 +9,7 @@ import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDis
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
+import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -18,7 +19,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 // diet/pref change, or a retry — since the client-side MAX_DAILY_REGENS only gates
 // the manual button. 6/day gives headroom for a real premium day (1 auto-gen + up to 3
 // manual rerolls + a scan or two) without a false "limit reached"; still a runaway backstop.
-const MEAL_GEN_CAP_PER_DAY = 6
+
 
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")

@@ -20,7 +20,9 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 // Hard cap on user-initiated regens per day. The auto-fire on first daily visit is free
 // (doesn't count); this cap only governs the manual "Refresh after shopping" button.
 // The server's MEAL_GEN_CAP_PER_DAY, mirrored for DISPLAY ONLY — the real gate is
-// check_and_increment_scan, which the client cannot reach around.
+// check_and_increment_scan, which the client cannot reach around. KEEP IN SYNC with
+// supabase/functions/_shared/caps.ts, which the client cannot import (a device build must not
+// pull in edge-runtime files). A drift here only mis-styles a button; the server still decides.
 //
 // This replaces a local MAX_DAILY_REGENS counter that drifted three ways and, on the path Logan
 // actually used, drifted to zero: a Profile change regenerates through the effect rather than

@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { verifyUser } from '../_shared/auth.ts'
 import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
+import { IMAGE_GEN_DAILY_CAP } from '../_shared/caps.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 // Photographic direction, varied per DISH and stable for it.
@@ -50,12 +51,10 @@ function photoVariant(mealName: string): string {
   return `${ANGLE[h % ANGLE.length]}, ${SURFACE[(h >>> 3) % SURFACE.length]}, ${LIGHT[(h >>> 6) % LIGHT.length]}`
 }
 
-// Per-user daily ceiling on actual generations (cache hits are exempt). Derived from the
-// real max a user can drive: meal-gen is capped at 3/day server-side × up to 5 meals per
-// Cook Now generation = 15 images, plus a small buffer for the onboarding plan reveal and
-// the occasional uncached meal-detail view. 20 covers legit heavy use; anything past it is
-// abuse. (Hitting it just means "no photo" for the extra meals — never blocks the meal.)
-const IMAGE_GEN_DAILY_CAP = 20
+// Per-user daily ceiling on actual generations (cache hits are exempt). DERIVED from the meal cap
+// in _shared/caps.ts rather than restated here — this comment used to claim "meal-gen is capped at
+// 3/day", which stopped being true when that cap was raised to 6, leaving the image cap sized for
+// 15 images while meal generation alone could demand 18. See caps.ts for the reasoning.
 
 const falApiKey = Deno.env.get("FAL_API_KEY")
 const googleAiKey = Deno.env.get("GOOGLE_AI_KEY")
