@@ -26,7 +26,7 @@ import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { formatRestTime } from '@/lib/ingredientDisplay'
+import { formatTimeLine } from '@/lib/ingredientDisplay'
 import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
 import { useAuth } from '@/context/AuthContext'
@@ -923,7 +923,7 @@ export default function PantryScreen() {
                               <Text style={styles.cookTonightName} numberOfLines={2}>{meal.name}</Text>
                               <Text style={styles.cookTonightMeta} numberOfLines={1}>
                                 {meal.prepTime > 0
-                                  ? `${meal.prepTime} min${formatRestTime((meal as any).restTime) ? ` + ${formatRestTime((meal as any).restTime)}` : ''}`
+                                  ? formatTimeLine(meal.prepTime, (meal as any).cookTime, (meal as any).restTime)
                                   : null}
                                 {meal.prepTime > 0 ? '  ·  ' : ''}
                                 {meal.calories} cal

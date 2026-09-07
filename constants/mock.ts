@@ -13,6 +13,9 @@ export type MealDetail = {
   // Hands-off time (chill/soak/marinate). See GeneratedMeal.restTime — only active time counts
   // against the user's prep budget, so this can be hours without disqualifying a dish.
   restTime?: number
+  // Unattended cooking the cook must stay for (bake, simmer). See GeneratedMeal.cookTime — unlike
+  // restTime this DOES count against the prep budget, because the user is still in the kitchen.
+  cookTime?: number
   calories: number
   protein: number
   carbs: number

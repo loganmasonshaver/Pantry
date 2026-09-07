@@ -28,7 +28,7 @@ import { Swipeable, Gesture, GestureDetector } from 'react-native-gesture-handle
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { formatRestTime } from '@/lib/ingredientDisplay'
+import { formatRestTime, formatTimeLine, formatTimeToEat, activeMinutes } from '@/lib/ingredientDisplay'
 import { todayStr } from '@/lib/localDate'
 import { setSelectedDay } from '@/lib/selectedDay'
 import { DEFAULT_SLOT_LABELS, slotId } from '@/lib/mealSlots'
@@ -360,15 +360,10 @@ function MealCard({
         <Text style={styles.mealName}>{meal.name}</Text>
         <View style={styles.mealMeta}>
           <Clock size={13} stroke={COLORS.textMuted} strokeWidth={1.8} />
-          <Text style={styles.mealMetaText}>{meal.prepTime} min prep</Text>
-          {/* Hands-off time is the difference between "dinner tonight" and "start it now, eat it
-              tomorrow". Hiding it is what let a recipe claim 5 minutes for an overnight soak. */}
-          {formatRestTime(meal.restTime) && (
-            <>
-              <View style={styles.macroDot} />
-              <Text style={styles.mealMetaText}>+{formatRestTime(meal.restTime)} rest</Text>
-            </>
-          )}
+          {/* Prep + cook, because both are time the cook is stuck here. Hands-off REST is the
+              difference between "dinner tonight" and "start it now, eat it tomorrow" — hiding it
+              is what let a recipe claim 5 minutes for an overnight soak. */}
+          <Text style={styles.mealMetaText}>{formatTimeLine(meal.prepTime, meal.cookTime, meal.restTime)}</Text>
           {/* Sits with prep time, not with the macros: the macros below are one portion and must
               stay unqualified, while "makes 2" is a fact about the COOKING, same as the clock. */}
           {(meal.servings ?? 1) > 1 && (
@@ -1970,14 +1965,14 @@ export default function HomeScreen() {
                         <View style={styles.heroMealContent}>
                           <Text style={styles.heroMealName} numberOfLines={2}>{balanceTitle(m.name)}</Text>
                           <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
-                            {m.prepTime > 0 && (
+                            {activeMinutes(m.prepTime, m.cookTime) > 0 && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
-                                <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{m.prepTime} MIN</Text>
+                                <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{formatTimeToEat(m.prepTime, m.cookTime).toUpperCase()}</Text>
                               </View>
                             )}
                             {formatRestTime(m.restTime) && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                                <Text style={styles.heroMealPillText}>+{formatRestTime(m.restTime)!.toUpperCase()}</Text>
+                                <Text style={styles.heroMealPillText}>+{formatRestTime(m.restTime)!.toUpperCase()} REST</Text>
                               </View>
                             )}
                             <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>

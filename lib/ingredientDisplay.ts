@@ -599,3 +599,33 @@ export function formatRestTime(minutes: unknown): string | null {
   const rounded = Math.round((m / 60) * 2) / 2
   return `${rounded} hr`
 }
+
+// Minutes from starting to eating, EXCLUDING detachable rest.
+//
+// prepTime is hands-on work; cookTime is unattended-but-you-are-stuck-here (a bake, a simmer).
+// Both are "time until food" and both are what the user's max-prep budget is really about — a
+// 10 min prep with a 20 min bake is a 30 minute commitment however little knife work it involves.
+// Splitting rest out of prepTime stopped soaks being compressed to fit; without cookTime the same
+// split handed the model an unlimited bucket to hide oven time in, and a 15-minute budget bought
+// a half-hour dish. Missing cookTime (every meal cached before it shipped) reads as 0.
+export function activeMinutes(prepTime: unknown, cookTime: unknown): number {
+  const p = Number(prepTime)
+  const c = Number(cookTime)
+  return (Number.isFinite(p) && p > 0 ? Math.round(p) : 0) + (Number.isFinite(c) && c > 0 ? Math.round(c) : 0)
+}
+
+// The headline number on a card: one figure answering "how soon do I eat". The breakdown belongs
+// on the detail screen, where there is room to say which half is work — on a pill "10 min + 20 min"
+// only raises the question of what the second number is.
+export function formatTimeToEat(prepTime: unknown, cookTime: unknown): string {
+  return `${activeMinutes(prepTime, cookTime)} min`
+}
+
+// The one time string every surface shows: minutes until food, then detachable waiting if any.
+// Kept in one place because the four render sites had drifted — the home card said "+20 min rest"
+// while the detail screen said "10 min + 20 min", an unlabelled second number that reads as a
+// range, a cook time, or a typo depending on the reader.
+export function formatTimeLine(prepTime: unknown, cookTime: unknown, restTime: unknown): string {
+  const rest = formatRestTime(restTime)
+  return `${formatTimeToEat(prepTime, cookTime)}${rest ? ` + ${rest} rest` : ''}`
+}

@@ -529,8 +529,8 @@ ${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}${bannedFormsLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
-- HARD CONSTRAINT — prepTime MUST be ≤ ${maxPrepMinutes} minutes. prepTime is HANDS-ON time only: the minutes the cook is actually working. It is the REALISTIC active time — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
-- restTime is SEPARATE and UNLIMITED: hands-off minutes where the food sits and the cook does nothing — chilling, soaking, marinating, rising, setting. It does NOT count toward ${maxPrepMinutes}, so NEVER shorten a soak or a marinade to fit the budget. Overnight oats need 480 minutes, not 15. If a dish genuinely needs to sit overnight, say so: "restTime": 480. Use 0 when the dish is ready as soon as the work is done.
+- HARD CONSTRAINT — prepTime + cookTime MUST be ≤ ${maxPrepMinutes} minutes TOGETHER. That sum is the time from starting to eating, which is what the user actually budgeted. prepTime is HANDS-ON minutes the cook is working; cookTime is UNATTENDED minutes the cook must still be there for — an oven bake, a simmer, a roast, anything where the food is cooking and they are waiting on it. Both are REALISTIC times — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
+- restTime is SEPARATE and UNLIMITED, and it is NOT the same thing as cookTime: it is DETACHABLE time where the cook walks away entirely and comes back later or tomorrow — chilling, soaking, marinating, rising, setting. It does NOT count toward ${maxPrepMinutes}, so NEVER shorten a soak or a marinade to fit the budget. Overnight oats need 480 minutes, not 15. If a dish genuinely needs to sit overnight, say so: "restTime": 480. Use 0 when the dish is ready as soon as the work is done. A 20-minute bake is cookTime, NEVER restTime — the cook is standing in the kitchen. Ask which it is: could they leave the house? Then it is rest. Must they wait by the oven? Then it is cook, and it counts against the budget.
 - NEVER claim a rest that does not do the job. Rolled oats do not soften in 15 minutes, gelatin does not set in 5, and dough does not rise in 10. If the honest rest makes the dish impractical, choose a different dish — do not shrink the number.
 ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — this is extremely tight. You are ONLY allowed to suggest meals from this approved list of genuinely fast formats: protein shake or smoothie, Greek yogurt parfait, overnight oats (pre-made), cottage cheese bowl, scrambled eggs on toast (2-3 min scramble max), microwave rice + canned/pre-cooked protein, wrap or tortilla with pre-cooked filling, tuna or chicken salad on bread or crackers, cold high-protein bowl using pre-cooked or ready-to-eat ingredients. FORBIDDEN formats: any raw meat that must be cooked from scratch (chicken breast, ground beef, shrimp, fish fillets), pasta (boiling alone takes 8-10 min), oven dishes, stir fries with raw protein, soups from scratch, anything with more than 2 cooking steps. If your pantry has pre-cooked or ready-to-eat proteins (rotisserie chicken, canned tuna, canned chicken, hard boiled eggs, deli meat, Greek yogurt, cottage cheese, protein powder), use those.` : ''}
 - Complexity must match the time budget:
@@ -538,7 +538,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
   - ≤20 min: quick stove-top only — single-pan sear/sauté, scramble, quick stir-fry, quick pasta. NO oven, NO braises.
   - ≤30 min: standard weeknight — one protein + one starch + veg. Sheet-pan, one-pan, stir-fry, pasta. No slow-roasts or braises.
   - ≤90 min: full recipes including roasts, braises, marinated dishes, multi-component dishes.
-- The ACTIVE steps must fit within the prepTime claimed. If hands-on work alone (e.g. boiling pasta) takes longer than the budget, the entire meal is disqualified. Hands-off waiting is not hands-on work — it belongs in restTime and never disqualifies a dish.
+- The ACTIVE steps must fit within the prepTime claimed, and any unattended cooking within cookTime. If prepTime + cookTime is over the budget the entire meal is disqualified — moving oven minutes into restTime to squeeze under it is the failure this rule exists to stop. Only DETACHABLE waiting (soaking, chilling, marinating overnight) is exempt, and it never disqualifies a dish.
 - For each ingredient include both a visual portion size (e.g. "1 palm", "1 fist", "2 tbsp") AND a gram/ml weight (e.g. "120g", "185g", "30ml")
 - INGREDIENT COMPLETENESS (blocking): EVERY single item referenced in any step — including oil, butter, salt, pepper, garlic, lemon juice, broth, spices, pasta, rice, sauces, anything — MUST appear in the "ingredients" array with grams/visual. If a step says "add garlic," there MUST be a garlic entry in ingredients. No exceptions. The "missing_ingredients" array is a FILTER LIST of names already present in "ingredients" that aren't in the pantry — it never contains items that aren't also in "ingredients".
 - No repeated meals
@@ -585,6 +585,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     "name": "meal name",
     "slot": "dinner",
     "prepTime": 25,
+    "cookTime": 0,
     "restTime": 0,
     "calories": 500,
     "protein": 45,
@@ -998,9 +999,13 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // preference, and a 45-minute recipe is not a milder failure than a shorter deck.
     funnel.afterMacroCheck = meals.length
     const beforePrep = meals.length
-    meals = meals.filter((m: any) => Number(m.prepTime) <= maxPrepMinutes)
+    // Measures prepTime + cookTime, not prepTime alone. Splitting rest out of prep gave the model
+    // a bucket the budget could not see, and it used it: a 10-min prep with a 20-min bake filed as
+    // "restTime" passed a 15-minute budget and cost the user half an hour. Rest stays exempt — a
+    // soak you walk away from is not time spent — but oven time is time spent.
+    meals = meals.filter((m: any) => Number(m.prepTime || 0) + Number(m.cookTime || 0) <= maxPrepMinutes)
     if (beforePrep - meals.length > 0) {
-      console.log(`Prep-time validation: dropped ${beforePrep - meals.length}/${beforePrep} meals that exceeded maxPrepMinutes=${maxPrepMinutes}`)
+      console.log(`Prep-time validation: dropped ${beforePrep - meals.length}/${beforePrep} meals whose prep+cook exceeded maxPrepMinutes=${maxPrepMinutes}`)
     }
 
     funnel.afterPrepTime = meals.length

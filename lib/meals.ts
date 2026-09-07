@@ -17,6 +17,12 @@ export type GeneratedMeal = {
   // allow oats to soften" so the dish would fit a 30-minute cap. Optional; absent on meals cached
   // before this shipped, and 0 on anything ready the moment the work is done.
   restTime?: number
+  // UNATTENDED but you cannot leave — a bake, a simmer, a roast. Separate from restTime because
+  // the two are only alike from the stove's point of view: an 8 hr soak means "start it tonight",
+  // a 20 min bake means "you are in the kitchen for another 20 minutes". Counts toward the user's
+  // max-prep budget for exactly that reason; restTime does not. Optional — meals cached before it
+  // shipped have none, and 0 means nothing is cooking unattended.
+  cookTime?: number
   calories: number
   protein: number
   carbs: number

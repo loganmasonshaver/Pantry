@@ -11,7 +11,7 @@ import {
   cleanIngredientName, formatHalf, getMeasuredDisplay, getWholeUnitDisplay,
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
-  formatQuarter, scaleVisual, countMissingIngredients, formatRestTime,
+  formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat,
 } from './ingredientDisplay.ts'
 
 // ── the two already-fixed bugs, pinned so they cannot come back ────────────────────────────────
@@ -602,4 +602,28 @@ test('formatRestTime rounds long waits to the half hour', () => {
   assert.equal(formatRestTime(120), '2 hr')
   // 1h45m is an exact tie between 1.5 and 2; rounding up is the safer direction for a wait.
   assert.equal(formatRestTime(105), '2 hr')
+})
+
+// ── activeMinutes / formatTimeToEat ────────────────────────────────────────────────────────────
+test('activeMinutes adds the bake to the knife work — that total is what the budget bounds', () => {
+  // The live case from the muffin-top bake: 10 min prep, 20 min in the oven. Counting only
+  // prepTime let it pass a 15-minute budget and cost the user half an hour.
+  assert.equal(activeMinutes(10, 20), 30)
+})
+
+test('activeMinutes treats a missing cookTime as zero, so meals cached before it shipped still read right', () => {
+  assert.equal(activeMinutes(25, undefined), 25)
+  assert.equal(activeMinutes(25, null), 25)
+  assert.equal(activeMinutes(25, 'soon'), 25)
+})
+
+test('activeMinutes ignores negative and non-finite parts rather than subtracting them', () => {
+  assert.equal(activeMinutes(20, -10), 20)
+  assert.equal(activeMinutes(-5, 15), 15)
+  assert.equal(activeMinutes(undefined, undefined), 0)
+})
+
+test('formatTimeToEat gives one number, not the ambiguous "10 min + 20 min"', () => {
+  assert.equal(formatTimeToEat(10, 20), '30 min')
+  assert.equal(formatTimeToEat(5, 0), '5 min')
 })
