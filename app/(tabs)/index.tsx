@@ -28,7 +28,7 @@ import { Swipeable, Gesture, GestureDetector } from 'react-native-gesture-handle
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { formatRestTime, formatTimeLine, formatTimeToEat, activeMinutes } from '@/lib/ingredientDisplay'
+import { formatTimeLine, activeMinutes } from '@/lib/ingredientDisplay'
 import { todayStr } from '@/lib/localDate'
 import { setSelectedDay } from '@/lib/selectedDay'
 import { DEFAULT_SLOT_LABELS, slotId } from '@/lib/mealSlots'
@@ -1992,14 +1992,11 @@ export default function HomeScreen() {
                         <View style={styles.heroMealContent}>
                           <Text style={styles.heroMealName} numberOfLines={2}>{balanceTitle(m.name)}</Text>
                           <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
+                            {/* One pill. The wait used to get its own, showing a duration nobody
+                                acts on — 6 hr and 8 hr are the same decision. */}
                             {activeMinutes(m.prepTime, m.cookTime) > 0 && (
                               <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
-                                <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{formatTimeToEat(m.prepTime, m.cookTime).toUpperCase()}</Text>
-                              </View>
-                            )}
-                            {formatRestTime(m.restTime) && (
-                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                                <Text style={styles.heroMealPillText}>+{formatRestTime(m.restTime)!.toUpperCase()} REST</Text>
+                                <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{formatTimeLine(m.prepTime, m.cookTime, m.restTime).toUpperCase()}</Text>
                               </View>
                             )}
                             <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>

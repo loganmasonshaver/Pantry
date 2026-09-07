@@ -12,6 +12,7 @@ import {
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
   formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat,
+  formatRestBadge, formatTimeBreakdown, formatTimeLine,
 } from './ingredientDisplay.ts'
 
 // ── the two already-fixed bugs, pinned so they cannot come back ────────────────────────────────
@@ -626,4 +627,69 @@ test('activeMinutes ignores negative and non-finite parts rather than subtractin
 test('formatTimeToEat gives one number, not the ambiguous "10 min + 20 min"', () => {
   assert.equal(formatTimeToEat(10, 20), '30 min')
   assert.equal(formatTimeToEat(5, 0), '5 min')
+})
+
+// ── WHOLE_UNIT_FOODS: produce ─────────────────────────────────────────────────────────────────
+test('countable produce reads as a count, not a weight', () => {
+  // The live miss: a Greek yogurt parfait listed "150g orange" on the ingredient card.
+  assert.deepEqual(getWholeUnitDisplay('orange', '150g'), { count: '1', name: 'orange' })
+  assert.deepEqual(getWholeUnitDisplay('carrots', '180g'), { count: '3', name: 'carrots' })
+  assert.deepEqual(getWholeUnitDisplay('kiwi', '150g'), { count: '2', name: 'kiwis' })
+})
+
+test('a more eager row cannot steal a match from the right one', () => {
+  // "orange bell pepper" matches /orange/ too. If that row is found first the noun is no longer
+  // name-final, and the ingredient loses its count entirely rather than falling through — which is
+  // why bell pepper is ordered ahead of orange.
+  assert.deepEqual(getWholeUnitDisplay('orange bell pepper', '120g'), { count: '1', name: 'orange bell pepper' })
+  // Divided by the plain-tomato weight, 100g of cherry tomatoes would read as "1".
+  assert.deepEqual(getWholeUnitDisplay('cherry tomatoes', '102g'), { count: '6', name: 'cherry tomatoes' })
+  assert.deepEqual(getWholeUnitDisplay('sweet potato', '130g'), { count: '1', name: 'sweet potato' })
+  assert.deepEqual(getWholeUnitDisplay('green onions', '45g'), { count: '3', name: 'green onions' })
+})
+
+test('a fruit named inside a derivative is still not a whole fruit', () => {
+  // Name-final guard: these must stay weights, not become "1 orange".
+  assert.equal(getWholeUnitDisplay('orange juice', '200g'), null)
+  assert.equal(getWholeUnitDisplay('orange zest', '5g'), null)
+  assert.equal(getWholeUnitDisplay('tomato paste', '30g'), null)
+  assert.equal(getWholeUnitDisplay('mashed potatoes', '200g'), null)
+})
+
+test('a token amount of produce stays a weight — the 40% floor still applies', () => {
+  assert.equal(getWholeUnitDisplay('orange', '40g'), null)
+  assert.equal(getWholeUnitDisplay('onion', '30g'), null)
+})
+
+// ── formatRestBadge / formatTimeLine / formatTimeBreakdown ────────────────────────────────────
+test('a short wait is not worth a badge — it is just part of making the thing', () => {
+  assert.equal(formatRestBadge(0), null)
+  assert.equal(formatRestBadge(10), null)
+  assert.equal(formatRestBadge(29), null)
+  assert.equal(formatRestBadge(undefined), null)
+})
+
+test('a wait that fits in an afternoon is a chill; past that it is overnight', () => {
+  assert.equal(formatRestBadge(30), 'chill')
+  assert.equal(formatRestBadge(120), 'chill')
+  assert.equal(formatRestBadge(239), 'chill')
+  assert.equal(formatRestBadge(240), 'overnight')
+  assert.equal(formatRestBadge(480), 'overnight')
+})
+
+test('the card says how soon you eat, then the wait as a word', () => {
+  // Overnight oats: five minutes of work, and the thing that matters is that it is not tonight.
+  assert.equal(formatTimeLine(5, 0, 480), '5 min + overnight')
+  // The muffin-top bake, once the oven minutes are filed as cook rather than rest.
+  assert.equal(formatTimeLine(10, 20, 0), '30 min')
+  // A 20-minute chill disappears rather than becoming an unlabelled second number.
+  assert.equal(formatTimeLine(15, 0, 20), '15 min')
+})
+
+test('the detail screen keeps the real numbers, and drops the parts that are zero', () => {
+  assert.equal(formatTimeBreakdown(10, 20, 0), '10 min prep · 20 min cook')
+  assert.equal(formatTimeBreakdown(5, 0, 480), '5 min prep · 8 hr rest')
+  assert.equal(formatTimeBreakdown(10, 20, 480), '10 min prep · 20 min cook · 8 hr rest')
+  // A no-cook dish says "5 min", not "5 min prep" — there is nothing to distinguish it from.
+  assert.equal(formatTimeBreakdown(5, 0, 0), '5 min')
 })

@@ -73,6 +73,52 @@ const WHOLE_UNIT_FOODS: Array<{ match: RegExp; weight: number; singular: string;
   { match: /\bchicken\s*thighs?\b/i,    weight: 110, singular: 'chicken thigh',    plural: 'chicken thighs' },
   { match: /\bpork\s*chops?\b/i,        weight: 175, singular: 'pork chop',        plural: 'pork chops' },
   { match: /\blamb\s*chops?\b/i,        weight: 90,  singular: 'lamb chop',        plural: 'lamb chops' },
+  { match: /\bchicken\s*drumsticks?\b/i, weight: 90, singular: 'chicken drumstick', plural: 'chicken drumsticks' },
+  { match: /\bchicken\s*wings?\b/i,     weight: 30,  singular: 'chicken wing',     plural: 'chicken wings' },
+  { match: /\bsteaks?\b/i,               weight: 200, singular: 'steak',            plural: 'steaks' },
+  { match: /\bsausages?\b/i,             weight: 75,  singular: 'sausage',          plural: 'sausages' },
+
+  // ── Produce ────────────────────────────────────────────────────────────────────────────────
+  // Everything below was rendering as a raw weight: "150g orange" instead of "1 orange". Countable
+  // produce is the single biggest hole in this list, and it shows on the ingredient card of almost
+  // every fruit-containing recipe.
+  //
+  // ORDER IS LOAD-BEARING TWICE OVER. `find` takes the FIRST matching row, and a match whose noun
+  // is not name-final returns null rather than falling through — so a row that matches too eagerly
+  // does not just mislabel, it disables the correct row entirely. "orange bell pepper" is why bell
+  // pepper is listed BEFORE orange: matched as "orange" it fails the name-final test and the
+  // ingredient loses its count. Same reason cherry tomato precedes tomato and sweet potato
+  // precedes potato — those two would otherwise divide by the wrong unit weight.
+  //
+  // Deliberately ABSENT: cucumber, cabbage, squash, melon, pineapple. Recipes use fractions of
+  // those, and half of one rounds up to a whole — a 2x overstatement the 40% floor cannot catch.
+  { match: /\bbell\s+peppers?\b/i,      weight: 120, singular: 'bell pepper',      plural: 'bell peppers' },
+  { match: /\bcherry\s+tomatoes?\b/i,   weight: 17,  singular: 'cherry tomato',    plural: 'cherry tomatoes' },
+  { match: /\btomatoes?\b/i,             weight: 120, singular: 'tomato',           plural: 'tomatoes' },
+  { match: /\bsweet\s+potatoe?s?\b/i,   weight: 130, singular: 'sweet potato',     plural: 'sweet potatoes' },
+  { match: /\bpotatoe?s?\b/i,            weight: 170, singular: 'potato',           plural: 'potatoes' },
+  // Green/spring onions are counted in their own right (~15g each), so they get a row rather than
+  // an exclusion — "red onion" still falls through to the generic row and reads correctly.
+  { match: /\b(?:green|spring)\s+onions?\b/i, weight: 15, singular: 'green onion', plural: 'green onions' },
+  { match: /\bonions?\b/i,               weight: 110, singular: 'onion',            plural: 'onions' },
+  { match: /\bcarrots?\b/i,              weight: 60,  singular: 'carrot',           plural: 'carrots' },
+  { match: /\bzucchinis?\b/i,            weight: 200, singular: 'zucchini',         plural: 'zucchini' },
+  { match: /\bjalape[nñ]os?\b/i,         weight: 15,  singular: 'jalapeño',         plural: 'jalapeños' },
+  { match: /\boranges?\b/i,              weight: 140, singular: 'orange',           plural: 'oranges' },
+  { match: /\b(?:clementines?|mandarins?|satsumas?)\b/i, weight: 75, singular: 'mandarin', plural: 'mandarins' },
+  { match: /\bpears?\b/i,                weight: 180, singular: 'pear',             plural: 'pears' },
+  { match: /\bpeach(?:es)?\b/i,          weight: 150, singular: 'peach',            plural: 'peaches' },
+  { match: /\bnectarines?\b/i,           weight: 140, singular: 'nectarine',        plural: 'nectarines' },
+  { match: /\bplums?\b/i,                weight: 65,  singular: 'plum',             plural: 'plums' },
+  { match: /\bkiwis?\b/i,                weight: 75,  singular: 'kiwi',             plural: 'kiwis' },
+  { match: /\bmangoe?s?\b/i,             weight: 200, singular: 'mango',            plural: 'mangoes' },
+
+  // ── Counted staples ────────────────────────────────────────────────────────────────────────
+  // "bread" has its own slice rule above; these are whole items that rule never sees.
+  { match: /\bbagels?\b/i,               weight: 100, singular: 'bagel',            plural: 'bagels' },
+  { match: /\benglish\s+muffins?\b/i,   weight: 60,  singular: 'English muffin',   plural: 'English muffins' },
+  { match: /\brice\s+cakes?\b/i,        weight: 9,   singular: 'rice cake',        plural: 'rice cakes' },
+
   // Generic catchall — runs LAST so the specific ones above take precedence.
   { match: /\bfillets?\b/i,             weight: 150, singular: 'fillet',           plural: 'fillets' },
 ]
@@ -114,7 +160,10 @@ export function getWholeUnitDisplay(name: string, gramsStr: string | undefined, 
   // Processed forms are bought and used by weight/volume even though the name still contains a
   // whole-unit noun. "liquid egg whites" is not seven eggs, and dividing its grams by 50 invents
   // a count that is simply wrong.
-  if (/\b(liquid|carton|substitute|powdered|beaten)\b/i.test(name)) return null
+  // mashed/pureed/canned/crushed/shredded/grated forms lost their unit identity — 200g of mashed
+  // potato is not "1 mashed potato". diced/chopped/sliced/minced are deliberately NOT here: those
+  // keep the unit ("1 diced onion" is how a cook reads it) and only describe the knife work.
+  if (/\b(liquid|carton|substitute|powdered|beaten|mashed|pur[eé]ed|canned|crushed|shredded|grated|riced|juiced)\b/i.test(name)) return null
 
   const match = WHOLE_UNIT_FOODS.find(w => w.match.test(name))
   if (!match) return null
@@ -621,11 +670,48 @@ export function formatTimeToEat(prepTime: unknown, cookTime: unknown): string {
   return `${activeMinutes(prepTime, cookTime)} min`
 }
 
-// The one time string every surface shows: minutes until food, then detachable waiting if any.
+// How a wait reads on a CARD: a word, never a number.
+//
+// This follows what recipe publishing already settled. schema.org has only prepTime and cookTime —
+// there is no rest field, and nobody filters a "30-minute recipe" by counting an overnight soak.
+// Sites that do surface it use a word: NC State prints "5 minutes + overnight", Food Network
+// annotates the total as "(includes chilling)". The reason is that the duration is not a decision
+// the reader makes — 6 hr and 8 hr are the same fact, "start this before you want it".
+//
+// Under 30 minutes returns null on purpose. A 10-minute chill inside a 25-minute recipe is just
+// part of making the thing, and showing it invites the question "20 min of what?" — which is
+// exactly what an unlabelled second number did.
+export function formatRestBadge(minutes: unknown): 'chill' | 'overnight' | null {
+  const m = Math.round(Number(minutes))
+  if (!Number.isFinite(m) || m < 30) return null
+  // 4 hours is where a wait stops fitting inside an afternoon. King Arthur's overnight oats are
+  // listed at 4 hr total, so it is also where the word people already use starts being true.
+  return m >= 240 ? 'overnight' : 'chill'
+}
+
+// The card line: one number for time-to-eat, then the wait as a word if there is one.
 // Kept in one place because the four render sites had drifted — the home card said "+20 min rest"
 // while the detail screen said "10 min + 20 min", an unlabelled second number that reads as a
 // range, a cook time, or a typo depending on the reader.
 export function formatTimeLine(prepTime: unknown, cookTime: unknown, restTime: unknown): string {
+  const badge = formatRestBadge(restTime)
+  return `${formatTimeToEat(prepTime, cookTime)}${badge ? ` + ${badge}` : ''}`
+}
+
+// The DETAIL screen version. Someone reading this has already chosen the meal, so the exact
+// numbers are worth the space the card cannot spare — and only here is it clear which minutes are
+// work and which are the oven.
+export function formatTimeBreakdown(prepTime: unknown, cookTime: unknown, restTime: unknown): string {
+  const p = Number(prepTime)
+  const c = Number(cookTime)
+  const prep = Number.isFinite(p) && p > 0 ? Math.round(p) : 0
+  const cook = Number.isFinite(c) && c > 0 ? Math.round(c) : 0
   const rest = formatRestTime(restTime)
-  return `${formatTimeToEat(prepTime, cookTime)}${rest ? ` + ${rest} rest` : ''}`
+  // Nothing to break down: the overwhelming case is a no-cook dish, and "5 min prep" only adds a
+  // word to "5 min".
+  if (cook === 0 && !rest) return `${prep} min`
+  const parts = [`${prep} min prep`]
+  if (cook > 0) parts.push(`${cook} min cook`)
+  if (rest) parts.push(`${rest} rest`)
+  return parts.join(' · ')
 }

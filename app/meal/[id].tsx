@@ -54,7 +54,7 @@ type PortionMode = 'Eyeball' | 'Measured'
 
 import {
   cleanIngredientName, isNeedToBuy, getWholeUnitDisplay, getMeasuredDisplay, toEyeball,
-  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatRestTime, formatTimeLine,
+  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatTimeBreakdown,
 } from '@/lib/ingredientDisplay'
 
 function renderStepContent(step: string | { title: string; detail: string }) {
@@ -732,7 +732,7 @@ export default function MealDetailScreen() {
               <View style={styles.mealMetaPill}>
                 <Clock size={14} stroke={COLORS.macroPrep} strokeWidth={2} />
                 <Text style={[styles.mealMetaPillText, { color: COLORS.macroPrep }]}>
-                  {formatTimeLine(meal.prepTime, meal.cookTime, meal.restTime)}
+                  {formatTimeBreakdown(meal.prepTime, meal.cookTime, meal.restTime)}
                 </Text>
               </View>
             )}
