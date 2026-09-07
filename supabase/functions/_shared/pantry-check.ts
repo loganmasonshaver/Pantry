@@ -60,8 +60,24 @@ export function isInPantry(ingredientName: unknown, pantry: readonly string[]): 
     if (!item) continue
     if (ing.includes(item) || item.includes(ing)) return true
     // Head-noun fallback: "large eggs" against a pantry "Eggs".
-    const head = ing.split(' ').filter(Boolean).pop()
-    if (head && head.length > 2 && (item === head || item.endsWith(' ' + head) || item.startsWith(head + ' '))) return true
+    //
+    // SINGULARISED on both sides. Without it the fallback compared "onion" against a pantry
+    // "Yellow Onions" and failed on the plural alone, so "diced onion" counted as MISSING against
+    // a shelf that had onions on it — and a missing STRUCTURAL ingredient disqualifies the whole
+    // meal in Cook Now. Measured against the real 55-item pantry: nine of forty-one plausible
+    // ingredient names missed, and this was the largest single cause.
+    //
+    // The crude rule dishKey and dishArchetype use, PLUS an -oes case, and the difference is not
+    // cosmetic: that rule turns "potatoes" into "potatoe", which then fails to match "potato".
+    // Potatoes are a pantry staple and were the first thing a test caught. Dish names rarely end
+    // in -oes, which is why the other two copies have never needed it.
+    const sing = (w: string) => {
+      if (w.length > 4 && w.endsWith('oes')) return w.slice(0, -2)
+      return w.length > 3 && w.endsWith('s') && !/(ss|us|is)$/.test(w) ? w.slice(0, -1) : w
+    }
+    const head = sing(ing.split(' ').filter(Boolean).pop() ?? '')
+    const itemLast = sing(item.split(' ').filter(Boolean).pop() ?? '')
+    if (head && head.length > 2 && (sing(item) === head || itemLast === head || item.startsWith(head + ' '))) return true
   }
   return false
 }

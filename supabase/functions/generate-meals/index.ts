@@ -809,10 +809,19 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // the Pantry card reads.
     {
       const beforeCookable = meals.length
+      const structuralGaps: string[] = []
       meals = meals.map((m: any) => {
         const miss = findMissing(m?.ingredients, ingredients, ASSUMED)
+        if (miss.structural.length > 0) structuralGaps.push(...miss.structural)
         return { ...m, missing_ingredients: [...miss.structural, ...miss.garnish], _notCookable: miss.structural.length > 0 }
       })
+      // The NAMES that disqualified a meal, not merely how many. This gate is the single largest
+      // source of candidate loss in Cook Now — four of ten on run 26 — and the count alone cannot
+      // separate the two causes, which need opposite fixes: the model reaching for food that is
+      // genuinely absent, versus the matcher failing to recognise food that is present. A plural
+      // mismatch that made "diced onion" missing against a shelf holding "Yellow Onions" was found
+      // exactly this way, by hand, and should not have needed a session to find.
+      funnel.notCookableMissing = structuralGaps
       if (isCookNow) {
         const cookable = meals.filter((m: any) => !m._notCookable)
         // Floored like every other drop here: a deck of two is worse than a deck with one dish that

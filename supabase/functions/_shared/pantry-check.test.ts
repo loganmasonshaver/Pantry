@@ -95,3 +95,48 @@ test('assumed ice does NOT swallow rice or juice', () => {
   assert.equal(isInPantry('brown rice', ASSUMED), false)
   assert.equal(isInPantry('orange juice', ASSUMED), false)
 })
+
+// ── head-noun plurals ──────────────────────────────────────────────────────────────────────────
+// A missing STRUCTURAL ingredient disqualifies a whole meal in Cook Now, so a plural mismatch here
+// costs a dinner. Measured against the real 55-item pantry, this was the largest single cause of
+// spurious misses.
+const REAL_PANTRY = ['Yellow Onions', 'Red Potatoes', 'Eggs', 'Leafy Greens', 'Shredded Cheese',
+  'Ground Beef', 'Tomato Sauce', 'Chicken', 'Cooked Rice', 'Pickles']
+
+test('a singular ingredient matches a plural pantry entry', () => {
+  assert.equal(isInPantry('diced onion', REAL_PANTRY), true)
+  assert.equal(isInPantry('red onion', REAL_PANTRY), true)
+  assert.equal(isInPantry('baby potato', REAL_PANTRY), true)
+})
+
+test('a plural ingredient still matches, in both directions', () => {
+  assert.equal(isInPantry('large eggs', REAL_PANTRY), true)
+  assert.equal(isInPantry('russet potatoes', REAL_PANTRY), true)
+  assert.equal(isInPantry('chicken breasts', REAL_PANTRY), true)
+})
+
+// The gate SHOULD still reject these. Naming a specific food the pantry does not have is the
+// broken promise the nameGaps rule exists for — matching them would let "Spinach Frittata" ship
+// on generic leafy greens. These assertions exist to stop a future loosening of the matcher from
+// silently swallowing that rule.
+test('a SPECIFIC food is still missing when the pantry only holds the GENERIC one', () => {
+  assert.equal(isInPantry('spinach', REAL_PANTRY), false)
+  assert.equal(isInPantry('kale', REAL_PANTRY), false)
+  assert.equal(isInPantry('mozzarella', REAL_PANTRY), false)
+})
+
+test('a food the pantry simply does not have stays missing', () => {
+  assert.equal(isInPantry('tortillas', REAL_PANTRY), false)
+  assert.equal(isInPantry('shrimp', REAL_PANTRY), false)
+  assert.equal(isInPantry('feta', REAL_PANTRY), false)
+})
+
+// DELIBERATE loose match, decided rather than inherited. "crushed tomatoes" resolves to
+// "Tomato Sauce" through the head-noun prefix rule once -oes singularises correctly. They are
+// different products, but swapping sauce for crushed tomatoes is ordinary cooking, and this
+// module's rule is that a false MISSING drops a whole dinner while a false PRESENT costs one
+// wrong shopping line. Asserted so the behaviour is visible if anyone tightens the matcher later.
+test('a close substitute resolves rather than killing the meal', () => {
+  assert.equal(isInPantry('crushed tomatoes', REAL_PANTRY), true)
+  assert.equal(isInPantry('diced tomatoes', REAL_PANTRY), true)
+})
