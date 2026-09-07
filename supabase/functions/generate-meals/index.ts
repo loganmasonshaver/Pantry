@@ -8,6 +8,7 @@ import { sanitizeList } from '../_shared/sanitize.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
+import { findMissing } from '../_shared/pantry-check.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -757,6 +758,38 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       console.log(`Macro bands: dropped ${droppedByBands}/${beforeBands} (protein > ${Math.round(proteinDropThreshold)}g, calories > ${Math.round(calorieDropThreshold)} kcal${droppedBySmall ? `, ${droppedBySmall} under ${Math.round(calorieDropLow)} kcal` : ''})`)
     }
 
+    // COOKABILITY. "Cook Now" promises a dish you can make tonight, and the model's own
+    // missing_ingredients cannot be trusted with that promise: on real output it declared 1g of
+    // parsley and stayed silent about 50g of tortilla for a wrap, with no tortilla in the pantry.
+    // Declaring the thing that did not matter and hiding the thing that did.
+    //
+    // Structural vs garnish is the whole point. Dropping every meal with any unlisted ingredient
+    // would throw away good dinners over a herb; keeping every one of them serves a wrap with no
+    // wrap. So a missing STRUCTURAL item disqualifies, a missing garnish does not — and either way
+    // missing_ingredients is overwritten with the truth, which is what the "Better with:" line on
+    // the Pantry card reads.
+    {
+      const beforeCookable = meals.length
+      meals = meals.map((m: any) => {
+        const miss = findMissing(m?.ingredients, ingredients, ASSUMED)
+        return { ...m, missing_ingredients: [...miss.structural, ...miss.garnish], _notCookable: miss.structural.length > 0 }
+      })
+      if (isCookNow) {
+        const cookable = meals.filter((m: any) => !m._notCookable)
+        // Floored like every other drop here: a deck of two is worse than a deck with one dish that
+        // needs a shopping trip, and on a thin pantry the model may have nothing better to offer.
+        if (cookable.length >= displayCount) {
+          const dropped = meals.length - cookable.length
+          if (dropped > 0) console.log(`Cookability: dropped ${dropped}/${beforeCookable} needing a structural ingredient the pantry lacks`)
+          meals = cookable
+        } else if (meals.some((m: any) => m._notCookable)) {
+          console.log(`Cookability: ${meals.filter((m: any) => m._notCookable).length} meal(s) need a missing structural ingredient, but only ${cookable.length} fully-cookable candidates remain — keeping them rather than showing a short deck`)
+        }
+      }
+      funnel.notCookable = meals.filter((m: any) => m._notCookable).length
+      funnel.afterCookable = meals.length
+    }
+
     // Repeat suppression, code-enforced. Marked rather than hard-dropped: on a thin pantry the
     // model may only be able to build dishes we've already shown, and an empty deck is worse than
     // a familiar one. Marked meals sort last in the ranking below, so a repeat only survives when
@@ -937,7 +970,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // Strip the markers whether or not the ranking above ran — they must never reach the client
     // cache, and _macrosCorrected must not reach generated_meals either, since that history is read
     // back as recentDetailed on every later generation.
-    meals = meals.map((m: any) => { const { _repeat, _macrosCorrected, ...rest } = m; return rest })
+    meals = meals.map((m: any) => { const { _repeat, _macrosCorrected, _notCookable, ...rest } = m; return rest })
 
     // If every candidate got filtered out (bad input, impossible macro/prep constraints),
     // refund the slot — the user got nothing usable, so it shouldn't count against their cap.
