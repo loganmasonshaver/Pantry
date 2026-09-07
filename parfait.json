@@ -1,0 +1,10 @@
+{
+  "mealName": "Greek Yogurt and Granola Power Parfait",
+  "ingredients": ["non-fat plain greek yogurt", "granola", "orange", "maple syrup", "pecans"],
+  "steps": [
+    { "title": "Prepare Fruit", "detail": "Peel and segment the orange." },
+    { "title": "Assemble", "detail": "Layer greek yogurt in a dish with orange segments." },
+    { "title": "Top", "detail": "Sprinkle with granola and pecans." },
+    { "title": "Finish", "detail": "Drizzle with maple syrup before serving." }
+  ]
+}
