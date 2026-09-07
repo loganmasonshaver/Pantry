@@ -98,7 +98,7 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
 
     // Write the exact cache shape the hook serves from (text only — images filled in on reveal).
     // userId stamps ownership so the cache survives sign-out for this user (see useMealSuggestions).
-    await writeMealCache(mode, { meals: generated, maxPrepMinutes: maxPrep, regenCount: 0, userId })
+    await writeMealCache(mode, { meals: generated, maxPrepMinutes: maxPrep, userId })
     try {
       // 24, matching useMealSuggestions — the prefetch drains the same shared window.
       const merged = [...generated.map(m => m.name).filter(Boolean), ...recentMealNames].slice(0, 24)

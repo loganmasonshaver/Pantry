@@ -28,7 +28,6 @@ export type CachedMeals = {
   // Optional on READ so a legacy entry still parses — the reader checks for undefined and discards
   // it deliberately. Required on WRITE, below, which is the half that stops new ones being created.
   maxPrepMinutes?: number
-  regenCount?: number
   userId?: string
   dietStyle?: string
 }
@@ -40,7 +39,6 @@ export async function writeMealCache(
     /** REQUIRED. Omitting it is what made an entry unreadable; the type is the guard. */
     maxPrepMinutes: number
     userId?: string | null
-    regenCount?: number
     dietStyle?: string
   },
 ): Promise<void> {
@@ -50,7 +48,6 @@ export async function writeMealCache(
     date: todayStr(),
     meals: entry.meals,
     maxPrepMinutes: entry.maxPrepMinutes,
-    regenCount: entry.regenCount ?? 0,
     ...(entry.userId ? { userId: entry.userId } : {}),
     ...(entry.dietStyle ? { dietStyle: entry.dietStyle } : {}),
   }

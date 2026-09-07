@@ -1,5 +1,5 @@
 import { todayStr } from './localDate'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { generateMeals, GeneratedMeal } from './meals'
@@ -18,11 +18,21 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 
 // Hard cap on user-initiated regens per day. The auto-fire on first daily visit is free
 // (doesn't count); this cap only governs the manual "Refresh after shopping" button.
-// Manual rerolls per day. 3 (not 1) so a premium user who doesn't love today's set can get a
-// couple more without a "check back tomorrow" wall — generous but bounded (avoids endless-reroll
-// choice paralysis, and image gen is globally cached so the marginal cost is ~a GPT call). The
-// server MEAL_GEN_CAP_PER_DAY is the real backstop. Resets at midnight (cache is keyed by date).
-const MAX_DAILY_REGENS = 3
+// The server's MEAL_GEN_CAP_PER_DAY, mirrored for DISPLAY ONLY — the real gate is
+// check_and_increment_scan, which the client cannot reach around.
+//
+// This replaces a local MAX_DAILY_REGENS counter that drifted three ways and, on the path Logan
+// actually used, drifted to zero: a Profile change regenerates through the effect rather than
+// regenerate() so it never incremented, and the SAME change stales the meal cache — and the count
+// was only restored on a cache HIT. So changing meal frequency both SPENT a server generation and
+// REFILLED the client's allowance. It also lived in AsyncStorage, so a second device kept its own
+// copy of one server number. The symptom: the Pantry refresh button said 0 of 3 used and was
+// guaranteed to fail, because the server had counted 6 of 6.
+const MEAL_GEN_CAP_PER_DAY = 6
+
+// The quota row is keyed by Postgres current_date, i.e. UTC — NOT todayStr(), which is local and
+// keys the meal cache. Using the local date here would read the wrong row for several hours a day.
+function utcDayKey(): string { return new Date().toISOString().slice(0, 10) }
 
 // How long the hero's own photo is waited for before today's meals are shown anyway. Only applies
 // when meals are ALREADY on screen — see the block that uses it.
@@ -58,8 +68,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   const [errorCode, setErrorCode] = useState<string | null>(null)
   // Track manual regens used today so the UI can disable the button at cap.
   // Mirrored to a ref so generate() can persist the right count without re-renders.
-  const [regensUsedToday, setRegensUsedToday] = useState(0)
-  const regensUsedTodayRef = useRef(0)
+  // Generations the SERVER has counted today. null = not read yet; treat that as "allowed" so the
+  // button is never disabled on missing information — the server rejects authoritatively anyway,
+  // and now that Home and Pantry both render the reason, a rejection is explained rather than mute.
+  const [genUsedToday, setGenUsedToday] = useState<number | null>(null)
   // Which (user, mode, day) we have already served from cache AND started an image backfill for.
   // Guards the effect against doing that work twice when `enabled` flips.
   const servedFromCacheRef = useRef<string | null>(null)
@@ -71,7 +83,6 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // real in it during the 6-8s generation instead of a skeleton. The UI must label them — see the
   // note on the carryover branch below.
   const [stale, setStale] = useState(false)
-  useEffect(() => { regensUsedTodayRef.current = regensUsedToday }, [regensUsedToday])
   useEffect(() => { shownRef.current = meals.length > 0 }, [meals.length])
 
   const generate = async () => {
@@ -163,9 +174,8 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       })
 
       // Cache today's meals — include maxPrepMinutes so stale meals can be invalidated if preference changes,
-      // and regenCount to track how many manual refreshes have been used today (cap enforced in regenerate()).
       const maxPrep = profile?.max_prep_minutes || 30
-      await writeMealCache(mode, { meals: generated, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId })
+      await writeMealCache(mode, { meals: generated, maxPrepMinutes: maxPrep, userId })
       perfMark(`cache WRITE post-generate (${generated.length} meals, ${todayStr()}, cap ${maxPrep})`)
 
       // Keep 24 names (~8 gens) rather than 12: a heavy day is 1 auto-fire + 3 rerolls = 12 names,
@@ -214,7 +224,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
 
       ;(async () => {
         await Promise.all(jobs)
-        await writeMealCache(mode, { meals: mealsToImage, maxPrepMinutes: maxPrep, regenCount: regensUsedTodayRef.current, userId })
+        await writeMealCache(mode, { meals: mealsToImage, maxPrepMinutes: maxPrep, userId })
       })()
 
       // mealsToImage, not `generated` — it carries whichever photos arrived during the wait.
@@ -248,7 +258,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   //
   // Keyed rather than a plain boolean so a day rollover or account switch is never blocked by a
   // stale lock. Manual rerolls pass forceGenerate and bypass it entirely — they are gated by
-  // MAX_DAILY_REGENS on the client and MEAL_GEN_CAP_PER_DAY on the server.
+  // MEAL_GEN_CAP_PER_DAY on the server, which the client now READS rather than mirroring.
   const generatingForRef = useRef<string | null>(null)
 
   const fetchAndGenerate = async (forceGenerate = false) => {
@@ -282,7 +292,6 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             if (validMeals.length > 0 && !isSeeded) {
               setMeals(validMeals)
               setLoading(false)
-              setRegensUsedToday(cached.regenCount ?? 0)
               // Fetch any missing images for cached meals
               const cachedMeals = [...cached.meals]
               if (cachedMeals.some(m => !m.image)) {
@@ -300,7 +309,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                       })
                     }
                   }))
-                  await writeMealCache(mode, { meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes!, regenCount: cached.regenCount ?? 0, userId })
+                  await writeMealCache(mode, { meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes!, userId })
                 })()
               }
               return
@@ -418,7 +427,6 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
             perfMark(`meals painted from cache (${validMeals.length})`)
             setMeals(validMeals)
             setStale(false)
-            setRegensUsedToday(cached.regenCount ?? 0)
             if (cached.meals.some(m => !m.image)) {
               const cachedMeals = [...cached.meals]
               ;(async () => {
@@ -435,7 +443,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                     })
                   }
                 }))
-                await writeMealCache(mode, { meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes!, regenCount: cached.regenCount ?? 0, userId })
+                await writeMealCache(mode, { meals: cachedMeals, maxPrepMinutes: cached.maxPrepMinutes!, userId })
               })()
             }
             return
@@ -475,27 +483,52 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
     return () => { cancelled = true }
   }, [userId, isPremium, mode, enabled])
 
-  // Manual refresh gated by daily cap. Increments regensUsedToday so the ref is set
-  // BEFORE generate() writes the cache, ensuring the new count is persisted.
+  // Manual refresh, gated by the server's own count.
   const regenerate = async () => {
-    if (regensUsedTodayRef.current >= MAX_DAILY_REGENS) return
-    const nextCount = regensUsedTodayRef.current + 1
-    setRegensUsedToday(nextCount)
-    regensUsedTodayRef.current = nextCount
+    // Guarded on the SERVER's count, not a local tally. Still only advisory — the call would be
+    // rejected anyway; this just avoids spending a round trip to be told so.
+    if (genUsedToday !== null && genUsedToday >= MEAL_GEN_CAP_PER_DAY) return
     await fetchAndGenerate(true)
   }
 
-  // Retry a failed gen — does NOT count against MAX_DAILY_REGENS. Failed gens never
-  // reach image fetch (which is where real cost lives), so retries are effectively free.
-  // Users shouldn't lose their daily refresh shot recovering from a network blip.
+  // Retry a failed gen. It DOES consume a server slot, and that is now visible rather than
+  // hidden behind a local tally that never counted it — the quota is re-read when it settles.
   const retry = async () => {
     await fetchAndGenerate(true)
   }
+
+  // Read the SERVER's count. Cheap (one indexed row) and it is the only number that survives a
+  // Profile change, an app reinstall, or a second device. Re-read whenever a generation settles —
+  // including a failed one, since a cap rejection is exactly when the button must go quiet.
+  const refreshQuota = useCallback(async () => {
+    if (!userId) return
+    try {
+      const { data } = await supabase
+        .from('scan_usage')
+        .select('count')
+        .eq('user_id', userId)
+        .eq('scan_type', 'meal_gen')
+        .eq('day', utcDayKey())
+        .maybeSingle()
+      // No row simply means nothing generated yet today; the row is created on first use.
+      setGenUsedToday(Number(data?.count ?? 0))
+    } catch {
+      // Leave it null — unknown must not disable the button. Never surfaced to the user: the
+      // authoritative answer arrives from generate-meals itself.
+    }
+  }, [userId])
+
+  useEffect(() => { refreshQuota() }, [refreshQuota])
+  useEffect(() => { if (!loading) refreshQuota() }, [loading, refreshQuota])
 
   // load() = the normal, NON-forced fetch: await a scan's in-flight prefetch (takeCookNowPrefetch)
   // or serve today's cache, and only generate on a genuine miss. cook-reveal uses this so it reuses
   // the SAME set the pantry tab serves (fixes the reveal-vs-pantry mismatch) instead of force-
   // generating a second batch — which also kills the wasted generation + the long reveal wait.
   const load = () => fetchAndGenerate(false)
-  return { meals, loading, stale, error, errorCode, regenerate, retry, load, cacheChecked, canRegenerate: regensUsedToday < MAX_DAILY_REGENS, regensUsedToday }
+  // Unknown (null) reads as allowed — see genUsedToday. The server is the gate; this only decides
+  // whether the button LOOKS available, and a button that lies about being unavailable is worse
+  // than one that lets you find out from an explained error.
+  const canRegenerate = genUsedToday === null || genUsedToday < MEAL_GEN_CAP_PER_DAY
+  return { meals, loading, stale, error, errorCode, regenerate, retry, load, cacheChecked, canRegenerate, genUsedToday, genCapPerDay: MEAL_GEN_CAP_PER_DAY }
 }
