@@ -259,7 +259,13 @@ Deno.serve(async (req: Request) => {
     // to plain macro ranking. More candidates is the only lever that gives it something to pick.
     // Costs a longer completion on ONE call per generation; nothing extra is imaged, since images
     // are fetched client-side for the final displayCount only.
-    const genCount = mode === 'cookNow' ? Math.max(displayCount + 5, 8) : displayCount
+    // Raised 8 -> 10. Measured on the 02:09 generation: at least 2 of the top 3 were flagged
+    // repeats, and since repeats sort last that means AT MOST 1 of the 8 candidates was fresh. The
+    // ranking cannot pick variety that was never generated, and this file's own comment already
+    // named more candidates as the only lever. Not raised further because max_tokens has to move
+    // with it (see below) and because 48 meals from this pantry produced only 26 distinct dishes —
+    // past a point the candidates repeat each other and the extra tokens buy nothing.
+    const genCount = mode === 'cookNow' ? Math.max(displayCount + 7, 10) : displayCount
     // Per-meal protein band: ±15% of daily target divided by mealsPerDay. Upper cap prevents
     // protein dumping (96g in one meal = poor absorption + GI discomfort). Protein goals
     // already factor bodyweight via calculateGoals (lose=1.2g/lb, maintain=1.0, bulk=0.8).
@@ -422,6 +428,14 @@ Deno.serve(async (req: Request) => {
     const proteinVarietyRule = (isCookNow && detectedProteins.length >= 3)
       ? `\n- PROTEIN VARIETY (blocking): pantry has ${detectedProteins.length} distinct primary protein sources — ${detectedProteins.join(', ')}. Each of the ${displayCount} displayed meals MUST use a DIFFERENT primary protein. Do not repeat a protein across meals. This prevents redundancy when the user clearly has variety on hand.`
       : ''
+    // FORM variety, mirroring the protein rule above — and modelled on it because the data says
+    // that rule WORKS. Across 48 served meals the proteins are genuinely spread (egg 14, yogurt 13,
+    // protein powder 11, cheese 11, chicken 11), while the FORMS collapse: bowl 12, smoothie 7,
+    // potato-dish 5. Nothing was ever asking for shape variety, so the model varied the only
+    // dimension it was told to. Naming the recent forms explicitly is what the protein rule does.
+    const recentForms = [...new Set(recentMealNames.slice(0, 9).map(n => dishArchetype(n)).filter(Boolean))]
+    const formVarietyRule = !isCookNow ? '' :
+      `\n- DISH FORM VARIETY (blocking): the ${displayCount} meals you return must be ${displayCount} DIFFERENT forms — a bowl, a skillet, a wrap, a soup, a bake, a salad, a scramble, a plate are different forms; two bowls with different toppings are the same form.${recentForms.length > 0 ? ` These were served in the last few days, so avoid them: ${recentForms.join(', ')}.` : ''} Form is what the user SEES: three bowls in a row reads as the same meal three times however differently they are seasoned.`
 
     // Assumed staples the user has NOT opted out of. Conservative cooking ENABLERS only (fats,
     // seasonings, baking basics) — never meal-defining items (eggs/rice/produce/proteins), which
@@ -480,7 +494,7 @@ Available pantry ingredients (listed oldest first — prioritize using the first
 ${ingredients.join(", ")}
 
 Rules:
-${ingredientRule}${proteinVarietyRule}${servingsRule}
+${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every recipe MUST have ${batchProteinMin}g–${batchProteinMax}g protein in TOTAL (target ~${batchProteinTarget}g). Distribute protein EVENLY across the ${genCount} recipes — never pile into one and starve another. A single SERVING above ${proteinMax}g causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
@@ -574,11 +588,13 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
           // temperature 0.8 — enough variety so consecutive generations don't return identical
           // meals, but not so high that the LLM ignores the dense constraint list above.
-          // max_tokens 4000 — 2000 truncated real full-fridge outputs mid-JSON (an unterminated
-          // string → JSON.parse throws → the provider gets treated as "failed"). 4000 gives
-          // comfortable headroom for up to ~7 meals with ingredient + step arrays; gpt-4o-mini
-          // and Gemini both allow far more, so the only cost is a few output tokens when needed.
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 4000 }),
+          // max_tokens 6000 — 2000 truncated real full-fridge outputs mid-JSON (an unterminated
+          // string → JSON.parse throws → the provider gets treated as "failed"), and 4000 was sized
+          // for "up to ~7 meals with ingredient + step arrays". genCount is now 10, so 4000 would
+          // truncate for exactly the reason that comment warns about — raising the candidate count
+          // without this is how the whole generation silently fails. gpt-4o-mini and Gemini both
+          // allow far more, so the only cost is a few output tokens when they are needed.
+          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.8, max_tokens: 6000 }),
         })
         const data = await response.json()
         if (data.error) {
