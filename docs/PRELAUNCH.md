@@ -830,7 +830,17 @@ What that sweep left open:
       scan* and *macro tracking* keywords the name gives up. Not yet set in ASC.
 - [ ] **⚠️ The name/subtitle call was reasoned from structure and the Cal AI precedent, NOT from
       live search-volume data.** A real ASO check belongs here before the copy is written.
-- [ ] Screenshots must be AI-generated, not Figma re-skins.
+- [ ] **Screenshots must be AI-generated, not Figma re-skins.** Method Logan wants used —
+      surface this when the task comes up, do not make him re-explain it:
+      1. **Find references first.** Browse Screens Design (screensdesign.com) or Dribbble for App
+         Store screenshot layouts he actually likes. Reference-driven, not designed from scratch.
+      2. **Then capture the real app.** Logan takes photos/screen-grabs of the best FEATURES in
+         Pantry — the actual screens, not mockups.
+      3. **Hand both to an AI to write the prompt.** Feed the reference shots + the app captures
+         into ChatGPT or Claude and have it produce the image-generation prompt.
+      4. **Let the AI generate the final screenshots** from that prompt.
+      This is a rough guideline as of 2026-09-08, not a locked spec — expect it to tighten once
+      the first set is made.
 
 ## 9. Unset SCAN_CAP_WEEK  *(after the trailer and screenshots are shot)*
 - [ ] `npx supabase secrets unset SCAN_CAP_WEEK` — unset is correct; scan-pantry falls back to 7.
