@@ -1838,11 +1838,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
-  newCard: { borderColor: COLORS.accent },
+  newCard: { borderColor: COLORS.accentGreen },
   // Flat top so it merges into the border it hangs from; rounded bottom so it reads as a tab.
   newTab: {
     position: 'absolute', top: 0, right: 12, zIndex: 3,
-    backgroundColor: COLORS.accent, paddingHorizontal: 7, paddingVertical: 3,
+    backgroundColor: COLORS.accentGreen, paddingHorizontal: 7, paddingVertical: 3,
     borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
   },
   newTabHero: { right: 18, paddingHorizontal: 9, paddingVertical: 4 },

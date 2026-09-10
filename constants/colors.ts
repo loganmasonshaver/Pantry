@@ -4,6 +4,10 @@ export const COLORS = {
   cardDark: '#141414',        // Slightly lifted dark surface, one step above pure black
   accent: '#00D4AA',          // Primary teal accent — buttons, highlights, active states
   accentDim: 'rgba(0, 212, 170, 0.18)', // Teal at low opacity for pill badges and icon tints
+  // The app's GREEN, distinct from the teal accent above. Freshness and positive state — Pantry's
+  // "Fresh today" pill, Discover's NEW TODAY border. Same value as macroProtein, but a separate name
+  // because a freshness border is not a protein number and must not change if that one ever does.
+  accentGreen: '#4ADE80',
   text: '#000000',            // Black text — used on white card surfaces
   textWhite: '#FFFFFF',
   textMuted: '#888888',       // Secondary / placeholder text
