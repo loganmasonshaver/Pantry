@@ -6,7 +6,7 @@ import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
-import { TIME_RULES, normaliseTimes } from '../_shared/meal-times.ts'
+import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
@@ -881,6 +881,8 @@ american-comfort as the catch-all for everything else. Every recipe gets one —
 
 ${TIME_RULES}
 
+${PHASE_RULES}
+
 LANGUAGE. Source descriptions are often not in English — this pipeline searches YouTube globally
 and German, Polish and Spanish high-protein cooking are large scenes. TRANSLATE everything you
 output into English: ingredient names, step text and the dish name. Never copy a source word
@@ -909,6 +911,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "prepTime": 25,
     "cookTime": 0,
     "restTime": 0,
+    "timePhases": [{ "kind": "prep", "label": "prep", "minutes": 25 }],
     "ingredients": [
       { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "150g", "section": null },
       { "name": "greek yogurt", "visual": "1/2 cup", "grams": "125g", "section": "bang bang dressing" },
@@ -1599,6 +1602,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     }
 
     if (dryRun) {
+      // What each recipe's time WOULD be stored as, so a dry run can be read for the split and the
+      // cooking order without writing a row. Goes into the funnel because pg_net drops the response.
+      const timeSample = recipes.map((r: any) => {
+        const t = normaliseTimes(r)
+        return { name: r.name, ...t, phases: normalisePhases(r.timePhases, t), rawPhases: r.timePhases ?? null }
+      })
+      funnel.timeSample = timeSample
       // Persist BEFORE returning. pg_net gives up on this request long before it finishes, so the
       // response body reaches nobody when the caller is the cron — the table is the only place a
       // run's result survives. Wrapped so a logging failure can never fail the run itself.
@@ -1608,7 +1618,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         })
         if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
       } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
-      return new Response(JSON.stringify({ dryRun: true, wouldStore: recipes.length, funnel }), {
+      return new Response(JSON.stringify({ dryRun: true, wouldStore: recipes.length, funnel, timeSample }), {
         headers: { 'Content-Type': 'application/json' },
       })
     }
@@ -1655,6 +1665,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         // Split three ways under the shared rules in _shared/meal-times.ts. One undefined prep_time let
         // the model drop a 16-hour freeze from one recipe and count it as work in another.
         ...(({ prepTime, cookTime, restTime }) => ({ prep_time: prepTime, cook_time: cookTime, rest_time: restTime }))(normaliseTimes(r)),
+        // The same minutes in cooking order, kept only when they agree with the totals above; null
+        // makes the detail screen fall back to the type-ordered breakdown rather than fake an order.
+        time_phases: normalisePhases(r.timePhases, normaliseTimes(r)),
         // Unknown or invented values fall back to null rather than being coerced into a shelf the
         // model didn't mean — a wrong shelf is worse than no shelf, since the meal still reaches
         // the user via the catch-all.

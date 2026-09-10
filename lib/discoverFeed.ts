@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { todayStr } from './localDate'
+import type { TimePhase } from './ingredientDisplay'
 
 // The Discover feed's data layer, split out of app/(tabs)/discover.tsx so the screen and the
 // background prefetch run the SAME query, mapping and cache format. Duplicating any of it is how
@@ -21,6 +22,9 @@ export type DiscoverMeal = {
   // backfill reaches them — which renders exactly as the old single number did.
   cookTime: number
   restTime: number
+  // The same minutes in cooking order, validated against the three totals server-side. null =
+  // not extracted yet, or the model's order disagreed with its totals; the detail screen falls back.
+  timePhases: TimePhase[] | null
   servings: number
   shelf_tag: string | null
   source_verified: boolean
@@ -96,7 +100,10 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
     .map((m: any) => ({
       id: m.id, name: m.name, calories: m.calories, protein: m.protein,
       carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
-      cookTime: m.cook_time ?? 0, restTime: m.rest_time ?? 0, servings: m.servings ?? 1,
+      cookTime: m.cook_time ?? 0, restTime: m.rest_time ?? 0,
+      // [] is the backfill's "tried, no valid order" marker — same as absent to the reader.
+      timePhases: Array.isArray(m.time_phases) && m.time_phases.length > 0 ? m.time_phases : null,
+      servings: m.servings ?? 1,
       shelf_tag: m.shelf_tag ?? null, source_verified: m.source_verified === true,
       ingredients: m.ingredients, steps: m.steps, image: m.image,
       trend_source: m.trend_source,

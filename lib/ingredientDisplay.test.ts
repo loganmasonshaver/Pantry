@@ -13,7 +13,7 @@ import {
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
   formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat, snapDisplayMinutes,
   isReadyWithin, formatDuration, countCountableIngredients, isNearlyThere,
-  formatRestBadge, formatTimeBreakdown, formatTimeLine,
+  formatRestBadge, formatTimeBreakdown, formatTimeLine, formatTimePhases,
 } from './ingredientDisplay.ts'
 
 // ── the two already-fixed bugs, pinned so they cannot come back ────────────────────────────────
@@ -860,4 +860,31 @@ test('fully cookable always qualifies; nothing to judge never does', () => {
 
 test('countable ingredients exclude assumed staples, matching the missing count', () => {
   assert.equal(countCountableIngredients([{ name: 'greek yogurt' }, { name: 'salt' }, { name: 'olive oil' }, { name: 'fruit' }]), 2)
+})
+
+// ── ordered time phases ────────────────────────────────────────────────────────────────────────
+
+test('Lentil Quinoa Flatbread reads in the order you cook it — the soak first, not last', () => {
+  assert.equal(formatTimePhases([
+    { kind: 'wait', label: 'soak', minutes: 480 }, { kind: 'prep', label: 'prep', minutes: 20 }, { kind: 'cook', label: 'cook', minutes: 20 },
+  ]), 'Soak 8 hr → 20 min prep → 20 min cook')
+})
+
+test('a mid-recipe freeze sits between the work it separates', () => {
+  assert.equal(formatTimePhases([
+    { kind: 'prep', label: 'prep', minutes: 5 }, { kind: 'wait', label: 'freeze', minutes: 960 }, { kind: 'cook', label: 'spin', minutes: 5 },
+  ]), '5 min prep → Freeze 16 hr → 5 min spin')
+  assert.equal(formatTimePhases([
+    { kind: 'prep', label: 'prep', minutes: 15 }, { kind: 'cook', label: 'bake', minutes: 45 }, { kind: 'wait', label: 'chill', minutes: 120 },
+  ]), '15 min prep → 45 min bake → Chill 2 hr')
+})
+
+test('a single prep phase stays "5 min", like the breakdown it replaces', () => {
+  assert.equal(formatTimePhases([{ kind: 'prep', label: 'prep', minutes: 3 }]), '5 min')
+})
+
+test('no phases means null, so the screen falls back to the plain breakdown', () => {
+  assert.equal(formatTimePhases(null), null)
+  assert.equal(formatTimePhases([]), null)
+  assert.equal(formatTimePhases('soak then cook'), null)
 })

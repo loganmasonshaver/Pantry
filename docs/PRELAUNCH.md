@@ -451,8 +451,10 @@ shelves. No "Today's picks" shelf — first-shelf-wins pulled new recipes OUT of
 ## 2k. VERIFY — shipped 2026-09-10, not yet confirmed  *(grouped by what unblocks each)*
 **A. The Sep 11 3am run (08:00 UTC)** — first SCHEDULED run on the fixed cron auth, and the first to
 split time three ways at extraction. Deployed source was diffed byte-for-byte against the repo.
-- [ ] `select count(*) meals, count(rest_time) split, count(*) filter (where rest_time >= 240) overnight
-  from trending_meals where generated_at = '2026-09-11';` — PASS = `meals > 0` AND `split = meals`.
+- [ ] `select count(*) meals, count(rest_time) split, count(time_phases) phased, count(*) filter (where rest_time >= 240) overnight
+  from trending_meals where generated_at = '2026-09-11';` — PASS = `meals > 0` AND `split = meals`
+  AND `phased = meals` (ordered phases shipped 2026-09-10; a NULL means the extractor's order
+  disagreed with its totals — look at which recipe before assuming a bug).
   Then the 08:20 health-check row in `net._http_response` reads `"healthy":true`. The pipeline's own
   row saying `timed_out: true` is EXPECTED (pg_net gives up at 5s, the run takes ~50s).
 - [ ] Does `pipeline_runs` get a row? Sep 6 (12 meals) and Sep 10 (13) wrote none; Sep 7 (2) did.
@@ -469,7 +471,14 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   row, unchanged. (Font-shrinking to fit one row was ruled out: it needs ~6pt; pills are 10pt.)
 - [ ] Detail screen still says "rest" (`20 min prep · 20 min cook · 8 hr rest`) — "chill" was
   reverted because 3 of 23 waits are soaks. Naming the kind needs the extractor to return it.
-- [ ] **NEXT BUILD after the Sep 11 3am run is verified — detail screen time as ordered phases with
+- [ ] **BUILT 2026-09-10 (Logan chose: build now, force-run to verify) — VERIFY ON DEVICE:** Lentil
+  Quinoa Flatbread's detail reads `Soak 8 hr → 20 min prep → 20 min cook`; McFlurry `5 min prep →
+  Freeze 16 hr → 5 min spin`; a long timeline wraps inside its pill without pushing the thumbs off.
+  Verified server-side: forced dry run of the cron command with the Vault cron_secret → HTTP 200,
+  13/13 recipes split AND phased; backfill 219/219 valid, 0 left. A step-number sort was tried and
+  REVERTED (3-4 of 24 misordered vs 1); model order + an explicit Creami rule got 24/24.
+  Tomorrow's 3am check now also expects `count(time_phases) = meals`.
+- [x] ~~NEXT BUILD after the Sep 11 3am run is verified~~ — detail screen time as ordered phases with
   arrows (Logan's call: chronological, "so the user knows the order of operations").** Measured on the
   23 waiting dishes: wait at the END 13 (type order is right), wait FIRST 3 (Lentil Quinoa Flatbread,
   Lahori Chickpea Curry, Moong Dal Dosa — type order reads the overnight soak as after cooking), wait

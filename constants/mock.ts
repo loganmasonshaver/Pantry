@@ -1,3 +1,6 @@
+// Type-only: no runtime import, so constants never pulls lib code into its module graph.
+import type { TimePhase } from '@/lib/ingredientDisplay'
+
 export type Ingredient = {
   id: string
   visual: string
@@ -16,6 +19,9 @@ export type MealDetail = {
   // Unattended cooking the cook must stay for (bake, simmer). See GeneratedMeal.cookTime — unlike
   // restTime this DOES count against the prep budget, because the user is still in the kitchen.
   cookTime?: number
+  // The same time in cooking order (Discover only, when the extractor's phases agreed with the
+  // totals). Absent = render the type-ordered breakdown.
+  timePhases?: TimePhase[] | null
   calories: number
   protein: number
   carbs: number

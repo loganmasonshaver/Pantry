@@ -54,7 +54,7 @@ type PortionMode = 'Eyeball' | 'Measured'
 
 import {
   cleanIngredientName, isNeedToBuy, getWholeUnitDisplay, getMeasuredDisplay, toEyeball,
-  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatTimeBreakdown,
+  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatTimeBreakdown, formatTimePhases,
 } from '@/lib/ingredientDisplay'
 
 function renderStepContent(step: string | { title: string; detail: string }) {
@@ -732,7 +732,9 @@ export default function MealDetailScreen() {
               <View style={styles.mealMetaPill}>
                 <Clock size={14} stroke={COLORS.macroPrep} strokeWidth={2} />
                 <Text style={[styles.mealMetaPillText, { color: COLORS.macroPrep }]}>
-                  {formatTimeBreakdown(meal.prepTime, meal.cookTime, meal.restTime)}
+                  {/* In cooking order when the recipe has validated phases ("Soak 8 hr → 20 min
+                      prep → 20 min cook"); otherwise the plain type-ordered breakdown. */}
+                  {formatTimePhases(meal.timePhases) ?? formatTimeBreakdown(meal.prepTime, meal.cookTime, meal.restTime)}
                 </Text>
               </View>
             )}
@@ -1398,11 +1400,14 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    // A 4-phase timeline is wider than the row; shrink and wrap rather than shove the thumbs off-screen.
+    flexShrink: 1,
   },
   mealMetaPillText: {
     fontSize: 13,
     fontWeight: '500',
     color: COLORS.textMuted,
+    flexShrink: 1,
   },
 
   // Creator attribution

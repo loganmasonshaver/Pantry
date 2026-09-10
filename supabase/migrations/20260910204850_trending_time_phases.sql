@@ -1,0 +1,14 @@
+-- A recipe's time in COOKING ORDER, so the detail screen can show "Soak 8 hr → 20 min prep → 20 min
+-- cook" instead of listing an overnight soak last, as if it came after the cooking.
+--
+-- Three totals cannot carry order: on the live pool 13 of 23 waiting dishes wait at the end, 3 wait
+-- first (soaks) and 6 wait mid-recipe (blend → freeze → spin), and no rule over prep/cook/rest can
+-- tell those apart. So the extractor returns ordered phases, validated against the totals
+-- (_shared/meal-times.ts normalisePhases) — the totals stay the source of truth for cards and filters.
+--
+--   NULL  not extracted yet (the backfill's resumable marker)
+--   []    tried, but the model's order did not add up to the totals — treated as absent
+--   [...] [{kind: prep|cook|wait, label, minutes}, ...] in the order the cook does them
+--
+-- trending_meals is public-read content; this column carries no user data.
+alter table public.trending_meals add column if not exists time_phases jsonb;

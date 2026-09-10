@@ -793,6 +793,38 @@ export function formatTimeBreakdown(prepTime: unknown, cookTime: unknown, restTi
   return parts.join(' · ')
 }
 
+// ── Ordered time phases ──────────────────────────────────────────────────────────────────────
+//
+// The same minutes in the order the cook does them — "Soak 8 hr → 20 min prep → 20 min cook" — so
+// the detail screen shows the order of operations. Three totals cannot: an overnight soak listed
+// last ("· 8 hr rest") reads as a wait AFTER cooking when it is the first thing you do. Validated
+// server-side against the totals (normalisePhases); absent or empty means use formatTimeBreakdown.
+export type TimePhase = { kind: 'prep' | 'cook' | 'wait'; label: string; minutes: number }
+
+export function formatTimePhases(phases: unknown): string | null {
+  if (!Array.isArray(phases) || phases.length === 0) return null
+  // A no-cook, no-wait dish is one prep phase; "5 min prep" only adds a word to "5 min".
+  if (phases.length === 1 && phases[0]?.kind === 'prep') {
+    const m = snapDisplayMinutes(phases[0]?.minutes)
+    return m ? formatDuration(m) : null
+  }
+  const parts: string[] = []
+  for (const p of phases) {
+    const label = String(p?.label ?? '').trim()
+    if (!label) continue
+    if (p?.kind === 'wait') {
+      // Waits read verb-first ("Chill 2 hr") and keep formatRestTime's half-hour rounding.
+      const d = formatRestTime(p?.minutes)
+      if (d) parts.push(`${label[0].toUpperCase()}${label.slice(1)} ${d}`)
+    } else if (p?.kind === 'prep' || p?.kind === 'cook') {
+      // Same 5-minute snap as the card, so "7 min" of prep never reads as a measurement.
+      const m = snapDisplayMinutes(p?.minutes)
+      if (m) parts.push(`${formatDuration(m)} ${label}`)
+    }
+  }
+  return parts.length ? parts.join(' → ') : null
+}
+
 // ── Discover time ────────────────────────────────────────────────────────────────────────────
 //
 // Discover recipes come from creators and many of them wait — a Ninja Creami base freezes 16-24
