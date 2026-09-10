@@ -504,6 +504,17 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   `select status_code, content from net._http_response order by id desc limit 1` → `"status":"ok"`.
   If it still fails, the next suspect is the dev build's APNs sandbox environment. User-facing
   reminders are LOCAL notifications and do not depend on this.
+- [x] Push arrived on Logan's phone 2026-09-10 (first remote push ever to land). Then made the push
+  the WHOLE report: fixable (photo/recipe) meals first, up to 10, the rest collapsed into counts
+  per reason — no more "select * from ..." printed on a phone.
+- [ ] **Notification TAPS go nowhere — for every notification, not just the report.** The response
+  listener in `hooks/useNotifications.ts` is an empty stub, so the 7 daily reminders and the day-5
+  trial-end notification all just open the app wherever it was. User-facing: decide per type where
+  a tap lands (meal reminder → Home, grocery reminder → receipt scan, trial-end → paywall?).
+- [ ] Undecided: a report screen only Logan can open, as the daily push's tap target — each meal
+  tappable through to its recipe, so a "photo didn't match" lands on the photo being judged. Needs a
+  server-side check that the caller is Logan (Vault `ops_user_id`), a screen, and the tap wiring
+  above. Worth it once dislikes regularly exceed ~10/day; until then the push is complete on its own.
 - [ ] Retire trending-health-check's own push once the daily report is proven — kept for now
   because §2k.A reads its 08:20 row.
 - [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
