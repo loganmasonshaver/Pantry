@@ -510,7 +510,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
     Tell: `belowProteinFloorShown` is 0 unless nothing else qualifies.
   - Image counts: the describer gets "3 eggs" and draws exactly that many. Existing images are cached
     by NAME, so only newly-named dishes show it.
-- [ ] **Savory clash ranks last** (built `5ef7d3b`): run 47 LED with "Protein-Fortified Creamy Rice Soup" —
+- [x] **Run 48 (18:03): savoryClash [] and savoryClashShown 0** — the prompt line held, so the ranking
+  gate itself was not exercised (nothing to catch). Good enough to close; the gate is cheap insurance.
+  **Savory clash ranks last** (built `5ef7d3b`): run 47 LED with "Protein-Fortified Creamy Rice Soup" —
   milk, rice, 70g chicken, protein powder "whisked in to thicken"; not a real dish, and 140g chicken hits
   the same protein. Protein powder or a sweet-flavoured product in a savory dish now sorts below
   everything; prompt says powder only in shakes/oats/pancakes/desserts. Measured: 1 flag in 113 meals.
@@ -520,6 +522,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   -> fit. Replaying run 47 without the soup, the 3rd slot goes to a FRESH 25g Egg and Rice Breakfast Bowl
   ahead of complete 40g+ REPEATS. Tier-first = every shown dish complete and protein-adequate, more repeats.
   The morning handoff said not to reopen the freshness rule without evidence — this is that evidence.
+  **Run 48 is stronger evidence (see §2n):** 7 of 10 candidates were repeats, including all 5 dinners, so
+  fresh-first had no choice at all — the 3 fresh ones shipped, one of them 24g (tier 1) over seven
+  tier-0 dishes, and the deck at 6pm held zero dinners. On a finite pantry, fresh-first selects for the
+  model's oddest recombinations (a cottage cheese + rice + pecan bowl) because the real dinners are
+  the ones already shown.
 - [ ] **Generated "Beef and Shredded Cheese Tacos" had no tortillas or shells** in its ingredients (also a
   "Beef Bolognese Pasta" with flour and no pasta). The name-gap check (25f2f83) should reject a dish
   named after a food it lacks — find out why "taco" slipped past it.
@@ -542,7 +549,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   occasionally line up by chance — that is the trade Logan chose over any visible pattern.
 - [x] **PASS on device 2026-09-10 (previewed via DEV_DAY_OFFSET = 5, reverted to 0).** "Ready in 15" has no
   frozen desserts. Not on every day's shelves by design — 6 of 11 shelves rotate daily.
-- [ ] **Cook Tonight only serves complete dishes first** (built 2026-09-10; FIRST RUN, 46, still showed 2
+- [x] **Run 48: incomplete 0 of 10, incompleteShown 0, notCookableMissing [] — PASS.** But it was
+  achieved by putting rice in all three dishes, a "wrap" and a scramble included (§2n).
+  **Cook Tonight only serves complete dishes first** (built 2026-09-10; FIRST RUN, 46, still showed 2
   incomplete of 3 — the only complete candidates were repeats, freshness wins, and 4 candidates died
   not-cookable because the model reached for bread/pasta/noodles the user does not own): a meal needs a carb base
   (drinks and keto/low-carb exempt); the ranker orders fresh → complete → fit, so a protein-and-veg
@@ -655,6 +664,50 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] Cleanup: Pantry's 19 hardcoded `'#4ADE80'` → `COLORS.accentGreen`; unify the two singularisation
   rules (`pantry-check` vs `recipe-integrity` — the latter is better); grep for `COLORS.text` on
   dark surfaces (it is #000000 for WHITE cards — made the dislike sheet unreadable).
+
+## 2n. AUDIT — Cook Tonight run 48 (2026-09-10 18:03)  *(Logan: "audit everything about those meals")*
+Shown: Egg and Vegetable Scramble (36g/520), Cottage Cheese and Rice Bowl (33g/549), Egg and Cheese
+Breakfast Wrap (24g/559). Target 40g/525 (160g ÷ 4 meals). Rows in `generated_meals`, funnel in
+`pipeline_runs` id 48. Photos viewed. Ordered by how much a paying user would notice.
+- [ ] **Zero dinners at 6pm.** The prompt asks for a spread across eating occasions, and the client
+  (`app/(tabs)/pantry.tsx` ~607) floats the one that fits the current hour, assuming the deck HAS one.
+  The ranker (`generate-meals/index.ts` ~1186) has no slot term: all 5 dinner candidates (Thai basil
+  chicken, beef taco bowl, chicken cauliflower skillet, beef stir-fry, pesto chicken rice) were
+  repeats, so 2 breakfasts + 1 "any" shipped, and chicken and beef never appeared. Fix idea: guarantee
+  at least one lunch/dinner in the 3, even a repeat, ahead of a third breakfast. Tied to the §2k
+  freshness decision.
+- [ ] **"Egg and Cheese Breakfast Wrap" has no wrap** — step 3: "Serve in a bowl with rice as a base".
+  The photo is honestly a rice bowl, so the title contradicts its own photo. `nameIngredientGaps`
+  checks FOODS in the title (`DEFINING_FOODS` has tortilla), and wrap/taco/burrito/sandwich/toast are
+  FORMS, so nothing checks them. This also answers the open "why did taco slip past" item above.
+  Fix: form → required-ingredient map (wrap/taco/burrito/quesadilla → tortilla|wrap|lettuce
+  cups; sandwich/toast → bread|bun|roll|bagel).
+- [ ] **The calorie scaler throws away protein.** `scaleToTarget` shrinks every measured ingredient by
+  one factor. Cottage Cheese and Rice Bowl was ~46g protein at 784 kcal (above target) and shipped at 33g
+  / 549; dropping only the 30g of pecans gives ~577 kcal at ~43g. 8 of 10 candidates were scaled this
+  run. Needed: cut fat/carb items (nuts, butter, oil, cheese, rice) before protein anchors. Also:
+  displayed protein is multiplied by the CALORIE factor while counted eggs stay unscaled, so card
+  macros drift a gram or two from the ingredient list.
+- [ ] **The prompt's FLAVOR PRINCIPLE is unenforced — 0 of 3 meet it.** Line ~594 requires 2 of 4 axes
+  (acid / heat / umami / aromatic fat). Wrap: 0. Scramble: 0. Cottage bowl: 1 (black pepper). No salt
+  in any of them. The pantry held lime, pickles, salsa, hot sauce, soy sauce, garlic and pesto.
+  Measure first (funnel counter of axes per candidate), per the file's own gate-after-evidence rule.
+- [ ] **Rice in all three.** Potato was base-banned, which left Cooked Rice, Protein Cereal and Granola
+  as the offered carbs, and only one of those is savory. Today's carb-completeness rule then forced rice
+  "alongside" a scramble and as the "wrap". A pantry with 2 savory carbs has 1 after a ban, so every
+  savory dish shares it. Risk: if rice and potato are banned together, the only carbs left are
+  breakfast cereals.
+- [ ] **Leftover "Cooked Rice" is never reheated.** Cottage bowl says "warm cooked rice" with cookTime 0;
+  no step anywhere says to microwave it.
+- [ ] **Cottage Cheese and Rice Bowl is four pantry items in a bowl** (cottage cheese, rice, pecans,
+  pepper). The photo reads as rice pudding. It is "fresh" only because it is an odd recombination.
+- [ ] **Scramble photo shows pooled runny yellow liquid** and mostly cauliflower. Cooking 5 min is
+  also short for sautéing cauliflower tender AND scrambling. The photo is now cached under that NAME
+  for every user (§2l image-cache item), and the rice-bowl photo now owns "egg cheese breakfast wrap" too.
+- [ ] Minor: `visual` mixes "1/2 cup" (model) and "½ cup" (scaler) on the same screen.
+- Environment caveat, not a bug: the repeat window is saturated by test bursts (4 generations in 50
+  min today, 8 in 45 min on 09-07), so 7/10 repeats is partly testing. But this pantry supports ~6
+  real dinners, so a once-a-day user would exhaust them within a week anyway.
 
 ## 2m. POST-LAUNCH — popularity signals  *(Logan asked 2026-09-10: "most liked in 7 days" as the hero?)*
 - [ ] **Decided: NOT the hero.** Pre-launch every recipe has 0 likes, and early on 1-2 taps would pick

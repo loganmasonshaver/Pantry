@@ -29,8 +29,8 @@ readiness (memory `feedback_prelaunch_no_users`).
    Gmail/Supabase approvals? (Asked twice; not confirmed.)
 4. **Sep 11, Discover** — note All's hero, flip through the chips, come back: same dish (fix `d8449ea`;
    today's pick was already rewritten by the bug, so only tomorrow proves it).
-5. **Next Cook Tonight generation** — read the funnel (below): `savoryClashShown` 0, `incompleteShown` 0,
-   `belowProteinFloorShown` 0, `notCookableMissing` free of bread/pasta/noodles. Image counts ("3 eggs") are
+5. ~~Next Cook Tonight generation~~ — DONE: run 48 (18:03) audited in full, findings in PRELAUNCH §2n.
+   Clash/incomplete/notCookable all 0; belowProteinFloorShown 1; zero dinners at 6pm. Image counts
    still unexercised.
 6. **Sep 11 ~1pm** — the Sep 10 batch loses its NEW TODAY border; the new batch gains it.
 
