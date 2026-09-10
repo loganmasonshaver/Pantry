@@ -586,6 +586,20 @@ export function stripAdjectives(name: string): string {
 }
 
 // Check if an item is already covered by existing names
+// Singular form of ONE word. Mirrors singular() in supabase/functions/_shared/recipe-integrity.ts
+// (separate Deno runtime — cannot share the module; keep the two in step). It only strips plurals,
+// so it can never merge two different foods: blueberries -> blueberry, potatoes -> potato,
+// eggs -> egg, glass stays glass.
+function singularWord(w: string): string {
+  if (w.endsWith('ies') && w.length > 4) return w.slice(0, -3) + 'y'
+  if (w.endsWith('oes') && w.length > 4) return w.slice(0, -2)
+  if (/(?:s|x|z|ch|sh)es$/.test(w) && w.length > 4) return w.slice(0, -2)
+  if (w.endsWith('ss')) return w
+  if (w.endsWith('s') && w.length > 3) return w.slice(0, -1)
+  return w
+}
+const singularName = (name: string) => name.split(/\s+/).map(singularWord).join(' ')
+
 export function isAlreadyInList(itemName: string, existingNames: Set<string>): boolean {
   const lower = cleanIngredientName(itemName).toLowerCase()
   const stripped = stripAdjectives(lower)
@@ -601,6 +615,10 @@ export function isAlreadyInList(itemName: string, existingNames: Set<string>): b
     // A name made only of qualifiers ("large") strips to "" — never let that match anything.
     if (!stripped) continue
     if (stripped === existing || stripAdjectives(existing) === stripped) return true
+    // Plural-blind, still whole-name: a recipe's "1 egg" is the pantry's "Eggs". The adjective pass
+    // above is why "large eggs" already matched, and the reason plain "egg" did not — nothing here
+    // compared singular to plural. Still never a substring: "egg whites" does not match "eggs".
+    if (singularName(stripped) === singularName(stripAdjectives(existing))) return true
   }
   return false
 }

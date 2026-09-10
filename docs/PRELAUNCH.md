@@ -497,9 +497,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [x] **A reason actually saves** — PASS 2026-09-10: Avocado Blueberry Yogurt Clusters row reads
   `reason = photo_mismatch` after Logan tapped it on device, and the recipe correctly stayed in
   Discover (photo reports do not suppress).
-- [ ] "Almost in your kitchen": 7 recipes, none "Missing 3" (order may now differ — NEW TODAY recipes sit at random spots), Cottage Cheese Crepes in it; Frozen
+- [x] **PASS on device 2026-09-10** (may gain recipes after the plural fix below). "Almost in your kitchen": 7 recipes, none "Missing 3" (order may now differ — NEW TODAY recipes sit at random spots), Cottage Cheese Crepes in it; Frozen
   Yogurt Fruit Melts gone.
-- [ ] Greek yogurt and "large eggs" sit under IN YOUR PANTRY on a recipe that needs them.
+- [ ] **FAILED on device, then fixed:** Peanut Butter Protein Cheesecake listed "1 egg" under YOU'LL NEED
+  with "Eggs" in the pantry — the matcher had no singular/plural rule ("large eggs" only matched via
+  adjective stripping). Re-verify: "egg" now under IN YOUR PANTRY; greek yogurt still is.
 - [x] **PASS on device 2026-09-10.** **Discover opens on the FULL pool** (6 shelves, Lentil Quinoa Flatbread findable) on the first
   open, without switching tabs — the cache held only the newest 60, which gave 2 shelves and parked
   the real pool until blur. Old 60-slice caches are now ignored (one skeleton, then full).
@@ -510,7 +512,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] "Ready in 15" has no frozen desserts.
 - [ ] Hero, if a waiting dish, reads e.g. `10 MIN + OVERNIGHT`.
 - [ ] Cook Tonight nudge "Still not feeling it? Browse Discover →" from the 3rd generation of the day.
-- [ ] Ice not under YOU'LL NEED on a smoothie; a 3-minute dish reads `5 min`.
+- [ ] Ice is assumed stock everywhere: not under YOU'LL NEED, and the Pantry tab's Cook tonight card no
+  longer says "Better with: ice cubes" (the app's staples list was never synced with generate-meals'
+  Sep 7 change). A 3-minute dish reads `5 min`.
 
 **C. The passage of time**
 - [ ] After 7pm tonight: NEW TODAY borders still show (rolling 24h from `created_at`, not UTC date).
@@ -596,6 +600,10 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   Bowl" lists pineapple and shows a July photo with banana.
 - [ ] Undecided, carried from 2026-09-07: Home layout (own-row vs one row); feedback board Phase 2
   (Profile has NO support/contact row at all).
+- [ ] **Pantry tab's Cook tonight uses its OWN two-way substring matcher** (`missingFor` in
+  app/(tabs)/pantry.tsx), the one isAlreadyInList was written to replace — it can call a meal ready
+  that the detail screen says needs shopping (pantry "rice" covers "rice vinegar"). Switching it
+  to countMissingIngredients changes Ready-to-cook counts, so measure before switching.
 - [ ] Cleanup: Pantry's 19 hardcoded `'#4ADE80'` → `COLORS.accentGreen`; unify the two singularisation
   rules (`pantry-check` vs `recipe-integrity` — the latter is better); grep for `COLORS.text` on
   dark surfaces (it is #000000 for WHITE cards — made the dislike sheet unreadable).

@@ -18,7 +18,7 @@ test('state-qualified staples are still assumed', () => {
 test('stripping state words does not turn real foods into staples', () => {
   for (const n of ['ice cream', 'iced tea', 'hot chocolate', 'hot sauce', 'cold brew',
                    'boiled egg', 'boiled eggs', 'warm milk', 'bell pepper', 'red pepper',
-                   'ice cubes', 'frozen berries', 'fresh basil leaves']) {
+                   'frozen berries', 'fresh basil leaves']) {
     assert.equal(isAssumedStaple(n), false, n)
   }
 })
@@ -26,7 +26,10 @@ test('stripping state words does not turn real foods into staples', () => {
 test('a name that is only a state word does not collapse to empty', () => {
   // "" would compare equal across unrelated ingredients — fall back to the normalized name.
   assert.equal(stapleKey('ice'), 'ice')
-  assert.equal(isAssumedStaple('ice'), false)
+  // Ice itself IS a staple now — an explicit alias, not a product of stripping. generate-meals has
+  // assumed "ice cubes" since 2026-09-07; this list was never synced and still said false, which is
+  // how a smoothie kept reading "Better with: ice cubes".
+  assert.equal(isAssumedStaple('ice'), true)
 })
 
 test('an opt-out on any variant suppresses every variant', () => {
@@ -35,4 +38,13 @@ test('an opt-out on any variant suppresses every variant', () => {
   assert.equal(isAssumedStaple('boiling water', excluded), false)
   assert.equal(isAssumedStaple('water', excluded), false)
   assert.equal(isAssumedStaple('cold water', excluded), false)
+})
+
+test('ice is an assumed staple in every form a recipe writes it — and rice is not', () => {
+  assert.equal(isAssumedStaple('ice cubes'), true)
+  assert.equal(isAssumedStaple('ice'), true)
+  assert.equal(isAssumedStaple('Ice Cube'), true)
+  assert.equal(isAssumedStaple('crushed ice'), true)
+  assert.equal(isAssumedStaple('rice'), false)
+  assert.equal(isAssumedStaple('iced coffee'), false)
 })

@@ -7,7 +7,7 @@
 export const ASSUMED_STAPLES = [
   'Salt', 'Black pepper', 'Cooking oil', 'Olive oil', 'Butter', 'All-purpose flour', 'Sugar',
   'Garlic powder', 'Onion powder', 'Paprika', 'Cumin', 'Chili powder', 'Oregano', 'Basil',
-  'Italian seasoning', 'Cinnamon', 'Red pepper flakes', 'Water',
+  'Italian seasoning', 'Cinnamon', 'Red pepper flakes', 'Water', 'Ice cubes',
 ]
 
 // Normalized aliases for matching a recipe ingredient to a staple. EXACT match (after cleaning) so
@@ -24,6 +24,10 @@ const STAPLE_ALIASES = new Set([
   'italian seasoning', 'cinnamon', 'ground cinnamon',
   'red pepper flakes', 'crushed red pepper', 'red chili flakes',
   'water', 'cooking spray',
+  // generate-meals has assumed 'ice cubes' since Sep 7, but this copy never got it, so the app kept
+  // telling a smoothie "Better with: ice cubes". Bare 'ice' is safe HERE because matching is exact;
+  // the server keeps only 'ice cubes' because its matcher is substring-based and 'ice' hits "rice".
+  'ice', 'ice cubes', 'ice cube', 'crushed ice',
 ])
 
 // Temperature and state adjectives describe how an ingredient is USED, never WHICH ingredient it

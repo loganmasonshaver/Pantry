@@ -888,3 +888,18 @@ test('no phases means null, so the screen falls back to the plain breakdown', ()
   assert.equal(formatTimePhases([]), null)
   assert.equal(formatTimePhases('soak then cook'), null)
 })
+
+// ── plural-blind pantry match ──────────────────────────────────────────────────────────────────
+test('the cheesecake case: recipe "egg" is the pantry\'s "Eggs"', () => {
+  assert.equal(isAlreadyInList('egg', new Set(['eggs'])), true)
+  assert.equal(isAlreadyInList('eggs', new Set(['egg'])), true)
+  assert.equal(isAlreadyInList('large egg', new Set(['eggs'])), true)
+  assert.equal(isAlreadyInList('blueberries', new Set(['blueberry'])), true)
+  assert.equal(isAlreadyInList('potato', new Set(['potatoes'])), true)
+})
+
+test('plural-blind is NOT substring — different foods still differ', () => {
+  assert.equal(isAlreadyInList('egg whites', new Set(['eggs'])), false)
+  assert.equal(isAlreadyInList('rice vinegar', new Set(['rice'])), false)
+  assert.equal(isAlreadyInList('eggs', new Set(['liquid egg whites'])), false)
+})
