@@ -41,22 +41,32 @@ const shelf = [
   { id: 'd', created_at: FRESH }, { id: 'e', created_at: OLD },
 ]
 
-test('new recipes ALTERNATE with older ones instead of stacking at the top', () => {
-  assert.deepEqual(interleaveNewToday(shelf, NOW).map(m => m.id), ['a', 'b', 'c', 'd', 'e'])
+// Rows of the 2-column grid, for reading the tests the way the screen draws them.
+const rows = (ids: string[]) => ids.reduce<string[][]>((acc, id, k) => (k % 2 ? acc[acc.length - 1].push(id) : acc.push([id]), acc), [])
+
+test('new recipes form a CHECKERBOARD — never stacked at the top, never all in one column', () => {
+  const out = interleaveNewToday(shelf, NOW).map(m => m.id)
+  assert.deepEqual(out, ['a', 'b', 'd', 'c', 'e'])
+  // [old | NEW], [NEW | old], [old] — the new ones switch sides.
+  assert.deepEqual(rows(out), [['a', 'b'], ['d', 'c'], ['e']])
 })
 
-test('a batch of four new recipes no longer leads the shelf together', () => {
+test('a batch of four new recipes spreads across both columns', () => {
   const batch = [
     { id: 'n1', created_at: FRESH }, { id: 'n2', created_at: FRESH }, { id: 'n3', created_at: FRESH }, { id: 'n4', created_at: FRESH },
     { id: 'o1', created_at: OLD }, { id: 'o2', created_at: OLD }, { id: 'o3', created_at: OLD }, { id: 'o4', created_at: OLD },
   ]
-  assert.deepEqual(interleaveNewToday(batch, NOW).map(m => m.id), ['o1', 'n1', 'o2', 'n2', 'o3', 'n3', 'o4', 'n4'])
+  const out = interleaveNewToday(batch, NOW).map(m => m.id)
+  assert.deepEqual(rows(out), [['o1', 'n1'], ['n2', 'o2'], ['o3', 'n3'], ['n4', 'o4']])
+  // The regression Logan saw: plain alternation put every new recipe in the RIGHT column.
+  const rightColumn = out.filter((_, k) => k % 2 === 1)
+  assert.ok(!rightColumn.every(id => id.startsWith('n')))
 })
 
 test('both halves keep claim()\'s order; surplus of either side trails in order', () => {
   const more = [...shelf, { id: 'f', created_at: FRESH }, { id: 'g', created_at: FRESH }, { id: 'h', created_at: FRESH }]
-  // old a,c,e and new b,d,f,g,h: a b c d e f, then g h.
-  assert.deepEqual(interleaveNewToday(more, NOW).map(m => m.id), ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'])
+  // old a,c,e and new b,d,f,g,h.
+  assert.deepEqual(interleaveNewToday(more, NOW).map(m => m.id), ['a', 'b', 'd', 'c', 'e', 'f', 'g', 'h'])
 })
 
 test('a shelf with nothing new, or only new, is untouched', () => {
@@ -67,7 +77,7 @@ test('a shelf with nothing new, or only new, is untouched', () => {
 })
 
 test('newTodayReach is how far the page must open so no new recipe is behind "Show more"', () => {
-  assert.equal(newTodayReach(interleaveNewToday(shelf, NOW), NOW), 4) // d sits at index 3
+  assert.equal(newTodayReach(interleaveNewToday(shelf, NOW), NOW), 3) // d sits at index 2
   assert.equal(newTodayReach([{ created_at: OLD }], NOW), 0)
   assert.equal(newTodayReach([], NOW), 0)
 })

@@ -23,26 +23,32 @@ export function isNewToday(createdAt: string | null | undefined, nowMs: number =
   return ageMs <= NEW_WINDOW_HOURS * 3_600_000
 }
 
-// NEW TODAY recipes ALTERNATE with older ones through a shelf — older, new, older, new — so each
-// is on the first page without the batch stacking at the top.
+// NEW TODAY recipes are spread through a shelf in a CHECKERBOARD — one new and one older per grid
+// row, the new one switching sides each row — so each is on the first page without the batch
+// stacking at the top or lining up down one column.
 //
-// Two of Logan's reports pull opposite ways, and this satisfies both. First: new recipes were
-// hidden behind "Show more" (a shelf shows 6; a new recipe ranked 9th was invisible). The fix for
-// that led every shelf with its new recipes, which produced the second: "all the new today meals
-// are at the top of each section rather than mixed in like before" — a batch of four ice creams
-// led a shelf together. Alternating keeps every new recipe within reach (newTodayReach tells the
-// page how far to open) while the shelf still reads as a mix.
+// Three reports shaped this. New recipes were hidden behind "Show more" (a shelf shows 6; a new
+// recipe ranked 9th was invisible), so they were moved to the front — which stacked a batch of four
+// ice creams at the top of a shelf ("should be mixed in like before"). Plain alternation fixed the
+// list order and broke the grid: shelves are 2 columns filled left to right, so every odd slot is
+// the RIGHT column and all the new recipes lined up down the right edge. Hence the slot pattern
+// old, new, new, old — row by row: [old | new], [new | old], [old | new]...
 //
 // Both halves keep claim()'s order, and it runs AFTER claim(), so it moves recipes within their
-// shelf and never changes which shelf owns them. An older recipe leads, so no shelf opens on "new".
+// shelf and never changes which shelf owns them. When either half runs out, the rest trail in order.
+const GRID_COLUMNS = 2 // discover.tsx browseGrid: two GRID_CELL_W cells per row
 export function interleaveNewToday<T extends { created_at?: string | null }>(meals: readonly T[], nowMs: number = Date.now()): T[] {
   const fresh = meals.filter(m => isNewToday(m.created_at, nowMs))
   const old = meals.filter(m => !isNewToday(m.created_at, nowMs))
   if (fresh.length === 0 || old.length === 0) return [...meals]
   const out: T[] = []
-  for (let i = 0; i < Math.max(fresh.length, old.length); i++) {
-    if (i < old.length) out.push(old[i])
-    if (i < fresh.length) out.push(fresh[i])
+  let i = 0, j = 0
+  for (let slot = 0; i < old.length || j < fresh.length; slot++) {
+    const row = Math.floor(slot / GRID_COLUMNS), col = slot % GRID_COLUMNS
+    // Even rows put the new recipe on the right, odd rows on the left.
+    const wantNew = col === (row % 2 === 0 ? 1 : 0)
+    if ((wantNew && j < fresh.length) || i >= old.length) out.push(fresh[j++])
+    else out.push(old[i++])
   }
   return out
 }

@@ -1077,7 +1077,7 @@ export default function DiscoverScreen() {
       })),
       ...intent.map(sec => ({ ...sec, accent: false })),
     ].filter(sec => sec.meals.length > 0)
-      // New recipes alternate with older ones, after claim() has settled ownership — see interleaveNewToday.
+      // New recipes checkerboard through the shelf, after claim() has settled ownership — see interleaveNewToday.
       .map(sec => ({ ...sec, meals: interleaveNewToday(sec.meals) }))
     // Filtered BEFORE rotating, deliberately: rotating first would let the index land on a section
     // that is about to be dropped, and the "different shelf each day" guarantee would silently
@@ -1172,8 +1172,8 @@ export default function DiscoverScreen() {
   //
   // Personalised shelves cap at 8 and page at 6, so a 7- or 8-meal shelf hit this on almost every
   // load; that is the "why does one say Show 1 more and the other doesn't" case.
-  // newReach floors the first page: every NEW TODAY recipe is visible without a tap. They alternate
-  // with older ones (interleaveNewToday), so a shelf with many new recipes simply opens wider.
+  // newReach floors the first page: every NEW TODAY recipe is visible without a tap. They are spread
+  // through the shelf (interleaveNewToday), so a shelf with many new recipes simply opens wider.
   const shownCount = (key: string, total: number, newReach = 0) => {
     const base = Math.max(expandedSections[key] ?? pageSizeFor(key), newReach)
     return total - base <= 2 ? total : base
