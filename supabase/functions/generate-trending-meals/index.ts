@@ -3,7 +3,7 @@ import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
-import { truncateSafe } from '../_shared/sanitize.ts'
+import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
@@ -1563,6 +1563,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     if (translatedNames.length || untranslatedDropped.length) {
       console.log(`[funnel] steps translated: ${translatedNames.join(', ') || 'none'}; dropped untranslatable: ${untranslatedDropped.join(', ') || 'none'}`)
     }
+    // Emoji out of every stored method (creators' 🙂👍🏼 were being copied into instructions).
+    for (const r of readable) if (Array.isArray(r.steps)) r.steps = stripEmojiFromSteps(r.steps)
     funnel.stepsTranslated = translatedNames
     funnel.untranslatedDropped = untranslatedDropped
     recipes = readable

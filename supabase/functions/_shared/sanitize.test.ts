@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { sanitizeStr, sanitizeList, truncateSafe } from './sanitize.ts'
+import { sanitizeStr, sanitizeList, truncateSafe, stripEmoji, stripEmojiFromSteps } from './sanitize.ts'
 
 // ── surrogate-safe truncation ────────────────────────────────────────────────────────────────
 // The bug this exists for: a cut landing inside an emoji leaves an unpaired surrogate, which
@@ -52,4 +52,20 @@ test('sanitizeList caps items and per-item length, drops empties', () => {
   assert.deepEqual(sanitizeList(['peas', '', '  ', 'kale']), ['peas', 'kale'])
   assert.equal(sanitizeList(Array(50).fill('x')).length, 20)
   assert.deepEqual(sanitizeList('not an array'), [])
+})
+
+// ── emoji out of steps ─────────────────────────────────────────────────────────────────────────
+
+test('the Mango Protein Ice Cream step loses its emoji and keeps its words', () => {
+  assert.equal(stripEmoji('Either eat immediately or let it freeze for another 5 minutes in the freezer. 🙂👍🏼'),
+    'Either eat immediately or let it freeze for another 5 minutes in the freezer.')
+})
+
+test('symbols a recipe needs are untouched', () => {
+  assert.equal(stripEmoji('Bake at 180 °C for ½ hour — about 30 min'), 'Bake at 180 °C for ½ hour — about 30 min')
+})
+
+test('step objects keep their titles and shape', () => {
+  assert.deepEqual(stripEmojiFromSteps([{ title: 'Serve 🍨', detail: 'Enjoy! 😋' }, 'Plain step ✨']),
+    [{ title: 'Serve', detail: 'Enjoy!' }, 'Plain step'])
 })

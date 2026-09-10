@@ -492,6 +492,24 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   renders `Soak overnight → 20 min prep → 20 min cook`; rows without phases keep today's format.
   Also names the wait (soak/freeze/chill) — the "rest" problem above. Waits because tonight's
   extraction change would confound the first scheduled run of the current split.
+- [x] **Emoji stripped from Discover steps** (2026-09-10): the pipeline removes them before storing
+  (_shared/sanitize.ts stripEmojiFromSteps) and the 8 stored recipes were cleaned — 0 of 219 left.
+- [ ] **Creator chatter stored as steps**: "Save this recipe for later and let me know if you try it!"
+  (Chocolate Peanut Butter Smoothie Bowl) and a cookbook plug (Slow Cooker Chinese Chicken Curry).
+  Not instructions — the extractor should drop them.
+- [ ] **AWAITING LOGAN'S OK (found 2026-09-10):**
+  - Server pantry-check treats pantry "Oat Milk" as "oats" (`item.startsWith(head + ' ')`), so a
+    porridge with no oats passed as cookable and the card said "Better with: oats". Same rule lets
+    rice vinegar cover rice, tomato sauce cover tomatoes, almond butter cover almonds. Unrelated to
+    the carb change — runs 45/46 pick the same deck under old and new ordering.
+  - No protein floor in the ranker: Pan-Fried Eggs with Potatoes shipped at 24g against a 40g target
+    (macros are CORRECT — 3 eggs 150g ~19g + potato 180g ~3.4g + butter; half the kcal is butter and
+    potato). The completeness ordering makes complete-but-low-protein likelier. Proposed: rank
+    under-75%-of-target below meals that meet it, same soft style as completeness.
+  - Name the user's OWN pantry carbs in the prompt (cooked rice, potatoes, protein cereal) so the carb
+    push stops producing bread/pasta/noodle meals that die as not-cookable.
+  - Image drew 2 eggs for a "3 large eggs" recipe (first generation of that name, so not a stale
+    cache) — put counts of countable items in the image prompt. Low priority.
 - [ ] **Generated "Beef and Shredded Cheese Tacos" had no tortillas or shells** in its ingredients (also a
   "Beef Bolognese Pasta" with flour and no pasta). The name-gap check (25f2f83) should reject a dish
   named after a food it lacks — find out why "taco" slipped past it.
@@ -512,10 +530,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   seeded by the day so the page holds still all day; none behind "Show more". Rejected on device:
   new-first (stacked at top), plain alternation (all in the right column), checkerboard. Random will
   occasionally line up by chance — that is the trade Logan chose over any visible pattern.
-- [ ] "Ready in 15" has no frozen desserts. It is NOT on today's shelves by design — 6 of 11 shelves
-  rotate daily and today's run fills six before reaching it (~Sep 15 it appears). Previewing via
-  DEV_DAY_OFFSET = 5 in discover.tsx — LOCAL ONLY, UNCOMMITTED, revert to 0 after the check.
-- [ ] **Cook Tonight only serves complete dishes first** (built 2026-09-10): a meal needs a carb base
+- [x] **PASS on device 2026-09-10 (previewed via DEV_DAY_OFFSET = 5, reverted to 0).** "Ready in 15" has no
+  frozen desserts. Not on every day's shelves by design — 6 of 11 shelves rotate daily.
+- [ ] **Cook Tonight only serves complete dishes first** (built 2026-09-10; FIRST RUN, 46, still showed 2
+  incomplete of 3 — the only complete candidates were repeats, freshness wins, and 4 candidates died
+  not-cookable because the model reached for bread/pasta/noodles the user does not own): a meal needs a carb base
   (drinks and keto/low-carb exempt); the ranker orders fresh → complete → fit, so a protein-and-veg
   plate shows only when there are not 3 complete fresh ones. Verify on the NEXT generation: funnel
   `incomplete` / `incompleteShown` in pipeline_runs (generate-meals-funnel), and no "chicken +

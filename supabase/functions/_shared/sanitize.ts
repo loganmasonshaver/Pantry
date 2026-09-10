@@ -38,3 +38,21 @@ export function sanitizeList(arr: unknown, maxItems = 20, maxLen = 60): string[]
   if (!Array.isArray(arr)) return []
   return arr.slice(0, maxItems).map((x) => sanitizeStr(x, maxLen)).filter(Boolean)
 }
+
+// Emoji out of recipe STEP text. Creators decorate their descriptions ("…5 more minutes in the
+// freezer 🙂👍🏼") and extraction copies them into the method, where they read as clutter in an
+// instruction. Logan: make sure emojis are not put into Discover instructions. Extended_Pictographic
+// plus the joiners and skin-tone modifiers that ride with it; °, ½ and other symbols are untouched.
+const EMOJI = /[\p{Extended_Pictographic}\u{FE0F}\u{200D}\u{1F3FB}-\u{1F3FF}]/gu
+
+export function stripEmoji(s: string): string {
+  return s.replace(EMOJI, '').replace(/\s{2,}/g, ' ').replace(/\s+([.,!?;:])/g, '$1').trim()
+}
+
+export function stripEmojiFromSteps<T>(steps: T[]): T[] {
+  return steps.map(s => (typeof s === 'string'
+    ? stripEmoji(s)
+    : (s && typeof s === 'object'
+      ? { ...s, ...('title' in (s as any) ? { title: stripEmoji(String((s as any).title ?? '')) } : {}), ...('detail' in (s as any) ? { detail: stripEmoji(String((s as any).detail ?? '')) } : {}) }
+      : s)) as T)
+}
