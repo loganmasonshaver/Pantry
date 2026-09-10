@@ -492,6 +492,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   renders `Soak overnight → 20 min prep → 20 min cook`; rows without phases keep today's format.
   Also names the wait (soak/freeze/chill) — the "rest" problem above. Waits because tonight's
   extraction change would confound the first scheduled run of the current split.
+- [ ] **Generated "Beef and Shredded Cheese Tacos" had no tortillas or shells** in its ingredients (also a
+  "Beef Bolognese Pasta" with flour and no pasta). The name-gap check (25f2f83) should reject a dish
+  named after a food it lacks — find out why "taco" slipped past it.
 - [ ] **Cucumber Salad Bowl has rest_time 120 but no waiting step** (Chop → Dressing → Combine →
   Avocado → Serve). Likely an extraction error; check its creator's source before trusting its time.
 - [x] **A reason actually saves** — PASS 2026-09-10: Avocado Blueberry Yogurt Clusters row reads
@@ -509,7 +512,17 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   seeded by the day so the page holds still all day; none behind "Show more". Rejected on device:
   new-first (stacked at top), plain alternation (all in the right column), checkerboard. Random will
   occasionally line up by chance — that is the trade Logan chose over any visible pattern.
-- [ ] "Ready in 15" has no frozen desserts.
+- [ ] "Ready in 15" has no frozen desserts. It is NOT on today's shelves by design — 6 of 11 shelves
+  rotate daily and today's run fills six before reaching it (~Sep 15 it appears). Previewing via
+  DEV_DAY_OFFSET = 5 in discover.tsx — LOCAL ONLY, UNCOMMITTED, revert to 0 after the check.
+- [ ] **Cook Tonight only serves complete dishes first** (built 2026-09-10): a meal needs a carb base
+  (drinks and keto/low-carb exempt); the ranker orders fresh → complete → fit, so a protein-and-veg
+  plate shows only when there are not 3 complete fresh ones. Verify on the NEXT generation: funnel
+  `incomplete` / `incompleteShown` in pipeline_runs (generate-meals-funnel), and no "chicken +
+  cauliflower + soy sauce" plate. The carb rule sat in the prompt unenforced since 2026-04-30.
+- [ ] **Ice/water are 0 kcal in macro correction** (built 2026-09-10) — FatSecret matched "Ice Cubes" at
+  217 kcal/100g, so the Chocolate Protein Power Shake read 782 kcal instead of ~565. Verify: a new
+  shake's funnel trace shows `zero-calorie@0/100g=0` for ice.
 - [ ] Hero, if a waiting dish, reads e.g. `10 MIN + OVERNIGHT`.
 - [ ] **Hero no longer changes when switching chips** (Logan: Breakfast → Lunch → All turned the Skillet
   into the Chilli Oil pasta). Chips recorded their own hero as the day's pick and marked it seen.
@@ -520,7 +533,7 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [x] **PASS on device 2026-09-10.** Ice is assumed stock everywhere: not under YOU'LL NEED, and the Pantry tab's Cook tonight card no
   longer says "Better with: ice cubes" (the app's staples list was never synced with generate-meals'
   Sep 7 change).
-- [ ] A 3-minute dish reads `5 min` (never "3 min").
+- [x] **PASS on device 2026-09-10.** A 3-minute dish reads `5 min` (never "3 min").
 
 **C. The passage of time**
 - [ ] After 7pm tonight: NEW TODAY borders still show (rolling 24h from `created_at`, not UTC date).
