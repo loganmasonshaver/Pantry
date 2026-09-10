@@ -515,8 +515,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   tappable through to its recipe, so a "photo didn't match" lands on the photo being judged. Needs a
   server-side check that the caller is Logan (Vault `ops_user_id`), a screen, and the tap wiring
   above. Worth it once dislikes regularly exceed ~10/day; until then the push is complete on its own.
-- [ ] Retire trending-health-check's own push once the daily report is proven — kept for now
-  because §2k.A reads its 08:20 row.
+- [x] trending-health-check's own push REMOVED 2026-09-10 (Logan: one notification a day). It
+  still runs at 08:20 UTC and writes its `pipeline_runs` row, which §2k.A reads; the 9am report's
+  first line is the alert now. A test tap confirmed the tap target is still nowhere (see above).
 - [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
   the pipeline's translate-everything rule. COUNT how many before fixing.
 - [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —

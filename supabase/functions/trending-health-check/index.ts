@@ -12,43 +12,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 // a single decimal macro failing an int4 insert. The run returned 500, nothing was stored, and it
 // went unnoticed until someone manually checked the table a day later.
 //
-// Known limit: nothing watches this watcher. If THIS cron stops firing, the result is silence, and
-// silence is also what healthy looks like. One level is the right trade for a solo pre-launch app —
-// revisit with a real uptime monitor if Discover ever becomes load-bearing for revenue.
+// It no longer pushes. The SQL-only daily_ops_report() sends Logan ONE notification a day whose first
+// line is Discover's health, read straight from trending_meals — so it also watches this watcher,
+// and needs no edge function or CRON_SECRET that a single auth failure could silence along with it.
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-const OPS_USER_ID = Deno.env.get("OPS_USER_ID") ?? ""
 // STORE_CAP is 18 and the LLM yield varies run to run (16 is normal), so 12 leaves room for a
 // slightly thin day while still catching a genuinely degraded batch.
 const MIN_EXPECTED = parseInt(Deno.env.get("TRENDING_MIN_EXPECTED") ?? "12", 10)
 
 const db = createClient(supabaseUrl, supabaseServiceKey)
 const today = () => new Date().toISOString().split('T')[0]
-
-async function pushToOps(title: string, body: string): Promise<string> {
-  if (!OPS_USER_ID) return "skipped: OPS_USER_ID not set"
-  const { data: profile } = await db
-    .from('profiles').select('expo_push_token').eq('id', OPS_USER_ID).maybeSingle()
-  const token = profile?.expo_push_token
-  // A missing token is itself worth surfacing in the logs — otherwise a silently-unregistered
-  // device turns this whole alert into a no-op that still looks healthy.
-  if (!token) return "FAILED: ops user has no expo_push_token"
-  try {
-    const res = await fetch("https://exp.host/--/api/v2/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify({ to: token, title, body, sound: "default", priority: "high" }),
-    })
-    if (!res.ok) return `FAILED: expo returned ${res.status}`
-    // Expo answers HTTP 200 even when it REJECTS the push; the verdict is the per-message ticket.
-    // Reading res.ok alone logged "sent" three times while APNs credentials were missing entirely.
-    const ticket = (await res.json().catch(() => null))?.data
-    return ticket?.status === "ok" ? "sent" : `FAILED: ${ticket?.message ?? "unreadable expo response"}`
-  } catch (e) {
-    return `FAILED: ${(e as Error).message}`
-  }
-}
 
 Deno.serve(async (req: Request) => {
   // Ops-only endpoint — no user auth path at all. Same cron auth the generator uses.
@@ -95,25 +70,12 @@ Deno.serve(async (req: Request) => {
     : `Discover PROBLEM for ${date} — ${problems.join(' | ')}`
   console.log(`[health] ${summary}`)
 
-  let alert = "not needed"
-  if (!healthy) {
-    alert = await pushToOps("Pantry: Discover didn't generate", problems.join(' • '))
-    console.log(`[health] alert: ${alert}`)
-  }
+  // Kept in the log row so old and new rows read the same; the 9am daily report is the alert now.
+  const alert = "none (daily report carries it)"
 
-  // PERSIST THE RESULT. Both of this function's reporting channels were dead, and it has been
-  // running on a cron reporting to nobody since 20260812002000_schedule_trending_health_check.sql:
-  //
-  //   1. pushToOps needs profiles.expo_push_token, and getExpoPushTokenAsync() has been failing
-  //      with 'No "projectId" found' — app.json has an empty `extra`, so the app is not linked to
-  //      an EAS project and no token was ever written. (Fix is `eas login` + `eas init`, which
-  //      needs Logan's credentials.)
-  //   2. The Response below goes to pg_net, which abandons the request before it completes. That
-  //      is the exact reason pipeline_runs was created for generate-trending-meals — this function
-  //      never got the same treatment.
-  //
-  // A row in pipeline_runs depends on nothing external: no EAS project, no device, no notification
-  // permission. Push stays as the nice-to-have on top. Read the last check with:
+  // PERSIST THE RESULT. The Response below goes to pg_net, which abandons the request before it
+  // completes, so the response body alone is not a record — the reason pipeline_runs exists for
+  // generate-trending-meals too. A row here depends on nothing external. Read the last check with:
   //   select created_at, funnel from pipeline_runs where provider = 'health-check'
   //   order by id desc limit 7;
   try {
