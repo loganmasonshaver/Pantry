@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameIngredientGaps, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
+import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
@@ -581,4 +581,42 @@ test('a small quantity is left alone — being wrong there costs more than being
 test('head-noun matching means "cooked rice" is satisfied by a step saying "rice"', () => {
   const steps = [{ title: 'Serve', detail: 'Spoon the rice into a bowl.' }]
   assert.deepEqual(unusedIngredients(steps, [{ name: 'cooked rice', grams: '150g' }]), [])
+})
+
+// ── dish forms ───────────────────────────────────────────────────────────────────────────────
+const ings = (...names: string[]) => names.map(name => ({ name }))
+
+// Both real: Cook Tonight run 48 (2026-09-10) and the taco dish in PRELAUNCH §2l.
+test('a wrap or taco with nothing to wrap it in is a gap', () => {
+  assert.deepEqual(nameFormGaps('Egg and Cheese Breakfast Wrap', ings('eggs', 'shredded cheese', 'cooked rice', 'butter')),
+    ['wrap (no tortilla or wrap)'])
+  assert.deepEqual(nameFormGaps('Beef and Shredded Cheese Tacos', ings('ground beef', 'shredded cheese', 'salsa', 'taco seasoning')),
+    ['taco (no tortilla or shell)'])
+  assert.deepEqual(nameFormGaps('High-Protein Breakfast Burrito', ings('eggs', 'black beans', 'salsa')), ['burrito (no tortilla)'])
+  assert.deepEqual(nameFormGaps('Chicken Salad Sandwich with Pickles', ings('chicken salad', 'pickles')), ['sandwich (no bread)'])
+})
+
+test('the form is satisfied by any real carrier', () => {
+  assert.deepEqual(nameFormGaps('Chicken Lettuce Wraps', ings('chicken', 'butter lettuce', 'soy sauce')), [])
+  assert.deepEqual(nameFormGaps('Breakfast Burrito', ings('eggs', 'large flour tortilla')), [])
+  assert.deepEqual(nameFormGaps('Crispy Beef Tacos', ings('ground beef', 'hard taco shells')), [])
+  assert.deepEqual(nameFormGaps('Avocado Toast', ings('sourdough', 'avocado')), [])
+  assert.deepEqual(nameFormGaps('Sweet Potato Toast', ings('sweet potato', 'peanut butter')), [])
+  assert.deepEqual(nameFormGaps('Protein Ice Cream Sandwich', ings('chocolate wafer cookies', 'greek yogurt')), [])
+  // Both from the live Discover pool.
+  assert.deepEqual(nameFormGaps('Chocolate Sweet Potato Ice Cream Sandwich', ings('pre-baked sweet potato', 'rice cakes', 'chocolate chips')), [])
+  assert.deepEqual(nameFormGaps('Protein Loaded Roti Wrap', ings('sweet potato', 'kala chana', 'roti')), [])
+})
+
+// Measured against the pool before shipping: these are the shapes that must NOT fire.
+test('a form word used as a flavour, or disclaimed, promises nothing', () => {
+  for (const name of ['Beef and Salsa Taco Bowl', 'Burrito Bowl', 'Taco Pasta', 'Taco Salad', 'Chicken Taco Soup',
+                      'Egg Roll in a Bowl', 'Bacon Wrapped Chicken', 'Toasted Sesame Chicken', 'Deconstructed Burrito',
+                      'Wrap-Style Chicken Plate', 'Burrito-Inspired Rice']) {
+    assert.deepEqual(nameFormGaps(name, ings('chicken', 'cooked rice')), [], name)
+  }
+})
+
+test('a flavouring line does not carry the form', () => {
+  assert.deepEqual(nameFormGaps('Chicken Tacos', ings('chicken', 'taco seasoning', 'tortilla chips')), ['taco (no tortilla or shell)'])
 })

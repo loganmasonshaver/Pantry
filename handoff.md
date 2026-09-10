@@ -7,7 +7,7 @@ PRELAUNCH** (CLAUDE.md "ONE LIST UNTIL LAUNCH") — every item below points ther
 
 **State:** all work committed and pushed. The 9 untracked files are a Higgsfield skills install from
 another session — not this work; leave them. Migrations synced. **TS baseline 135 / 16 app-code** (was 136;
-trending-health-check lost its `OPS_USER_ID` Deno line). **503 tests** —
+trending-health-check lost its `OPS_USER_ID` Deno line). **525 tests** —
 `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`. Preflight flags categorize-item,
 estimate-meal-macros and generate-recipe as "committed after deploy" only because `_shared/sanitize.ts`
 gained exports they do not use — no redeploy needed.
@@ -34,8 +34,10 @@ readiness (memory `feedback_prelaunch_no_users`).
    still unexercised.
 6. **Sep 11 ~1pm** — the Sep 10 batch loses its NEW TODAY border; the new batch gains it.
 
-**One decision waiting on Logan (§2l):** should "complete + protein floor" outrank freshness in the Cook
-Tonight ranker? Replaying run 47 shows the trade exactly. Do not build either way without his call.
+**Decided and built (later, 2026-09-10):** tier outranks freshness + slot coverage, dish-form name check,
+protein-first scaler, flavour-axis counter — all deployed to generate-meals, UNVERIFIED until Logan's next
+Cook Tonight generation (PRELAUNCH §2n has the tells). generate-trending-meals was NOT redeployed; preflight
+flagging it is only recipe-integrity.ts gaining `nameFormGaps`, which it does not use yet.
 
 ---
 
@@ -58,8 +60,8 @@ Made today:
 - **Discover's cache holds the FULL pool** (`full: true`); a 60-meal slice opened every visit on 2 shelves.
 - **Dislike sheet:** no extra question; flavour row inside the taste step; neutral chips (water, oil, salt,
   spray) filtered. Nothing acts on flavours automatically yet — the report is where a pattern would show.
-- **Cook Tonight ranker order: clash → fresh → tier → fit.** Tier counts "no carb base" and "under 75% of
-  the protein target" equally. Freshness-vs-tier is the one OPEN question (above).
+- **Cook Tonight ranker order: clash → tier → fresh → fit, then slot coverage** (Logan, after run 48). Tier
+  counts "no carb base" and "under 75% of the protein target" equally.
 - **Flavour:** flavoured-vs-plain GATING stays dead (the morning's measured zero). The savory clash —
   protein powder or a sweet-flavoured product in a savory dish — is a separate, narrow check with its own
   evidence (the rice soup; 1 flag in 113 meals, no false positives).

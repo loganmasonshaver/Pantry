@@ -398,6 +398,50 @@ export function nameIngredientGaps(name: string, ingredients: any[] | undefined)
   return gaps
 }
 
+// DISH FORMS that need a specific thing to exist. DEFINING_FOODS deliberately skips vessels, because
+// "wrap" is not a food, and that is exactly the gap: "Egg and Cheese Breakfast Wrap" shipped as eggs
+// and cheese over rice ("Serve in a bowl with rice as a base"), and "Beef and Shredded Cheese Tacos"
+// had no tortilla. Both titles promise a shape the ingredient list cannot make.
+// Each form maps to the words any one ingredient line may carry to make it. The form word itself
+// counts ("sandwich thins", "taco shells") except on a flavouring line, see FORM_NOT_A_CARRIER.
+const DISH_FORMS: Record<string, { needs: string; carriers: string[] }> = {
+  wrap: { needs: 'tortilla or wrap', carriers: ['wrap', 'tortilla', 'lavash', 'roti', 'chapati', 'paratha', 'lettuce', 'collard', 'chard', 'cabbage', 'nori', 'paper', 'pita', 'flatbread', 'naan'] },
+  taco: { needs: 'tortilla or shell', carriers: ['taco', 'tortilla', 'shell', 'tostada', 'lettuce', 'cabbage'] },
+  burrito: { needs: 'tortilla', carriers: ['burrito', 'tortilla', 'wrap'] },
+  quesadilla: { needs: 'tortilla', carriers: ['quesadilla', 'tortilla', 'wrap'] },
+  sandwich: { needs: 'bread', carriers: ['sandwich', 'bread', 'bun', 'roll', 'bagel', 'croissant', 'muffin', 'pita', 'ciabatta',
+    'sourdough', 'baguette', 'brioche', 'toast', 'focaccia', 'biscuit', 'waffle', 'cookie', 'wafer', 'cake', 'lettuce', 'naan', 'flatbread'] },
+  // Sweet potato toast and rice-cake toast are real dishes, so potato and cake carry it. Rice cakes also
+  // carry a sandwich — the live pool's Chocolate Sweet Potato Ice Cream Sandwich is built on them.
+  toast: { needs: 'bread', carriers: ['toast', 'bread', 'sourdough', 'bagel', 'baguette', 'brioche', 'muffin', 'ciabatta', 'cake', 'potato', 'sandwich'] },
+}
+
+// "taco seasoning" and "tortilla chips" contain the right word and still make no taco.
+const FORM_NOT_A_CARRIER = /\b(seasoning|spice|sauce|mix|dressing|chips?|strips?|crumbs?)\b/i
+
+// A form word only makes a promise when it is the dish's HEAD noun. "Beef and Salsa Taco Bowl",
+// "Taco Pasta" and "Burrito Bowl" use it as a flavour word and owe no tortilla. The head is the last
+// word before any trailing clause ("Chicken Wrap with Ranch" -> wrap). Only a SPACED dash ends the
+// title: "High-Protein Breakfast Burrito" must still read as a burrito.
+const TRAILING_CLAUSE = /\s(?:with|over|on|in|plus|served|topped)\s.*$|\s+[–-]\s+.*$|\s*[(:,].*$/i
+// Qualifiers that openly disclaim the shape.
+const FORM_DISCLAIMED = /\b(deconstructed|unstuffed|inspired|style)\b/i
+
+export function nameFormGaps(name: string, ingredients: any[] | undefined): string[] {
+  const n = String(name ?? '').toLowerCase()
+  if (!n || FORM_DISCLAIMED.test(n)) return []
+  const words = n.replace(TRAILING_CLAUSE, '').match(/[a-zÀ-ɏ]+/g) ?? []
+  const head = singular(words[words.length - 1] ?? '')
+  const form = DISH_FORMS[head]
+  if (!form) return []
+  const lines = realIngredients(ingredients)
+    .map(i => (typeof i === 'string' ? i : String((i as any)?.name ?? '')))
+    .filter(l => l && !FORM_NOT_A_CARRIER.test(l))
+  if (lines.length === 0) return [] // nothing to judge against; the count gate handles empties
+  const has = lines.some(l => { const t = tokens(l); return form.carriers.some(c => t.has(c)) })
+  return has ? [] : [`${head} (no ${form.needs})`]
+}
+
 /**
  * The list used for the retention COUNT: junk removed and duplicates collapsed.
  *

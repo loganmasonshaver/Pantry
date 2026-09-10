@@ -27,6 +27,15 @@ const MEASURE_WORDS = /\b(?:cups?|tbsps?|tablespoons?|tsps?|teaspoons?|ounces?|g
  */
 export const SCALE_MIN = 0.7
 export const SCALE_MAX = 1.4
+// Calorie-dense, protein-poor food (rice, nuts, butter, oil, cheese) may shrink further than the
+// dish as a whole: half the rice under the same cottage cheese is still that dish, and it is where
+// the calories were. Run 48 shrank everything alike and took a 46g bowl to 33g to lose 235 kcal,
+// when the 30g of pecans alone carried 207 of them.
+export const DENSE_MIN = 0.5
+// Protein's share of an ingredient's own calories, at or above which it is protected. Eggs sit at
+// 0.35 and ground beef at 0.35; shredded cheese (0.25), milk (0.26) and peanut butter (0.17) do
+// not. Vegetables clear it too, which is right for a different reason: they cost almost nothing.
+const LEAN_SHARE = 0.3
 
 export type ScalableIngredient = { name?: unknown; grams?: unknown; visual?: unknown }
 
@@ -74,6 +83,12 @@ export function scaleVisualText(visual: string | undefined, factor: number): str
     // "1 cups" on a real recipe — the rounding has to happen before the plural decision.
     return `${fmt(lo * factor)}-${fmt(hi * factor)}${agree(rest, quarter(hi * factor))}`
   }
+  // Quarter-rounding cannot show less than ¼ cup, so halving "¼ cup" of pecans printed "¼ cup" over
+  // 15g. Below that a cook measures in tablespoons anyway (16 to the cup).
+  if (lo * factor < 0.25 && /^\s*cups?\b/i.test(rest)) {
+    const tbsp = lo * factor * 16
+    return `${fmt(tbsp)}${rest.replace(/^(\s*)cups?\b/i, '$1tbsp')}`
+  }
   return `${fmt(lo * factor)}${agree(rest, quarter(lo * factor))}`
 }
 
@@ -96,66 +111,101 @@ function agree(rest: string, value: number): string {
 /** Quarter-rounding, shared by the formatter and the plural decision so they cannot disagree. */
 function quarter(n: number): number { return Math.round(n * 4) / 4 }
 
+type MacroKey = 'kcal' | 'protein' | 'carbs' | 'fat'
+const KEYS: MacroKey[] = ['kcal', 'protein', 'carbs', 'fat']
+
 export type ScaleResult = {
   ingredients: ScalableIngredient[]
-  /** multiplier applied to the meal's macro totals; 1 when nothing was changed */
+  /** multiplier for the meal's calorie total; 1 when nothing was changed */
   macroFactor: number
-  factor: number
+  /** one multiplier per macro. Protein moves less than calories when only dense food was cut, so
+   *  scaling every total by the calorie factor misreports it. */
+  factors: Record<MacroKey, number>
+  /** applied to measured calorie-dense food, and to measured lean food */
+  denseFactor: number
+  leanFactor: number
   reason: string
 }
+
+const clamp = (lo: number, hi: number, v: number) => Math.min(hi, Math.max(lo, v))
 
 /**
  * Move a recipe's measured ingredients so its total lands near `targetKcal`.
  *
- * The share of calories that is actually movable is read from the LOCAL table rather than the
- * corrected totals, on purpose: the table is approximate in absolute terms (it ran 20-30% from
- * FatSecret on real recipes) but this only needs the RATIO of movable to fixed calories, and a
- * ratio is far more robust to a table being uniformly off than a total is.
+ * DOWN cuts calorie-dense food first, to DENSE_MIN, aiming at the target. Only if the dish is still
+ * out of band does lean food shrink, and only to the band's edge: past that, every gram is protein
+ * given up for calories that are already close enough. UP grows all measured food together.
+ *
+ * Works in the LOCAL table's units rather than the corrected totals, on purpose: the table is
+ * approximate in absolute terms (it ran 20-30% from FatSecret on real recipes) but this only needs
+ * RATIOS between groups, which survive a table that is uniformly off.
  */
 export function scaleToTarget(
   ingredients: ScalableIngredient[] | undefined,
   currentKcal: number,
   targetKcal: number,
-  { min = SCALE_MIN, max = SCALE_MAX, tolerance = 0.15 } = {},
+  { min = SCALE_MIN, max = SCALE_MAX, denseMin = DENSE_MIN, tolerance = 0.15 } = {},
 ): ScaleResult {
   const ings = Array.isArray(ingredients) ? ingredients : []
-  const noop = (reason: string): ScaleResult => ({ ingredients: ings, macroFactor: 1, factor: 1, reason })
+  const unit1 = { kcal: 1, protein: 1, carbs: 1, fat: 1 }
+  const noop = (reason: string): ScaleResult => ({ ingredients: ings, macroFactor: 1, factors: unit1, denseFactor: 1, leanFactor: 1, reason })
   if (ings.length === 0 || !(currentKcal > 0) || !(targetKcal > 0)) return noop('no quantities to work with')
   const ratio = currentKcal / targetKcal
   if (ratio >= 1 - tolerance && ratio <= 1 + tolerance) return noop(`already within ${Math.round(tolerance * 100)}% of target`)
+  if (!ings.some(isScalable)) return noop('every ingredient is counted, not measured')
 
-  const movable = ings.filter(isScalable)
-  if (movable.length === 0) return noop('every ingredient is counted, not measured')
+  // Unmatched food counts as lean: not knowing what it is, it is cut only after everything else.
+  const est = ings.map(i => estimateMacros([i] as never))
+  const group = ings.map((ing, i): 'fixed' | 'dense' | 'lean' =>
+    !isScalable(ing) ? 'fixed'
+    : est[i].kcal > 0 && (est[i].protein * 4) / est[i].kcal < LEAN_SHARE ? 'dense' : 'lean')
+  const kcalOf = (g: string) => est.reduce((s, e, i) => s + (group[i] === g ? e.kcal : 0), 0)
+  const F = kcalOf('fixed'), D = kcalOf('dense'), L = kcalOf('lean')
+  const total = F + D + L
+  if (!(D + L > 0)) return noop('the measured ingredients carry no calories')
+  const k = currentKcal / total // corrected kcal per table kcal
+  const want = targetKcal / k
 
-  const all = estimateMacros(ings as never)
-  const fixedOnly = estimateMacros(ings.filter(i => !isScalable(i)) as never)
-  const movableKcal = all.kcal - fixedOnly.kcal
-  if (!(movableKcal > 0)) return noop('the measured ingredients carry no calories')
+  let denseFactor = 1, leanFactor = 1
+  if (ratio > 1) {
+    if (D > 0) denseFactor = clamp(denseMin, 1, 1 - (total - want) / D)
+    const edge = (targetKcal * (1 + tolerance)) / k
+    const afterDense = F + D * denseFactor + L
+    if (afterDense > edge && L > 0) leanFactor = clamp(min, 1, (edge - F - D * denseFactor) / L)
+  } else {
+    // Counted food does not grow, so the measured share must grow by MORE than the ratio. Using the
+    // ratio itself left the old version short of target whenever a recipe held eggs.
+    denseFactor = leanFactor = clamp(1, max, (want - F) / (D + L))
+  }
+  if (Math.abs(denseFactor - 1) < 0.05 && Math.abs(leanFactor - 1) < 0.05) return noop('adjustment too small to be worth making')
 
-  // How much the movable share must change so fixed + movable*f hits the target.
-  const wantMovable = movableKcal - (currentKcal - targetKcal) * (movableKcal / currentKcal)
-  const raw = wantMovable / movableKcal
-  const factor = Math.min(max, Math.max(min, raw))
-  if (Math.abs(factor - 1) < 0.05) return noop('adjustment too small to be worth making')
-
-  const scaled = ings.map(ing => {
-    if (!isScalable(ing)) return ing
+  const factorOf = (i: number) => (group[i] === 'dense' ? denseFactor : group[i] === 'lean' ? leanFactor : 1)
+  const scaled = ings.map((ing, i) => {
+    const f = factorOf(i)
+    if (f === 1) return ing
     const g = parseFloat(String(ing.grams ?? '').replace(/[^0-9.]/g, ''))
     const unit = String(ing.grams ?? '').replace(/[0-9.\s]/g, '') || 'g'
     return {
       ...ing,
-      grams: Number.isFinite(g) && g > 0 ? `${Math.max(1, Math.round(g * factor))}${unit}` : ing.grams,
-      visual: scaleVisualText(String(ing.visual ?? '') || undefined, factor),
+      grams: Number.isFinite(g) && g > 0 ? `${Math.max(1, Math.round(g * f))}${unit}` : ing.grams,
+      visual: scaleVisualText(String(ing.visual ?? '') || undefined, f),
     }
   })
 
-  // Only the movable share moved, so the meal's totals move by less than `factor`.
-  const movableShare = movableKcal / all.kcal
-  const macroFactor = (1 - movableShare) + movableShare * factor
+  const factors = { ...unit1 }
+  for (const key of KEYS) {
+    const before = est.reduce((s, e) => s + e[key], 0)
+    const after = est.reduce((s, e, i) => s + e[key] * factorOf(i), 0)
+    factors[key] = before > 0 ? after / before : 1
+  }
+  const nDense = group.filter(g => g === 'dense').length, nLean = group.filter(g => g === 'lean').length
   return {
     ingredients: scaled,
-    macroFactor,
-    factor,
-    reason: `${Math.round(currentKcal)} → ~${Math.round(currentKcal * macroFactor)} kcal (target ${Math.round(targetKcal)}); scaled ${movable.length}/${ings.length} measured ingredients by ${factor.toFixed(2)}x`,
+    macroFactor: factors.kcal,
+    factors,
+    denseFactor,
+    leanFactor,
+    reason: `${Math.round(currentKcal)} → ~${Math.round(currentKcal * factors.kcal)} kcal (target ${Math.round(targetKcal)}); ` +
+      `dense ×${denseFactor.toFixed(2)} (${nDense}), lean ×${leanFactor.toFixed(2)} (${nLean}), protein ×${factors.protein.toFixed(2)}`,
   }
 }

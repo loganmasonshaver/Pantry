@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { scaleToTarget, scaleVisualText, isScalable, SCALE_MIN, SCALE_MAX } from './scale-recipe.ts'
+import { scaleToTarget, scaleVisualText, isScalable, SCALE_MIN, SCALE_MAX, DENSE_MIN } from './scale-recipe.ts'
 
 // The real over-shooting recipe this was written for: 806 kcal against a 525 target.
 const PESTO_BOWL = [
@@ -31,7 +31,8 @@ test('a measured ingredient is scalable', () => {
 // The landmine CLAUDE.md names by name. Obeyed by construction, not by rounding afterwards.
 test('an all-counted recipe is left completely alone rather than producing half an egg', () => {
   const out = scaleToTarget(EGG_PLATE, 900, 525)
-  assert.equal(out.factor, 1)
+  assert.equal(out.denseFactor, 1)
+  assert.equal(out.leanFactor, 1)
   assert.equal(out.macroFactor, 1)
   assert.deepEqual(out.ingredients, EGG_PLATE)
   assert.match(out.reason, /counted/)
@@ -45,21 +46,24 @@ test('counted ingredients survive untouched inside a mixed recipe', () => {
 
 test('an over-sized recipe comes down and lands nearer the target', () => {
   const out = scaleToTarget(PESTO_BOWL, 806, 525)
-  assert.ok(out.factor < 1, 'scaled down')
-  assert.ok(out.factor >= SCALE_MIN)
+  assert.ok(out.denseFactor < 1, 'scaled down')
+  assert.ok(out.denseFactor >= DENSE_MIN)
+  assert.ok(out.leanFactor >= SCALE_MIN)
   const after = 806 * out.macroFactor
   assert.ok(Math.abs(after - 525) < Math.abs(806 - 525), `moved toward target: ${after.toFixed(0)}`)
 })
 
 test('a meal already in band is not touched', () => {
   const out = scaleToTarget(PESTO_BOWL, 540, 525)
-  assert.equal(out.factor, 1)
+  assert.equal(out.macroFactor, 1)
   assert.deepEqual(out.ingredients, PESTO_BOWL)
 })
 
 test('the factor is clamped, because past that the dish stops being the dish', () => {
-  assert.ok(scaleToTarget(PESTO_BOWL, 4000, 525).factor >= SCALE_MIN)
-  assert.ok(scaleToTarget(PESTO_BOWL, 100, 525).factor <= SCALE_MAX)
+  const down = scaleToTarget(PESTO_BOWL, 4000, 525)
+  assert.ok(down.denseFactor >= DENSE_MIN && down.leanFactor >= SCALE_MIN)
+  const up = scaleToTarget(PESTO_BOWL, 100, 525)
+  assert.ok(up.denseFactor <= SCALE_MAX && up.leanFactor <= SCALE_MAX)
 })
 
 test('bad input never mangles a recipe', () => {
@@ -115,4 +119,65 @@ test('glyph fractions scale instead of being mangled', () => {
   assert.equal(scaleVisualText('½ cup', 2), '1 cup')
   assert.equal(scaleVisualText('2½ scoops', 0.4), '1 scoop')
   assert.equal(scaleVisualText('¾ tsp', 2), '1½ tsp')
+})
+
+test('under a quarter cup, the visual switches to tablespoons instead of freezing at ¼', () => {
+  assert.equal(scaleVisualText('¼ cup', 0.5), '2 tbsp')
+  assert.equal(scaleVisualText('¼ cup chopped', 0.5), '2 tbsp chopped')
+  assert.equal(scaleVisualText('½ cup', 0.5), '¼ cup')
+})
+
+// ── protein first ─────────────────────────────────────────────────────────────────────────────
+// Cook Tonight run 48, BEFORE the old scaler touched it (quantities from the FatSecret trace):
+// 784 kcal, ~46g protein. The old uniform cut shipped 549 kcal and 33g.
+const COTTAGE_BOWL = [
+  { name: 'cottage cheese', visual: '1½ cups', grams: '341g' },
+  { name: 'cooked rice', visual: '1 cup', grams: '180g' },
+  { name: 'pecans', visual: '¼ cup', grams: '30g' },
+  { name: 'black pepper', visual: 'to taste', grams: '1g' },
+]
+
+test('calorie-dense food is cut before protein', () => {
+  const out = scaleToTarget(COTTAGE_BOWL, 784, 525)
+  const g = (n: string) => out.ingredients.find(i => i.name === n)!.grams
+  assert.equal(g('cottage cheese'), '341g', 'the protein anchor is untouched')
+  assert.equal(g('cooked rice'), '90g')
+  assert.equal(g('pecans'), '15g')
+  assert.equal(out.ingredients.find(i => i.name === 'pecans')!.visual, '2 tbsp', 'visual agrees with the grams')
+  assert.ok(out.factors.protein > 0.9, `protein kept: x${out.factors.protein.toFixed(2)}`)
+  assert.ok(784 * out.macroFactor <= 525 * 1.15, `in band: ${(784 * out.macroFactor).toFixed(0)}`)
+})
+
+test('the protein anchor survives in the pesto bowl too', () => {
+  const out = scaleToTarget(PESTO_BOWL, 806, 525)
+  assert.equal(out.ingredients.find(i => i.name === 'chicken')!.grams, '200g')
+  assert.ok(out.factors.protein > out.macroFactor, 'protein falls less than calories')
+})
+
+test('lean food is trimmed only when dense food cannot get the dish into band', () => {
+  const lean = [
+    { name: 'chicken', visual: '300g', grams: '300g' },
+    { name: 'olive oil', visual: '1 tsp', grams: '5g' },
+  ]
+  const out = scaleToTarget(lean, 900, 525)
+  assert.ok(out.leanFactor < 1 && out.leanFactor >= SCALE_MIN)
+  // To the band's edge, not the target: past that it is protein given up for nothing.
+  assert.ok(900 * out.macroFactor > 525, `stops at the edge: ${(900 * out.macroFactor).toFixed(0)}`)
+})
+
+// Run 48's wrap: two counted eggs and three measured items at 690 kcal. The old formula moved the
+// measured share by the plain ratio and shipped 559 against 525.
+test('counted food no longer leaves the result short of target', () => {
+  const wrap = [
+    { name: 'eggs', visual: '2 large', grams: '100g' },
+    { name: 'shredded cheese', visual: '½ cup', grams: '56g' },
+    { name: 'cooked rice', visual: '1 cup', grams: '180g' },
+    { name: 'butter', visual: '1 tbsp', grams: '14g' },
+  ]
+  const down = scaleToTarget(wrap, 690, 525)
+  assert.equal(down.ingredients[0].grams, '100g')
+  assert.ok(Math.abs(690 * down.macroFactor - 525) < 525 * 0.02, `${(690 * down.macroFactor).toFixed(0)}`)
+  const small = [{ name: 'eggs', visual: '2 large', grams: '100g' }, { name: 'cooked rice', visual: '1 cup', grams: '180g' }]
+  const up = scaleToTarget(small, 430, 525)
+  assert.ok(Math.abs(430 * up.macroFactor - 525) < 525 * 0.02, `${(430 * up.macroFactor).toFixed(0)}`)
 })

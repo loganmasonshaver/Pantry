@@ -10,8 +10,10 @@ import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-matc
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
+import { selectDeck } from '../_shared/rank-deck.ts'
+import { flavourAxes } from '../_shared/flavour-axes.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
-import { nameIngredientGaps, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
+import { nameFormGaps, nameIngredientGaps, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
@@ -746,7 +748,8 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // is the only lever left.
     //
     // Counted ingredients are never touched, so "0.5 large eggs" cannot be produced. See
-    // _shared/scale-recipe.ts; the rule is structural, not a rounding step afterwards.
+    // _shared/scale-recipe.ts; the rule is structural, not a rounding step afterwards. Shrinking
+    // cuts rice, nuts, butter and cheese before the protein, which the old uniform cut did not.
     let scaledToTargetCount = 0
     {
       meals = meals.map((m: any) => {
@@ -754,13 +757,14 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         if (res.macroFactor === 1) return m
         scaledToTargetCount++
         console.log(`[scale] "${m?.name}" ${res.reason}`)
+        // Per-macro factors: dense food is cut first, so protein falls less than calories do.
         return {
           ...m,
           ingredients: res.ingredients,
-          calories: Math.round(Number(m.calories) * res.macroFactor),
-          protein: Math.round(Number(m.protein) * res.macroFactor),
-          carbs: Math.round(Number(m.carbs) * res.macroFactor),
-          fat: Math.round(Number(m.fat) * res.macroFactor),
+          calories: Math.round(Number(m.calories) * res.factors.kcal),
+          protein: Math.round(Number(m.protein) * res.factors.protein),
+          carbs: Math.round(Number(m.carbs) * res.factors.carbs),
+          fat: Math.round(Number(m.fat) * res.factors.fat),
         }
       })
       if (scaledToTargetCount > 0) console.log(`Scaled ${scaledToTargetCount}/${meals.length} meals toward ${batchCalorieTarget} kcal`)
@@ -893,7 +897,8 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       const beforeGaps = meals.length
       const gapDetail: string[] = []
       const honest = meals.filter((m: any) => {
-        const gaps = nameIngredientGaps(String(m?.name ?? ''), m?.ingredients)
+        // Foods AND forms: "Egg and Cheese Breakfast Wrap" promised a wrap, listed none, and shipped.
+        const gaps = [...nameIngredientGaps(String(m?.name ?? ''), m?.ingredients), ...nameFormGaps(String(m?.name ?? ''), m?.ingredients)]
         if (gaps.length > 0) {
           gapDetail.push(`${String(m?.name ?? '')} -> ${gaps.join(', ')}`)
           console.log(`[name-gap] "${m?.name}" promises ${gaps.join(', ')} and lists none`)
@@ -1122,20 +1127,17 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
     // displayCount (3). Rank survivors by macro fit — sum of normalized squared distance
     // from per-meal targets — and slice to the top displayCount. Lower score = better fit.
-    // Runs UNCONDITIONALLY, not only when there is a surplus. Repeats are ordered last here and
-    // nowhere else — an earlier version hard-dropped them at the repeat filter instead, which
+    // Runs UNCONDITIONALLY, not only when there is a surplus. Repeats are ordered below fresh
+    // dishes of the same tier here and nowhere else — an earlier version hard-dropped them at the repeat filter instead, which
     // thinned the pool BEFORE the macro and prep-time filters and could leave only 2 meals on
     // screen. Keeping repeats as reserves and letting the slice discard them means a repeat
-    // reaches the user only when there genuinely aren't enough fresh survivors to fill the deck.
+    // reaches the user only when there aren't enough fresh survivors of the same tier.
     {
       const beforeRank = meals.length
-      // PROTEIN FIT IS MEASURED HERE AND HAS ALMOST NO AUTHORITY. Recorded because working that
-      // out by hand took a full session: nothing in the pipeline enforces a protein FLOOR — the
-      // band filter below is upper-bound only, scaleToTarget sizes the food to the CALORIE target
-      // and protein merely rides along proportionally, and in this sort freshness outranks fit
-      // outright. With the deck routinely arriving at four candidates for three slots, fit decides
-      // only which single meal is dropped. So a shown meal far under target is the system working
-      // as designed, not a filter failing, and only these three numbers make that visible.
+      // PROTEIN has authority in exactly two places: the tier (under 75% of target ranks below
+      // every dish that meets it) and scaleToTarget, which cuts calorie-dense food before protein.
+      // Fit only orders dishes within a tier. These three numbers are what make a shown meal far
+      // under target explainable — it means nothing in its tier did better.
       funnel.proteinTarget = proteinTarget
       funnel.proteinCandidates = meals.map((m: any) => Number(m?.protein) || 0)
       const scored = meals
@@ -1169,6 +1171,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         c: Number(m?.calories) || 0,
         f: Number(m?.fat) || 0,
         repeat: !!m?._repeat,
+        slot: String(m?.slot ?? ''),
         complete: !!m?._complete,
         tier: Number(m?._tier) || 0,
         clash: !!m?._clash,
@@ -1176,29 +1179,28 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       }))
       funnel.incomplete = scored.filter((m: any) => !m._complete).map((m: any) => String(m?.name ?? ''))
 
-      meals = scored
-        // Freshness outranks everything (a standing decision — do not reopen without evidence), then
-        // COMPLETENESS, then macro fit: a fresh complete dish beats a fresh protein-and-veg plate, and
-        // an incomplete one reaches the deck only when there are not enough complete ones to fill it.
-        // A savory clash sorts below EVERYTHING, repeats included — Logan's call: protein powder
-        // "whisked in to thicken" a chicken soup is worse than seeing a dish again.
-        // Tier = 0 when complete AND over the protein floor, 1 when one of the two, 2 when neither.
-        .sort((a: any, b: any) =>
-          a._clash !== b._clash ? (a._clash ? 1 : -1)
-          : a._repeat !== b._repeat ? (a._repeat ? 1 : -1)
-          : a._tier !== b._tier ? a._tier - b._tier
-          : a._fitScore - b._fitScore)
-        .slice(0, displayCount)
-        .map((m: any) => { const { _fitScore, _complete, _tier, _clash, ...rest } = m; return rest })
+      // clash -> tier -> fresh -> fit, then at least one lunch/dinner and one lighter meal. See
+      // _shared/rank-deck.ts for the run that moved tier ahead of freshness.
+      // Tier = 0 when complete AND over the protein floor, 1 when one of the two, 2 when neither.
+      const { deck, promoted } = selectDeck(scored, displayCount)
+      funnel.slotPromoted = promoted
+      meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length
       funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < 0.75 * proteinTarget).length
       funnel.savoryClash = scored.filter((m: any) => m._clash).map((m: any) => String(m?.name ?? ''))
       funnel.savoryClashShown = meals.filter((m: any) => savoryClash(m)).length
+      // MEASURED, NOT RANKED: the prompt asks for 2 of 4 flavour axes and nothing checks it. See
+      // _shared/flavour-axes.ts; rank on it only once these show how often candidates fall short.
+      funnel.flavourAxes = scored.map((m: any) => ({ name: String(m?.name ?? ''), axes: flavourAxes(m) }))
+      funnel.flavourAxesShown = meals.map((m: any) => flavourAxes(m).length)
       const shownRepeats = meals.filter((m: any) => m._repeat).length
+      // The price of tier-first: a repeat now beats a fresh dish under the protein floor. Recorded so
+      // that price is watched rather than guessed at.
+      funnel.repeatsShown = shownRepeats
       console.log(
-        `Macro rank: kept top ${Math.min(displayCount, beforeRank)}/${beforeRank} by freshness then target fit` +
-        (shownRepeats > 0 ? ` — ${shownRepeats} repeat(s) had to fill the deck (not enough fresh)` : ''),
+        `Macro rank: kept top ${Math.min(displayCount, beforeRank)}/${beforeRank} by tier, freshness, then target fit${promoted.length ? `; slot coverage pulled in ${promoted.join(', ')}` : ''}` +
+        (shownRepeats > 0 ? ` — ${shownRepeats} repeat(s) shown` : ''),
       )
     }
     // Strip the markers whether or not the ranking above ran — they must never reach the client

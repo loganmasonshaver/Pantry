@@ -615,7 +615,12 @@ export default function PantryScreen() {
     return 'dinner'
   })()
   // 0 = matches now, 1 = anytime dish (or a meal cached before `slot` existed), 2 = wrong occasion.
-  const slotScore = (m: { slot?: string }) => (m.slot === currentSlot ? 0 : (!m.slot || m.slot === 'any') ? 1 : 2)
+  // Lunch and dinner stand in for each other (0.5): the server guarantees one of the two, and at 6pm
+  // a chicken plate tagged "lunch" must not sink level with a parfait.
+  const slotScore = (m: { slot?: string }) =>
+    m.slot === currentSlot ? 0
+    : currentSlot !== 'breakfast' && (m.slot === 'lunch' || m.slot === 'dinner') ? 0.5
+    : (!m.slot || m.slot === 'any') ? 1 : 2
 
   perfMark('Pantry RENDER')
   return (

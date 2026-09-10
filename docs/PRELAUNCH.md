@@ -518,7 +518,10 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   everything; prompt says powder only in shakes/oats/pancakes/desserts. Measured: 1 flag in 113 meals.
   Verify next generation: `savoryClashShown` 0. (First claimed the soup used VANILLA whey — wrong, that
   was FatSecret's match label; the recipe used plain powder.)
-- [ ] **DECISION FOR LOGAN — does "complete + protein floor" outrank freshness?** Now: clash -> fresh -> tier
+- [x] **DECIDED by Logan 2026-09-10 (after the run 48 audit): tier outranks freshness, plus slot coverage.**
+  Order is now clash -> tier -> fresh -> fit, then at least one lunch/dinner and one lighter meal
+  (`_shared/rank-deck.ts`). The price, more repeats, is recorded per run as `repeatsShown`.
+  Was: **DECISION FOR LOGAN — does "complete + protein floor" outrank freshness?** Then: clash -> fresh -> tier
   -> fit. Replaying run 47 without the soup, the 3rd slot goes to a FRESH 25g Egg and Rice Breakfast Bowl
   ahead of complete 40g+ REPEATS. Tier-first = every shown dish complete and protein-adequate, more repeats.
   The morning handoff said not to reopen the freshness rule without evidence — this is that evidence.
@@ -669,26 +672,46 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 Shown: Egg and Vegetable Scramble (36g/520), Cottage Cheese and Rice Bowl (33g/549), Egg and Cheese
 Breakfast Wrap (24g/559). Target 40g/525 (160g ÷ 4 meals). Rows in `generated_meals`, funnel in
 `pipeline_runs` id 48. Photos viewed. Ordered by how much a paying user would notice.
-- [ ] **Zero dinners at 6pm.** The prompt asks for a spread across eating occasions, and the client
+- [ ] **BUILT 2026-09-10, UNVERIFIED — verify on the next generation:** funnel `slotPromoted` names any dish
+  coverage pulled in, `rankCandidates[].slot` is recorded, and the deck holds a lunch/dinner. Replaying run 48
+  gives Scramble + Cottage Cheese Bowl + Chicken and Pesto Rice Plate (44g) instead of the 24g wrap.
+  Pantry tab: lunch and dinner now stand in for each other (score 0.5), so a "lunch" plate leads at 6pm.
+  **Zero dinners at 6pm.** The prompt asks for a spread across eating occasions, and the client
   (`app/(tabs)/pantry.tsx` ~607) floats the one that fits the current hour, assuming the deck HAS one.
   The ranker (`generate-meals/index.ts` ~1186) has no slot term: all 5 dinner candidates (Thai basil
   chicken, beef taco bowl, chicken cauliflower skillet, beef stir-fry, pesto chicken rice) were
   repeats, so 2 breakfasts + 1 "any" shipped, and chicken and beef never appeared. Fix idea: guarantee
   at least one lunch/dinner in the 3, even a repeat, ahead of a third breakfast. Tied to the §2k
   freshness decision.
-- [ ] **"Egg and Cheese Breakfast Wrap" has no wrap** — step 3: "Serve in a bowl with rice as a base".
+- [ ] **BUILT 2026-09-10 (`nameFormGaps`), Cook Tonight only — UNVERIFIED live.** Measured first: flags
+  exactly the 3 real cases in 129 generated meals (this wrap, the taco dish, a flour "wrap"), and 0 of
+  219 Discover recipes once rice cakes and roti counted as carriers. NOT wired into generate-trending-meals
+  yet: that would confound the Sep 11 3am check. Wire it after that passes. Tell: `nameGapDetail` reads
+  "... -> wrap (no tortilla or wrap)".
+  **"Egg and Cheese Breakfast Wrap" has no wrap** — step 3: "Serve in a bowl with rice as a base".
   The photo is honestly a rice bowl, so the title contradicts its own photo. `nameIngredientGaps`
   checks FOODS in the title (`DEFINING_FOODS` has tortilla), and wrap/taco/burrito/sandwich/toast are
   FORMS, so nothing checks them. This also answers the open "why did taco slip past" item above.
   Fix: form → required-ingredient map (wrap/taco/burrito/quesadilla → tortilla|wrap|lettuce
   cups; sandwich/toast → bread|bun|roll|bagel).
-- [ ] **The calorie scaler throws away protein.** `scaleToTarget` shrinks every measured ingredient by
+- [ ] **BUILT 2026-09-10 — UNVERIFIED live.** Shrinking now cuts calorie-dense food (protein under 30% of
+  its own calories: rice, nuts, butter, oil, cheese) to as low as 0.5x before touching protein, and trims
+  lean food only to the band's edge. Replay: cottage bowl 546 kcal / 43g (was 549 / 33g). Also fixed: with
+  counted eggs the old formula undershot (wrap 559 -> now 525), and per-macro factors replace the calorie
+  factor on protein. Visuals under ¼ cup switch to tbsp. Tell: `[scale]` log lines read "protein ×0.9x".
+  **The calorie scaler throws away protein.** `scaleToTarget` shrinks every measured ingredient by
   one factor. Cottage Cheese and Rice Bowl was ~46g protein at 784 kcal (above target) and shipped at 33g
   / 549; dropping only the 30g of pecans gives ~577 kcal at ~43g. 8 of 10 candidates were scaled this
   run. Needed: cut fat/carb items (nuts, butter, oil, cheese, rice) before protein anchors. Also:
   displayed protein is multiplied by the CALORIE factor while counted eggs stay unscaled, so card
   macros drift a gram or two from the ingredient list.
-- [ ] **The prompt's FLAVOR PRINCIPLE is unenforced — 0 of 3 meet it.** Line ~594 requires 2 of 4 axes
+- [ ] **COUNTER BUILT 2026-09-10 (`flavourAxes`, `flavourAxesShown` in the funnel) — not ranked on.**
+  Baseline over stored meals: savory generated dishes fall under 2 axes 20% of the time; savory CREATOR
+  recipes in Discover, 45%. The prompt's 2-of-4 rule is stricter than the creators' own recipes, so a gate
+  on it would be wrong. The real signal is ZERO axes on a non-sweet dish (generated 9%, creators 12%), and
+  all 7 generated cases are egg or cottage cheese dishes. Next step, not built: a narrow prompt or rank
+  rule for egg dishes, after a few runs of the counter.
+  **The prompt's FLAVOR PRINCIPLE is unenforced — 0 of 3 meet it.** Line ~594 requires 2 of 4 axes
   (acid / heat / umami / aromatic fat). Wrap: 0. Scramble: 0. Cottage bowl: 1 (black pepper). No salt
   in any of them. The pantry held lime, pickles, salsa, hot sauce, soy sauce, garlic and pesto.
   Measure first (funnel counter of axes per candidate), per the file's own gate-after-evidence rule.
