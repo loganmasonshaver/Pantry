@@ -24,7 +24,8 @@ import {
   type DiscoverMeal,
   readDiscoverPersonal, writeDiscoverPersonal,
 } from '@/lib/discoverFeed'
-import { isNewToday } from '@/lib/discoverFreshness'
+import { isNewToday, newTodayFirst, countNewToday } from '@/lib/discoverFreshness'
+import { isReadyWithin, formatDiscoverCardTime, formatTimeLine } from '@/lib/ingredientDisplay'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
@@ -170,7 +171,8 @@ type FactShelf = { key: string; title: string; match: (m: DiscoverMeal) => boole
 const FACT_SHELVES: FactShelf[] = [
   // 15, not 20 — at 20 it matched over half the catalog, and a shelf holding most things is not a
   // reason to tap.
-  { key: 'quick', title: 'Ready in 15', match: m => m.prepTime > 0 && m.prepTime <= 15 },
+  // Active time AND no real wait. Reading prepTime alone put 16-hour Ninja Creami freezes here.
+  { key: 'quick', title: 'Ready in 15', match: m => isReadyWithin(m.prepTime, m.cookTime, m.restTime, 15) },
   { key: 'batch', title: 'Cook once, eat all week', match: m => ((m as any).servings ?? 1) > 1 },
 ]
 
@@ -347,7 +349,7 @@ function timeOfDayRank(meal: DiscoverMeal, mealTime: 'Breakfast' | 'Lunch' | 'Di
 function passesFilter(meal: DiscoverMeal, filter: FilterKey): boolean {
   if (filter === 'All') return true
   const nameLower = meal.name.toLowerCase()
-  if (filter === 'Quick') return meal.prepTime > 0 && meal.prepTime <= 20
+  if (filter === 'Quick') return isReadyWithin(meal.prepTime, meal.cookTime, meal.restTime, 20)
   if (filter === 'High Protein') {
     // Protein density ≥ 25% of calories — same bar the trending pipeline uses.
     return meal.calories > 0 && (meal.protein * 4) / meal.calories >= 0.25
@@ -1067,10 +1069,12 @@ export default function DiscoverScreen() {
       })),
       ...intent.map(sec => ({ ...sec, accent: false })),
     ].filter(sec => sec.meals.length > 0)
+      // New recipes lead their own shelf, after claim() has settled ownership — see newTodayFirst.
+      .map(sec => ({ ...sec, meals: newTodayFirst(sec.meals) }))
     // Filtered BEFORE rotating, deliberately: rotating first would let the index land on a section
     // that is about to be dropped, and the "different shelf each day" guarantee would silently
     // degrade to "sometimes the same one".
-    const leftoverSection = { key: 'other', title: 'Everything else', meals: leftovers, accent: false }
+    const leftoverSection = { key: 'other', title: 'Everything else', meals: newTodayFirst(leftovers), accent: false }
     // THE OFFSET IS TAKEN MODULO A FIXED WINDOW, NOT THE LIST LENGTH. rotateByDay does
     // `(day + hash) % arr.length`, and arr.length CHANGES WITHIN A SESSION: shelfBudget is 2 over
     // the 60-meal disk cache and 6 over the 600-meal pool, so the built list goes from ~4 sections
@@ -1078,8 +1082,11 @@ export default function DiscoverScreen() {
     // opening a dish and coming back could throw "Almost in your kitchen" to the top. Logan hit it
     // within a day of the rotation shipping.
     //
-    // Both lists share a PREFIX: the personalised shelves and Today's picks are identical, and the
-    // intent shelves are the same day-rotated order merely TRUNCATED at shelfBudget. So an offset
+    // Both lists share a PREFIX: the personalised shelves are identical, and the intent shelves are
+    // the same day-rotated order merely TRUNCATED at shelfBudget. (This used to include "Today's
+    // picks", removed 2026-09-10; with three personalised shelves the first ROT_WINDOW sections are
+    // still identical across pool sizes. With NONE, the cache has fewer than ROT_WINDOW sections and
+    // its modulus differs from the pool's — a pre-existing gap Today's picks had only narrowed.) So an offset
     // bounded by that shared prefix picks the same leader from either. Simulated over 10 days:
     // 0 mismatches between pool sizes, 0 consecutive-day repeats, all 4 leaders cycling.
     //
@@ -1157,8 +1164,10 @@ export default function DiscoverScreen() {
   //
   // Personalised shelves cap at 8 and page at 6, so a 7- or 8-meal shelf hit this on almost every
   // load; that is the "why does one say Show 1 more and the other doesn't" case.
-  const shownCount = (key: string, total: number) => {
-    const base = expandedSections[key] ?? pageSizeFor(key)
+  // newCount floors the first page: every NEW TODAY recipe is visible without a tap. They already
+  // lead the shelf (newTodayFirst), so a shelf with more new recipes than a page simply opens wider.
+  const shownCount = (key: string, total: number, newCount = 0) => {
+    const base = Math.max(expandedSections[key] ?? pageSizeFor(key), newCount)
     return total - base <= 2 ? total : base
   }
 
@@ -1178,7 +1187,7 @@ export default function DiscoverScreen() {
       const sec = browseSectionsRef.current.find(x => x.key === key)
       if (!sec) continue
       firedSections.current.add(key)
-      trackMealImpressions(key, sec.meals.slice(0, shownCount(key, sec.meals.length)).map(m => m.id), 'discover_grid')
+      trackMealImpressions(key, sec.meals.slice(0, shownCount(key, sec.meals.length, countNewToday(sec.meals))).map(m => m.id), 'discover_grid')
     }
   }, [expandedSections])
   // Ref mirror so the scroll handler isn't re-created on every section change.
@@ -1386,7 +1395,8 @@ export default function DiscoverScreen() {
             <View style={styles.featuredContent}>
               <Text style={styles.featuredName} numberOfLines={2}>{featured.name}</Text>
               <View style={{ flexDirection: 'row', gap: 6, marginTop: 10 }}>
-                {featured.prepTime > 0 && <Pill label={`${featured.prepTime} MIN`} tint="amber" />}
+                {/* The hero has room for the whole line — "10 MIN + OVERNIGHT" — so it says both halves. */}
+                {featured.prepTime > 0 && <Pill label={formatTimeLine(featured.prepTime, featured.cookTime, featured.restTime).toUpperCase()} tint="amber" />}
                 <Pill label={`${featured.calories} CAL`} tint="white" />
                 {featured.protein > 0 && <Pill label={`${featured.protein}P`} tint="green" />}
               </View>
@@ -1434,7 +1444,7 @@ export default function DiscoverScreen() {
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
         {!searching && !showSkeleton && sectionsToRender.map(section => {
-          const shown = shownCount(section.key, section.meals.length)
+          const shown = shownCount(section.key, section.meals.length, countNewToday(section.meals))
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
           return (
@@ -1576,8 +1586,13 @@ function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress:
             2-digit protein) keep "450 CAL"; a 4-digit calorie count falls back to the bare number
             instead of wrapping. Deterministic per-recipe, so it can't wrap on an unlucky day. */}
         {(() => {
-          const timeLabel = `${meal.prepTime} min`
           const protLabel = `${meal.protein}P`
+          // A waiting dish shows the WAIT ("Overnight", "2 hr chill"); if even that would push this
+          // no-wrap row over, fall back to the bare word rather than letting it wrap.
+          const timeFull = formatDiscoverCardTime(meal.prepTime, meal.cookTime, meal.restTime)
+          const timeLabel = fitsPillRow([timeFull, ...(meal.protein > 0 ? [protLabel] : []), `${meal.calories}`])
+            ? timeFull
+            : formatDiscoverCardTime(meal.prepTime, meal.cookTime, meal.restTime, true)
           const labels = [
             ...(meal.prepTime > 0 ? [timeLabel] : []),
             ...(meal.protein > 0 ? [protLabel] : []),

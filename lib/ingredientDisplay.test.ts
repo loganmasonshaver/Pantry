@@ -12,6 +12,7 @@ import {
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
   formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat, snapDisplayMinutes,
+  isReadyWithin, formatDiscoverCardTime, formatDuration,
   formatRestBadge, formatTimeBreakdown, formatTimeLine,
 } from './ingredientDisplay.ts'
 
@@ -729,4 +730,63 @@ test('zero and junk stay zero — a no-cook dish must not gain a phantom 5 minut
 test('activeMinutes stays EXACT — the prep budget filters on it and must not inherit the rounding', () => {
   assert.equal(activeMinutes(3, 0), 3)
   assert.equal(activeMinutes(7, 20), 27)
+})
+
+// ── Discover time ──────────────────────────────────────────────────────────────────────────────
+
+test('the McFlurry case: a 10-minute blend with a 16-hour freeze is NOT ready in 15', () => {
+  assert.equal(isReadyWithin(10, 0, 960, 15), false)
+  // It was — the old shelf read prepTime alone.
+})
+
+test('an ordinary quick dish is still ready in 15', () => {
+  assert.equal(isReadyWithin(10, 0, 0, 15), true)
+  assert.equal(isReadyWithin(5, 5, 0, 15), true)
+})
+
+test('oven time counts toward "ready in", a short set does not disqualify', () => {
+  assert.equal(isReadyWithin(5, 20, 0, 15), false)
+  // Under 30 minutes of rest has no badge, so it does not stop a dish being quick.
+  assert.equal(isReadyWithin(10, 0, 20, 15), true)
+})
+
+test('an unknown time is never "ready" — no recipe qualifies on a zero', () => {
+  assert.equal(isReadyWithin(0, 0, 0, 15), false)
+  assert.equal(isReadyWithin(undefined, undefined, undefined, 15), false)
+})
+
+test('card time: a waiting dish shows the wait, a quick one shows minutes', () => {
+  assert.equal(formatDiscoverCardTime(10, 0, 960), 'Overnight')
+  assert.equal(formatDiscoverCardTime(15, 0, 120), '2 hr chill')
+  assert.equal(formatDiscoverCardTime(10, 0, 45), '45 min chill')
+  assert.equal(formatDiscoverCardTime(15, 0, 0), '15 min')
+})
+
+test('card time compact form never invents a number', () => {
+  assert.equal(formatDiscoverCardTime(10, 0, 45, true), 'Chill')
+  assert.equal(formatDiscoverCardTime(10, 0, 960, true), 'Overnight')
+  assert.equal(formatDiscoverCardTime(15, 0, 0, true), '15 min')
+})
+
+test('legacy Discover rows with no rest data render exactly as before', () => {
+  // rest_time is null on every row stored before this change until the backfill reaches it.
+  assert.equal(formatDiscoverCardTime(20, undefined, null), '20 min')
+  assert.equal(isReadyWithin(10, undefined, null, 15), true)
+})
+
+test('long times read in hours — a 4-hour slow cooker is not "255 min"', () => {
+  assert.equal(formatTimeToEat(10, 245), '4.5 hr')
+  assert.equal(formatTimeBreakdown(10, 245, 0), '10 min prep · 4.5 hr cook')
+})
+
+test('hours round UP to the half hour, never under-promising', () => {
+  assert.equal(formatDuration(90), '1.5 hr')
+  assert.equal(formatDuration(91), '2 hr')
+  assert.equal(formatDuration(120), '2 hr')
+})
+
+test('everything under 90 minutes is unchanged — Cook Tonight is untouched', () => {
+  assert.equal(formatDuration(30), '30 min')
+  assert.equal(formatDuration(85), '85 min')
+  assert.equal(formatTimeToEat(10, 20), '30 min')
 })

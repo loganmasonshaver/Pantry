@@ -683,8 +683,15 @@ export function snapDisplayMinutes(minutes: unknown): number {
   return Math.max(5, Math.ceil(n / 5) * 5)
 }
 
+// Minutes as a person reads them. Cook Tonight never needed hours — the user's max-prep budget caps
+// it — but Discover has no budget, and a slow-cooker curry's 4-hour cook read as "255 min". Above 90
+// it rounds UP to the half hour, keeping the same never-under-promise rule as snapDisplayMinutes.
+export function formatDuration(minutes: number): string {
+  return minutes >= 90 ? `${Math.ceil(minutes / 30) / 2} hr` : `${minutes} min`
+}
+
 export function formatTimeToEat(prepTime: unknown, cookTime: unknown): string {
-  return `${snapDisplayMinutes(prepTime) + snapDisplayMinutes(cookTime)} min`
+  return formatDuration(snapDisplayMinutes(prepTime) + snapDisplayMinutes(cookTime))
 }
 
 // How a wait reads on a CARD: a word, never a number.
@@ -727,9 +734,36 @@ export function formatTimeBreakdown(prepTime: unknown, cookTime: unknown, restTi
   const rest = formatRestTime(restTime)
   // Nothing to break down: the overwhelming case is a no-cook dish, and "5 min prep" only adds a
   // word to "5 min".
-  if (cook === 0 && !rest) return `${prep} min`
-  const parts = [`${prep} min prep`]
-  if (cook > 0) parts.push(`${cook} min cook`)
+  if (cook === 0 && !rest) return formatDuration(prep)
+  const parts = [`${formatDuration(prep)} prep`]
+  if (cook > 0) parts.push(`${formatDuration(cook)} cook`)
   if (rest) parts.push(`${rest} rest`)
   return parts.join(' · ')
+}
+
+// ── Discover time ────────────────────────────────────────────────────────────────────────────
+//
+// Discover recipes come from creators and many of them wait — a Ninja Creami base freezes 16-24
+// hours, a cheesecake sets overnight. The pipeline used to store ONE prep_time with no definition,
+// so the model guessed: the McFlurry's 16-hour freeze was dropped ("10 min") while Brownie Batter's
+// was counted as work ("1020 min"). Both lie. These read the same three fields Cook Tonight uses.
+
+// "Ready in N" means eatable in N minutes: the active time fits AND there is no wait worth a badge.
+// A 10-minute blend that then freezes for 16 hours is not ready in 15, and was on that shelf.
+export function isReadyWithin(prepTime: unknown, cookTime: unknown, restTime: unknown, minutes: number): boolean {
+  const active = activeMinutes(prepTime, cookTime)
+  return active > 0 && active <= minutes && formatRestBadge(restTime) === null
+}
+
+// The time pill on a small Discover card. It cannot hold "10 min + overnight" — the rail card's
+// pill row is ~163px and deliberately never wraps — so a waiting dish shows the WAIT, which is the
+// fact that decides whether you make it tonight. The exact breakdown is on the detail screen.
+// `compact` drops the duration for rows too tight even for that ("Chill"), never inventing a number.
+export function formatDiscoverCardTime(
+  prepTime: unknown, cookTime: unknown, restTime: unknown, compact = false,
+): string {
+  const badge = formatRestBadge(restTime)
+  if (badge === 'overnight') return 'Overnight'
+  if (badge === 'chill') return compact ? 'Chill' : `${formatRestTime(restTime)} chill`
+  return formatTimeToEat(prepTime, cookTime)
 }

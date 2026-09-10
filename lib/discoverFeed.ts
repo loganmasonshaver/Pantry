@@ -15,6 +15,12 @@ export type DiscoverMeal = {
   carbs: number
   fat: number
   prepTime: number
+  // Same meaning as Cook Tonight's fields, so the meal detail screen's formatTimeBreakdown reads them
+  // unchanged. cookTime = unattended but you must stay (a bake, a Creami spin); restTime = walk away
+  // (a freeze, a set, an overnight soak). 0 on rows stored before these columns existed, until the
+  // backfill reaches them — which renders exactly as the old single number did.
+  cookTime: number
+  restTime: number
   servings: number
   shelf_tag: string | null
   source_verified: boolean
@@ -89,7 +95,8 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
   return filterTrendingByLifecycle(data)
     .map((m: any) => ({
       id: m.id, name: m.name, calories: m.calories, protein: m.protein,
-      carbs: m.carbs, fat: m.fat, prepTime: m.prep_time, servings: m.servings ?? 1,
+      carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
+      cookTime: m.cook_time ?? 0, restTime: m.rest_time ?? 0, servings: m.servings ?? 1,
       shelf_tag: m.shelf_tag ?? null, source_verified: m.source_verified === true,
       ingredients: m.ingredients, steps: m.steps, image: m.image,
       trend_source: m.trend_source,
