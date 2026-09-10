@@ -463,7 +463,7 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   2026-09-10 (`0bc3751` position, `3521935` text was black-on-#1A1A1A).
 - [ ] Dislike sheet: no grabber bar, title sits where it did, last reason reads "Not to my taste".
   Tap it → step 2 ingredient chips legible, Done/Skip works.
-- [ ] **One time rule on every card** (`aa037b8`). A waiting Discover dish shows its time pill on its
+- [x] **PASS on device 2026-09-10.** **One time rule on every card** (`aa037b8`). A waiting Discover dish shows its time pill on its
   OWN row — Lentil Quinoa Flatbread `40 MIN + OVERNIGHT`, Blueberry Lemon Cheesecake `60 MIN +
   CHILL` — with calories and protein beneath; the grid must stay aligned. Non-waiting cards: one
   row, unchanged. (Font-shrinking to fit one row was ruled out: it needs ~6pt; pills are 10pt.)
