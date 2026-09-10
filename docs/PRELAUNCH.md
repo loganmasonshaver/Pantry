@@ -511,6 +511,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   occasionally line up by chance — that is the trade Logan chose over any visible pattern.
 - [ ] "Ready in 15" has no frozen desserts.
 - [ ] Hero, if a waiting dish, reads e.g. `10 MIN + OVERNIGHT`.
+- [ ] **Hero no longer changes when switching chips** (Logan: Breakfast → Lunch → All turned the Skillet
+  into the Chilli Oil pasta). Chips recorded their own hero as the day's pick and marked it seen.
+  Now only All records. Today's stored pick was already rewritten by the bug, so verify TOMORROW:
+  note All's hero, flip through chips, come back — same dish. Separately, by design, All's hero can
+  still change when the time-of-day tier changes (a breakfast hero is replaced at dinner).
 - [ ] Cook Tonight nudge "Still not feeling it? Browse Discover →" from the 3rd generation of the day.
 - [ ] Ice is assumed stock everywhere: not under YOU'LL NEED, and the Pantry tab's Cook tonight card no
   longer says "Better with: ice cubes" (the app's staples list was never synced with generate-meals'

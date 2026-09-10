@@ -781,6 +781,11 @@ export default function DiscoverScreen() {
   // what stops it looping, since writing heroStore re-runs the memo that produced `featured`.
   useEffect(() => {
     if (!featured || heroStore === undefined) return
+    // Only the ALL feed picks the day's hero. A chip's hero is a VIEW of that filter, not a choice:
+    // recording it overwrote today's pick and marked it seen, so Breakfast -> Lunch -> All came back
+    // to a different dish (the Skillet became the Chilli Oil pasta). Chips still show their own best
+    // match, derived from the same stored pick and seen list, so each one is stable all day too.
+    if (activeFilter !== 'All') return
     const day = dayOfYearNow()
     if (heroStore.day === day && heroStore.id === featured.id) return
     const next: HeroPick = {
@@ -790,7 +795,7 @@ export default function DiscoverScreen() {
     }
     setHeroStore(next)
     writeHeroPick(next)
-  }, [featured, heroStore])
+  }, [featured, heroStore, activeFilter])
   // The rail is a CURATED shelf, not the whole browsing surface — that distinction is why the tab
   // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
   // unreachable. The rail stays tight (10, protein-varied) and everything else drops into the
