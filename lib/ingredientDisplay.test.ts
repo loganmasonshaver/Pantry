@@ -689,8 +689,8 @@ test('the card says how soon you eat, then the wait as a word', () => {
 
 test('the detail screen keeps the real numbers, and drops the parts that are zero', () => {
   assert.equal(formatTimeBreakdown(10, 20, 0), '10 min prep · 20 min cook')
-  assert.equal(formatTimeBreakdown(5, 0, 480), '5 min prep · 8 hr chill')
-  assert.equal(formatTimeBreakdown(10, 20, 480), '10 min prep · 20 min cook · 8 hr chill')
+  assert.equal(formatTimeBreakdown(5, 0, 480), '5 min prep · 8 hr rest')
+  assert.equal(formatTimeBreakdown(10, 20, 480), '10 min prep · 20 min cook · 8 hr rest')
   // A no-cook dish says "5 min", not "5 min prep" — there is nothing to distinguish it from.
   assert.equal(formatTimeBreakdown(5, 0, 0), '5 min')
 })
@@ -766,11 +766,12 @@ test('the Blueberry Lemon Cheesecake case: the Discover card no longer hides an 
   assert.equal(formatDiscoverCardTime(15, 45, 120), '60 min + chill')
   // And it is the exact string Home's cards and both heroes print for the same dish.
   assert.equal(formatDiscoverCardTime(15, 45, 120), formatTimeLine(15, 45, 120))
-  assert.equal(formatTimeBreakdown(15, 45, 120), '15 min prep · 45 min cook · 2 hr chill')
+  assert.equal(formatTimeBreakdown(15, 45, 120), '15 min prep · 45 min cook · 2 hr rest')
 })
 
-test('detail keeps "rest" for a wait too short to badge — a steak resting is not chilling', () => {
-  assert.equal(formatTimeBreakdown(15, 10, 10), '15 min prep · 10 min cook · 10 min rest')
+test('detail never calls a wait "chill" — an overnight lentil soak is not chilling', () => {
+  // Lentil Quinoa Flatbread: step 1 soaks, step 2 blends the soaked grains into batter.
+  assert.equal(formatTimeBreakdown(20, 20, 480), '20 min prep · 20 min cook · 8 hr rest')
 })
 
 test('card time compact form never invents a number', () => {

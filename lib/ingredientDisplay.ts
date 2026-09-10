@@ -787,9 +787,9 @@ export function formatTimeBreakdown(prepTime: unknown, cookTime: unknown, restTi
   if (cook === 0 && !rest) return formatDuration(prep)
   const parts = [`${formatDuration(prep)} prep`]
   if (cook > 0) parts.push(`${formatDuration(cook)} cook`)
-  // A wait the card badges is called "chill" here too, so both screens name the same field the
-  // same way. Below the badge threshold it stays "rest": a 10-minute rest on a steak is not a chill.
-  if (rest) parts.push(`${rest} ${formatRestBadge(restTime) ? 'chill' : 'rest'}`)
+  // "rest", not "chill": only the wait's LENGTH is stored, not its kind, and 3 of the 23 waiting
+  // Discover dishes are overnight SOAKS (lentils, chickpeas, dosa). "8 hr chill" was false for them.
+  if (rest) parts.push(`${rest} rest`)
   return parts.join(' · ')
 }
 
