@@ -40,7 +40,11 @@ async function pushToOps(title: string, body: string): Promise<string> {
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify({ to: token, title, body, sound: "default", priority: "high" }),
     })
-    return res.ok ? "sent" : `FAILED: expo returned ${res.status}`
+    if (!res.ok) return `FAILED: expo returned ${res.status}`
+    // Expo answers HTTP 200 even when it REJECTS the push; the verdict is the per-message ticket.
+    // Reading res.ok alone logged "sent" three times while APNs credentials were missing entirely.
+    const ticket = (await res.json().catch(() => null))?.data
+    return ticket?.status === "ok" ? "sent" : `FAILED: ${ticket?.message ?? "unreadable expo response"}`
   } catch (e) {
     return `FAILED: ${(e as Error).message}`
   }

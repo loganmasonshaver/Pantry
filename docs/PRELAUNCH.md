@@ -484,19 +484,22 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] Sep 11 ~1pm: the Sep 10 batch (created 12:51 CDT) loses the border; the new batch gains it.
 
 ## 2l. FOUND 2026-09-10 — open, deliberately NOT fixed  *(were only in handoff.md until now)*
-- [ ] **Dislike reasons reach NOBODY.** They are stored in `meal_ratings.reason` and that is all — no
-  PostHog event, no notification, nothing surfaces them to Logan. Yet a photo/recipe report shows the
-  toast "Thanks — we'll take a look at this one", a promise with no mechanism behind it. Those two
-  are defect reports about SHARED assets (images are cached globally), so one report is about every
-  user's copy. **Proposed design (awaiting Logan's go):** a pg_cron job at 9am CT runs a SQL function
-  that counts the last 24h of `meal_ratings` thumbs-downs; if there are none it sends NOTHING, else
-  ONE Expo push to Logan's token: "2 photo · 1 recipe · 3 other", naming the meals in the two
-  fixable categories. SQL-only (`net.http_post` straight to exp.host, token read from `profiles`) so
-  no edge function and no CRON_SECRET can silence it — the failure that hid 3 days of cron outage.
-  Build together with the health-check fix below. Full detail in a service-role-only view; the
-  taste/too-often/macros signal goes into the weekly founder-research `feedback/LOG.md` pull.
-  Channel is PROVEN: Logan's is the only `expo_push_token` (1 of 20 profiles) and pushToOps has
-  returned "sent" 3 times (09-05, 09-07, 09-10).
+- [x] **Daily report BUILT 2026-09-10** (`daily_ops_report()`, cron `ops-daily-report` 14:00 UTC =
+  9am CDT / 8am CST). Every day, even at zero: Discover health on line 1, then each meal with a
+  count per reason ("Cheesecake: 2 photo didn't match, 1 no reason"), top 8 + a pointer to the
+  `ops_dislike_report` view. SQL-only — no edge function or CRON_SECRET can silence it. anon and
+  authenticated verified unable to call it or read the view. Recipient = Vault `ops_user_id`.
+  Preview without sending: `select public.daily_ops_report(false);`
+- [ ] **⚠️ BLOCKER for it: NO remote push has ever reached Logan's phone.** Expo returns HTTP 200
+  with `"status":"error"` — *"Could not find APNs credentials for com.kobalabs.pantry"*. The health
+  check's three "sent" results (09-05, 09-07, 09-10) were HTTP 200 only; it never read the ticket.
+  Now fixed to read it (deployed). **Logan must run `npx eas-cli credentials -p ios` → Push
+  Notifications → set up a new key** (needs his Apple login). Then re-send and check:
+  `select status_code, content from net._http_response order by id desc limit 1` → `"status":"ok"`.
+  If it still fails, the next suspect is the dev build's APNs sandbox environment. User-facing
+  reminders are LOCAL notifications and do not depend on this.
+- [ ] Retire trending-health-check's own push once the daily report is proven — kept for now
+  because §2k.A reads its 08:20 row.
 - [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
   the pipeline's translate-everything rule. COUNT how many before fixing.
 - [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —
