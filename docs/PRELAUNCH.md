@@ -445,6 +445,34 @@ pill on recently added cards, or ordering each shelf newest-first. Not investiga
 look at whether `trending_meals` carries a usable added-at date per row and how it interacts with
 the day-keyed shelf rotation (which deliberately varies order per day, and would fight a strict
 newest-first sort).
+**BUILT 2026-09-10:** NEW TODAY border on a rolling 24h from `created_at`, new recipes lead their
+shelves. No "Today's picks" shelf — first-shelf-wins pulled new recipes OUT of their home shelves.
+
+## 2k. FOUND 2026-09-10 — open, deliberately NOT fixed  *(were only in handoff.md until now)*
+- [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
+  the pipeline's translate-everything rule. COUNT how many before fixing.
+- [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —
+  in the step text only, so they never reach a grocery list. Violates 100% ingredient retention.
+  WHY the retention check let it through is uninvestigated. (Its step 4 "onions" is the creator's
+  own error, copied faithfully — not ours.)
+- [ ] **"Marinate chicken with ingredients listed above" (Sukiyaki).** The grouping IS stored
+  (`ingredients[].section = "chicken marinade"`) but the detail screen regroups by pantry status
+  and discards it. Proposed, not accepted: expand back-references from the stored section.
+- [ ] **Pre-push AI review fails open on EVERY commit** ("Allowing push (fail-open by design)"). It is
+  reviewing nothing — including both cron migrations. Every push since is unreviewed.
+- [ ] **Health check shares the pipeline's credential**, so one auth failure silences both — how three
+  days of cron outage went unnoticed. Fix: a SQL-only cron that checks `trending_meals` and pushes
+  via Expo directly.
+- [ ] **Cup-measured produce drawn whole** (Sukiyaki "1 cup shiitake", "2 cups cabbage"). The extractor
+  should name the prepared form ("sliced shiitake").
+- [ ] **"fruit" never matches a specific fruit** — needs a category taxonomy.
+- [ ] **Image cache key is the meal name only** — confirmed twice: "Greek Yogurt and Granola Power
+  Bowl" lists pineapple and shows a July photo with banana.
+- [ ] Undecided, carried from 2026-09-07: Home layout (own-row vs one row); feedback board Phase 2
+  (Profile has NO support/contact row at all).
+- [ ] Cleanup: Pantry's 19 hardcoded `'#4ADE80'` → `COLORS.accentGreen`; unify the two singularisation
+  rules (`pantry-check` vs `recipe-integrity` — the latter is better); grep for `COLORS.text` on
+  dark surfaces (it is #000000 for WHITE cards — made the dislike sheet unreadable).
 
 ## 2h. Also designed, not built — scale instead of regenerating
 Logan asked why a goal change needs a whole new generation when the dish is still fine.
