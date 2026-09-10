@@ -515,6 +515,12 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   tappable through to its recipe, so a "photo didn't match" lands on the photo being judged. Needs a
   server-side check that the caller is Logan (Vault `ops_user_id`), a screen, and the tap wiring
   above. Worth it once dislikes regularly exceed ~10/day; until then the push is complete on its own.
+- [ ] **Report moves to EMAIL (Logan's call 2026-09-10) — waiting on his Loops setup.** The function
+  sends email via a Loops transactional template once Vault holds `loops_api_key` AND
+  `loops_daily_report_id`; until then it falls back to the push, so one of the two always goes.
+  Email lists EVERY meal (no 10 cap). Template: subject `{title}`, one ARRAY block `lines` with
+  `{line}`. Verify: `select public.daily_ops_report(false)->>'channel'` reads `email`, then a real
+  send's `net._http_response` reads `{"success":true}` and it lands in Gmail (check Promotions/spam).
 - [x] trending-health-check's own push REMOVED 2026-09-10 (Logan: one notification a day). It
   still runs at 08:20 UTC and writes its `pipeline_runs` row, which §2k.A reads; the 9am report's
   first line is the alert now. A test tap confirmed the tap target is still nowhere (see above).
