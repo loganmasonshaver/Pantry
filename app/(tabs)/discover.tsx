@@ -1077,7 +1077,7 @@ export default function DiscoverScreen() {
       })),
       ...intent.map(sec => ({ ...sec, accent: false })),
     ].filter(sec => sec.meals.length > 0)
-      // New recipes checkerboard through the shelf, after claim() has settled ownership — see interleaveNewToday.
+      // New recipes land at day-seeded random spots in the first page, after claim() — see interleaveNewToday.
       .map(sec => ({ ...sec, meals: interleaveNewToday(sec.meals) }))
     // Filtered BEFORE rotating, deliberately: rotating first would let the index land on a section
     // that is about to be dropped, and the "different shelf each day" guarantee would silently

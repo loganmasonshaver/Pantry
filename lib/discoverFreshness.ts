@@ -23,33 +23,41 @@ export function isNewToday(createdAt: string | null | undefined, nowMs: number =
   return ageMs <= NEW_WINDOW_HOURS * 3_600_000
 }
 
-// NEW TODAY recipes are spread through a shelf in a CHECKERBOARD — one new and one older per grid
-// row, the new one switching sides each row — so each is on the first page without the batch
-// stacking at the top or lining up down one column.
+// NEW TODAY recipes land at RANDOM spots within the first page of their shelf — Logan's call
+// after three patterns each looked like a pattern: new-first stacked a batch at the top, plain
+// alternation lined them all down the right column of the 2-column grid, and a checkerboard he
+// rejected on sight. "Just make it random."
 //
-// Three reports shaped this. New recipes were hidden behind "Show more" (a shelf shows 6; a new
-// recipe ranked 9th was invisible), so they were moved to the front — which stacked a batch of four
-// ice creams at the top of a shelf ("should be mixed in like before"). Plain alternation fixed the
-// list order and broke the grid: shelves are 2 columns filled left to right, so every odd slot is
-// the RIGHT column and all the new recipes lined up down the right edge. Hence the slot pattern
-// old, new, new, old — row by row: [old | new], [new | old], [old | new]...
-//
-// Both halves keep claim()'s order, and it runs AFTER claim(), so it moves recipes within their
-// shelf and never changes which shelf owns them. When either half runs out, the rest trail in order.
-const GRID_COLUMNS = 2 // discover.tsx browseGrid: two GRID_CELL_W cells per row
-export function interleaveNewToday<T extends { created_at?: string | null }>(meals: readonly T[], nowMs: number = Date.now()): T[] {
+// Two things are deliberately NOT random. The seed is the DAY (plus which recipes are new), so the
+// layout holds still all day — reshuffling on every open is the "page rearranges under me" bug this
+// screen was rebuilt to avoid. And every new recipe stays inside the first page window (6 cards,
+// wider if a shelf has more than 3 new ones), because the first complaint was new recipes hidden
+// behind "Show more". Both halves keep claim()'s order, and it runs after claim(), so shelf
+// ownership never changes.
+const FIRST_PAGE = 6 // discover.tsx GRID_PAGE
+// FNV-1a plus murmur3's final mix. The slot is the LAST character of each seed, and a plain
+// h*31+c hash barely moves on a last-character change — it put the new recipes in one contiguous
+// block (slots 0-2 or 3-5) every day, i.e. stacked again. The finaliser spreads it to every bit.
+const hash = (str: string) => {
+  let h = 2166136261
+  for (let k = 0; k < str.length; k++) { h ^= str.charCodeAt(k); h = Math.imul(h, 16777619) }
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16
+  return h >>> 0
+}
+export function interleaveNewToday<T extends { id?: string; created_at?: string | null }>(meals: readonly T[], nowMs: number = Date.now()): T[] {
   const fresh = meals.filter(m => isNewToday(m.created_at, nowMs))
   const old = meals.filter(m => !isNewToday(m.created_at, nowMs))
   if (fresh.length === 0 || old.length === 0) return [...meals]
+  const window = Math.min(meals.length, Math.max(FIRST_PAGE, fresh.length * 2))
+  const seed = `${new Date(nowMs).toDateString()}|${fresh.map(m => m.id ?? '').join(',')}`
+  // A seeded permutation of the window's slots; the first fresh.length of them hold the new recipes.
+  const slots = Array.from({ length: window }, (_, k) => k)
+    .sort((x, y) => hash(`${seed}|${x}`) - hash(`${seed}|${y}`))
+    .slice(0, fresh.length)
+  const freshAt = new Set(slots)
   const out: T[] = []
   let i = 0, j = 0
-  for (let slot = 0; i < old.length || j < fresh.length; slot++) {
-    const row = Math.floor(slot / GRID_COLUMNS), col = slot % GRID_COLUMNS
-    // Even rows put the new recipe on the right, odd rows on the left.
-    const wantNew = col === (row % 2 === 0 ? 1 : 0)
-    if ((wantNew && j < fresh.length) || i >= old.length) out.push(fresh[j++])
-    else out.push(old[i++])
-  }
+  for (let slot = 0; slot < meals.length; slot++) out.push(freshAt.has(slot) && j < fresh.length ? fresh[j++] : (i < old.length ? old[i++] : fresh[j++]))
   return out
 }
 

@@ -41,32 +41,35 @@ const shelf = [
   { id: 'd', created_at: FRESH }, { id: 'e', created_at: OLD },
 ]
 
-// Rows of the 2-column grid, for reading the tests the way the screen draws them.
-const rows = (ids: string[]) => ids.reduce<string[][]>((acc, id, k) => (k % 2 ? acc[acc.length - 1].push(id) : acc.push([id]), acc), [])
+const DAY = 86_400_000
+const bigShelf = [
+  ...Array.from({ length: 4 }, (_, k) => ({ id: `n${k}`, created_at: FRESH })),
+  ...Array.from({ length: 10 }, (_, k) => ({ id: `o${k}`, created_at: OLD })),
+]
 
-test('new recipes form a CHECKERBOARD — never stacked at the top, never all in one column', () => {
-  const out = interleaveNewToday(shelf, NOW).map(m => m.id)
-  assert.deepEqual(out, ['a', 'b', 'd', 'c', 'e'])
-  // [old | NEW], [NEW | old], [old] — the new ones switch sides.
-  assert.deepEqual(rows(out), [['a', 'b'], ['d', 'c'], ['e']])
+test('every new recipe lands inside the first page — none behind "Show more"', () => {
+  // 4 new -> a window of max(6, 8) = 8 slots.
+  const out = interleaveNewToday(bigShelf, NOW)
+  assert.ok(newTodayReach(out, NOW) <= 8)
+  assert.equal(out.length, bigShelf.length)
 })
 
-test('a batch of four new recipes spreads across both columns', () => {
-  const batch = [
-    { id: 'n1', created_at: FRESH }, { id: 'n2', created_at: FRESH }, { id: 'n3', created_at: FRESH }, { id: 'n4', created_at: FRESH },
-    { id: 'o1', created_at: OLD }, { id: 'o2', created_at: OLD }, { id: 'o3', created_at: OLD }, { id: 'o4', created_at: OLD },
-  ]
-  const out = interleaveNewToday(batch, NOW).map(m => m.id)
-  assert.deepEqual(rows(out), [['o1', 'n1'], ['n2', 'o2'], ['o3', 'n3'], ['n4', 'o4']])
-  // The regression Logan saw: plain alternation put every new recipe in the RIGHT column.
-  const rightColumn = out.filter((_, k) => k % 2 === 1)
-  assert.ok(!rightColumn.every(id => id.startsWith('n')))
+test('both halves keep claim()\'s order — only the positions are random', () => {
+  const out = interleaveNewToday(bigShelf, NOW).map(m => m.id)
+  assert.deepEqual(out.filter(id => id.startsWith('n')), ['n0', 'n1', 'n2', 'n3'])
+  assert.deepEqual(out.filter(id => id.startsWith('o')), bigShelf.filter(m => m.id.startsWith('o')).map(m => m.id))
 })
 
-test('both halves keep claim()\'s order; surplus of either side trails in order', () => {
-  const more = [...shelf, { id: 'f', created_at: FRESH }, { id: 'g', created_at: FRESH }, { id: 'h', created_at: FRESH }]
-  // old a,c,e and new b,d,f,g,h.
-  assert.deepEqual(interleaveNewToday(more, NOW).map(m => m.id), ['a', 'b', 'd', 'c', 'e', 'f', 'g', 'h'])
+test('stable all day — the page must not reshuffle on every open', () => {
+  assert.deepEqual(interleaveNewToday(bigShelf, NOW), interleaveNewToday(bigShelf, NOW + 60_000))
+})
+
+test('a different day gives a different arrangement', () => {
+  const positions = (now: number) => interleaveNewToday(bigShelf, now).map((m, k) => m.id.startsWith('n') ? k : -1).filter(k => k >= 0)
+  // Recipes stay "new" for 24h, so compare two days with the SAME recipes marked new.
+  const later = bigShelf.map(m => m.created_at === FRESH ? { ...m, created_at: new Date(NOW + DAY - 3_600_000).toISOString() } : m)
+  const posLater = interleaveNewToday(later, NOW + DAY).map((m, k) => m.id.startsWith('n') ? k : -1).filter(k => k >= 0)
+  assert.notDeepEqual(positions(NOW), posLater)
 })
 
 test('a shelf with nothing new, or only new, is untouched', () => {
@@ -77,7 +80,19 @@ test('a shelf with nothing new, or only new, is untouched', () => {
 })
 
 test('newTodayReach is how far the page must open so no new recipe is behind "Show more"', () => {
-  assert.equal(newTodayReach(interleaveNewToday(shelf, NOW), NOW), 3) // d sits at index 2
+  assert.ok(newTodayReach(interleaveNewToday(shelf, NOW), NOW) <= 5)
   assert.equal(newTodayReach([{ created_at: OLD }], NOW), 0)
   assert.equal(newTodayReach([], NOW), 0)
+})
+
+test('the arrangement really varies day to day — the first hash collapsed into one fixed block', () => {
+  // With h*31+c the new recipes sat at slots 0-2 or 3-5 every day, i.e. stacked. Sample a week.
+  const seen = new Set<string>()
+  for (let d = 0; d < 8; d++) {
+    const now = NOW + d * DAY
+    const fresh = new Date(now - 3_600_000).toISOString()
+    const s = [...[0, 1, 2].map(k => ({ id: `n${k}-${d}`, created_at: fresh })), ...Array.from({ length: 9 }, (_, k) => ({ id: `o${k}`, created_at: OLD }))]
+    seen.add(interleaveNewToday(s, now).map((m, k) => m.id.startsWith('n') ? k : -1).filter(k => k >= 0).join(','))
+  }
+  assert.ok(seen.size >= 5, `only ${seen.size} distinct arrangements in 8 days`)
 })
