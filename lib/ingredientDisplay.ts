@@ -806,16 +806,3 @@ export function isReadyWithin(prepTime: unknown, cookTime: unknown, restTime: un
   const active = activeMinutes(prepTime, cookTime)
   return active > 0 && active <= minutes && formatRestBadge(restTime) === null
 }
-
-// The time pill on a small Discover card: the SAME line as every other card, so a number means
-// "minutes you are busy" everywhere. It used to show the wait's duration instead ("2 hr chill"),
-// which hid a cheesecake's hour of prep and bake behind what read as two hours in the fridge.
-// `compact` is for a pill row too tight for the full line (~163px, deliberately never wraps): it
-// keeps the wait word and drops the number. "60 min" alone would promise dinner in an hour.
-export function formatDiscoverCardTime(
-  prepTime: unknown, cookTime: unknown, restTime: unknown, compact = false,
-): string {
-  const badge = formatRestBadge(restTime)
-  if (!compact || !badge) return formatTimeLine(prepTime, cookTime, restTime)
-  return badge === 'overnight' ? 'Overnight' : 'Chill'
-}

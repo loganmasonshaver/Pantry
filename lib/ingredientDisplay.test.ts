@@ -12,7 +12,7 @@ import {
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
   formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat, snapDisplayMinutes,
-  isReadyWithin, formatDiscoverCardTime, formatDuration, countCountableIngredients, isNearlyThere,
+  isReadyWithin, formatDuration, countCountableIngredients, isNearlyThere,
   formatRestBadge, formatTimeBreakdown, formatTimeLine,
 } from './ingredientDisplay.ts'
 
@@ -755,18 +755,12 @@ test('an unknown time is never "ready" — no recipe qualifies on a zero', () =>
   assert.equal(isReadyWithin(undefined, undefined, undefined, 15), false)
 })
 
-test('card time: busy minutes first, then the wait as a word — same as every other card', () => {
-  assert.equal(formatDiscoverCardTime(10, 0, 960), '10 min + overnight')
-  assert.equal(formatDiscoverCardTime(15, 0, 120), '15 min + chill')
-  assert.equal(formatDiscoverCardTime(15, 0, 0), '15 min')
-})
-
-test('the Blueberry Lemon Cheesecake case: the Discover card no longer hides an hour of work', () => {
-  // 15 prep + 45 bake + 2 hr set. The card read "2 hr chill", which sounded like fridge time only.
-  assert.equal(formatDiscoverCardTime(15, 45, 120), '60 min + chill')
-  // And it is the exact string Home's cards and both heroes print for the same dish.
-  assert.equal(formatDiscoverCardTime(15, 45, 120), formatTimeLine(15, 45, 120))
-  assert.equal(formatTimeBreakdown(15, 45, 120), '15 min prep · 45 min cook · 2 hr rest')
+test('Discover cards use the same line as Home — busy minutes, then the wait as a word', () => {
+  // Blueberry Lemon Cheesecake: 15 prep + 45 bake + 2 hr set. The card used to read "2 hr chill",
+  // which hid an hour of work behind what sounded like fridge time.
+  assert.equal(formatTimeLine(15, 45, 120), '60 min + chill')
+  // Lentil Quinoa Flatbread: the step-1 soak cannot be skipped (step 2 blends the soaked grains).
+  assert.equal(formatTimeLine(20, 20, 480), '40 min + overnight')
 })
 
 test('detail never calls a wait "chill" — an overnight lentil soak is not chilling', () => {
@@ -774,15 +768,9 @@ test('detail never calls a wait "chill" — an overnight lentil soak is not chil
   assert.equal(formatTimeBreakdown(20, 20, 480), '20 min prep · 20 min cook · 8 hr rest')
 })
 
-test('card time compact form never invents a number', () => {
-  assert.equal(formatDiscoverCardTime(10, 0, 45, true), 'Chill')
-  assert.equal(formatDiscoverCardTime(10, 0, 960, true), 'Overnight')
-  assert.equal(formatDiscoverCardTime(15, 0, 0, true), '15 min')
-})
-
 test('legacy Discover rows with no rest data render exactly as before', () => {
   // rest_time is null on every row stored before this change until the backfill reaches it.
-  assert.equal(formatDiscoverCardTime(20, undefined, null), '20 min')
+  assert.equal(formatTimeLine(20, undefined, null), '20 min')
   assert.equal(isReadyWithin(10, undefined, null, 15), true)
 })
 

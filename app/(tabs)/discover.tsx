@@ -25,7 +25,7 @@ import {
   readDiscoverPersonal, writeDiscoverPersonal,
 } from '@/lib/discoverFeed'
 import { isNewToday, newTodayFirst, countNewToday } from '@/lib/discoverFreshness'
-import { isReadyWithin, formatDiscoverCardTime, formatTimeLine, isNearlyThere, countCountableIngredients } from '@/lib/ingredientDisplay'
+import { isReadyWithin, formatRestBadge, formatTimeLine, isNearlyThere, countCountableIngredients } from '@/lib/ingredientDisplay'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
@@ -1601,26 +1601,34 @@ function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress:
             instead of wrapping. Deterministic per-recipe, so it can't wrap on an unlucky day. */}
         {(() => {
           const protLabel = `${meal.protein}P`
-          // Same line as Home's cards ("60 min + chill"). If that would push this no-wrap row over,
-          // "CAL" goes first (below), then the number — the wait word is what must survive.
-          const timeFull = formatDiscoverCardTime(meal.prepTime, meal.cookTime, meal.restTime)
-          const timeLabel = fitsPillRow([timeFull, ...(meal.protein > 0 ? [protLabel] : []), `${meal.calories}`])
-            ? timeFull
-            : formatDiscoverCardTime(meal.prepTime, meal.cookTime, meal.restTime, true)
+          // Busy minutes + the wait as a word — the same line as Home's cards ("40 min + overnight").
+          // With a wait it is too long to share this row with calories and protein (157px on a 393pt
+          // phone; all 23 waiting dishes overflowed), so it takes a row of its own. By RULE, not by
+          // measurement, so every waiting card looks alike. railContent is absolute, so it grows up.
+          const timeLabel = formatTimeLine(meal.prepTime, meal.cookTime, meal.restTime)
+          const hasTime = meal.prepTime > 0
+          const ownRow = hasTime && formatRestBadge(meal.restTime) !== null
           const labels = [
-            ...(meal.prepTime > 0 ? [timeLabel] : []),
+            ...(hasTime && !ownRow ? [timeLabel] : []),
             ...(meal.protein > 0 ? [protLabel] : []),
           ]
           const calLabel = fitsPillRow([...labels, `${meal.calories} CAL`])
             ? `${meal.calories} CAL`
             : `${meal.calories}`
           return (
-            <View style={{ flexDirection: 'row', gap: 3, marginTop: 6, marginHorizontal: -4, flexWrap: 'wrap' }}>
-              {meal.prepTime > 0 && <Pill label={timeLabel} tint="amber" small />}
-              <Pill label={calLabel} tint="white" small />
-              {meal.protein > 0 && <Pill label={protLabel} tint="green" small />}
-              {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
-            </View>
+            <>
+              {ownRow && (
+                <View style={{ flexDirection: 'row', marginTop: 6, marginHorizontal: -4 }}>
+                  <Pill label={timeLabel} tint="amber" small />
+                </View>
+              )}
+              <View style={{ flexDirection: 'row', gap: 3, marginTop: ownRow ? 3 : 6, marginHorizontal: -4, flexWrap: 'wrap' }}>
+                {hasTime && !ownRow && <Pill label={timeLabel} tint="amber" small />}
+                <Pill label={calLabel} tint="white" small />
+                {meal.protein > 0 && <Pill label={protLabel} tint="green" small />}
+                {meal.log_count >= 10 && <Pill label={`${meal.log_count} cooked`} tint="teal" small />}
+              </View>
+            </>
           )
         })()}
       </View>
