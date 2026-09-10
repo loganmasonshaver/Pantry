@@ -61,3 +61,25 @@ export function pantryCarbs(pantryNames: readonly string[]): string[] {
   return pantryNames.filter(n =>
     hasCarbSource([n]) && !/\b(milk|butter|oil|syrup|spread|vinegar|flour|cookies?|bars?|chips)$/i.test(String(n).trim()))
 }
+
+// Protein powder — or any sweet-flavoured product — in a SAVORY dish. Logan's 2026-09-10 17:47 deck
+// led with "Protein-Fortified Creamy Rice Soup": 2/3 cup milk, rice, 70g chicken and a scoop of
+// protein powder "whisked in to thicken". Not a dish anyone cooks — whey clumps in hot milk and reads
+// sweet-dairy — and not even needed: 140g chicken hits the same protein. The prompt's REAL DISHES
+// rule forbids it and lost to the protein target, as the carb rule did, so it is checked in code.
+// Powder's own dishes (pancakes, oats, smoothies, bars…) are exempt even with bacon on the side.
+const PROTEIN_POWDER = /\b(protein powder|whey|casein|protein isolate|pea protein)\b/i
+const SWEET_FLAVOUR = /\b(vanilla|chocolate|cocoa|cookies? (?:and|&|n) cream|cookie dough|birthday cake|caramel|strawberry|banana|blueberry|raspberry|cinnamon roll|mocha|marshmallow)\b/i
+const FLAVOURED_PRODUCT = /\b(protein|whey|yogurt|yoghurt|skyr|kefir|milk|creamer|shake|cottage cheese)\b/i
+const SAVORY_INGREDIENT = /\b(chicken|beef|pork|turkey|lamb|bacon|ham|sausages?|salmon|tuna|cod|tilapia|shrimp|prawns?|fish|steak|garlic|onions?|shallots?|soy sauce|broth|stock|salsa|pesto|mustard|cumin|curry|chil(?:l)?i|paprika|italian seasoning|oregano|tomato sauce|marinara|parmesan)\b/i
+const SAVORY_DISH = /\b(soup|stew|curry|stir[- ]?fry|skillet|chili|tacos?|burritos?|pizza|pasta|casserole|risotto|fried rice|hash|frittata|omelet(?:te)?|quesadilla|burger|sandwich)\b/i
+const POWDER_HOMES = /\b(pancakes?|waffles?|crepes?|oats|oatmeal|porridge|overnight|muffins?|smoothie|shake|parfait|pudding|bars?|bites|balls|brownies?|cookies?|mug cake|cake|ice cream|french toast)\b/i
+
+export function savoryClash(meal: { name?: unknown; ingredients?: unknown }): boolean {
+  const name = String(meal?.name ?? '')
+  if (POWDER_HOMES.test(name)) return false
+  const names = ingredientNames(meal?.ingredients)
+  const offending = names.some(n => PROTEIN_POWDER.test(n) || (SWEET_FLAVOUR.test(n) && FLAVOURED_PRODUCT.test(n)))
+  if (!offending) return false
+  return SAVORY_DISH.test(name) || names.some(n => SAVORY_INGREDIENT.test(n) && !PROTEIN_POWDER.test(n))
+}

@@ -62,3 +62,23 @@ test("Logan's pantry: the real carb bases, and not the products made from them",
     'Cooked Rice', 'Protein Cereal', 'Granola', 'Eggs', 'Chicken Breast']),
     ['Red Potatoes', 'Yellow Potatoes', 'Cooked Rice', 'Protein Cereal', 'Granola'])
 })
+
+test("the 17:47 soup is a clash — protein powder in a savory chicken soup", async () => {
+  const { savoryClash } = await import('./meal-completeness.ts')
+  assert.equal(savoryClash({ name: 'Protein-Fortified Creamy Rice Soup',
+    ingredients: ing('cooked rice', 'protein powder', 'milk', 'chicken', 'garlic powder', 'black pepper') }), true)
+  assert.equal(savoryClash({ name: 'Creamy Chicken Stir-Fry', ingredients: ing('chicken', 'vanilla greek yogurt', 'soy sauce', 'rice') }), true)
+})
+
+test("powder's own dishes are fine, even with bacon on the side", async () => {
+  const { savoryClash } = await import('./meal-completeness.ts')
+  assert.equal(savoryClash({ name: 'Protein Powder and Oat Milk Breakfast Porridge', ingredients: ing('oats', 'protein powder', 'oat milk', 'cinnamon') }), false)
+  assert.equal(savoryClash({ name: 'Protein Pancakes with Bacon', ingredients: ing('protein powder', 'eggs', 'flour', 'bacon') }), false)
+  assert.equal(savoryClash({ name: 'Chocolate Protein Power Shake', ingredients: ing('chocolate protein powder', 'milk', 'peanut butter') }), false)
+})
+
+test('plain yogurt in a curry, or chocolate chips anywhere, is not a clash', async () => {
+  const { savoryClash } = await import('./meal-completeness.ts')
+  assert.equal(savoryClash({ name: 'Chicken Tikka Curry', ingredients: ing('chicken', 'non-fat plain greek yogurt', 'garlic', 'rice') }), false)
+  assert.equal(savoryClash({ name: 'Cottage Cheese Pasta Bake', ingredients: ing('pasta', 'cottage cheese', 'tomato sauce', 'garlic') }), false)
+})

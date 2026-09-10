@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { isCompleteMeal, isZeroCalorie, pantryCarbs, carbRequired } from '../_shared/meal-completeness.ts'
+import { isCompleteMeal, isZeroCalorie, pantryCarbs, carbRequired, savoryClash } from '../_shared/meal-completeness.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
@@ -546,6 +546,7 @@ ${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
 - CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}${bannedFormsLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
+- PROTEIN POWDER belongs ONLY in shakes, smoothies, oats/porridge, yogurt bowls, pancakes, baking and desserts — NEVER in a savory dish (a soup, stir-fry, skillet, pasta or curry, or anything with meat, fish, garlic, onion or broth). It does not thicken; in hot milk it clumps and tastes of sweet dairy. To raise protein in a savory meal use MORE OF THE REAL PROTEIN (140g chicken, not 70g plus a scoop). The same goes for sweet-flavoured products — vanilla or chocolate yogurt, flavoured milk or creamer. Savory dishes containing them are checked in code and ranked below every other meal.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.${carbSourcesLine}
 - When the protein and vegetables already fill the calorie target, SHRINK THE PROTEIN PORTION to make room for the carb — never drop the carb to fit. 125g chicken with 150g cooked rice is a complete ~520 kcal plate at ~44g protein; 150g chicken with cauliflower and no starch is a side dish. Meals without a carb are checked in code and ranked below complete ones, so dropping it only loses the meal.
 - HARD CONSTRAINT — prepTime + cookTime MUST be ≤ ${maxPrepMinutes} minutes TOGETHER. That sum is the time from starting to eating, which is what the user actually budgeted. prepTime is HANDS-ON minutes the cook is working; cookTime is UNATTENDED minutes the cook must still be there for — an oven bake, a simmer, a roast, anything where the food is cooking and they are waiting on it. Both are REALISTIC times — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
@@ -1146,13 +1147,15 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           // completeness — Pan-Fried Eggs with Potatoes shipped at 24g against 40g, and the
           // completeness ordering alone would favour exactly that kind of dish.
           const proteinOk = proteinTarget <= 0 || Number(m.protein) >= 0.75 * proteinTarget
+          // Protein powder or a sweet-flavoured product in a savory dish — see savoryClash.
+          const clash = savoryClash(m)
           const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
           const cDelta = (Number(m.calories) - calorieTarget) / Math.max(calorieTarget, 1)
           // One-sided fat penalty: only meals ABOVE the fat target lose points, so leaner meals
           // rank higher without punishing a naturally-lean dish. Off for keto/low-carb.
           const fExcess = highFatDiet ? 0 : Math.max(0, (Number(m.fat) - fatTarget) / Math.max(fatTarget, 1))
           const fitScore = pDelta * pDelta + cDelta * cDelta + fExcess * fExcess
-          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1) }
+          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1), _clash: clash }
         })
 
       // EVERY INPUT THE SORT BELOW USES, recorded before it runs. proteinCandidates alone could not
@@ -1168,6 +1171,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         repeat: !!m?._repeat,
         complete: !!m?._complete,
         tier: Number(m?._tier) || 0,
+        clash: !!m?._clash,
         fit: Math.round((Number(m?._fitScore) || 0) * 1000) / 1000,
       }))
       funnel.incomplete = scored.filter((m: any) => !m._complete).map((m: any) => String(m?.name ?? ''))
@@ -1176,16 +1180,21 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         // Freshness outranks everything (a standing decision — do not reopen without evidence), then
         // COMPLETENESS, then macro fit: a fresh complete dish beats a fresh protein-and-veg plate, and
         // an incomplete one reaches the deck only when there are not enough complete ones to fill it.
+        // A savory clash sorts below EVERYTHING, repeats included — Logan's call: protein powder
+        // "whisked in to thicken" a chicken soup is worse than seeing a dish again.
         // Tier = 0 when complete AND over the protein floor, 1 when one of the two, 2 when neither.
         .sort((a: any, b: any) =>
-          a._repeat !== b._repeat ? (a._repeat ? 1 : -1)
+          a._clash !== b._clash ? (a._clash ? 1 : -1)
+          : a._repeat !== b._repeat ? (a._repeat ? 1 : -1)
           : a._tier !== b._tier ? a._tier - b._tier
           : a._fitScore - b._fitScore)
         .slice(0, displayCount)
-        .map((m: any) => { const { _fitScore, _complete, _tier, ...rest } = m; return rest })
+        .map((m: any) => { const { _fitScore, _complete, _tier, _clash, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length
       funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < 0.75 * proteinTarget).length
+      funnel.savoryClash = scored.filter((m: any) => m._clash).map((m: any) => String(m?.name ?? ''))
+      funnel.savoryClashShown = meals.filter((m: any) => savoryClash(m)).length
       const shownRepeats = meals.filter((m: any) => m._repeat).length
       console.log(
         `Macro rank: kept top ${Math.min(displayCount, beforeRank)}/${beforeRank} by freshness then target fit` +
