@@ -613,6 +613,15 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   rules (`pantry-check` vs `recipe-integrity` — the latter is better); grep for `COLORS.text` on
   dark surfaces (it is #000000 for WHITE cards — made the dislike sheet unreadable).
 
+## 2m. POST-LAUNCH — popularity signals  *(Logan asked 2026-09-10: "most liked in 7 days" as the hero?)*
+- [ ] **Decided: NOT the hero.** Pre-launch every recipe has 0 likes, and early on 1-2 taps would pick
+  it; a popularity hero also self-reinforces (most shown → most liked → stays shown) and repeats for
+  days, fighting the hero's job — the newest dish the reader has not seen, the reason to open daily.
+- [ ] Instead, once there is data: a **"Most cooked this week"** shelf below the hero using `log_count`
+  (cooking beats a like), count on the card ("12 cooked" — the pill already exists at >= 10), hidden
+  until a floor like 5 distinct cooks. Optionally popularity as a TIEBREAKER inside the hero's pool
+  of new, unseen, time-appropriate dishes.
+
 ## 2h. Also designed, not built — scale instead of regenerating
 Logan asked why a goal change needs a whole new generation when the dish is still fine.
 - [ ] **Scale the existing meals for calorie/protein/macro changes instead of regenerating.**
