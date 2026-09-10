@@ -497,8 +497,10 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] **Creator chatter stored as steps**: "Save this recipe for later and let me know if you try it!"
   (Chocolate Peanut Butter Smoothie Bowl) and a cookbook plug (Slow Cooker Chinese Chicken Curry).
   Not instructions — the extractor should drop them.
-- [ ] **BUILT 2026-09-10 with Logan's OK — verify on the NEXT generation** (pipeline_runs,
-  provider generate-meals-funnel):
+- [x] **VERIFIED by run 47 (17:47)** except image counts: pantryCarbsOffered = red/yellow potatoes, cooked rice,
+  protein cereal; notCookable 0 (was 4); incomplete 0 of 8 candidates (was 5 of 8); incompleteShown 0;
+  belowProteinFloorShown 0 (shown 44/41/38g). Image counts not exercised — no counted eggs in that deck.
+  **BUILT 2026-09-10 with Logan's OK** (pipeline_runs, provider generate-meals-funnel):
   - Pantry "Oat Milk" no longer counts as "oats" (nor rice vinegar as rice, tomato sauce as tomatoes,
     almond butter as almonds, chicken broth as chicken). Tell: no porridge without oats.
   - The prompt names the user's own carbs (`pantryCarbsOffered` in the funnel — for Logan: potatoes,
@@ -508,6 +510,16 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
     Tell: `belowProteinFloorShown` is 0 unless nothing else qualifies.
   - Image counts: the describer gets "3 eggs" and draws exactly that many. Existing images are cached
     by NAME, so only newly-named dishes show it.
+- [ ] **Savory clash ranks last** (built `5ef7d3b`): run 47 LED with "Protein-Fortified Creamy Rice Soup" —
+  milk, rice, 70g chicken, protein powder "whisked in to thicken"; not a real dish, and 140g chicken hits
+  the same protein. Protein powder or a sweet-flavoured product in a savory dish now sorts below
+  everything; prompt says powder only in shakes/oats/pancakes/desserts. Measured: 1 flag in 113 meals.
+  Verify next generation: `savoryClashShown` 0. (First claimed the soup used VANILLA whey — wrong, that
+  was FatSecret's match label; the recipe used plain powder.)
+- [ ] **DECISION FOR LOGAN — does "complete + protein floor" outrank freshness?** Now: clash -> fresh -> tier
+  -> fit. Replaying run 47 without the soup, the 3rd slot goes to a FRESH 25g Egg and Rice Breakfast Bowl
+  ahead of complete 40g+ REPEATS. Tier-first = every shown dish complete and protein-adequate, more repeats.
+  The morning handoff said not to reopen the freshness rule without evidence — this is that evidence.
 - [ ] **Generated "Beef and Shredded Cheese Tacos" had no tortillas or shells** in its ingredients (also a
   "Beef Bolognese Pasta" with flour and no pasta). The name-gap check (25f2f83) should reject a dish
   named after a food it lacks — find out why "taco" slipped past it.
