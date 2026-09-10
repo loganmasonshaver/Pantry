@@ -689,8 +689,8 @@ test('the card says how soon you eat, then the wait as a word', () => {
 
 test('the detail screen keeps the real numbers, and drops the parts that are zero', () => {
   assert.equal(formatTimeBreakdown(10, 20, 0), '10 min prep · 20 min cook')
-  assert.equal(formatTimeBreakdown(5, 0, 480), '5 min prep · 8 hr rest')
-  assert.equal(formatTimeBreakdown(10, 20, 480), '10 min prep · 20 min cook · 8 hr rest')
+  assert.equal(formatTimeBreakdown(5, 0, 480), '5 min prep · 8 hr chill')
+  assert.equal(formatTimeBreakdown(10, 20, 480), '10 min prep · 20 min cook · 8 hr chill')
   // A no-cook dish says "5 min", not "5 min prep" — there is nothing to distinguish it from.
   assert.equal(formatTimeBreakdown(5, 0, 0), '5 min')
 })
@@ -755,11 +755,22 @@ test('an unknown time is never "ready" — no recipe qualifies on a zero', () =>
   assert.equal(isReadyWithin(undefined, undefined, undefined, 15), false)
 })
 
-test('card time: a waiting dish shows the wait, a quick one shows minutes', () => {
-  assert.equal(formatDiscoverCardTime(10, 0, 960), 'Overnight')
-  assert.equal(formatDiscoverCardTime(15, 0, 120), '2 hr chill')
-  assert.equal(formatDiscoverCardTime(10, 0, 45), '45 min chill')
+test('card time: busy minutes first, then the wait as a word — same as every other card', () => {
+  assert.equal(formatDiscoverCardTime(10, 0, 960), '10 min + overnight')
+  assert.equal(formatDiscoverCardTime(15, 0, 120), '15 min + chill')
   assert.equal(formatDiscoverCardTime(15, 0, 0), '15 min')
+})
+
+test('the Blueberry Lemon Cheesecake case: the Discover card no longer hides an hour of work', () => {
+  // 15 prep + 45 bake + 2 hr set. The card read "2 hr chill", which sounded like fridge time only.
+  assert.equal(formatDiscoverCardTime(15, 45, 120), '60 min + chill')
+  // And it is the exact string Home's cards and both heroes print for the same dish.
+  assert.equal(formatDiscoverCardTime(15, 45, 120), formatTimeLine(15, 45, 120))
+  assert.equal(formatTimeBreakdown(15, 45, 120), '15 min prep · 45 min cook · 2 hr chill')
+})
+
+test('detail keeps "rest" for a wait too short to badge — a steak resting is not chilling', () => {
+  assert.equal(formatTimeBreakdown(15, 10, 10), '15 min prep · 10 min cook · 10 min rest')
 })
 
 test('card time compact form never invents a number', () => {

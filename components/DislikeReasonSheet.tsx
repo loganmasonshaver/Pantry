@@ -34,7 +34,7 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
   }, [visible])
 
   const choose = (reason: DislikeReason) => {
-    // "Didn't taste good" is the one answer that cannot be acted on as given. Too much of one
+    // "Not to my taste" is the one answer that cannot be acted on as given. Too much of one
     // thing, an ingredient they hate, a pairing that does not work and a cook who overdid it all
     // arrive as the same tap. A second question separates them; the COUNT of what they pick is
     // itself the signal (one = a disliked food, several = a bad combination).
@@ -70,7 +70,8 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
         <Pressable style={styles.backdrop} onPress={onClose}>
           <Pressable style={styles.sheet} onPress={() => {}}>
             <SafeAreaView edges={['bottom']}>
-              <View style={styles.grabber} />
+              {/* No grabber: a transparent Modal has no drag gesture, so a handle would promise a
+                  swipe-to-dismiss that does nothing. Tap-outside is the dismiss. */}
               {step === 'reason' ? (
                 <>
                   <Text style={styles.title}>What put you off?</Text>
@@ -121,8 +122,8 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#1A1A1A', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 },
-  grabber: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#3A3A3A', alignSelf: 'center', marginBottom: 14 },
+  // paddingTop 28 = the old 10 + the removed grabber's 4px bar and 14px gap, so the title doesn't move.
+  sheet: { backgroundColor: '#1A1A1A', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 28, paddingBottom: 8 },
   // textWhite, not text: COLORS.text is #000000 for WHITE cards, and this sheet is #1A1A1A.
   title: { color: COLORS.textWhite, fontSize: 20, fontWeight: '700' },
   subtitle: { color: COLORS.textMuted, fontSize: 13, marginTop: 4, marginBottom: 16 },

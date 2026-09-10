@@ -1601,8 +1601,8 @@ function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress:
             instead of wrapping. Deterministic per-recipe, so it can't wrap on an unlucky day. */}
         {(() => {
           const protLabel = `${meal.protein}P`
-          // A waiting dish shows the WAIT ("Overnight", "2 hr chill"); if even that would push this
-          // no-wrap row over, fall back to the bare word rather than letting it wrap.
+          // Same line as Home's cards ("60 min + chill"). If that would push this no-wrap row over,
+          // "CAL" goes first (below), then the number — the wait word is what must survive.
           const timeFull = formatDiscoverCardTime(meal.prepTime, meal.cookTime, meal.restTime)
           const timeLabel = fitsPillRow([timeFull, ...(meal.protein > 0 ? [protLabel] : []), `${meal.calories}`])
             ? timeFull

@@ -787,7 +787,9 @@ export function formatTimeBreakdown(prepTime: unknown, cookTime: unknown, restTi
   if (cook === 0 && !rest) return formatDuration(prep)
   const parts = [`${formatDuration(prep)} prep`]
   if (cook > 0) parts.push(`${formatDuration(cook)} cook`)
-  if (rest) parts.push(`${rest} rest`)
+  // A wait the card badges is called "chill" here too, so both screens name the same field the
+  // same way. Below the badge threshold it stays "rest": a 10-minute rest on a steak is not a chill.
+  if (rest) parts.push(`${rest} ${formatRestBadge(restTime) ? 'chill' : 'rest'}`)
   return parts.join(' · ')
 }
 
@@ -805,15 +807,15 @@ export function isReadyWithin(prepTime: unknown, cookTime: unknown, restTime: un
   return active > 0 && active <= minutes && formatRestBadge(restTime) === null
 }
 
-// The time pill on a small Discover card. It cannot hold "10 min + overnight" — the rail card's
-// pill row is ~163px and deliberately never wraps — so a waiting dish shows the WAIT, which is the
-// fact that decides whether you make it tonight. The exact breakdown is on the detail screen.
-// `compact` drops the duration for rows too tight even for that ("Chill"), never inventing a number.
+// The time pill on a small Discover card: the SAME line as every other card, so a number means
+// "minutes you are busy" everywhere. It used to show the wait's duration instead ("2 hr chill"),
+// which hid a cheesecake's hour of prep and bake behind what read as two hours in the fridge.
+// `compact` is for a pill row too tight for the full line (~163px, deliberately never wraps): it
+// keeps the wait word and drops the number. "60 min" alone would promise dinner in an hour.
 export function formatDiscoverCardTime(
   prepTime: unknown, cookTime: unknown, restTime: unknown, compact = false,
 ): string {
   const badge = formatRestBadge(restTime)
-  if (badge === 'overnight') return 'Overnight'
-  if (badge === 'chill') return compact ? 'Chill' : `${formatRestTime(restTime)} chill`
-  return formatTimeToEat(prepTime, cookTime)
+  if (!compact || !badge) return formatTimeLine(prepTime, cookTime, restTime)
+  return badge === 'overnight' ? 'Overnight' : 'Chill'
 }

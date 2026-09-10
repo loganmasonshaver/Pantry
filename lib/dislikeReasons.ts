@@ -22,7 +22,9 @@ export const DISLIKE_REASONS: { key: DislikeReason; label: string; suppress: boo
   // Suppresses THIS DISH only. Suppressing the whole food family was the original design and it
   // was wrong: it applies the broadest action to the most ambiguous signal, so one bad parfait
   // would delete yogurt bowls. The follow-up question is what narrows it, and the user decides.
-  { key: 'taste', label: "Didn't taste good", suppress: true },
+  // Not "Didn't taste good": thumbs-down sits on every recipe BEFORE it is cooked, and most are
+  // pressed then. This wording is true either side of cooking. Key stays 'taste' — stored rows.
+  { key: 'taste', label: 'Not to my taste', suppress: true },
 ]
 
 const SUPPRESSING = new Set(DISLIKE_REASONS.filter(r => r.suppress).map(r => r.key))
