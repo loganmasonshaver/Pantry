@@ -12,7 +12,7 @@ import {
   gramsToProteinScoops, gramsToSeedsSpoons, gramsToSpiceTsp, isAlreadyInList,
   isNeedToBuy, roundDisplayGrams, stripAdjectives, stripStepNumber, toEyeball, toCookingFraction,
   formatQuarter, scaleVisual, countMissingIngredients, formatRestTime, activeMinutes, formatTimeToEat, snapDisplayMinutes,
-  isReadyWithin, formatDiscoverCardTime, formatDuration,
+  isReadyWithin, formatDiscoverCardTime, formatDuration, countCountableIngredients, isNearlyThere,
   formatRestBadge, formatTimeBreakdown, formatTimeLine,
 } from './ingredientDisplay.ts'
 
@@ -789,4 +789,75 @@ test('everything under 90 minutes is unchanged — Cook Tonight is untouched', (
   assert.equal(formatDuration(30), '30 min')
   assert.equal(formatDuration(85), '85 min')
   assert.equal(formatTimeToEat(10, 20), '30 min')
+})
+
+// ── product qualifiers: pantry-specific covers recipe-generic ──────────────────────────────────
+// Logan's real pantry entries, lowercased the way discover.tsx builds pantryNames.
+const LOGAN = new Set(['non-fat plain greek yogurt', 'whole milk plain yogurt', 'yogurt', 'eggs',
+  'ground beef', 'peanut butter', 'butter', 'cream cheese', 'oat milk', 'milk', 'orange', 'pineapple'])
+
+test('his Non-Fat Plain Greek Yogurt covers a recipe asking for greek yogurt', () => {
+  assert.equal(isAlreadyInList('plain greek yogurt', LOGAN), true)
+  assert.equal(isAlreadyInList('greek yogurt', LOGAN), true)
+  assert.equal(isAlreadyInList('non-fat greek yogurt', LOGAN), true)
+  assert.equal(isAlreadyInList('high-protein greek yogurt', LOGAN), true)
+})
+
+test('size and fat-level qualifiers no longer hide food he owns', () => {
+  assert.equal(isAlreadyInList('large eggs', LOGAN), true)
+  assert.equal(isAlreadyInList('lean ground beef', LOGAN), true)
+  assert.equal(isAlreadyInList('extra-lean ground beef', LOGAN), true)
+})
+
+test('the "Frozen Yogurt Fruit Melts" card now counts what is really missing', () => {
+  const melts = [{ name: 'plain greek yogurt' }, { name: 'fruit' }, { name: 'vanilla extract' }]
+  // Was 3. Greek yogurt is owned; vanilla genuinely is not; "fruit" is a category the matcher
+  // cannot map to his oranges — a known gap, not this fix's to close.
+  assert.equal(countMissingIngredients(melts, LOGAN), 2)
+})
+
+// The widening must not reopen any trap this file already documents.
+test('a word that changes the FOOD is never stripped', () => {
+  assert.equal(isAlreadyInList('greek yogurt', new Set(['yogurt'])), false)       // yogurt ≠ greek yogurt
+  assert.equal(isAlreadyInList('high-protein greek yogurt', new Set(['yogurt'])), false)
+  assert.equal(isAlreadyInList('butter', new Set(['peanut butter'])), false)       // not butter
+  assert.equal(isAlreadyInList('cheese', new Set(['cream cheese'])), false)
+  assert.equal(isAlreadyInList('milk', new Set(['oat milk'])), false)
+  assert.equal(isAlreadyInList('coconut oil', new Set(['oil'])), false)
+  assert.equal(isAlreadyInList('rice vinegar', new Set(['rice'])), false)
+  assert.equal(isAlreadyInList('chicken broth', new Set(['chicken'])), false)
+  assert.equal(isAlreadyInList('sweet potato', new Set(['potato'])), false)
+})
+
+test('a name made only of qualifiers never matches everything', () => {
+  // "large" strips to "". Without the guard, "" === "" would call anything owned.
+  assert.equal(isAlreadyInList('large', new Set(['plain'])), false)
+  assert.equal(countMissingIngredients([{ name: 'large' }], new Set(['organic'])), 1)
+})
+
+test('whole milk still resolves to milk — the qualifier list did not break the old case', () => {
+  assert.equal(isAlreadyInList('whole milk', LOGAN), true)
+})
+
+// ── "Almost in your kitchen" ───────────────────────────────────────────────────────────────────
+test('missing 3 of 3 is not almost anything — the case Logan reported', () => {
+  assert.equal(isNearlyThere(3, 3), false)
+})
+
+test('at most two missing, AND you already hold at least as many as you lack', () => {
+  assert.equal(isNearlyThere(2, 3), false) // hold 1, lack 2 — Frozen Yogurt Fruit Melts, not almost
+  assert.equal(isNearlyThere(1, 3), true)  // hold 2, lack 1
+  assert.equal(isNearlyThere(2, 4), true)  // hold 2, lack 2 — half there
+  assert.equal(isNearlyThere(2, 5), true)  // hold 3, lack 2 — a stricter rule wrongly dropped this
+  assert.equal(isNearlyThere(3, 12), false) // plenty held, but three to buy is a shopping trip
+})
+
+test('fully cookable always qualifies; nothing to judge never does', () => {
+  assert.equal(isNearlyThere(0, 4), true)
+  assert.equal(isNearlyThere(0, 0), false)
+  assert.equal(isNearlyThere(99, 0), false) // missingCount's "no ingredient data" sentinel
+})
+
+test('countable ingredients exclude assumed staples, matching the missing count', () => {
+  assert.equal(countCountableIngredients([{ name: 'greek yogurt' }, { name: 'salt' }, { name: 'olive oil' }, { name: 'fruit' }]), 2)
 })

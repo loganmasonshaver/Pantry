@@ -561,7 +561,25 @@ export function toEyeball(visualStr: string | undefined, ingredientName: string)
 // full Discover pass (600 meals x 8 ingredients x 200 pantry entries) — a synchronous freeze on the
 // render path. Behaviour is unchanged: \b anchors mean a shorter adjective can't match inside a
 // longer one ("cooked" never fires inside "uncooked"), so alternation order doesn't matter.
-const ADJECTIVE_RE = new RegExp(`\\b(${COOKING_ADJECTIVES.join('|')})\\b`, 'g')
+// PRODUCT qualifiers — how a product is sold, never what food it is. Logan's pantry holds
+// "Non-Fat Plain Greek Yogurt", and with only COOKING words stripped, "plain greek yogurt" and even
+// bare "greek yogurt" failed the exact match, so every Discover recipe needing greek yogurt showed it
+// as missing and "Frozen Yogurt Fruit Melts" read "Missing 3" when only the vanilla was. "large eggs"
+// against a pantry "Eggs" failed the same way.
+//
+// Deliberately NOT here: any word that changes the FOOD. "greek" stays, so a pantry "yogurt" still
+// cannot satisfy "greek yogurt" — the case the exact-match rule was written for. "peanut", "cream",
+// "coconut", "oat" stay, so peanut butter never counts as butter and oat milk never as milk. "light"
+// and "sweet" stay out: light soy sauce and sweet potato are different foods.
+const PRODUCT_QUALIFIERS = [
+  'non-fat', 'nonfat', 'non fat', 'fat-free', 'fat free', 'low-fat', 'lowfat', 'low fat',
+  'reduced-fat', 'reduced fat', 'full-fat', 'full fat', 'plain', 'unsweetened', 'organic',
+  'high-protein', 'high protein', 'extra-lean', 'lean', 'extra-large', 'large', 'medium', 'small', 'jumbo',
+]
+// Longest first: alternation takes the first branch that matches at a position, so "lean" listed
+// before "extra-lean" would strip only "lean" and leave "extra-" behind.
+const ADJECTIVE_RE = new RegExp(
+  `\\b(${[...COOKING_ADJECTIVES, ...PRODUCT_QUALIFIERS].sort((a, b) => b.length - a.length).join('|')})\\b`, 'g')
 
 export function stripAdjectives(name: string): string {
   return name.toLowerCase().replace(ADJECTIVE_RE, '').replace(/\s+/g, ' ').trim()
@@ -579,8 +597,10 @@ export function isAlreadyInList(itemName: string, existingNames: Set<string>): b
   // Erring the other way is the safe direction: an extra line on the list is a minor annoyance,
   // a missing one means standing in the kitchen unable to cook.
   for (const existing of existingNames) {
-    if (lower === existing || stripped === existing) return true
-    if (stripAdjectives(existing) === stripped) return true
+    if (lower === existing) return true
+    // A name made only of qualifiers ("large") strips to "" — never let that match anything.
+    if (!stripped) continue
+    if (stripped === existing || stripAdjectives(existing) === stripped) return true
   }
   return false
 }
@@ -629,10 +649,40 @@ export function countMissingIngredients(
     const name = cleanIngredientName(raw)
     const lower = name.toLowerCase()
     const stripped = stripAdjectives(lower)
-    if (pantryNames.has(lower) || pantryNames.has(stripped) || strippedPantry.has(stripped)) return false
+    if (pantryNames.has(lower) || (stripped && (pantryNames.has(stripped) || strippedPantry.has(stripped)))) return false
     if (isAssumedStaple(name, excludedStaples)) return false
     return true
   }).length
+}
+
+// How many ingredients COUNT toward "do I have this" — the same staples rule countMissingIngredients
+// applies, so the two numbers share one denominator.
+export function countCountableIngredients(ingredients: any[] | undefined, excludedStaples: Set<string> = new Set()): number {
+  return (ingredients || [])
+    .map(i => String(i?.name ?? i ?? '').trim())
+    .filter(Boolean)
+    .filter(raw => !isAssumedStaple(cleanIngredientName(raw), excludedStaples))
+    .length
+}
+
+// "Almost in your kitchen" means you already have MOST of it.
+//
+// The shelf had no cap at all: it ranked every recipe by missing count and took a 24-deep window,
+// so with a narrow pantry it reached "Missing 3" and still called that almost. Logan's rule is at
+// most two missing. On its own that admits a 3-ingredient recipe missing 2 of 3 — you hold one thing
+// out of three — and measured against his real pantry, 6 of the 13 recipes it admitted were exactly
+// that, INCLUDING "Frozen Yogurt Fruit Melts", the recipe he reported. So you must also already hold at
+// least as many ingredients as you lack.
+//
+// A stricter "hold twice what you lack" was tried first and measured at 2 qualifying recipes out of
+// 219 — it threw out "2 of 5" (you hold 60%), which is fairly called almost, and left the shelf one
+// recipe above the point where it disappears. Holding as many as you lack admitted 7.
+// Fully-cookable recipes (0 missing) always qualify; they are the best case the shelf has.
+export const NEARLY_MAX_MISSING = 2
+export function isNearlyThere(missing: number, countable: number): boolean {
+  if (!Number.isFinite(missing) || !Number.isFinite(countable) || countable <= 0) return false
+  if (missing === 0) return true
+  return missing <= NEARLY_MAX_MISSING && countable - missing >= missing
 }
 
 // Hands-off time, phrased the way a cook thinks about it. Returns null when there is nothing to

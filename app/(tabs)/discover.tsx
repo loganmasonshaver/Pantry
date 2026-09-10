@@ -25,7 +25,7 @@ import {
   readDiscoverPersonal, writeDiscoverPersonal,
 } from '@/lib/discoverFeed'
 import { isNewToday, newTodayFirst, countNewToday } from '@/lib/discoverFreshness'
-import { isReadyWithin, formatDiscoverCardTime, formatTimeLine } from '@/lib/ingredientDisplay'
+import { isReadyWithin, formatDiscoverCardTime, formatTimeLine, isNearlyThere, countCountableIngredients } from '@/lib/ingredientDisplay'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
@@ -949,12 +949,20 @@ export default function DiscoverScreen() {
     //
     // Hash, not an index rotation, for the reason recorded on the hero: this pool grows from the
     // front, and a day-indexed cursor cancels against that exactly.
-    const nearlyRanked = pantryNames.size > 0
+    // ONLY recipes you are genuinely close to (isNearlyThere: at most 2 missing, and you already hold
+    // twice what you lack). This used to rank every recipe and take a 24-deep window, so a narrow
+    // pantry pushed "Missing 3 of 3" onto a shelf called Almost in your kitchen.
+    const nearlyEligible = pantryNames.size > 0
       ? browseGrid.filter(m => m.source_verified)
           .map(m => ({ m, missing: missingCount(m, pantryNames, excludedStaples) }))
+          .filter(x => isNearlyThere(x.missing, countCountableIngredients(x.m.ingredients, excludedStaples)))
           .sort((a, b) => (a.missing - b.missing)
             || (hashKey(`${a.m.id}:${dayOfYear}`) - hashKey(`${b.m.id}:${dayOfYear}`)))
       : []
+    // Logan's rule: one qualifying recipe is not a shelf. Below two, the shelf is withheld entirely
+    // (an empty section is dropped by the filter below) rather than shown as a lone card.
+    const NEARLY_MIN_SHELF = 2
+    const nearlyRanked = nearlyEligible.length >= NEARLY_MIN_SHELF ? nearlyEligible : []
     // 8, not 12. Three personalised shelves at 12 claim 36 meals before any intent shelf runs —
     // on a 35-meal pool a user with a full pantry would pull almost everything into "Almost in
     // your kitchen" and leave the rest of the page bare.
