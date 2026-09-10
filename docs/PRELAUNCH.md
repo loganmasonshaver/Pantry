@@ -488,8 +488,15 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   PostHog event, no notification, nothing surfaces them to Logan. Yet a photo/recipe report shows the
   toast "Thanks — we'll take a look at this one", a promise with no mechanism behind it. Those two
   are defect reports about SHARED assets (images are cached globally), so one report is about every
-  user's copy. Proposed: fold into the SQL-only health-check cron below — one daily push carries both
-  "pipeline healthy" and "N new photo/recipe reports". Undecided.
+  user's copy. **Proposed design (awaiting Logan's go):** a pg_cron job at 9am CT runs a SQL function
+  that counts the last 24h of `meal_ratings` thumbs-downs; if there are none it sends NOTHING, else
+  ONE Expo push to Logan's token: "2 photo · 1 recipe · 3 other", naming the meals in the two
+  fixable categories. SQL-only (`net.http_post` straight to exp.host, token read from `profiles`) so
+  no edge function and no CRON_SECRET can silence it — the failure that hid 3 days of cron outage.
+  Build together with the health-check fix below. Full detail in a service-role-only view; the
+  taste/too-often/macros signal goes into the weekly founder-research `feedback/LOG.md` pull.
+  Channel is PROVEN: Logan's is the only `expo_push_token` (1 of 20 profiles) and pushToOps has
+  returned "sent" 3 times (09-05, 09-07, 09-10).
 - [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
   the pipeline's translate-everything rule. COUNT how many before fixing.
 - [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —
