@@ -99,6 +99,15 @@ export function trackMarketingOptIn(method: 'email' | 'apple' | 'google', optedI
   posthog.capture('marketing_opt_in_decision', { method, opted_in: optedIn })
 }
 
+// ── Discover nudge ────────────────────────────────────────────────────────────
+
+// Tapped, not shown: a shown event fires on every render of the Pantry tab and says nothing about
+// whether the nudge worked. What decides that is whether people who tap it stop regenerating —
+// read this against scan_usage.meal_gen for the same users and day.
+export function trackDiscoverNudgeTapped(stage: 'redo' | 'capped', gensUsedToday: number) {
+  posthog.capture('discover_nudge_tapped', { stage, gens_used_today: gensUsedToday })
+}
+
 // ── Paywall / Subscription ────────────────────────────────────────────────────
 
 export function trackPaywallViewed(source: 'onboarding' | 'meal_detail' | 'home') {

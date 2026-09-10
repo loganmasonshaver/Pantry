@@ -21,6 +21,8 @@ import {
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
+import { discoverNudge } from '@/lib/discoverNudge'
+import { trackDiscoverNudgeTapped } from '@/lib/analytics'
 import { perfMark } from '@/lib/perf'
 import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Trash2 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
@@ -276,7 +278,7 @@ export default function PantryScreen() {
   // Generation fires once per day (daily cache). Manual refresh button is capped at
   // 1/day per user to bound image-gen cost — see MAX_DAILY_REGENS in useMealSuggestions.
   const hasPantryItems = categories.some(c => c.ingredients.length > 0)
-  const { meals, loading: mealsLoading, error: mealsError, errorCode: mealsErrorCode, regenerate, retry, canRegenerate } = useMealSuggestions(
+  const { meals, loading: mealsLoading, error: mealsError, errorCode: mealsErrorCode, regenerate, retry, canRegenerate, genUsedToday, genCapPerDay } = useMealSuggestions(
     user?.id, isPremium, 'cookNow', hasPantryItems
   )
 
@@ -880,9 +882,18 @@ export default function PantryScreen() {
                       {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
                       <Text style={styles.cookTonightErrorText}>{mealsError}</Text>
                       {/* Retry is pointless once the daily cap is hit — hide it in that case. */}
-                      {mealsErrorCode !== 'meal_cap_reached' && (
+                      {mealsErrorCode !== 'meal_cap_reached' ? (
                         <TouchableOpacity onPress={retry} activeOpacity={0.7}>
                           <Text style={styles.cookTonightRetryText}>Try again →</Text>
+                        </TouchableOpacity>
+                      ) : (
+                        // At the cap Retry is pointless and was simply hidden, leaving a dead end.
+                        // Discover is free to serve, so it is the one action worth offering here.
+                        <TouchableOpacity
+                          onPress={() => { trackDiscoverNudgeTapped('capped', genUsedToday ?? genCapPerDay); router.push('/(tabs)/discover') }}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.cookTonightRetryText}>Browse Discover →</Text>
                         </TouchableOpacity>
                       )}
                     </View>
@@ -954,6 +965,27 @@ export default function PantryScreen() {
                       })}
                     </Reanimated.View>
                   ) : null}
+                  {/* REPEAT REFRESHERS → DISCOVER. Deliberately a quiet text line, not a button: the
+                      ↻ above stays the primary action until the cap, so this reads as an option
+                      rather than a second CTA competing for the same moment. At the cap the ↻
+                      greys out and this becomes the only thing left to tap. */}
+                  {!mealsLoading && !mealsError && meals.length > 0 && (() => {
+                    const nudge = discoverNudge(genUsedToday, genCapPerDay)
+                    if (nudge === 'none') return null
+                    return (
+                      <TouchableOpacity
+                        onPress={() => { trackDiscoverNudgeTapped(nudge, genUsedToday ?? 0); router.push('/(tabs)/discover') }}
+                        activeOpacity={0.7}
+                        hitSlop={8}
+                        style={styles.discoverNudge}
+                      >
+                        <Text style={styles.discoverNudgeText}>
+                          {nudge === 'capped' ? "That's today's refreshes — " : 'Still not feeling it? '}
+                          <Text style={styles.cookTonightRetryText}>Browse Discover →</Text>
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  })()}
                   {/* Meals came back, but from a thin pantry — say what would unlock better ones
                       instead of letting quality degrade silently. */}
                   {!mealsLoading && !mealsError && meals.length > 0 && pantryIsThin && (
@@ -1679,4 +1711,6 @@ const styles = StyleSheet.create({
   cookTonightLoadingText: { fontSize: 13, color: COLORS.textMuted },
   cookTonightErrorText: { fontSize: 13, color: '#EF4444' },
   cookTonightRetryText: { fontSize: 13, color: '#4ADE80', fontWeight: '700' },
+  discoverNudge: { marginTop: 12, alignSelf: 'center' },
+  discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
 })
