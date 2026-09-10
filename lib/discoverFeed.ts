@@ -146,13 +146,17 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
 
 export const discoverCacheKey = (uid: string) => `pantry_discover_${uid}`
 
-// Only the first 60 are kept — enough to fill the rail on first paint without storing the pool.
-const CACHE_SLICE = 60
-
+// The WHOLE pool is cached, not a slice. It used to keep 60 — "enough to fill the rail" — but the
+// page is now shelves built from the full pool: shelf count steps with pool size (6 at 200+, 2
+// under 60) and membership is claimed across all of it. Discover paints from this cache and PARKS
+// the fetched pool until blur, so a 60-meal cache meant every visit opened on 2 shelves and nothing
+// older than a week, until the reader left and came back. Logan: "many meals missing, fewer
+// sections, the lentil one is gone". The pool is ~400 KB at 219 meals, capped by the 600 fetch.
 export async function writeDiscoverCache(uid: string, meals: DiscoverMeal[]): Promise<void> {
   await AsyncStorage.setItem(
     discoverCacheKey(uid),
-    JSON.stringify({ day: todayStr(), meals: meals.slice(0, CACHE_SLICE) }),
+    // `full` marks a whole-pool entry; a 60-meal slice written before this change reads as stale.
+    JSON.stringify({ day: todayStr(), full: true, meals }),
   ).catch(() => {})
 }
 
@@ -165,6 +169,8 @@ export async function readDiscoverCache(uid: string): Promise<DiscoverMeal[] | n
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) return null // legacy, undated
     if (parsed?.day !== todayStr()) return null
+    // A pre-full-pool slice would repaint 2 shelves and park the real pool; skip it for a skeleton.
+    if (parsed?.full !== true) return null
     return Array.isArray(parsed.meals) && parsed.meals.length ? parsed.meals : null
   } catch {
     return null

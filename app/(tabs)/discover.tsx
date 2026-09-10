@@ -24,7 +24,7 @@ import {
   type DiscoverMeal,
   readDiscoverPersonal, writeDiscoverPersonal,
 } from '@/lib/discoverFeed'
-import { isNewToday, newTodayFirst, countNewToday } from '@/lib/discoverFreshness'
+import { isNewToday, interleaveNewToday, newTodayReach } from '@/lib/discoverFreshness'
 import { isReadyWithin, formatRestBadge, formatTimeLine, isNearlyThere, countCountableIngredients } from '@/lib/ingredientDisplay'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
@@ -1077,12 +1077,12 @@ export default function DiscoverScreen() {
       })),
       ...intent.map(sec => ({ ...sec, accent: false })),
     ].filter(sec => sec.meals.length > 0)
-      // New recipes lead their own shelf, after claim() has settled ownership — see newTodayFirst.
-      .map(sec => ({ ...sec, meals: newTodayFirst(sec.meals) }))
+      // New recipes alternate with older ones, after claim() has settled ownership — see interleaveNewToday.
+      .map(sec => ({ ...sec, meals: interleaveNewToday(sec.meals) }))
     // Filtered BEFORE rotating, deliberately: rotating first would let the index land on a section
     // that is about to be dropped, and the "different shelf each day" guarantee would silently
     // degrade to "sometimes the same one".
-    const leftoverSection = { key: 'other', title: 'Everything else', meals: newTodayFirst(leftovers), accent: false }
+    const leftoverSection = { key: 'other', title: 'Everything else', meals: interleaveNewToday(leftovers), accent: false }
     // THE OFFSET IS TAKEN MODULO A FIXED WINDOW, NOT THE LIST LENGTH. rotateByDay does
     // `(day + hash) % arr.length`, and arr.length CHANGES WITHIN A SESSION: shelfBudget is 2 over
     // the 60-meal disk cache and 6 over the 600-meal pool, so the built list goes from ~4 sections
@@ -1172,10 +1172,10 @@ export default function DiscoverScreen() {
   //
   // Personalised shelves cap at 8 and page at 6, so a 7- or 8-meal shelf hit this on almost every
   // load; that is the "why does one say Show 1 more and the other doesn't" case.
-  // newCount floors the first page: every NEW TODAY recipe is visible without a tap. They already
-  // lead the shelf (newTodayFirst), so a shelf with more new recipes than a page simply opens wider.
-  const shownCount = (key: string, total: number, newCount = 0) => {
-    const base = Math.max(expandedSections[key] ?? pageSizeFor(key), newCount)
+  // newReach floors the first page: every NEW TODAY recipe is visible without a tap. They alternate
+  // with older ones (interleaveNewToday), so a shelf with many new recipes simply opens wider.
+  const shownCount = (key: string, total: number, newReach = 0) => {
+    const base = Math.max(expandedSections[key] ?? pageSizeFor(key), newReach)
     return total - base <= 2 ? total : base
   }
 
@@ -1195,7 +1195,7 @@ export default function DiscoverScreen() {
       const sec = browseSectionsRef.current.find(x => x.key === key)
       if (!sec) continue
       firedSections.current.add(key)
-      trackMealImpressions(key, sec.meals.slice(0, shownCount(key, sec.meals.length, countNewToday(sec.meals))).map(m => m.id), 'discover_grid')
+      trackMealImpressions(key, sec.meals.slice(0, shownCount(key, sec.meals.length, newTodayReach(sec.meals))).map(m => m.id), 'discover_grid')
     }
   }, [expandedSections])
   // Ref mirror so the scroll handler isn't re-created on every section change.
@@ -1455,7 +1455,7 @@ export default function DiscoverScreen() {
             open Discover to explore rather than to be told. Two columns so the image still carries
             the card, unlike a dense list. */}
         {!searching && !showSkeleton && sectionsToRender.map(section => {
-          const shown = shownCount(section.key, section.meals.length, countNewToday(section.meals))
+          const shown = shownCount(section.key, section.meals.length, newTodayReach(section.meals))
           const visible = section.meals.slice(0, shown)
           const remaining = section.meals.length - visible.length
           return (

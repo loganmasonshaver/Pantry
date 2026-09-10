@@ -497,7 +497,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] "Almost in your kitchen": 7 recipes, none "Missing 3", led by Cottage Cheese Crepes; Frozen
   Yogurt Fruit Melts gone.
 - [ ] Greek yogurt and "large eggs" sit under IN YOUR PANTRY on a recipe that needs them.
-- [ ] New recipes lead their shelves, none behind "Show more".
+- [ ] **Discover opens on the FULL pool** (6 shelves, Lentil Quinoa Flatbread findable) on the first
+  open, without switching tabs — the cache held only the newest 60, which gave 2 shelves and parked
+  the real pool until blur. Old 60-slice caches are now ignored (one skeleton, then full).
+- [ ] NEW TODAY recipes ALTERNATE with older ones in each shelf (older, new, older, new) — none behind
+  "Show more", none stacked at the top. (Was new-first; Logan: "should be mixed in like before".)
 - [ ] "Ready in 15" has no frozen desserts.
 - [ ] Hero, if a waiting dish, reads e.g. `10 MIN + OVERNIGHT`.
 - [ ] Cook Tonight nudge "Still not feeling it? Browse Discover →" from the 3rd generation of the day.

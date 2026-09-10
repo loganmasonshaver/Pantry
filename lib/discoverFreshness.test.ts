@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isNewToday, NEW_WINDOW_HOURS, newTodayFirst, countNewToday } from './discoverFreshness.ts'
+import { isNewToday, NEW_WINDOW_HOURS, interleaveNewToday, newTodayReach } from './discoverFreshness.ts'
 
 const HOUR = 3_600_000
 const NOW = Date.parse('2026-09-11T02:00:00Z') // 9pm US Central on Sep 10 — the evening case
@@ -41,25 +41,33 @@ const shelf = [
   { id: 'd', created_at: FRESH }, { id: 'e', created_at: OLD },
 ]
 
-test('new recipes lead the shelf so none sit behind "Show more"', () => {
-  assert.deepEqual(newTodayFirst(shelf, NOW).map(m => m.id), ['b', 'd', 'a', 'c', 'e'])
+test('new recipes ALTERNATE with older ones instead of stacking at the top', () => {
+  assert.deepEqual(interleaveNewToday(shelf, NOW).map(m => m.id), ['a', 'b', 'c', 'd', 'e'])
 })
 
-test('the partition is STABLE — both halves keep claim()\'s order', () => {
-  // b before d, and a, c, e in their original order: the dish-form spread survives.
-  const out = newTodayFirst(shelf, NOW).map(m => m.id)
-  assert.ok(out.indexOf('b') < out.indexOf('d'))
-  assert.deepEqual(out.slice(2), ['a', 'c', 'e'])
+test('a batch of four new recipes no longer leads the shelf together', () => {
+  const batch = [
+    { id: 'n1', created_at: FRESH }, { id: 'n2', created_at: FRESH }, { id: 'n3', created_at: FRESH }, { id: 'n4', created_at: FRESH },
+    { id: 'o1', created_at: OLD }, { id: 'o2', created_at: OLD }, { id: 'o3', created_at: OLD }, { id: 'o4', created_at: OLD },
+  ]
+  assert.deepEqual(interleaveNewToday(batch, NOW).map(m => m.id), ['o1', 'n1', 'o2', 'n2', 'o3', 'n3', 'o4', 'n4'])
+})
+
+test('both halves keep claim()\'s order; surplus of either side trails in order', () => {
+  const more = [...shelf, { id: 'f', created_at: FRESH }, { id: 'g', created_at: FRESH }, { id: 'h', created_at: FRESH }]
+  // old a,c,e and new b,d,f,g,h: a b c d e f, then g h.
+  assert.deepEqual(interleaveNewToday(more, NOW).map(m => m.id), ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'])
 })
 
 test('a shelf with nothing new, or only new, is untouched', () => {
   const allOld = shelf.filter(m => m.created_at === OLD)
-  assert.deepEqual(newTodayFirst(allOld, NOW), allOld)
+  assert.deepEqual(interleaveNewToday(allOld, NOW), allOld)
   const allNew = shelf.filter(m => m.created_at === FRESH)
-  assert.deepEqual(newTodayFirst(allNew, NOW), allNew)
+  assert.deepEqual(interleaveNewToday(allNew, NOW), allNew)
 })
 
-test('countNewToday counts only the window', () => {
-  assert.equal(countNewToday(shelf, NOW), 2)
-  assert.equal(countNewToday([], NOW), 0)
+test('newTodayReach is how far the page must open so no new recipe is behind "Show more"', () => {
+  assert.equal(newTodayReach(interleaveNewToday(shelf, NOW), NOW), 4) // d sits at index 3
+  assert.equal(newTodayReach([{ created_at: OLD }], NOW), 0)
+  assert.equal(newTodayReach([], NOW), 0)
 })

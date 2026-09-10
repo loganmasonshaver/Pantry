@@ -23,20 +23,33 @@ export function isNewToday(createdAt: string | null | undefined, nowMs: number =
   return ageMs <= NEW_WINDOW_HOURS * 3_600_000
 }
 
-// NEW TODAY FIRST inside a shelf, so a new recipe is never behind "Show more". Logan found new
-// recipes hidden that way: the border marks them, but a shelf shows 6 before paging, and a new
-// recipe ranked 9th was invisible until tapped for.
+// NEW TODAY recipes ALTERNATE with older ones through a shelf — older, new, older, new — so each
+// is on the first page without the batch stacking at the top.
 //
-// A STABLE partition — both halves keep the order claim() gave them — applied AFTER claim(), so it
-// changes only where a recipe sits within its shelf, never which shelf owns it. The cost is that a
-// batch heavy in one form (four ice creams on 2026-09-10) now leads that shelf together; keeping
-// claim()'s spread order within the new group means nothing is clustered beyond the batch itself.
-export function newTodayFirst<T extends { created_at?: string | null }>(meals: readonly T[], nowMs: number = Date.now()): T[] {
+// Two of Logan's reports pull opposite ways, and this satisfies both. First: new recipes were
+// hidden behind "Show more" (a shelf shows 6; a new recipe ranked 9th was invisible). The fix for
+// that led every shelf with its new recipes, which produced the second: "all the new today meals
+// are at the top of each section rather than mixed in like before" — a batch of four ice creams
+// led a shelf together. Alternating keeps every new recipe within reach (newTodayReach tells the
+// page how far to open) while the shelf still reads as a mix.
+//
+// Both halves keep claim()'s order, and it runs AFTER claim(), so it moves recipes within their
+// shelf and never changes which shelf owns them. An older recipe leads, so no shelf opens on "new".
+export function interleaveNewToday<T extends { created_at?: string | null }>(meals: readonly T[], nowMs: number = Date.now()): T[] {
   const fresh = meals.filter(m => isNewToday(m.created_at, nowMs))
-  if (fresh.length === 0 || fresh.length === meals.length) return [...meals]
-  return [...fresh, ...meals.filter(m => !isNewToday(m.created_at, nowMs))]
+  const old = meals.filter(m => !isNewToday(m.created_at, nowMs))
+  if (fresh.length === 0 || old.length === 0) return [...meals]
+  const out: T[] = []
+  for (let i = 0; i < Math.max(fresh.length, old.length); i++) {
+    if (i < old.length) out.push(old[i])
+    if (i < fresh.length) out.push(fresh[i])
+  }
+  return out
 }
 
-export function countNewToday(meals: readonly { created_at?: string | null }[], nowMs: number = Date.now()): number {
-  return meals.reduce((n, m) => n + (isNewToday(m.created_at, nowMs) ? 1 : 0), 0)
+// How far into a shelf the LAST new recipe sits. The first page opens at least this far, so no
+// NEW TODAY recipe is ever behind "Show more".
+export function newTodayReach(meals: readonly { created_at?: string | null }[], nowMs: number = Date.now()): number {
+  for (let k = meals.length - 1; k >= 0; k--) if (isNewToday(meals[k].created_at, nowMs)) return k + 1
+  return 0
 }
