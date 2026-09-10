@@ -462,9 +462,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [x] Dislike sheet at the bottom, clear of the Dynamic Island, text legible — PASS on device
   2026-09-10 (`0bc3751` position, `3521935` text was black-on-#1A1A1A).
 - [ ] Dislike sheet step 2: tap "Didn't taste good" → ingredient chips legible, Done/Skip works.
-- [ ] **A reason actually saves.** Pick one, then `select meal_name, reason from meal_ratings order by
-  created_at desc limit 3`. The 14:09 Avocado Blueberry row is still `reason NULL` (sheet opened,
-  nothing picked). RLS is `FOR ALL auth.uid() = user_id`, so UPDATE should pass — unproven.
+- [x] **A reason actually saves** — PASS 2026-09-10: Avocado Blueberry Yogurt Clusters row reads
+  `reason = photo_mismatch` after Logan tapped it on device, and the recipe correctly stayed in
+  Discover (photo reports do not suppress).
 - [ ] "Almost in your kitchen": 7 recipes, none "Missing 3", led by Cottage Cheese Crepes; Frozen
   Yogurt Fruit Melts gone.
 - [ ] Greek yogurt and "large eggs" sit under IN YOUR PANTRY on a recipe that needs them.
