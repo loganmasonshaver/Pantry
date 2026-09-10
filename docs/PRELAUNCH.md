@@ -499,7 +499,7 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   Discover (photo reports do not suppress).
 - [x] **PASS on device 2026-09-10** (may gain recipes after the plural fix below). "Almost in your kitchen": 7 recipes, none "Missing 3" (order may now differ — NEW TODAY recipes sit at random spots), Cottage Cheese Crepes in it; Frozen
   Yogurt Fruit Melts gone.
-- [ ] **FAILED on device, then fixed:** Peanut Butter Protein Cheesecake listed "1 egg" under YOU'LL NEED
+- [x] **PASS on device 2026-09-10 after the plural fix.** Was FAILED: Peanut Butter Protein Cheesecake listed "1 egg" under YOU'LL NEED
   with "Eggs" in the pantry — the matcher had no singular/plural rule ("large eggs" only matched via
   adjective stripping). Re-verify: "egg" now under IN YOUR PANTRY; greek yogurt still is.
 - [x] **PASS on device 2026-09-10.** **Discover opens on the FULL pool** (6 shelves, Lentil Quinoa Flatbread findable) on the first
@@ -517,9 +517,10 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   note All's hero, flip through chips, come back — same dish. Separately, by design, All's hero can
   still change when the time-of-day tier changes (a breakfast hero is replaced at dinner).
 - [ ] Cook Tonight nudge "Still not feeling it? Browse Discover →" from the 3rd generation of the day.
-- [ ] Ice is assumed stock everywhere: not under YOU'LL NEED, and the Pantry tab's Cook tonight card no
+- [x] **PASS on device 2026-09-10.** Ice is assumed stock everywhere: not under YOU'LL NEED, and the Pantry tab's Cook tonight card no
   longer says "Better with: ice cubes" (the app's staples list was never synced with generate-meals'
-  Sep 7 change). A 3-minute dish reads `5 min`.
+  Sep 7 change).
+- [ ] A 3-minute dish reads `5 min` (never "3 min").
 
 **C. The passage of time**
 - [ ] After 7pm tonight: NEW TODAY borders still show (rolling 24h from `created_at`, not UTC date).
