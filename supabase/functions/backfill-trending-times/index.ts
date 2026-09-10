@@ -19,10 +19,15 @@
 // none. The totals are handed to the model as fixed — they were split and checked already — so this
 // only adds order. An answer that does not add up is stored as [] ("tried, no valid order"), which
 // the client treats as absent and which stops the resumable loop retrying it forever.
+//
+// mode 'translate' repairs stored recipes whose step DETAIL was copied untranslated (6 German rows
+// on 2026-09-10). Same detector and verified translator the pipeline now runs before storing —
+// _shared/translate-steps.ts. Only steps change; a translation that fails verification is skipped.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases, type TimePhase } from '../_shared/meal-times.ts'
+import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -124,6 +129,33 @@ Deno.serve(async (req: Request) => {
   const body = await req.json().catch(() => ({}))
   const dryRun = body?.dryRun !== false // default TRUE: writing is the thing you have to ask for
   const limit = Math.min(Math.max(Number(body?.limit) || BATCH, 1), 250)
+
+  if (body?.mode === 'translate') {
+    const { data: rows, error } = await db.from('trending_meals').select('id, name, steps')
+    if (error) return json({ error: error.message }, 500)
+    const flagged = (rows ?? []).filter((r: { id: string; name: string; steps: unknown }) => stepsLookUntranslated(r.steps))
+    const results: Array<Record<string, unknown>> = []
+    const failures: string[] = []
+    for (const r of flagged) {
+      const complete = async (prompt: string) => {
+        const res = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${googleAiKey}` },
+          body: JSON.stringify({ model: "gemini-3.1-flash-lite", messages: [{ role: "user", content: prompt }], temperature: 0, max_tokens: 4000 }),
+        })
+        if (!res.ok) throw new Error(`model ${res.status}`)
+        return String((await res.json())?.choices?.[0]?.message?.content ?? '')
+      }
+      const steps = await translateSteps(r.steps, complete).catch(() => null)
+      if (!steps) { failures.push(`${r.name}: translation failed verification`); continue }
+      results.push({ name: r.name, steps })
+      if (!dryRun) {
+        const { error: upErr } = await db.from('trending_meals').update({ steps }).eq('id', r.id)
+        if (upErr) failures.push(`${r.name}: ${upErr.message}`)
+      }
+    }
+    return json({ mode: 'translate', dryRun, flagged: flagged.length, translated: results.length, failures, results })
+  }
 
   if (body?.mode === 'phases') {
     const { data: rows, error } = await db.from('trending_meals')

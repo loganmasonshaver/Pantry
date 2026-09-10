@@ -567,8 +567,13 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [x] trending-health-check's own push REMOVED 2026-09-10 (Logan: one notification a day). It
   still runs at 08:20 UTC and writes its `pipeline_runs` row, which §2k.A reads; the 9am report's
   first line is the alert now. A test tap confirmed the tap target is still nowhere (see above).
-- [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
-  the pipeline's translate-everything rule. COUNT how many before fixing.
+- [x] **Untranslated recipes — FIXED 2026-09-10.** Counted first: 6 of 219, all German, all the same
+  shape — English name, ingredients and step titles over German step DETAIL. Why: the extraction
+  prompt's fidelity rules ("PRESERVE THE PREPARATION METHOD exactly") beat its translate rule for
+  method text, and the existing guard (recipe-integrity looksUntranslated) only judges INGREDIENTS.
+  Now: a prompt line, a pipeline safety net that detects foreign step text before storing and
+  translates it in a separate verified call (or drops the recipe), and the 6 repaired via the
+  backfill's 'translate' mode. Re-scan: 0 of 219.
 - [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —
   in the step text only, so they never reach a grocery list. Violates 100% ingredient retention.
   WHY the retention check let it through is uninvestigated. (Its step 4 "onions" is the creator's

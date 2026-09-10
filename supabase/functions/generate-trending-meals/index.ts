@@ -7,6 +7,7 @@ import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
+import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
@@ -891,6 +892,10 @@ cottage cheese). Translate the FOOD, not the brand: "ESN Flexpresso" stays as it
 Skyr. A recipe whose ingredients are still in the source language is unusable to the reader even
 though every other field looks correct, and that is exactly what shipped before this line existed —
 English dish names sitting over German and Polish ingredient lists.
+That includes every step's DETAIL text, not only its title. "Preserve the preparation method" means
+preserve WHAT the creator does — the cut, the method, the times and temperatures — never the language
+they wrote it in: a German method becomes the same method in English. Six stored recipes had English
+titles over German steps ("Sauté: Zwiebel und Paprika in Ölspray anbraten"), unreadable to the user.
 
 Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in steps (oil, garlic, salt, pepper) appears in the ingredients array:
 [
@@ -1524,6 +1529,43 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     funnel.formatCapDeprioritised = overflow.length
     recipes = [...kept, ...overflow].slice(0, STORE_CAP)
     funnel.storeCap = STORE_CAP
+
+    // TRANSLATION SAFETY NET. The prompt says translate everything, and still 6 of 219 stored recipes
+    // kept German step DETAIL under English titles — its fidelity rules ("PRESERVE THE METHOD
+    // exactly") win for method text. So it is enforced here, on the final set only (at most
+    // STORE_CAP, and usually 0-2 flagged): translate in a separate call, verify the answer, and DROP
+    // a recipe that cannot be translated — the prompt's own words are that an untranslated recipe is
+    // unusable. See _shared/translate-steps.ts for the detector and its false-positive guards.
+    const completeWith = async (prompt: string): Promise<string> => {
+      for (const p of selected) {
+        try {
+          const res = await fetch(p.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${p.key}` },
+            body: JSON.stringify({ model: p.model, messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 4000 }),
+          })
+          if (!res.ok) continue
+          const text = (await res.json())?.choices?.[0]?.message?.content
+          if (text) return String(text)
+        } catch { /* next provider */ }
+      }
+      throw new Error('no provider answered the translation')
+    }
+    const translatedNames: string[] = []
+    const untranslatedDropped: string[] = []
+    const readable: any[] = []
+    for (const r of recipes) {
+      if (!stepsLookUntranslated(r.steps)) { readable.push(r); continue }
+      const steps = await translateSteps(r.steps, completeWith).catch(() => null)
+      if (steps) { r.steps = steps; translatedNames.push(r.name); readable.push(r) }
+      else untranslatedDropped.push(r.name)
+    }
+    if (translatedNames.length || untranslatedDropped.length) {
+      console.log(`[funnel] steps translated: ${translatedNames.join(', ') || 'none'}; dropped untranslatable: ${untranslatedDropped.join(', ') || 'none'}`)
+    }
+    funnel.stepsTranslated = translatedNames
+    funnel.untranslatedDropped = untranslatedDropped
+    recipes = readable
     funnel.stored = recipes.length
 
     // A recipe that survives with 3 or fewer ingredients usually means the extractor collapsed the
