@@ -26,6 +26,9 @@ export type DiscoverMeal = {
   vote_score: number
   log_count: number
   generated_at: string
+  // Row creation time, which is what the NEW TODAY border reads. Distinct from generated_at, which
+  // is a DATE and cannot express "within the last 24 hours". Null on anything cached before it shipped.
+  created_at: string | null
   compatible_diets: string[] | null
   is_dairy_free: boolean | null
   is_gluten_free: boolean | null
@@ -94,6 +97,7 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
       vote_score: m.vote_score ?? 0,
       log_count: m.log_count ?? 0,
       generated_at: m.generated_at,
+      created_at: m.created_at ?? null,
       compatible_diets: m.compatible_diets ?? null,
       is_dairy_free: m.is_dairy_free ?? null,
       is_gluten_free: m.is_gluten_free ?? null,

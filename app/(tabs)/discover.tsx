@@ -24,6 +24,7 @@ import {
   type DiscoverMeal,
   readDiscoverPersonal, writeDiscoverPersonal,
 } from '@/lib/discoverFeed'
+import { isNewToday } from '@/lib/discoverFreshness'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
@@ -891,9 +892,6 @@ export default function DiscoverScreen() {
   // used to provide, which is what lets retention grow from 7 days to 30 without the feed feeling
   // stale.
   const browseSections = useMemo(() => {
-    // Deliberately UTC: this is compared against generated_at, a SERVER pipeline timestamp, not
-    // against anything in the user's local day. Do not swap this for the local-date helper.
-    const pipelineTodayUtc = new Date().toISOString().split('T')[0]
     const dayOfYear = dayOfYearNow()
 
     // FIRST SHELF WINS. Each section claims meals the earlier ones didn't take, so a meal appears
@@ -1003,9 +1001,13 @@ export default function DiscoverScreen() {
     const personalOrder = rotateByDay(personalShelves, dayOfYear, 'personal', 1)
     const personalBuilt = new Map(personalOrder.map(sh => [sh.key, sh.run()]))
 
-    // ── Today. One section, not a rail plus a leftovers grid: the rail took 10 and today's batch
-    // is 8-15, so "More from today" was empty by construction and the two names described one set.
-    const today = claim(browseGrid.filter(m => m.generated_at?.startsWith(pipelineTodayUtc)), 18)
+    // ── NO "Today's picks" shelf, deliberately. New recipes are marked by the NEW TODAY border on
+    // their card, wherever they land — see lib/discoverFreshness.ts. A dedicated shelf could not
+    // coexist with that: FIRST SHELF WINS means every meal appears once on the page, so a "today"
+    // shelf does not add a view of the new recipes, it PULLS them out of their home shelves — a new
+    // Indian dish sat in "Today's picks" instead of under Indian, where someone browsing Indian would
+    // find it. It also keyed on the UTC date, which flips at 7pm US Central while the pipeline runs
+    // at 3am, so it vanished for eight hours every evening. Do not re-add it without solving both.
 
     // ── Intent shelves ──
     // Shelf COUNT scales with the pool. Four shelves over 35 meals leaves two-item sections that
@@ -1063,7 +1065,6 @@ export default function DiscoverScreen() {
         meals: personalBuilt.get(sh.key) ?? [],
         accent: true,
       })),
-      { key: 'today', title: "Today's picks", meals: today, accent: false },
       ...intent.map(sec => ({ ...sec, accent: false })),
     ].filter(sec => sec.meals.length > 0)
     // Filtered BEFORE rotating, deliberately: rotating first would let the index land on a section
@@ -1359,7 +1360,7 @@ export default function DiscoverScreen() {
         ) : featured ? (
           <Animated.View entering={FadeIn.duration(350)}>
           <PressableScale
-            style={styles.featuredHero}
+            style={[styles.featuredHero, isNewToday(featured.created_at) && styles.newCard]}
             scaleTo={0.98}
             onPress={() => openMeal(featured, 'discover_featured')}
           >
@@ -1379,6 +1380,9 @@ export default function DiscoverScreen() {
               <Flame size={11} stroke="#000" fill="#000" strokeWidth={2} />
               <Text style={styles.featuredBadgeText}>FEATURED</Text>
             </View>
+            {isNewToday(featured.created_at) && (
+              <View style={[styles.newTab, styles.newTabHero]}><Text style={styles.newTabText}>NEW TODAY</Text></View>
+            )}
             <View style={styles.featuredContent}>
               <Text style={styles.featuredName} numberOfLines={2}>{featured.name}</Text>
               <View style={{ flexDirection: 'row', gap: 6, marginTop: 10 }}>
@@ -1528,7 +1532,7 @@ function safeOpenSocialUrl(url: string) {
 function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress: () => void; full?: boolean; badge?: string }) {
   return (
     // `full` lets the browse grid drive the width from its cell instead of the rail's fixed 175.
-    <PressableScale style={[styles.railCard, full && { width: '100%' }]} scaleTo={0.98} onPress={onPress}>
+    <PressableScale style={[styles.railCard, full && { width: '100%' }, isNewToday(meal.created_at) && styles.newCard]} scaleTo={0.98} onPress={onPress}>
       {meal.image && meal.image.startsWith('http') ? (
         <MealImage uri={meal.image} style={styles.railImage} recyclingKey={String(meal.id)} />
       ) : (
@@ -1541,6 +1545,13 @@ function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress:
           missing, so a card ranked 5th isn't implying you can cook it right now. */}
       {badge && (
         <View style={styles.cardBadge}><Text style={styles.cardBadgeText}>{badge}</Text></View>
+      )}
+      {/* TOP-RIGHT, because top-left is already claimed twice — the creator badge and the
+          "missing N ingredients" badge both sit at top:8 left:8 — and the bottom holds the name and
+          macros. The tab hangs from the green top border in the same colour, so it reads as part of
+          the border rather than a sticker on the photo, and never covers the food. */}
+      {isNewToday(meal.created_at) && (
+        <View style={styles.newTab}><Text style={styles.newTabText}>NEW TODAY</Text></View>
       )}
       {meal.creator && (() => {
         const socialUrl = meal.creator.instagram_url || meal.creator.tiktok_url || meal.creator.youtube_url
@@ -1696,6 +1707,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#1A1A1A',
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
   featuredSkeleton: {
     alignItems: 'center',
@@ -1820,7 +1833,20 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#1A1A1A',
+    // EVERY card carries the border, transparent unless new. RN borders sit inside the box, so a
+    // border added only to new cards would shrink their image by 3px and misalign the row.
+    borderWidth: 1.5,
+    borderColor: 'transparent',
   },
+  newCard: { borderColor: COLORS.accent },
+  // Flat top so it merges into the border it hangs from; rounded bottom so it reads as a tab.
+  newTab: {
+    position: 'absolute', top: 0, right: 12, zIndex: 3,
+    backgroundColor: COLORS.accent, paddingHorizontal: 7, paddingVertical: 3,
+    borderBottomLeftRadius: 8, borderBottomRightRadius: 8,
+  },
+  newTabHero: { right: 18, paddingHorizontal: 9, paddingVertical: 4 },
+  newTabText: { fontSize: 9, fontWeight: '800', color: '#000000', letterSpacing: 0.6 },
   railImage: {
     width: '100%',
     height: '100%',
