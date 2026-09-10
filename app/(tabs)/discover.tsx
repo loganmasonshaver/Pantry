@@ -1369,7 +1369,7 @@ export default function DiscoverScreen() {
         ) : featured ? (
           <Animated.View entering={FadeIn.duration(350)}>
           <PressableScale
-            style={[styles.featuredHero, isNewToday(featured.created_at) && styles.newCard]}
+            style={styles.featuredHero}
             scaleTo={0.98}
             onPress={() => openMeal(featured, 'discover_featured')}
           >
@@ -1390,7 +1390,10 @@ export default function DiscoverScreen() {
               <Text style={styles.featuredBadgeText}>FEATURED</Text>
             </View>
             {isNewToday(featured.created_at) && (
-              <View style={[styles.newTab, styles.newTabHero]}><Text style={styles.newTabText}>NEW TODAY</Text></View>
+              <>
+                <View pointerEvents="none" style={[styles.newFrame, styles.newFrameHero]} />
+                <View style={[styles.newTab, styles.newTabHero]}><Text style={styles.newTabText}>NEW TODAY</Text></View>
+              </>
             )}
             <View style={styles.featuredContent}>
               <Text style={styles.featuredName} numberOfLines={2}>{featured.name}</Text>
@@ -1542,7 +1545,7 @@ function safeOpenSocialUrl(url: string) {
 function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress: () => void; full?: boolean; badge?: string }) {
   return (
     // `full` lets the browse grid drive the width from its cell instead of the rail's fixed 175.
-    <PressableScale style={[styles.railCard, full && { width: '100%' }, isNewToday(meal.created_at) && styles.newCard]} scaleTo={0.98} onPress={onPress}>
+    <PressableScale style={[styles.railCard, full && { width: '100%' }]} scaleTo={0.98} onPress={onPress}>
       {meal.image && meal.image.startsWith('http') ? (
         <MealImage uri={meal.image} style={styles.railImage} recyclingKey={String(meal.id)} />
       ) : (
@@ -1561,7 +1564,10 @@ function RailCard({ meal, onPress, full, badge }: { meal: DiscoverMeal; onPress:
           macros. The tab hangs from the green top border in the same colour, so it reads as part of
           the border rather than a sticker on the photo, and never covers the food. */}
       {isNewToday(meal.created_at) && (
-        <View style={styles.newTab}><Text style={styles.newTabText}>NEW TODAY</Text></View>
+        <>
+          <View pointerEvents="none" style={styles.newFrame} />
+          <View style={styles.newTab}><Text style={styles.newTabText}>NEW TODAY</Text></View>
+        </>
       )}
       {meal.creator && (() => {
         const socialUrl = meal.creator.instagram_url || meal.creator.tiktok_url || meal.creator.youtube_url
@@ -1722,8 +1728,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#1A1A1A',
-    borderWidth: 1.5,
-    borderColor: 'transparent',
   },
   featuredSkeleton: {
     alignItems: 'center',
@@ -1848,12 +1852,18 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     position: 'relative',
     backgroundColor: '#1A1A1A',
-    // EVERY card carries the border, transparent unless new. RN borders sit inside the box, so a
-    // border added only to new cards would shrink their image by 3px and misalign the row.
-    borderWidth: 1.5,
-    borderColor: 'transparent',
   },
-  newCard: { borderColor: COLORS.accentGreen },
+  // The NEW TODAY frame is an OVERLAY above the photo, never a border on the card. A border on the
+  // card itself insets the photo and gradient, and a "transparent" border is not see-through to the
+  // photo — it shows the card's own #1A1A1A background. Putting a transparent 1.5px border on every
+  // card (to keep photo sizes equal) drew a faint grey frame on ALL of them, most visible along the
+  // bottom against the near-black gradient. An absolutely positioned overlay changes no layout at
+  // all, so non-new cards are untouched and new ones keep full-size photos.
+  newFrame: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 2,
+    borderWidth: 1.5, borderColor: COLORS.accentGreen, borderRadius: 18,
+  },
+  newFrameHero: { borderRadius: 24 },
   // Flat top so it merges into the border it hangs from; rounded bottom so it reads as a tab.
   newTab: {
     position: 'absolute', top: 0, right: 12, zIndex: 3,
