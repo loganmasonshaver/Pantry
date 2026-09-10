@@ -492,7 +492,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   `ops_dislike_report` view. SQL-only — no edge function or CRON_SECRET can silence it. anon and
   authenticated verified unable to call it or read the view. Recipient = Vault `ops_user_id`.
   Preview without sending: `select public.daily_ops_report(false);`
-- [ ] **⚠️ BLOCKER for it: NO remote push has ever reached Logan's phone.** Expo returns HTTP 200
+- [ ] **APNs key FIXED 2026-09-10** via `eas credentials` (push key 9FADV539ZW, Koba Labs team,
+  assigned to com.kobalabs.pantry; `eas.json` added so the command would run). Re-send: Expo ticket
+  `"status":"ok"` AND receipt `"status":"ok"` (Apple accepted it). **Still to confirm: the banner
+  actually appeared on Logan's phone**, then tomorrow's 9am send arrives unprompted.
+- [x] ~~BLOCKER: NO remote push has ever reached Logan's phone.~~ Was: Expo returns HTTP 200
   with `"status":"error"` — *"Could not find APNs credentials for com.kobalabs.pantry"*. The health
   check's three "sent" results (09-05, 09-07, 09-10) were HTTP 200 only; it never read the ticket.
   Now fixed to read it (deployed). **Logan must run `npx eas-cli credentials -p ios` → Push
