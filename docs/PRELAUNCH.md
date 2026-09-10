@@ -469,6 +469,19 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   row, unchanged. (Font-shrinking to fit one row was ruled out: it needs ~6pt; pills are 10pt.)
 - [ ] Detail screen still says "rest" (`20 min prep · 20 min cook · 8 hr rest`) — "chill" was
   reverted because 3 of 23 waits are soaks. Naming the kind needs the extractor to return it.
+- [ ] **NEXT BUILD after the Sep 11 3am run is verified — detail screen time as ordered phases with
+  arrows (Logan's call: chronological, "so the user knows the order of operations").** Measured on the
+  23 waiting dishes: wait at the END 13 (type order is right), wait FIRST 3 (Lentil Quinoa Flatbread,
+  Lahori Chickpea Curry, Moong Dal Dosa — type order reads the overnight soak as after cooking), wait
+  in the MIDDLE with work after it 6 (Creami: combine → freeze → spin; bites: mix → freeze → dip →
+  chill) — three stored totals CANNOT express those, so arrows must not be faked from prep/cook/rest.
+  Build: extractor returns ordered phases `[{kind: prep|cook|wait, label: soak|freeze|chill|…, minutes}]`
+  (stored as e.g. `time_phases jsonb`), backfill via the resumable backfill function, detail screen
+  renders `Soak overnight → 20 min prep → 20 min cook`; rows without phases keep today's format.
+  Also names the wait (soak/freeze/chill) — the "rest" problem above. Waits because tonight's
+  extraction change would confound the first scheduled run of the current split.
+- [ ] **Cucumber Salad Bowl has rest_time 120 but no waiting step** (Chop → Dressing → Combine →
+  Avocado → Serve). Likely an extraction error; check its creator's source before trusting its time.
 - [x] **A reason actually saves** — PASS 2026-09-10: Avocado Blueberry Yogurt Clusters row reads
   `reason = photo_mismatch` after Logan tapped it on device, and the recipe correctly stayed in
   Discover (photo reports do not suppress).
