@@ -464,7 +464,7 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [x] Dislike sheet at the bottom, clear of the Dynamic Island, text legible — PASS on device
   2026-09-10 (`0bc3751` position, `3521935` text was black-on-#1A1A1A).
 - [x] Dislike sheet step 2 legible, no grabber — PASS on device 2026-09-10 (Beef Pasta Skillet).
-- [ ] **Dislike sheet flavour row** (built 2026-09-10): "Not to my taste" → ingredient chips WITHOUT
+- [x] **PASS on device 2026-09-10.** **Dislike sheet flavour row** (built 2026-09-10): "Not to my taste" → ingredient chips WITHOUT
   pasta water / spray oil / water / salt / plain oils, then "Or was it the flavour?" Too bland · Too
   spicy · Too sweet · Texture was off. Button reads Done once anything is picked; Skip and Done both
   close it. Pick a flavour, then the daily report should read "... not to my taste (too bland)".
@@ -497,7 +497,7 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [x] **A reason actually saves** — PASS 2026-09-10: Avocado Blueberry Yogurt Clusters row reads
   `reason = photo_mismatch` after Logan tapped it on device, and the recipe correctly stayed in
   Discover (photo reports do not suppress).
-- [ ] "Almost in your kitchen": 7 recipes, none "Missing 3", led by Cottage Cheese Crepes; Frozen
+- [ ] "Almost in your kitchen": 7 recipes, none "Missing 3" (order may now differ — NEW TODAY recipes sit at random spots), Cottage Cheese Crepes in it; Frozen
   Yogurt Fruit Melts gone.
 - [ ] Greek yogurt and "large eggs" sit under IN YOUR PANTRY on a recipe that needs them.
 - [x] **PASS on device 2026-09-10.** **Discover opens on the FULL pool** (6 shelves, Lentil Quinoa Flatbread findable) on the first
@@ -573,7 +573,7 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   method text, and the existing guard (recipe-integrity looksUntranslated) only judges INGREDIENTS.
   Now: a prompt line, a pipeline safety net that detects foreign step text before storing and
   translates it in a separate verified call (or drops the recipe), and the 6 repaired via the
-  backfill's 'translate' mode. Re-scan: 0 of 219.
+  backfill's 'translate' mode. Re-scan: 0 of 219. Beef Pasta Skillet verified English on device.
 - [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —
   in the step text only, so they never reach a grocery list. Violates 100% ingredient retention.
   WHY the retention check let it through is uninvestigated. (Its step 4 "onions" is the creator's
