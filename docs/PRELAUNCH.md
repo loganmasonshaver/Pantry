@@ -650,6 +650,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   Clue (2026-09-10): the hook prints "Fix: claude auth login", yet `claude auth status` in a normal
   shell says loggedIn true — so it is the hook's ENVIRONMENT (env/keychain access from git), not
   the login. Start there.
+  New clue (2026-09-10 evening push): the hook's error is now explicit — `401 ... OAuth access token has
+  expired`. So the hook's `claude` reads a token that is not refreshed, while the interactive one refreshes
+  fine. Likely a separate credential path (config dir / keychain entry) for non-interactive runs.
 - [ ] **Health check shares the pipeline's credential**, so one auth failure silences both — how three
   days of cron outage went unnoticed. Fix: a SQL-only cron that checks `trending_meals` and pushes
   via Expo directly.
