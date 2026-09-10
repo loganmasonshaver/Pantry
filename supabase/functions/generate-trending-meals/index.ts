@@ -6,6 +6,7 @@ import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
+import { TIME_RULES, normaliseTimes } from '../_shared/meal-times.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
@@ -878,6 +879,8 @@ Pick by what the dish IS: cuisine first if it clearly belongs to one, otherwise 
 desserts, high-protein-snack for small savoury bites, breakfast for morning food, and
 american-comfort as the catch-all for everything else. Every recipe gets one — there is no "none".
 
+${TIME_RULES}
+
 LANGUAGE. Source descriptions are often not in English — this pipeline searches YouTube globally
 and German, Polish and Spanish high-protein cooking are large scenes. TRANSLATE everything you
 output into English: ingredient names, step text and the dish name. Never copy a source word
@@ -904,6 +907,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     "carbs": 40,
     "fat": 18,
     "prepTime": 25,
+    "cookTime": 0,
+    "restTime": 0,
     "ingredients": [
       { "name": "chicken breast", "visual": "1 palm-sized piece", "grams": "150g", "section": null },
       { "name": "greek yogurt", "visual": "1/2 cup", "grams": "125g", "section": "bang bang dressing" },
@@ -1647,7 +1652,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         protein: toInt(r.protein),
         carbs: toInt(r.carbs),
         fat: toInt(r.fat),
-        prep_time: toInt(r.prepTime),
+        // Split three ways under the shared rules in _shared/meal-times.ts. One undefined prep_time let
+        // the model drop a 16-hour freeze from one recipe and count it as work in another.
+        ...(({ prepTime, cookTime, restTime }) => ({ prep_time: prepTime, cook_time: cookTime, rest_time: restTime }))(normaliseTimes(r)),
         // Unknown or invented values fall back to null rather than being coerced into a shelf the
         // model didn't mean — a wrong shelf is worse than no shelf, since the meal still reaches
         // the user via the catch-all.
