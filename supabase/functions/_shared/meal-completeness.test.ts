@@ -55,3 +55,10 @@ test('a spoon of flour thickening a sauce does NOT complete a protein-and-veg pl
 test('cauliflower rice is a vegetable, not rice', () => {
   assert.equal(hasCarbSource(ing('chicken', 'cauliflower rice', 'soy sauce')), false)
 })
+
+test("Logan's pantry: the real carb bases, and not the products made from them", async () => {
+  const { pantryCarbs } = await import('./meal-completeness.ts')
+  assert.deepEqual(pantryCarbs(['Red Potatoes', 'Yellow Potatoes', 'Cookies', 'Cinnamon Granola Butter', 'Oat Milk',
+    'Cooked Rice', 'Protein Cereal', 'Granola', 'Eggs', 'Chicken Breast']),
+    ['Red Potatoes', 'Yellow Potatoes', 'Cooked Rice', 'Protein Cereal', 'Granola'])
+})

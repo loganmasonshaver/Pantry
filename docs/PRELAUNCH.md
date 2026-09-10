@@ -497,19 +497,17 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] **Creator chatter stored as steps**: "Save this recipe for later and let me know if you try it!"
   (Chocolate Peanut Butter Smoothie Bowl) and a cookbook plug (Slow Cooker Chinese Chicken Curry).
   Not instructions — the extractor should drop them.
-- [ ] **AWAITING LOGAN'S OK (found 2026-09-10):**
-  - Server pantry-check treats pantry "Oat Milk" as "oats" (`item.startsWith(head + ' ')`), so a
-    porridge with no oats passed as cookable and the card said "Better with: oats". Same rule lets
-    rice vinegar cover rice, tomato sauce cover tomatoes, almond butter cover almonds. Unrelated to
-    the carb change — runs 45/46 pick the same deck under old and new ordering.
-  - No protein floor in the ranker: Pan-Fried Eggs with Potatoes shipped at 24g against a 40g target
-    (macros are CORRECT — 3 eggs 150g ~19g + potato 180g ~3.4g + butter; half the kcal is butter and
-    potato). The completeness ordering makes complete-but-low-protein likelier. Proposed: rank
-    under-75%-of-target below meals that meet it, same soft style as completeness.
-  - Name the user's OWN pantry carbs in the prompt (cooked rice, potatoes, protein cereal) so the carb
-    push stops producing bread/pasta/noodle meals that die as not-cookable.
-  - Image drew 2 eggs for a "3 large eggs" recipe (first generation of that name, so not a stale
-    cache) — put counts of countable items in the image prompt. Low priority.
+- [ ] **BUILT 2026-09-10 with Logan's OK — verify on the NEXT generation** (pipeline_runs,
+  provider generate-meals-funnel):
+  - Pantry "Oat Milk" no longer counts as "oats" (nor rice vinegar as rice, tomato sauce as tomatoes,
+    almond butter as almonds, chicken broth as chicken). Tell: no porridge without oats.
+  - The prompt names the user's own carbs (`pantryCarbsOffered` in the funnel — for Logan: potatoes,
+    cooked rice, protein cereal). Tell: `notCookableMissing` stops listing bread/pasta/noodles, and
+    `incompleteShown` drops toward 0.
+  - Protein floor: under 75% of target ranks below meals that meet it (tier = complete + floor).
+    Tell: `belowProteinFloorShown` is 0 unless nothing else qualifies.
+  - Image counts: the describer gets "3 eggs" and draws exactly that many. Existing images are cached
+    by NAME, so only newly-named dishes show it.
 - [ ] **Generated "Beef and Shredded Cheese Tacos" had no tortillas or shells** in its ingredients (also a
   "Beef Bolognese Pasta" with flour and no pasta). The name-gap check (25f2f83) should reject a dish
   named after a food it lacks — find out why "taco" slipped past it.

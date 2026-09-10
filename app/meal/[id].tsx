@@ -54,7 +54,7 @@ type PortionMode = 'Eyeball' | 'Measured'
 
 import {
   cleanIngredientName, isNeedToBuy, getWholeUnitDisplay, getMeasuredDisplay, toEyeball,
-  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatTimeBreakdown, formatTimePhases,
+  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatTimeBreakdown, formatTimePhases, imageIngredientNames,
 } from '@/lib/ingredientDisplay'
 
 function renderStepContent(step: string | { title: string; detail: string }) {
@@ -449,7 +449,7 @@ export default function MealDetailScreen() {
     }
     if (meal?.image) return
 
-    const ingredientNames = meal!.ingredients.map(i => i.name)
+    const ingredientNames = imageIngredientNames(meal!.ingredients)
     const steps = meal!.steps ?? []
     let cancelled = false
     const timers: ReturnType<typeof setTimeout>[] = []

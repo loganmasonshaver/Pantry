@@ -903,3 +903,19 @@ test('plural-blind is NOT substring — different foods still differ', () => {
   assert.equal(isAlreadyInList('rice vinegar', new Set(['rice'])), false)
   assert.equal(isAlreadyInList('eggs', new Set(['liquid egg whites'])), false)
 })
+
+// ── image prompt counts ────────────────────────────────────────────────────────────────────────
+test('the eggs dish tells the image model "3 eggs" — and diced potatoes get no count', async () => {
+  const { imageIngredientNames } = await import('./ingredientDisplay.ts')
+  assert.deepEqual(imageIngredientNames([
+    { name: 'eggs', grams: '150g', visual: '3 large' },
+    { name: 'yellow potatoes', grams: '180g', visual: '1¼ cups, diced' },
+    { name: 'butter', grams: '17g', visual: '1¼ tbsp' },
+  ]), ['3 eggs', 'yellow potatoes', 'butter'])
+})
+
+test('a stated count on something that gets broken up is not drawn whole', async () => {
+  const { imageIngredientNames } = await import('./ingredientDisplay.ts')
+  assert.deepEqual(imageIngredientNames([{ name: 'eggs', grams: '100g', visual: '2 eggs, scrambled' },
+    { name: 'chicken breast', grams: '300g', visual: '2 breasts, sliced' }]), ['eggs', 'chicken breast'])
+})

@@ -52,3 +52,12 @@ export function isZeroCalorie(name: unknown): boolean {
   return /^((cold|warm|hot|boiling|ice|iced|filtered|sparkling|tap|lukewarm)\s+)?water$/.test(n)
     || /^(crushed\s+)?ice( cubes?)?$/.test(n)
 }
+
+// The carb bases a pantry actually holds, for naming in the prompt. Without the list the carb rule
+// pushed the model to bread, pasta and noodles the user did not own: run 46 lost 4 of 8 candidates
+// to not-cookable that way, leaving only incomplete dishes for the deck. Products made FROM a carb
+// ("Oat Milk", "Granola Butter") are not bases.
+export function pantryCarbs(pantryNames: readonly string[]): string[] {
+  return pantryNames.filter(n =>
+    hasCarbSource([n]) && !/\b(milk|butter|oil|syrup|spread|vinegar|flour|cookies?|bars?|chips)$/i.test(String(n).trim()))
+}

@@ -856,3 +856,22 @@ export function isReadyWithin(prepTime: unknown, cookTime: unknown, restTime: un
   const active = activeMinutes(prepTime, cookTime)
   return active > 0 && active <= minutes && formatRestBadge(restTime) === null
 }
+
+// Ingredient names for the IMAGE prompt, with a count on whole items the photo shows ("3 eggs").
+// The image describer only ever saw names, so a "3 large eggs" recipe (Pan-Fried Eggs with
+// Potatoes) was drawn with two. Only a count the RECIPE states, on an item that stays whole on the
+// plate — "1¼ cups diced potatoes" must never become "1 potato", or the photo shows a whole one.
+const PHOTO_WHOLE = /\b(eggs?|breasts?|thighs?|fillets?|patt(?:y|ies)|pancakes?|waffles?|crepes?|tortillas?|wraps?|bagels?|muffins?|sausages?|steaks?|chops?|drumsticks?|wings?|skewers?)\b/i
+const NOT_A_COUNT = /\b(cups?|tbsp|tsp|g|kg|oz|lbs?|ml|l|diced|chopped|sliced|shredded|minced|cubed|mashed|crumbled|grated|scrambled|whisked|beaten)\b/i
+
+export function imageIngredientNames(ingredients: any[] | undefined): string[] {
+  return (ingredients ?? []).map((ing: any) => {
+    const name = String(ing?.name ?? ing ?? '').trim()
+    const visual = String(ing?.visual ?? '')
+    if (name && PHOTO_WHOLE.test(name) && /^\s*\d+\b/.test(visual) && !NOT_A_COUNT.test(visual)) {
+      const whole = getWholeUnitDisplay(name, String(ing?.grams ?? ''), visual)
+      if (whole) return `${whole.count} ${whole.name}`
+    }
+    return name
+  }).filter(Boolean)
+}

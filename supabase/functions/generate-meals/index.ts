@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { isCompleteMeal, isZeroCalorie } from '../_shared/meal-completeness.ts'
+import { isCompleteMeal, isZeroCalorie, pantryCarbs, carbRequired } from '../_shared/meal-completeness.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
@@ -396,6 +396,14 @@ Deno.serve(async (req: Request) => {
     const bannedFormsLine = bannedForms.length === 0 ? "" :
       `\n- DISH FORM BAN (blocking constraint): this user has been served ${bannedForms.map(f => `a ${f}`).join(" and ")} over and over — it is the single thing they complain about. Do NOT return ANY meal that is ${bannedForms.map(f => `a ${f}`).join(" or ")}, however it is flavoured, based or named. A different fruit in the blender is the SAME dish to them. Return a different FORM entirely.`
 
+    // Name the carbs this pantry HAS. The carb rule alone sent the model to bread, pasta and noodles
+    // the user did not own — 4 of 8 candidates in run 46 died not-cookable — so the deck was filled
+    // with the incomplete dishes the rule exists to prevent. Banned bases are left out of the list.
+    const ownCarbs = pantryCarbs(ingredients as string[])
+      .filter((c: string) => !bannedBases.some((b: string) => c.toLowerCase().includes(String(b).toLowerCase())))
+    const carbSourcesLine = !(mode === 'cookNow') || !carbRequired(dietaryRestrictions) ? '' : ownCarbs.length > 0
+      ? `\n- CARBS THIS PANTRY ACTUALLY HAS: ${ownCarbs.join(', ')}. In the STRICT meals the carb MUST be one of these. Bread, pasta, noodles or tortillas the pantry does not list make the meal NOT cookable, and it is thrown away.`
+      : `\n- This pantry holds NO carb base. Make each meal as complete as the pantry allows — never invent a carb it does not have.`
     const bannedBasesLine = bannedBases.length === 0 ? "" :
       `\n- BASE INGREDIENT BAN (blocking constraint): ${bannedBases.map(b => b.toUpperCase()).join(" and ")} ${bannedBases.length > 1 ? "have" : "has"} carried roughly a third of this user's recent meals and they are sick of ${bannedBases.length > 1 ? "them" : "it"}. Do NOT build ANY of today's meals on ${bannedBases.join(" or ")} — not as the protein, not as the base, not as the headline ingredient. A trace amount as a garnish is fine. Use a DIFFERENT base from their pantry. This is a rule about the FOOD, not the title: renaming the dish does not satisfy it.`
 
@@ -538,7 +546,7 @@ ${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
 - CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}${bannedFormsLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
-- Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.
+- Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.${carbSourcesLine}
 - When the protein and vegetables already fill the calorie target, SHRINK THE PROTEIN PORTION to make room for the carb — never drop the carb to fit. 125g chicken with 150g cooked rice is a complete ~520 kcal plate at ~44g protein; 150g chicken with cauliflower and no starch is a side dish. Meals without a carb are checked in code and ranked below complete ones, so dropping it only loses the meal.
 - HARD CONSTRAINT — prepTime + cookTime MUST be ≤ ${maxPrepMinutes} minutes TOGETHER. That sum is the time from starting to eating, which is what the user actually budgeted. prepTime is HANDS-ON minutes the cook is working; cookTime is UNATTENDED minutes the cook must still be there for — an oven bake, a simmer, a roast, anything where the food is cooking and they are waiting on it. Both are REALISTIC times — do NOT default every meal to ${maxPrepMinutes}. A 25-minute pasta is 25 min, a 5-min smoothie is 5 min. Honest times only.
 - restTime is SEPARATE and UNLIMITED, and it is NOT the same thing as cookTime: it is DETACHABLE time where the cook walks away entirely and comes back later or tomorrow — chilling, soaking, marinating, rising, setting. It does NOT count toward ${maxPrepMinutes}, so NEVER shorten a soak or a marinade to fit the budget. Overnight oats need 480 minutes, not 15. If a dish genuinely needs to sit overnight, say so: "restTime": 480. Use 0 when the dish is ready as soon as the work is done. A 20-minute bake is cookTime, NEVER restTime — the cook is standing in the kitchen. Ask which it is: could they leave the house? Then it is rest. Must they wait by the oven? Then it is cook, and it counts against the budget.
@@ -686,7 +694,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       genCountAsked: genCount, modelReturned: meals.length,
       displayCount, servings, calorieTarget, batchCalorieTarget,
       bannedBases, bannedForms, maxPrepMinutes,
-      pantryItems: ingredients.length, windowNames: recentServed.length,
+      pantryItems: ingredients.length, windowNames: recentServed.length, pantryCarbsOffered: ownCarbs,
     }
 
     // STRIP PHANTOM FOOD, before anything sums the ingredient list. An ingredient no step ever
@@ -1134,13 +1142,17 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           // Complete = has a carb base (or is a drink, or the user is keto/low-carb). See
           // _shared/meal-completeness.ts for why the prompt's rule needed enforcing.
           const complete = isCompleteMeal(m, dietaryRestrictions)
+          // PROTEIN FLOOR, soft: under 75% of target ranks below meals that meet it, alongside
+          // completeness — Pan-Fried Eggs with Potatoes shipped at 24g against 40g, and the
+          // completeness ordering alone would favour exactly that kind of dish.
+          const proteinOk = proteinTarget <= 0 || Number(m.protein) >= 0.75 * proteinTarget
           const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
           const cDelta = (Number(m.calories) - calorieTarget) / Math.max(calorieTarget, 1)
           // One-sided fat penalty: only meals ABOVE the fat target lose points, so leaner meals
           // rank higher without punishing a naturally-lean dish. Off for keto/low-carb.
           const fExcess = highFatDiet ? 0 : Math.max(0, (Number(m.fat) - fatTarget) / Math.max(fatTarget, 1))
           const fitScore = pDelta * pDelta + cDelta * cDelta + fExcess * fExcess
-          return { ...m, _fitScore: fitScore, _complete: complete }
+          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1) }
         })
 
       // EVERY INPUT THE SORT BELOW USES, recorded before it runs. proteinCandidates alone could not
@@ -1155,6 +1167,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         f: Number(m?.fat) || 0,
         repeat: !!m?._repeat,
         complete: !!m?._complete,
+        tier: Number(m?._tier) || 0,
         fit: Math.round((Number(m?._fitScore) || 0) * 1000) / 1000,
       }))
       funnel.incomplete = scored.filter((m: any) => !m._complete).map((m: any) => String(m?.name ?? ''))
@@ -1163,14 +1176,16 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         // Freshness outranks everything (a standing decision — do not reopen without evidence), then
         // COMPLETENESS, then macro fit: a fresh complete dish beats a fresh protein-and-veg plate, and
         // an incomplete one reaches the deck only when there are not enough complete ones to fill it.
+        // Tier = 0 when complete AND over the protein floor, 1 when one of the two, 2 when neither.
         .sort((a: any, b: any) =>
           a._repeat !== b._repeat ? (a._repeat ? 1 : -1)
-          : a._complete !== b._complete ? (a._complete ? -1 : 1)
+          : a._tier !== b._tier ? a._tier - b._tier
           : a._fitScore - b._fitScore)
         .slice(0, displayCount)
-        .map((m: any) => { const { _fitScore, _complete, ...rest } = m; return rest })
+        .map((m: any) => { const { _fitScore, _complete, _tier, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length
+      funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < 0.75 * proteinTarget).length
       const shownRepeats = meals.filter((m: any) => m._repeat).length
       console.log(
         `Macro rank: kept top ${Math.min(displayCount, beforeRank)}/${beforeRank} by freshness then target fit` +

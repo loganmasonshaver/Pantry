@@ -5,6 +5,7 @@ import { supabase } from './supabase'
 import { suppressesDish } from './dislikeReasons'
 import { generateMeals, GeneratedMeal } from './meals'
 import { fetchMealImage } from './mealImages'
+import { imageIngredientNames } from './ingredientDisplay'
 
 // Speculative "cook now" meal generation, kicked off while the user reviews a scan so the
 // cook-reveal screen can reuse the result instead of generating a SECOND time. This removes
@@ -124,11 +125,11 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     if (warmable.length > 0) {
       ;(async () => {
         const [hero, ...rest] = warmable
-        await fetchMealImage(hero.name, hero.ingredients?.map((ing: any) => ing.name) ?? [], hero.steps ?? []).catch(() => null)
+        await fetchMealImage(hero.name, imageIngredientNames(hero.ingredients), hero.steps ?? []).catch(() => null)
         // Cards 2-3 get the remainder of the review window as runway instead of the ~2s between
         // "Add all to Pantry" and the reveal mounting, which is what made them lag behind card 1.
         await Promise.all(rest.map(m =>
-          fetchMealImage(m.name, m.ingredients?.map((ing: any) => ing.name) ?? [], m.steps ?? []).catch(() => null)
+          fetchMealImage(m.name, imageIngredientNames(m.ingredients), m.steps ?? []).catch(() => null)
         ))
       })()
     }
@@ -156,7 +157,7 @@ export async function warmMealImages(userId: string, mode: 'cookNow' | 'mealPlan
     await Promise.all(meals.map(m =>
       m?.image || !m?.name
         ? null
-        : fetchMealImage(m.name, m.ingredients?.map((ing: any) => ing.name) ?? [], m.steps ?? []).catch(() => null)
+        : fetchMealImage(m.name, imageIngredientNames(m.ingredients), m.steps ?? []).catch(() => null)
     ))
   } catch {}
 }

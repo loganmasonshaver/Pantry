@@ -188,6 +188,8 @@ LAYERED DISHES — DESCRIBE THE LAYERS IN BUILD ORDER, BOTTOM FIRST: If the step
 
 ASSEMBLED, NOT STACKED: Describe the dish AS PLATED — fully assembled, integrated, ready to eat. Never describe separate visible components (e.g., a brownie with cottage cheese baked in, NOT cottage cheese piled on top of a brownie). Do NOT mention cooking process.
 
+COUNTS: when an ingredient is given with a number of whole items ("3 eggs", "2 chicken breasts", "4 pancakes"), the photo must show EXACTLY that many — write the number out in words in your description ("three fried eggs"). Never add or drop one for composition; a real example listed 3 eggs and was drawn with two.
+
 READ THE STEPS FOR INGREDIENT ROLES: If recipe steps are provided, use them to determine each ingredient's role in the finished plate. An ingredient that is mashed, blended, mixed, stirred, folded, dissolved, melted, whisked, or otherwise incorporated INTO another component is INVISIBLE in the photo — do NOT depict it as a separate dollop, drizzle, swirl, sprinkle, or pile. Only ingredients that are plated separately, served on top, used as garnish, or remain as recognizable solids should appear visually.
 
 Examples:

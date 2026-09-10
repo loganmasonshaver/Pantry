@@ -12,6 +12,7 @@ import { writeMealCache, mealCacheKey, CachedMeals as SharedCachedMeals } from '
 // Shared with the scan-time image warm — one implementation so the global image cache/cost model
 // stays identical no matter who asks for an image.
 import { fetchMealImage as fetchImage } from './mealImages'
+import { imageIngredientNames } from './ingredientDisplay'
 import { useAIConsent } from '../context/AIConsentContext'
 
 // Key and shape live in ./mealCache — see the note there on why there is exactly one of each.
@@ -201,7 +202,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const mealsToImage = [...generated]
       const jobs = mealsToImage.map(async (meal, i) => {
         if (meal.image) return
-        const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+        const ingNames = imageIngredientNames(meal.ingredients)
         const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
         if (!image) {
           // SETTLED, not pending. fetchImage has already exhausted its retries, so this photo is
@@ -323,7 +324,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
                 ;(async () => {
                   await Promise.all(cachedMeals.map(async (meal, i) => {
                     if (meal.image) return
-                    const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+                    const ingNames = imageIngredientNames(meal.ingredients)
                     const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
                     if (image) {
                       cachedMeals[i] = { ...cachedMeals[i], image }
@@ -465,7 +466,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
               ;(async () => {
                 await Promise.all(cachedMeals.map(async (meal, i) => {
                   if (meal.image) return
-                  const ingNames = meal.ingredients?.map((ing: any) => ing.name) ?? []
+                  const ingNames = imageIngredientNames(meal.ingredients)
                   const image = await fetchImage(meal.name, ingNames, meal.steps ?? [])
                   if (image && !cancelled) {
                     cachedMeals[i] = { ...cachedMeals[i], image }

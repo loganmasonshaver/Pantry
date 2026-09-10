@@ -140,3 +140,20 @@ test('a close substitute resolves rather than killing the meal', () => {
   assert.equal(isInPantry('crushed tomatoes', REAL_PANTRY), true)
   assert.equal(isInPantry('diced tomatoes', REAL_PANTRY), true)
 })
+
+test('a product made from a food does not stock the food — the Oat Milk porridge', () => {
+  assert.equal(isInPantry('oats', ['Oat Milk']), false, 'porridge passed as cookable with no oats')
+  assert.equal(isInPantry('oat', ['Oat Milk']), false)
+  assert.equal(isInPantry('rice', ['Rice Vinegar']), false)
+  assert.equal(isInPantry('tomatoes', ['Tomato Sauce']), false)
+  assert.equal(isInPantry('almonds', ['Almond Butter']), false)
+  assert.equal(isInPantry('chicken', ['Chicken Broth']), false)
+})
+
+test('the product itself, and the generous swaps, still match', () => {
+  assert.equal(isInPantry('oat milk', ['Oat Milk']), true)
+  assert.equal(isInPantry('milk', ['Oat Milk']), true, 'milk swap stays generous')
+  assert.equal(isInPantry('rice', ['Cooked Rice']), true)
+  assert.equal(isInPantry('chicken', ['Chicken Breast']), true)
+  assert.equal(isInPantry('oats', ['Oat Milk', 'Rolled Oats']), true, 'real oats elsewhere in the pantry')
+})

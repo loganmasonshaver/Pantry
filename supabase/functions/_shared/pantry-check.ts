@@ -52,12 +52,30 @@ const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9\s]/
  * Deliberately GENEROUS. A false "present" costs a slightly wrong shopping line; a false "missing"
  * drops a dinner the user could have cooked. Given the choice, be wrong in the cheap direction.
  */
+// A product MADE from a food, named "<food> <product>". It does not stock the food itself: pantry
+// "Oat Milk" was covering "oats" through the head-noun rule below ("oat milk" starts with "oat "),
+// so a porridge with no oats passed as cookable tonight and the card said "Better with: oats".
+// The same shape let "rice vinegar" cover rice, "tomato sauce" tomatoes, "almond butter" almonds.
+const DERIVED_PRODUCT = /^(.+?) (milk|flour|butter|oil|syrup|water|juice|powder|sauce|paste|extract|cream|vinegar|broth|stock|chips|bars?|cookies|cakes|drink|spread|wine)$/
+
+// The food a derived pantry product is made from, or null. Singularised to match the head rule.
+const derivedBase = (item: string): string | null => {
+  const m = DERIVED_PRODUCT.exec(item)
+  return m ? m[1] : null
+}
+
 export function isInPantry(ingredientName: unknown, pantry: readonly string[]): boolean {
   const ing = norm(ingredientName)
   if (!ing) return true
+  const singular = (w: string) => (w.length > 4 && w.endsWith('oes')) ? w.slice(0, -2)
+    : (w.length > 3 && w.endsWith('s') && !/(ss|us|is)$/.test(w) ? w.slice(0, -1) : w)
   for (const raw of pantry) {
     const item = norm(raw)
     if (!item) continue
+    // Asked for the FOOD, holding a product made from it: not a match. Asked for the product itself
+    // ("oat milk") still matches below, and "milk" is still covered by "oat milk" — that swap is fine.
+    const base = derivedBase(item)
+    if (base && ing !== item && (ing === base || singular(ing) === singular(base))) continue
     if (ing.includes(item) || item.includes(ing)) return true
     // Head-noun fallback: "large eggs" against a pantry "Eggs".
     //
