@@ -25,10 +25,13 @@ begin
            (array['too_often','too_often','too_often','photo_mismatch','recipe_wrong','macros_fit','taste','taste',null])[1 + ((urn * 3 + mrn) % 9)] as reason
       from pairs
   )
-  insert into meal_ratings (user_id, meal_name, rating, reason, reason_ingredients, created_at)
+  insert into meal_ratings (user_id, meal_name, rating, reason, reason_ingredients, reason_flavours, created_at)
   select uid, name, -1, reason,
+         -- mrn % 4 = 3 names no ingredient at all, only a flavour — the case the flavour row exists for.
          case when reason = 'taste' then (case mrn % 4 when 0 then array['dill'] when 1 then array['cilantro','red onion']
-                                                     when 2 then array['tahini'] else array['cottage cheese'] end) end,
+                                                     when 2 then array['tahini'] else null end) end,
+         case when reason = 'taste' then (case mrn % 3 when 0 then array['too_bland'] when 1 then array['too_spicy','texture_off']
+                                                     else null end) end,
          now() - interval '3 hours'
     from p
   on conflict (user_id, meal_name) do nothing;

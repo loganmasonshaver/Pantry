@@ -1081,6 +1081,7 @@ export default function HomeScreen() {
         rating: next,
         reason: null,
         reason_ingredients: null,
+        reason_flavours: null,
       }, { onConflict: 'user_id,meal_name' })
       // Show learning feedback so user sees the AI improving
       if (next === -1) setReasonMeal(meal)
@@ -1091,11 +1092,15 @@ export default function HomeScreen() {
   // The sheet's answer lands on the row rateMeal just wrote. Only two of the five reasons suppress
   // the dish — a wrong photo or a broken recipe is a bug report about a meal the user may still
   // want, and useMealSuggestions reads `reason` to tell them apart.
-  const submitDislikeReason = async ({ reason, ingredients }: DislikeFeedback) => {
+  const submitDislikeReason = async ({ reason, ingredients, flavours }: DislikeFeedback) => {
     const meal = reasonMeal
     if (!user || !meal) return
     await supabase.from('meal_ratings')
-      .update({ reason, reason_ingredients: ingredients.length > 0 ? ingredients : null })
+      .update({
+        reason,
+        reason_ingredients: ingredients.length > 0 ? ingredients : null,
+        reason_flavours: flavours.length > 0 ? flavours : null,
+      })
       .eq('user_id', user.id).eq('meal_name', meal.name)
     showRatingToast(
       // Say what actually happens: these two leave the dish in rotation, so "we'll skip this"

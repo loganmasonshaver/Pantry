@@ -2,17 +2,18 @@ import { useEffect, useState } from 'react'
 import { View, Text, Modal, Pressable, TouchableOpacity, StyleSheet, ScrollView } from 'react-native'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { COLORS } from '@/constants/colors'
-import { DISLIKE_REASONS, DislikeReason } from '@/lib/dislikeReasons'
+import { DISLIKE_REASONS, DislikeReason, FLAVOUR_ISSUES, FlavourIssue, culpritCandidates } from '@/lib/dislikeReasons'
 
 // The five reasons and their routing live in lib/dislikeReasons.ts — this file only draws them.
 // Two of the five are bug reports about a meal the user may well want again, so the dish must
 // survive them; that is the whole reason the sheet exists.
-export type DislikeFeedback = { reason: DislikeReason; ingredients: string[] }
+export type DislikeFeedback = { reason: DislikeReason; ingredients: string[]; flavours: FlavourIssue[] }
 
 type Props = {
   visible: boolean
   mealName: string
-  // Ingredient names for the taste follow-up. Empty is fine — the follow-up is skipped.
+  // Ingredient names for the taste follow-up. Neutral staples are dropped (culpritCandidates); the
+  // flavour row still gives the follow-up something to ask when no ingredient is left.
   ingredients: string[]
   onClose: () => void
   onSubmit: (feedback: DislikeFeedback) => void
@@ -26,11 +27,14 @@ type Props = {
 export default function DislikeReasonSheet({ visible, mealName, ingredients, onClose, onSubmit, onIngredientsNamed }: Props) {
   const [step, setStep] = useState<'reason' | 'culprit'>('reason')
   const [picked, setPicked] = useState<string[]>([])
+  const [flavours, setFlavours] = useState<FlavourIssue[]>([])
+  const candidates = culpritCandidates(ingredients)
 
   useEffect(() => {
     if (!visible) return
     setStep('reason')
     setPicked([])
+    setFlavours([])
   }, [visible])
 
   const choose = (reason: DislikeReason) => {
@@ -38,8 +42,8 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
     // thing, an ingredient they hate, a pairing that does not work and a cook who overdid it all
     // arrive as the same tap. A second question separates them; the COUNT of what they pick is
     // itself the signal (one = a disliked food, several = a bad combination).
-    if (reason === 'taste' && ingredients.length > 0) { setStep('culprit'); return }
-    onSubmit({ reason, ingredients: [] })
+    if (reason === 'taste') { setStep('culprit'); return }
+    onSubmit({ reason, ingredients: [], flavours: [] })
     onClose()
   }
 
@@ -47,8 +51,12 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
     setPicked(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name])
   }
 
+  const toggleFlavour = (key: FlavourIssue) => {
+    setFlavours(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
+
   const finishCulprit = () => {
-    onSubmit({ reason: 'taste', ingredients: picked })
+    onSubmit({ reason: 'taste', ingredients: picked, flavours })
     // Ordered so the rating is recorded before any navigation the caller does on this callback.
     if (picked.length > 0) onIngredientsNamed?.(picked)
     onClose()
@@ -90,7 +98,7 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
                   <Text style={styles.subtitle}>Tap anything you didn't like — or skip.</Text>
                   <ScrollView style={styles.culpritScroll} showsVerticalScrollIndicator={false}>
                     <View style={styles.chips}>
-                      {ingredients.map(name => {
+                      {candidates.map(name => {
                         const on = picked.includes(name)
                         return (
                           <TouchableOpacity
@@ -105,10 +113,27 @@ export default function DislikeReasonSheet({ visible, mealName, ingredients, onC
                       })}
                     </View>
                   </ScrollView>
+                  {/* Outside the ScrollView so a long ingredient list can never scroll it out of sight. */}
+                  <Text style={styles.flavourLabel}>Or was it the flavour?</Text>
+                  <View style={styles.chips}>
+                    {FLAVOUR_ISSUES.map(f => {
+                      const on = flavours.includes(f.key)
+                      return (
+                        <TouchableOpacity
+                          key={f.key}
+                          style={[styles.ingChip, on && styles.ingChipOn]}
+                          onPress={() => toggleFlavour(f.key)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.ingChipText, on && styles.ingChipTextOn]}>{f.label}</Text>
+                        </TouchableOpacity>
+                      )
+                    })}
+                  </View>
                   <TouchableOpacity style={styles.primary} onPress={finishCulprit} activeOpacity={0.85}>
                     {/* One button, two meanings — "Skip" when nothing is picked. A separate skip
                         control would be a second CTA for the same moment. */}
-                    <Text style={styles.primaryText}>{picked.length > 0 ? 'Done' : 'Skip'}</Text>
+                    <Text style={styles.primaryText}>{picked.length + flavours.length > 0 ? 'Done' : 'Skip'}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -130,7 +155,8 @@ const styles = StyleSheet.create({
   chips: { gap: 10, flexDirection: 'row', flexWrap: 'wrap' },
   chip: { width: '100%', backgroundColor: '#111111', borderRadius: 14, paddingVertical: 15, paddingHorizontal: 16 },
   chipText: { color: COLORS.textWhite, fontSize: 15, fontWeight: '600' },
-  culpritScroll: { maxHeight: 260 },
+  culpritScroll: { maxHeight: 220 },
+  flavourLabel: { color: COLORS.textMuted, fontSize: 13, marginTop: 16, marginBottom: 10 },
   ingChip: { backgroundColor: '#111111', borderRadius: 30, paddingVertical: 10, paddingHorizontal: 16, borderWidth: 1, borderColor: 'transparent' },
   ingChipOn: { backgroundColor: 'rgba(74,222,128,0.12)', borderColor: COLORS.accent },
   ingChipText: { color: COLORS.textWhite, fontSize: 14, fontWeight: '600' },

@@ -463,8 +463,11 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 **B. Device reload** — on Discover, SWITCH TABS ONCE after opening (it paints from an old cache).
 - [x] Dislike sheet at the bottom, clear of the Dynamic Island, text legible — PASS on device
   2026-09-10 (`0bc3751` position, `3521935` text was black-on-#1A1A1A).
-- [ ] Dislike sheet: no grabber bar, title sits where it did, last reason reads "Not to my taste".
-  Tap it → step 2 ingredient chips legible, Done/Skip works.
+- [x] Dislike sheet step 2 legible, no grabber — PASS on device 2026-09-10 (Beef Pasta Skillet).
+- [ ] **Dislike sheet flavour row** (built 2026-09-10): "Not to my taste" → ingredient chips WITHOUT
+  pasta water / spray oil / water / salt / plain oils, then "Or was it the flavour?" Too bland · Too
+  spicy · Too sweet · Texture was off. Button reads Done once anything is picked; Skip and Done both
+  close it. Pick a flavour, then the daily report should read "... not to my taste (too bland)".
 - [x] **PASS on device 2026-09-10.** **One time rule on every card** (`aa037b8`). A waiting Discover dish shows its time pill on its
   OWN row — Lentil Quinoa Flatbread `40 MIN + OVERNIGHT`, Blueberry Lemon Cheesecake `60 MIN +
   CHILL` — with calories and protein beneath; the grid must stay aligned. Non-waiting cards: one

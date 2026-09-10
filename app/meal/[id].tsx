@@ -245,6 +245,7 @@ export default function MealDetailScreen() {
         rating: next,
         reason: null,
         reason_ingredients: null,
+        reason_flavours: null,
       }, { onConflict: 'user_id,meal_name' })
       if (next === -1) setReasonSheetOpen(true)
       else showRatingToast("Got it — we'll suggest more like this")
@@ -263,10 +264,14 @@ export default function MealDetailScreen() {
   // The sheet's answer lands on the row rateMeal just wrote. Only two of the five reasons suppress
   // the dish; the other three are bug reports about a recipe the user may well want again, and
   // useMealSuggestions reads `reason` to decide which is which.
-  const submitDislikeReason = async ({ reason, ingredients }: DislikeFeedback) => {
+  const submitDislikeReason = async ({ reason, ingredients, flavours }: DislikeFeedback) => {
     if (!user || !meal) return
     await supabase.from('meal_ratings')
-      .update({ reason, reason_ingredients: ingredients.length > 0 ? ingredients : null })
+      .update({
+        reason,
+        reason_ingredients: ingredients.length > 0 ? ingredients : null,
+        reason_flavours: flavours.length > 0 ? flavours : null,
+      })
       .eq('user_id', user.id).eq('meal_name', meal.name)
     showRatingToast(
       reason === 'photo_mismatch' || reason === 'recipe_wrong'
