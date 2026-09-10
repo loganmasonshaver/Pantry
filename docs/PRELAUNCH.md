@@ -463,10 +463,12 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   2026-09-10 (`0bc3751` position, `3521935` text was black-on-#1A1A1A).
 - [ ] Dislike sheet: no grabber bar, title sits where it did, last reason reads "Not to my taste".
   Tap it → step 2 ingredient chips legible, Done/Skip works.
-- [ ] **One time rule on every card.** Discover's small cards now read like Home's: Blueberry Lemon
-  Cheesecake `60 MIN + CHILL` (was `2 HR CHILL`). Tell of the narrow-row fallback: a card showing
-  only `OVERNIGHT`/`CHILL` with a bare calorie number — how OFTEN that happens is the unknown.
-- [ ] Detail screen says "chill" for a badged wait: `15 min prep · 45 min cook · 2 hr chill`.
+- [ ] **One time rule on every card** (`aa037b8`). A waiting Discover dish shows its time pill on its
+  OWN row — Lentil Quinoa Flatbread `40 MIN + OVERNIGHT`, Blueberry Lemon Cheesecake `60 MIN +
+  CHILL` — with calories and protein beneath; the grid must stay aligned. Non-waiting cards: one
+  row, unchanged. (Font-shrinking to fit one row was ruled out: it needs ~6pt; pills are 10pt.)
+- [ ] Detail screen still says "rest" (`20 min prep · 20 min cook · 8 hr rest`) — "chill" was
+  reverted because 3 of 23 waits are soaks. Naming the kind needs the extractor to return it.
 - [x] **A reason actually saves** — PASS 2026-09-10: Avocado Blueberry Yogurt Clusters row reads
   `reason = photo_mismatch` after Logan tapped it on device, and the recipe correctly stayed in
   Discover (photo reports do not suppress).
