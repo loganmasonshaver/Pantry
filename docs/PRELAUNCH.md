@@ -469,9 +469,9 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   OWN row — Lentil Quinoa Flatbread `40 MIN + OVERNIGHT`, Blueberry Lemon Cheesecake `60 MIN +
   CHILL` — with calories and protein beneath; the grid must stay aligned. Non-waiting cards: one
   row, unchanged. (Font-shrinking to fit one row was ruled out: it needs ~6pt; pills are 10pt.)
-- [ ] Detail screen still says "rest" (`20 min prep · 20 min cook · 8 hr rest`) — "chill" was
+- [x] ~~SUPERSEDED for Discover by ordered phases (waits now say soak/freeze/chill).~~ Cook Tonight meals, which have no phases, keep the breakdown. Detail screen still says "rest" (`20 min prep · 20 min cook · 8 hr rest`) — "chill" was
   reverted because 3 of 23 waits are soaks. Naming the kind needs the extractor to return it.
-- [ ] **BUILT 2026-09-10 (Logan chose: build now, force-run to verify) — VERIFY ON DEVICE:** Lentil
+- [x] **PASS on device 2026-09-10** (Lentil, McFlurry, 4-phase wrap). **BUILT 2026-09-10 (Logan chose: build now, force-run to verify):** Lentil
   Quinoa Flatbread's detail reads `Soak 8 hr → 20 min prep → 20 min cook`; McFlurry `5 min prep →
   Freeze 16 hr → 5 min spin`; a long timeline wraps inside its pill without pushing the thumbs off.
   Verified server-side: forced dry run of the cron command with the Vault cron_secret → HTTP 200,
@@ -497,10 +497,10 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] "Almost in your kitchen": 7 recipes, none "Missing 3", led by Cottage Cheese Crepes; Frozen
   Yogurt Fruit Melts gone.
 - [ ] Greek yogurt and "large eggs" sit under IN YOUR PANTRY on a recipe that needs them.
-- [ ] **Discover opens on the FULL pool** (6 shelves, Lentil Quinoa Flatbread findable) on the first
+- [x] **PASS on device 2026-09-10.** **Discover opens on the FULL pool** (6 shelves, Lentil Quinoa Flatbread findable) on the first
   open, without switching tabs — the cache held only the newest 60, which gave 2 shelves and parked
   the real pool until blur. Old 60-slice caches are now ignored (one skeleton, then full).
-- [ ] NEW TODAY recipes sit at RANDOM spots in each shelf's first page (Logan: "just make it random"),
+- [x] **PASS on device 2026-09-10.** NEW TODAY recipes sit at RANDOM spots in each shelf's first page (Logan: "just make it random"),
   seeded by the day so the page holds still all day; none behind "Show more". Rejected on device:
   new-first (stacked at top), plain alternation (all in the right column), checkerboard. Random will
   occasionally line up by chance — that is the trade Logan chose over any visible pattern.
