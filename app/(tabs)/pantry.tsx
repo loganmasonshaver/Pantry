@@ -891,9 +891,10 @@ export default function PantryScreen() {
                         // Discover is free to serve, so it is the one action worth offering here.
                         <TouchableOpacity
                           onPress={() => { trackDiscoverNudgeTapped('capped', genUsedToday ?? genCapPerDay); router.push('/(tabs)/discover') }}
-                          activeOpacity={0.7}
+                          activeOpacity={0.8}
+                          style={styles.discoverCapButton}
                         >
-                          <Text style={styles.cookTonightRetryText}>Browse Discover →</Text>
+                          <Text style={styles.discoverCapButtonText}>Browse Discover</Text>
                         </TouchableOpacity>
                       )}
                     </View>
@@ -972,16 +973,26 @@ export default function PantryScreen() {
                   {!mealsLoading && !mealsError && meals.length > 0 && (() => {
                     const nudge = discoverNudge(genUsedToday, genCapPerDay)
                     if (nudge === 'none') return null
+                    const goDiscover = () => { trackDiscoverNudgeTapped(nudge, genUsedToday ?? 0); router.push('/(tabs)/discover') }
+                    // AT THE CAP IT BECOMES A BUTTON. The ↻ is greyed out, so this is the one action
+                    // left in the section — a text link there undersells the only way forward. It
+                    // uses the SECONDARY pill (the "Save" style), not the white primary: the three
+                    // meal cards above are still the section's content, and a white pill would
+                    // outshout food the user can cook tonight.
+                    if (nudge === 'capped') {
+                      return (
+                        <View style={styles.discoverCapWrap}>
+                          <Text style={styles.discoverNudgeText}>That's today's refreshes.</Text>
+                          <TouchableOpacity onPress={goDiscover} activeOpacity={0.8} style={styles.discoverCapButton}>
+                            <Text style={styles.discoverCapButtonText}>Browse Discover</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )
+                    }
                     return (
-                      <TouchableOpacity
-                        onPress={() => { trackDiscoverNudgeTapped(nudge, genUsedToday ?? 0); router.push('/(tabs)/discover') }}
-                        activeOpacity={0.7}
-                        hitSlop={8}
-                        style={styles.discoverNudge}
-                      >
+                      <TouchableOpacity onPress={goDiscover} activeOpacity={0.7} hitSlop={8} style={styles.discoverNudge}>
                         <Text style={styles.discoverNudgeText}>
-                          {nudge === 'capped' ? "That's today's refreshes — " : 'Still not feeling it? '}
-                          <Text style={styles.cookTonightRetryText}>Browse Discover →</Text>
+                          Still not feeling it? <Text style={styles.cookTonightRetryText}>Browse Discover →</Text>
                         </Text>
                       </TouchableOpacity>
                     )
@@ -1713,4 +1724,11 @@ const styles = StyleSheet.create({
   cookTonightRetryText: { fontSize: 13, color: '#4ADE80', fontWeight: '700' },
   discoverNudge: { marginTop: 12, alignSelf: 'center' },
   discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
+  discoverCapWrap: { marginTop: 14, alignItems: 'center', gap: 10, alignSelf: 'stretch' },
+  // Mirrors saveButton on the meal detail screen — the app's established SECONDARY pill.
+  discoverCapButton: {
+    alignSelf: 'stretch', backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingVertical: 14,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORS.trackDark, marginTop: 4,
+  },
+  discoverCapButtonText: { color: COLORS.textWhite, fontSize: 15, fontWeight: '700' },
 })
