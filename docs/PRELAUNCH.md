@@ -523,12 +523,16 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   exactly one message a day. Test email sent 2026-09-10. **Trade-off:** runs only while the Claude app
   is open — a closed laptop at 9am means it sends on next launch. To verify: tomorrow's email arrives
   without prompting; Logan should hit "Run now" once so the Gmail/Supabase approvals are stored.
-- [ ] **Sectioned HTML email built, AWAITING Logan's approval** (he called the plain list "hard to
-  read, lacks organization"). `ops_report_data()` now also returns `email_html` + `email_text`:
-  Discover line (red if broken), totals + by-reason line, TO FIX (photo/recipe), MOST DISLIKED (2+),
-  and singles collapsed to one line. Sent as "TEST v2" from a 20-user simulation
-  (`scripts/simulate-daily-report.sql`, rolls itself back). On approval: point the scheduled task at
-  `email_html` (htmlBody) + `email_text` (body), then delete the old `email_body`/`lines` path.
+- [x] **Sectioned HTML email APPROVED by Logan and LIVE** — the scheduled task now sends `email_html`
+  (+ `email_text` fallback): Discover line (red if broken), totals + by-reason line, TO FIX
+  (photo/recipe), MOST DISLIKED (2+), singles on one line. A meal whose dislikes are all photo/recipe
+  shows ONLY under TO FIX (it was listed twice). Re-test any format change with
+  `scripts/simulate-daily-report.sql` (rolls itself back).
+- [ ] **Verify: Sep 11 ~9:05am the email arrives by itself, in the new format.** Logan should hit
+  "Run now" on the task once first, so its Gmail/Supabase approvals are stored and the unattended
+  run cannot stall on a permission prompt.
+- [ ] Cleanup (low): delete the old `email_body` / `lines` / `tail` path from `ops_report_data()` —
+  only `daily_ops_report()`'s manual push still reads it.
 - [x] trending-health-check's own push REMOVED 2026-09-10 (Logan: one notification a day). It
   still runs at 08:20 UTC and writes its `pipeline_runs` row, which §2k.A reads; the 9am report's
   first line is the alert now. A test tap confirmed the tap target is still nowhere (see above).
