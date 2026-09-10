@@ -25,21 +25,32 @@ This repo uses a single main-branch workflow. No feature branches, no PRs for so
    from prod on 2026-08-12. Recovery: `npx supabase migration repair --status reverted <version>`,
    renumber, re-push. Always write `add column if not exists` so a partial apply is re-runnable.
 
+## ONE LIST UNTIL LAUNCH — `docs/PRELAUNCH.md`
+Logan works from exactly one list until the app ships: **`docs/PRELAUNCH.md`**. Every open item,
+every unverified fix, every new bug goes THERE, the moment it is found — never only into a handoff,
+a memory, or a commit body.
+- **NOT lists:** `~/my-briefing/todos/active.md` (archived; a SessionEnd hook copies stale
+  `docs/todos.md` over it), `docs/todos.md` (frozen 2026-09-10), `docs/TRENDING-OPEN.md` (the
+  audit METHODS reference — read it, do not add open items to it).
+- **handoff.md is not a list either.** It points at PRELAUNCH sections and holds only what a list
+  cannot: in-flight state, the exact SQL/tell for a check, decisions not to reopen. If a handoff
+  names an open item that PRELAUNCH does not, that is a bug — copy it over before writing anything
+  else. (On 2026-09-10 ten open items lived only in a handoff that the next session replaces.)
+
 ## On Session Start
 1. `cd /Users/loganshaver/pantry && git pull origin main` (per Git Workflow above)
-2. Read ~/my-briefing/todos/active.md (clone it locally first if needed)
+2. Read `docs/PRELAUNCH.md`, then `handoff.md` if present
 3. Summarize what's in progress and what's next
 4. Tell me where to start today based on priority
 
 ## During Session
-After completing each feature or fix, immediately update ~/my-briefing/todos/active.md:
-- Check off completed tasks
-- Add any new bugs discovered to the Bugs section
-- Add a content idea to the 📱 Content Ideas section (e.g. "Show [feature] in action — 60s screen recording")
+After completing each feature or fix, immediately update `docs/PRELAUNCH.md`:
+- Check off completed items (or mark them UNVERIFIED with the tell that would settle it)
+- Add any new bug or deliberately-deferred item to the relevant section
 Do this after each task — not just at session end — so progress is saved if the session cuts off.
 
 ## On Session End
-1. Do a final update of ~/my-briefing/todos/active.md (tasks, bugs)
+1. Do a final update of `docs/PRELAUNCH.md`
 2. Ensure all code changes are committed + pushed to `main` before the session closes
 
 ## App Context

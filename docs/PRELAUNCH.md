@@ -448,7 +448,43 @@ newest-first sort).
 **BUILT 2026-09-10:** NEW TODAY border on a rolling 24h from `created_at`, new recipes lead their
 shelves. No "Today's picks" shelf — first-shelf-wins pulled new recipes OUT of their home shelves.
 
-## 2k. FOUND 2026-09-10 — open, deliberately NOT fixed  *(were only in handoff.md until now)*
+## 2k. VERIFY — shipped 2026-09-10, not yet confirmed  *(grouped by what unblocks each)*
+**A. The Sep 11 3am run (08:00 UTC)** — first SCHEDULED run on the fixed cron auth, and the first to
+split time three ways at extraction. Deployed source was diffed byte-for-byte against the repo.
+- [ ] `select count(*) meals, count(rest_time) split, count(*) filter (where rest_time >= 240) overnight
+  from trending_meals where generated_at = '2026-09-11';` — PASS = `meals > 0` AND `split = meals`.
+  Then the 08:20 health-check row in `net._http_response` reads `"healthy":true`. The pipeline's own
+  row saying `timed_out: true` is EXPECTED (pg_net gives up at 5s, the run takes ~50s).
+- [ ] Does `pipeline_runs` get a row? Sep 6 (12 meals) and Sep 10 (13) wrote none; Sep 7 (2) did.
+  Hypothesis: big batches exhaust wall-clock after images, before the final log write.
+
+**B. Device reload** — on Discover, SWITCH TABS ONCE after opening (it paints from an old cache).
+- [x] Dislike sheet at the bottom, clear of the Dynamic Island, text legible — PASS on device
+  2026-09-10 (`0bc3751` position, `3521935` text was black-on-#1A1A1A).
+- [ ] Dislike sheet step 2: tap "Didn't taste good" → ingredient chips legible, Done/Skip works.
+- [ ] **A reason actually saves.** Pick one, then `select meal_name, reason from meal_ratings order by
+  created_at desc limit 3`. The 14:09 Avocado Blueberry row is still `reason NULL` (sheet opened,
+  nothing picked). RLS is `FOR ALL auth.uid() = user_id`, so UPDATE should pass — unproven.
+- [ ] "Almost in your kitchen": 7 recipes, none "Missing 3", led by Cottage Cheese Crepes; Frozen
+  Yogurt Fruit Melts gone.
+- [ ] Greek yogurt and "large eggs" sit under IN YOUR PANTRY on a recipe that needs them.
+- [ ] New recipes lead their shelves, none behind "Show more".
+- [ ] "Ready in 15" has no frozen desserts.
+- [ ] Hero, if a waiting dish, reads e.g. `10 MIN + OVERNIGHT`.
+- [ ] Cook Tonight nudge "Still not feeling it? Browse Discover →" from the 3rd generation of the day.
+- [ ] Ice not under YOU'LL NEED on a smoothie; a 3-minute dish reads `5 min`.
+
+**C. The passage of time**
+- [ ] After 7pm tonight: NEW TODAY borders still show (rolling 24h from `created_at`, not UTC date).
+- [ ] Sep 11 ~1pm: the Sep 10 batch (created 12:51 CDT) loses the border; the new batch gains it.
+
+## 2l. FOUND 2026-09-10 — open, deliberately NOT fixed  *(were only in handoff.md until now)*
+- [ ] **Dislike reasons reach NOBODY.** They are stored in `meal_ratings.reason` and that is all — no
+  PostHog event, no notification, nothing surfaces them to Logan. Yet a photo/recipe report shows the
+  toast "Thanks — we'll take a look at this one", a promise with no mechanism behind it. Those two
+  are defect reports about SHARED assets (images are cached globally), so one report is about every
+  user's copy. Proposed: fold into the SQL-only health-check cron below — one daily push carries both
+  "pipeline healthy" and "N new photo/recipe reports". Undecided.
 - [ ] **Untranslated recipes.** "Mango Protein Ice Cream" and "Cheesecake" have German steps despite
   the pipeline's translate-everything rule. COUNT how many before fixing.
 - [ ] **"Beef Pasta Meal Prep" dropped two seasonings** (~8g butter seasoning, ~8g garlic & herb) —

@@ -1,5 +1,9 @@
 # Pantry App — Active Todos
 
+> **FROZEN 2026-09-10 — do not add to or work from this file until launch.** The only list is
+> `docs/PRELAUNCH.md`. This file is kept for history (a SessionEnd hook still mirrors it to the
+> archived `my-briefing` repo); it is stale, not authoritative.
+
 ## 🔥 FIRST THING TOMORROW
 - [x] **FAL.AI Flux Pro images** — already worked out by Logan
 - [x] Fix YouTube API key for trending meals — working
