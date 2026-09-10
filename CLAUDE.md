@@ -171,9 +171,12 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 130** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **16** in
+- **TS baseline = 136** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **16** in
   app code (`app/ lib/ components/ hooks/ context/`) and the rest Deno-global noise from
   `supabase/functions` being inside the tsconfig.
+  (Was 130 until 2026-09-10: the new `backfill-trending-times` edge function added six lines — one
+  `esm.sh` import and five `Cannot find name 'Deno'` — each read individually, none real. App-code
+  stayed 16.)
   (Was 131/17 until 2026-09-05. The notification handler in `hooks/useNotifications.ts` returned
   `shouldShowAlert` only; expo-notifications 55 REQUIRES `shouldShowBanner` and `shouldShowList`
   and deprecates `shouldShowAlert`. Not noise — it meant any notification arriving while the app
