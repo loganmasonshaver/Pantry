@@ -810,6 +810,90 @@ and Vegetable Frittata (51g/527). Target 40g/525. Photos viewed; every quantity 
 - [ ] Still true from §2n: rice in 2 of 3 shown, and 2 of 3 were egg dishes. Whether the carb protection
   plus the egg exemption actually breaks the rice monotony is the thing to read on the next run.
 
+## 2p. COOK TONIGHT — stress test across pantries, and the ship bar  *(2026-09-12)*
+Every rule in generate-meals had been calibrated on ONE pantry: Logan's 55 items, protein-heavy, two
+savory carbs. Several were written as direct reactions to its shape. This is the sweep across the
+pantries real users will have, the bar it is measured against, and what is left.
+
+**Harness** — `scripts/cook-tonight-sweep/`, results gitignored.
+```bash
+node scripts/cook-tonight-sweep/run.mjs                      # 17 cases x 2 runs, scored
+RUNS=3 CASES=vegan,keto-declared node scripts/cook-tonight-sweep/run.mjs
+node scripts/cook-tonight-sweep/depth.mjs vegetarian standard 7 vegetarian   # a WEEK with real history
+node scripts/cook-tonight-sweep/rescore.mjs results/<dir>    # re-grade offline, no API calls
+```
+It drives the function's service-role `?dryRun=true` (no cap, no history, no images, nothing a user
+sees) and scores each deck with the production gates themselves plus what production has no opinion
+on: dietary violations, dislikes served, over the time budget, duplicate dish, repeat shown while a
+fresh candidate sat unshown. ~14s and ~$0.03 a generation; a full sweep is ~8 min and ~$1.
+
+**The bar.** HARD (blocks the ship gate): not cookable from that pantry · title promises a food or
+form it lacks · steps use an unlisted ingredient · sweet food in a savory dish · no carb base when
+the pantry HAS one · a declared restriction or dislike violated · protein under 70% of target *when
+the pantry could reach it* · calories outside the band · over the user's time budget · two of the
+same dish in one deck · a repeat shown over an unshown fresh candidate. SOFT (tracked, not blocking):
+unseasoned · untimed cooking step · oven never preheated · cold pre-cooked carb never reheated ·
+under 2 flavour axes · invented marketing name · absurd single portion · every dish on one base.
+
+**Results (34 decks, 102 meals per sweep, all re-scored with the final scorer):**
+| sweep | decks clean | hard fails |
+|---|---|---|
+| 1 — before any of this | 27/34 | 6 dietary violations, 6 not cookable, 1 duplicate, 1 name gap |
+| 4 — after the diet gate + matcher fixes | 31/34 | 3 not cookable, 1 protein |
+| C — final | **32/34** | 4 not cookable |
+| D — final, consecutive | **31/34** | 3 not cookable, 1 ghost ingredient |
+
+**Depth — a WEEK on one pantry with real history accumulating, which a breadth sweep cannot test.**
+Day 1 was never the risk; the question is whether day 7 still works once the repeat window is full and
+the base ban has fired. 21 meals each, all 21 distinct dishes in every run:
+| pantry | clean days | protein range | repeats in last 3 days |
+|---|---|---|---|
+| Logan's (55 items) | **7/7** | 41-75g vs 50g target | 3 of 9 |
+| vegetarian | **5/7** (was 3/7) | 29-76g vs 50g | 3 of 9 |
+| thin (12 items), beginner 15-min | **5/7** | 24-50g vs 43g | **9 of 9** |
+| carb-heavy vs 50g target | 1/7 | 20-57g vs 50g | 4 of 9 |
+
+The thin pantry's last three days were ENTIRELY repeats — 12 items cannot produce 21 distinct good
+dishes, and the ranker correctly prefers a familiar dish that hits the macros over a novel one that
+does not. That is the same product answer as the protein ceiling below: tell the user their shelf is
+the limit, rather than generating around it.
+
+**Found and fixed** (each has its own commit and tests):
+- [x] **Dietary restrictions were never enforced, only requested** — sweep 1 served soy sauce and
+  sourdough to gluten-free, feta and butter to dairy-free, pecans twice to nut-free. `_shared/diet-check.ts`
+  now enforces in code and its drop is the ONE gate that is never floored. Zero violations since.
+- [x] **The app never sent the diet style at all.** `profiles.diet_type` (Pescatarian/Vegetarian/Vegan)
+  was split out for Discover and `useMealSuggestions` was never updated — it did not even SELECT the
+  column. Every generation ever made was blind to it.
+- [x] **"Protein powder" counted as in-stock in every pantry** — the head-noun matcher compares last
+  words and "garlic powder" is an assumed staple. Class words (powder/sauce/oil/milk/broth…) no
+  longer match on the last word alone.
+- [x] **Water counted as a missing ingredient** (§2o), **granola on a savory omelet** (§2o).
+- [x] **The model under-portions plant protein.** A failing vegetarian day had ONE of nine candidates
+  over the floor. The prompt now carries the protein density table and must add up what it wrote.
+  After: vegetarian 3/3 clean, vegan 3/3, thin 3/3, asian 3/3.
+- [x] **Macro fit punished a 73g meal as hard as a 27g one**; only the shortfall scores now, doubled.
+- [x] **Counted quantities blocked resizing** — "1 pack" udon and "15 large" shrimp left a 690 kcal
+  dish against a 467 kcal cutting target. Counts of 4+ now scale to whole items; 3 or fewer stay
+  frozen, so the "0.5 large eggs" landmine is untouched.
+- [x] Ranking: a not-cookable meal can no longer LEAD a deck; slot coverage can no longer promote a
+  dish under the protein floor (it was costing ~15g on the third meal every day of a vegetarian week);
+  one dish cannot appear twice under two names.
+
+**OPEN — decisions for Logan, not bugs:**
+- [ ] **The floored cookability gate.** Every hard fail left (7 in 204 meals, ~3%) is the same shape:
+  the model invents ONE ingredient, and the gate — which detects all of them — shows the meal anyway
+  rather than a short deck. Cook Now's whole promise is the pantry. Options: keep it (a card that
+  says "Better with: eggs"), or hard-drop in cookNow and show 2 meals on a thin pantry.
+- [ ] **A pantry that cannot meet the targets.** The carb-heavy shelf (peanut butter, milk, sliced
+  cheese, canned beans) tops out near 33g against a 38g floor — no recipe reaches it without 1.5 cans
+  of beans. The app currently shows the best it can, silently. Proposal: when every shown meal is
+  under the floor, say so ("your pantry is light on protein for a 50g goal") — honest, and it points
+  at the scan/grocery flow. Client-side only; the data is already there.
+- [ ] Soft metrics still above where they should be, tracked per run: ~45% of meals reach fewer than
+  2 flavour axes, ~20% unseasoned (was 50% before the seasoning rule), ~15% have an untimed cooking
+  step. None blocks the gate; all are visible in `stepIssuesShown` / `flavourAxesShown`.
+
 ## 2m. POST-LAUNCH — popularity signals  *(Logan asked 2026-09-10: "most liked in 7 days" as the hero?)*
 - [ ] **Decided: NOT the hero.** Pre-launch every recipe has 0 likes, and early on 1-2 taps would pick
   it; a popularity hero also self-reinforces (most shown → most liked → stays shown) and repeats for
