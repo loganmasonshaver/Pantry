@@ -443,3 +443,20 @@ test('fat-dominant bases are not protected — banning them costs the deck nothi
   // bannable and leave the real protein budget untouched.
   assert.deepEqual(overusedBases(rep('Peanut Butter Cheese Toast')), ['cheese', 'peanut butter'])
 })
+
+// Cook Tonight runs 48 and 51: Logan's pantry holds two savory carbs, rice and potato. Banning potato
+// for overuse left exactly one, so every savory dish was built on rice — and when the model could not
+// use rice either it reached for granola beside a savory omelet.
+test('a carb ban is refused when it would leave the pantry one savory carb', () => {
+  const history = [
+    ...Array(5).fill(0).map((_, i) => ({ name: `Potato Hash ${i}`, ingredients: [{ name: 'yellow potatoes' }, { name: 'eggs' }] })),
+    ...Array(10).fill(0).map((_, i) => ({ name: `Chicken Plate ${i}`, ingredients: [{ name: 'chicken' }, { name: 'cauliflower' }] })),
+  ]
+  assert.ok(overusedBases(history).includes('potato'), 'without the pantry it still bans potato')
+  assert.ok(!overusedBases(history, { carbBases: ['rice', 'potato'] }).includes('potato'),
+    'two savory carbs: banning one leaves no alternative, so it is refused')
+  assert.ok(overusedBases(history, { carbBases: ['rice', 'potato', 'pasta'] }).includes('potato'),
+    'three savory carbs: the ban still fires, two remain')
+  // The protein ban is untouched by any of this.
+  assert.ok(overusedBases(history, { carbBases: ['rice', 'potato'] }).includes('chicken'))
+})

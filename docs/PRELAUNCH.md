@@ -801,9 +801,14 @@ and Vegetable Frittata (51g/527). Target 40g/525. Photos viewed; every quantity 
   was written against protein-and-veg PLATES and an egg dish is not one. Measured: flips 9 of 129 stored
   meals from incomplete to complete, every one a scramble, frittata or omelet; a wrap and a stir-fry
   still owe a carb. Tell: an egg dish shows with no starch bolted on, `incompleteShown` stays 0.
-- [ ] Still true from §2n: rice in 2 of 3 shown, and 2 of 3 were egg dishes. The base ban leaves this
-  pantry ONE savory carb (rice) whenever potato is banned — consider protecting the last savory carb the
-  way `maxProteinBans` protects proteins.
+- [x] **CARB BAN PROTECTED 2026-09-11, UNVERIFIED.** A carb is now banned only while `minCarbsLeft` (2)
+  savory carbs would remain, mirroring `maxProteinBans`. Savory excludes granola, cereal and oats, so a
+  sweet carb can never be counted as the alternative that keeps a ban legal. Replayed on the real last-15
+  history: the ban was about to take RICE, leaving potato alone; it now takes cheese and chicken instead,
+  which is the point — variety comes from the axis this pantry has plenty of. Funnel records
+  `savoryCarbsHeld`. Tell: `bannedBases` holds no carb while the pantry has only rice and potato.
+- [ ] Still true from §2n: rice in 2 of 3 shown, and 2 of 3 were egg dishes. Whether the carb protection
+  plus the egg exemption actually breaks the rice monotony is the thing to read on the next run.
 
 ## 2m. POST-LAUNCH — popularity signals  *(Logan asked 2026-09-10: "most liked in 7 days" as the hero?)*
 - [ ] **Decided: NOT the hero.** Pre-launch every recipe has 0 likes, and early on 1-2 taps would pick

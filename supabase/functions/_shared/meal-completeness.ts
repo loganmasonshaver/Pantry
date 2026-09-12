@@ -73,6 +73,15 @@ export function pantryCarbs(pantryNames: readonly string[]): string[] {
     hasCarbSource([n]) && !/\b(milk|butter|oil|syrup|spread|vinegar|flour|cookies?|bars?|chips)$/i.test(String(n).trim()))
 }
 
+// Carbs that belong in a SAVORY dinner. Granola, cereal and oats are carbs, but offering them as the
+// base for a savory dish is how run 51 ended up with granola beside an omelet: with potato base-banned
+// this pantry's only other carbs were protein cereal and granola.
+const SWEET_CARB = /\b(granola|cereal|oats|oatmeal|porridge|pancakes?|waffles?|crepes?|muffins?|rice cakes?)\b/i
+
+export function savoryCarbs(pantryNames: readonly string[]): string[] {
+  return pantryCarbs(pantryNames).filter(n => !SWEET_CARB.test(String(n)))
+}
+
 // Protein powder — or any sweet-flavoured product — in a SAVORY dish. Logan's 2026-09-10 17:47 deck
 // led with "Protein-Fortified Creamy Rice Soup": 2/3 cup milk, rice, 70g chicken and a scoop of
 // protein powder "whisked in to thicken". Not a dish anyone cooks — whey clumps in hot milk and reads

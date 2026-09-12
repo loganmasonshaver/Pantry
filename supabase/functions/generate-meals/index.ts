@@ -1,13 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { isCompleteMeal, isZeroCalorie, pantryCarbs, carbRequired, savoryClash } from '../_shared/meal-completeness.ts'
+import { isCompleteMeal, isZeroCalorie, pantryCarbs, savoryCarbs, carbRequired, savoryClash } from '../_shared/meal-completeness.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
 import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-match.ts'
-import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
+import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, detectBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget } from '../_shared/scale-recipe.ts'
 import { selectDeck } from '../_shared/rank-deck.ts'
@@ -388,8 +388,11 @@ Deno.serve(async (req: Request) => {
     const overuseHistory = recentDetailed.length >= 15
       ? recentDetailed
       : (Array.isArray(rawRecent) ? rawRecent : []).map((n: unknown) => ({ name: n }))
-    const bannedBases = overusedBases(overuseHistory)
-    if (bannedBases.length > 0) console.log(`Base ban: ${bannedBases.join(", ")} (from ${overuseHistory.length} recent meals)`)
+    // The savory carb bases this pantry actually holds, so the ban can refuse to take the last one.
+    // Read from the pantry, not from history: what the user OWNS decides whether an alternative exists.
+    const carbBasesHeld = [...new Set(savoryCarbs(ingredients as string[]).flatMap(c => [...detectBases(c)]))]
+    const bannedBases = overusedBases(overuseHistory, { carbBases: carbBasesHeld })
+    if (bannedBases.length > 0) console.log(`Base ban: ${bannedBases.join(", ")} (from ${overuseHistory.length} recent meals; savory carbs held: ${carbBasesHeld.join(", ") || "none"})`)
     // FORM ban, mirroring the base ban above and sharing its calibrated thresholds. Bases stop the
     // model reaching for the same FOOD; this stops it reaching for the same SHAPE. Both are needed:
     // a smoothie built on yogurt instead of protein powder defeats the base ban while still being
@@ -703,6 +706,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       displayCount, servings, calorieTarget, batchCalorieTarget,
       bannedBases, bannedForms, maxPrepMinutes,
       pantryItems: ingredients.length, windowNames: recentServed.length, pantryCarbsOffered: ownCarbs,
+      savoryCarbsHeld: carbBasesHeld, // why a carb ban was or was not allowed
     }
 
     // STRIP PHANTOM FOOD, before anything sums the ingredient list. An ingredient no step ever

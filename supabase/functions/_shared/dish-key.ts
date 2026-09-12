@@ -314,8 +314,10 @@ export function detectBases(name: unknown, ingredients?: unknown): Set<string> {
 // counts were 2-3 and indistinguishable from noise.
 export function overusedBases(
   dishes: ReadonlyArray<{ name?: unknown; ingredients?: unknown }>,
-  { window = 15, topK = 2, minCount = 3, minShare = 0.25, maxProteinBans = 1 }:
-    { window?: number; topK?: number; minCount?: number; minShare?: number; maxProteinBans?: number } = {},
+  { window = 15, topK = 2, minCount = 3, minShare = 0.25, maxProteinBans = 1, carbBases = [], minCarbsLeft = 2 }:
+    { window?: number; topK?: number; minCount?: number; minShare?: number; maxProteinBans?: number
+      /** savory carb bases this pantry actually holds, e.g. ["rice", "potato"] */
+      carbBases?: readonly string[]; minCarbsLeft?: number } = {},
 ): string[] {
   const recent = dishes.slice(0, window)
   if (recent.length === 0) return []
@@ -349,13 +351,29 @@ export function overusedBases(
   // So the budget is spent on the axis the user has plenty of. Ban order still follows overuse, so
   // the most-repeated food is still the first to go; a SECOND protein is simply skipped in favour
   // of the next non-protein offender, and if there is none, fewer bans is the correct answer.
+  // CARBS GET THE SAME PROTECTION, for the same reason and by the same measured argument.
+  //
+  // A base ban tells the model to build on something else, which requires something else to exist.
+  // Logan's pantry holds two savory carbs — rice and potato — so banning potato left exactly one, and
+  // every savory dish was built on rice: three of three shown meals in run 48, two of three in run 51,
+  // including rice "alongside" an egg scramble and rice as the filling of a "wrap". When the ban took
+  // rice as well, the only carbs the prompt could offer were granola and protein cereal, and the model
+  // put granola beside a savory omelet.
+  //
+  // So a carb is banned only while `minCarbsLeft` savory carbs would remain. With three or more the
+  // ban still fires; with two it never does, which is correct — alternating everything between two
+  // bases is not variety, it is the same two bases with one of them switched off.
   const out: string[] = []
   let proteinBans = 0
+  let carbBans = 0
   for (const base of ranked) {
     if (out.length >= topK) break
     const isProtein = PROTEIN_BASES.has(base)
     if (isProtein && proteinBans >= maxProteinBans) continue
+    const isCarb = !isProtein && carbBases.includes(base)
+    if (isCarb && carbBases.length - carbBans - 1 < minCarbsLeft) continue
     if (isProtein) proteinBans++
+    if (isCarb) carbBans++
     out.push(base)
   }
   return out
