@@ -71,6 +71,9 @@ export const PANTRIES = {
     'Beef Stock', 'Curry Powder', 'Garam Masala', 'Cumin', 'Smoked Paprika', 'Chili Powder', 'Oregano',
     'Thyme', 'Rosemary', 'Bay Leaves', 'Cinnamon', 'Nutritional Yeast', 'Walnuts', 'Almonds', 'Sesame Seeds'],
 
+  // Five items. What a half-hearted first scan looks like.
+  tiny: ['Eggs', 'White Rice', 'Soy Sauce', 'Yellow Onion', 'Butter'],
+
   // Rice, noodles, aromatics. A cuisine with its own grammar.
   asian: ['Jasmine Rice', 'Rice Noodles', 'Udon', 'Firm Tofu', 'Chicken Thighs', 'Shrimp', 'Eggs',
     'Bok Choy', 'Napa Cabbage', 'Carrots', 'Scallions', 'Garlic', 'Ginger', 'Soy Sauce', 'Oyster Sauce',
@@ -130,4 +133,8 @@ export const CASES = [
   { id: 'asian-cutting', pantry: 'asian', profile: 'cutting', diet: 'none' },
   { id: 'logan-nutallergy', pantry: 'logan', profile: 'standard', diet: 'nutAllergy' },
   { id: 'bigmixed-mealplan', pantry: 'bigMixed', profile: 'standard', diet: 'none', mode: 'mealPlan' },
+  // A vegan in a shared household: the scanned shelf is full of meat and dairy. The diet gate is the
+  // only thing between them and a chicken dinner, and if it empties the deck, what do they see?
+  { id: 'vegan-shared-fridge', pantry: 'bigMixed', profile: 'standard', diet: 'vegan' },
+  { id: 'tiny-standard', pantry: 'tiny', profile: 'standard', diet: 'none' },
 ]

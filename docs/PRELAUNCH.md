@@ -876,6 +876,14 @@ the limit, rather than generating around it.
 - [x] **Counted quantities blocked resizing** — "1 pack" udon and "15 large" shrimp left a 690 kcal
   dish against a 467 kcal cutting target. Counts of 4+ now scale to whole items; 3 or fewer stay
   frozen, so the "0.5 large eggs" landmine is untouched.
+- [x] **A vegan in a shared fridge saw ONE meal.** Told "vegan" with salmon, turkey, chicken and Greek
+  yogurt in the scanned list, the model used them anyway; the diet gate (never floored) dropped 8-9 of
+  10 and one card was left. The pantry is now filtered by the restriction BEFORE the prompt — the
+  model cannot cook what it never sees. After: 3/3 full decks, zero drops. Funnel: `pantryHiddenByDiet`.
+- [x] **An empty pantry was silently replaced by a made-up one** (chicken breast, rice, eggs,
+  broccoli) so the model had something to work with — reachable through the post-scan reveal when a
+  scan finds nothing, and a vegan would have been offered chicken. Now an `empty_pantry` error with
+  no retry button: "Add a few items to your pantry first."
 - [x] Ranking: a not-cookable meal can no longer LEAD a deck; slot coverage can no longer promote a
   dish under the protein floor (it was costing ~15g on the third meal every day of a vegetarian week);
   one dish cannot appear twice under two names.
@@ -896,7 +904,22 @@ the limit, rather than generating around it.
   that feeds the hero fit, so it should push the hero down rather than over it, and the copy wraps to
   two lines on a narrow screen.
 - [ ] Optional follow-up: the Pantry tab's own "Cook tonight" card does not carry the same line.
-- [ ] Soft metrics still above where they should be, tracked per run: ~45% of meals reach fewer than
+**SHIP CHECKLIST — what is actually left (2026-09-12, after ~750 generations):**
+- [ ] **One real generation from the phone.** Every run above was the service-role dry run, which
+  skips auth, the daily cap, the history writes, recent_meal_names and images. The production path
+  shares the code but has NOT been exercised since any of these changes. Tap Generate once; the tell
+  is a `pipeline_runs` row with `dry_run = false` (the column was hardcoded true until today), three
+  new `generated_meals` rows, and photos. If the deck is empty or errors, this is where to look first.
+- [ ] **Two device checks:** the pantry-limit line (raise your protein goal in Profile to force it;
+  it must push the hero down, not overlap it) and the Pantry tab at dinner time floating a "lunch"
+  dish ahead of a parfait.
+- [ ] **The eye test — yours, not the harness's.** 17 decks / 51 meals from the final sweeps are in
+  a digest (sent to you). Rate each *would cook / wouldn't / embarrassing*. Bar: >=80% would-cook,
+  zero embarrassing. The harness cannot judge appetite, and photos only exist for real runs.
+- [ ] **Quality counters in the daily email** (`unseasoned`, `flavourAxesShown`, `belowProteinFloorShown`,
+  `notCookableKept`, `droppedByDiet` from `pipeline_runs`), so a prompt regression after launch is
+  visible the next morning instead of when a user complains. SQL in `ops_report_data()`; a migration.
+- Not needed to ship, tracked: soft metrics still above where they should be — ~45% of meals reach fewer than
   2 flavour axes, ~20% unseasoned (was 50% before the seasoning rule), ~15% have an untimed cooking
   step. None blocks the gate; all are visible in `stepIssuesShown` / `flavourAxesShown`.
 

@@ -238,7 +238,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const {
-      ingredients,
+      ingredients: rawIngredients,
       calorieGoal,
       proteinGoal,
       mealsPerDay,
@@ -258,6 +258,15 @@ Deno.serve(async (req: Request) => {
     // newlines/quotes and caps count + length (token-bloat DoS). Downstream code uses
     // these names unchanged.
     const dietaryRestrictions = sanitizeList(rawRestrictions)
+    // A RESTRICTION FILTERS THE PANTRY, not just the output. Told "vegan" with salmon, turkey,
+    // chicken and Greek yogurt sitting in the list — a shared fridge — the model used them anyway:
+    // 8 of 10 candidates on that sweep case died at the diet gate and the user was shown one meal.
+    // The gate is the backstop. This is the fix: the model cannot cook what it never sees, and the
+    // carb/protein lists, cookability and the prompt all read the filtered shelf from here on.
+    const allIngredients: string[] = (Array.isArray(rawIngredients) ? rawIngredients : []).map((n: unknown) => String(n ?? '')).filter(Boolean)
+    const ingredients = allIngredients.filter(n => dietViolations({ ingredients: [n] }, dietaryRestrictions).length === 0)
+    const pantryHiddenByDiet = allIngredients.length - ingredients.length
+    if (pantryHiddenByDiet > 0) console.log(`[diet] ${pantryHiddenByDiet} pantry item(s) hidden from the prompt for ${dietaryRestrictions.join(', ')}`)
     const foodDislikes = sanitizeList(rawDislikes)
     const dislikedMeals = sanitizeList(rawDislikedMeals)
     const likedMeals = sanitizeList(rawLikedMeals)
@@ -720,7 +729,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       genCountAsked: genCount, modelReturned: meals.length,
       displayCount, servings, calorieTarget, batchCalorieTarget,
       bannedBases, bannedForms, maxPrepMinutes,
-      pantryItems: ingredients.length, windowNames: recentServed.length, pantryCarbsOffered: ownCarbs,
+      pantryItems: ingredients.length, pantryHiddenByDiet, windowNames: recentServed.length, pantryCarbsOffered: ownCarbs,
       savoryCarbsHeld: carbBasesHeld, // why a carb ban was or was not allowed
       pantryProteinsOffered: ownProteins,
     }

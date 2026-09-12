@@ -258,8 +258,8 @@ export default function CookReveal() {
         <View style={styles.loaderWrap}>
           {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
           <Text style={styles.loaderTitle}>{error}</Text>
-          {/* Retry can't help once the daily cap is hit — hide it in that case. */}
-          {errorCode !== 'meal_cap_reached' && (
+          {/* Retry can't help once the daily cap is hit, or when the pantry is empty — hide it. */}
+          {errorCode !== 'meal_cap_reached' && errorCode !== 'empty_pantry' && (
             <TouchableOpacity style={styles.retryBtn} onPress={() => { animatedRef.current = false; retry() }}>
               <Text style={styles.retryText}>Try again</Text>
             </TouchableOpacity>

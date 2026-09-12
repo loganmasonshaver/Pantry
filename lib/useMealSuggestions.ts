@@ -166,13 +166,24 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const ok = await requestConsent()
       if (!ok) { setLoading(false); return }
 
+      // An empty pantry used to be replaced by a made-up one (chicken breast, rice, eggs, broccoli)
+      // so the model had something to chew on — which meant a scan that found nothing produced a
+      // deck of food the user does not own, and a vegan got chicken. Reachable through the post-scan
+      // reveal, which calls load() directly. Say so instead; every consumer already renders `error`.
+      if (ingredients.length === 0) {
+        setError('Add a few items to your pantry first')
+        setErrorCode('empty_pantry')
+        setLoading(false)
+        return
+      }
+
       const dietRestrictions = [
         ...(profile?.dietary_restrictions ?? []),
         ...(profile?.diet_type && profile.diet_type !== 'Classic' ? [profile.diet_type] : []),
       ].filter(Boolean)
 
       const generated = await generateMeals({
-        ingredients: ingredients.length > 0 ? ingredients : ['chicken breast', 'rice', 'eggs', 'broccoli'], // GPT needs at least some ingredients to generate meaningful meals
+        ingredients,
         calorieGoal: profile?.calorie_goal || 2400,
         proteinGoal: profile?.protein_goal || 150,
         mealsPerDay: profile?.meals_per_day || 3,
