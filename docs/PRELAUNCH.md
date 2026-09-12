@@ -881,15 +881,21 @@ the limit, rather than generating around it.
   one dish cannot appear twice under two names.
 
 **OPEN — decisions for Logan, not bugs:**
-- [ ] **The floored cookability gate.** Every hard fail left (7 in 204 meals, ~3%) is the same shape:
-  the model invents ONE ingredient, and the gate — which detects all of them — shows the meal anyway
-  rather than a short deck. Cook Now's whole promise is the pantry. Options: keep it (a card that
-  says "Better with: eggs"), or hard-drop in cookNow and show 2 meals on a thin pantry.
-- [ ] **A pantry that cannot meet the targets.** The carb-heavy shelf (peanut butter, milk, sliced
-  cheese, canned beans) tops out near 33g against a 38g floor — no recipe reaches it without 1.5 cans
-  of beans. The app currently shows the best it can, silently. Proposal: when every shown meal is
-  under the floor, say so ("your pantry is light on protein for a 50g goal") — honest, and it points
-  at the scan/grocery flow. Client-side only; the data is already there.
+- [x] **DECIDED 2026-09-12 (Logan): the floored cookability gate stays as it is.** ~3% of meals on a
+  thin pantry need one item the user lacks, and the card already says "Better with: <item>". A short
+  deck was judged worse than a deck with one shopping line, which is the same answer every other
+  floored gate in the file already gives. Not to be reopened without a new measurement.
+- [x] **BUILT 2026-09-12, UNVERIFIED ON DEVICE — the pantry-limit line.** When EVERY meal in the deck
+  misses the protein floor, Home's "Cook from your pantry" header carries one muted line: "Light on
+  protein for your {N}g-a-meal goal — add one when you shop." Same 75% floor the ranker uses, so it
+  appears only when the server had nothing better; it waits for the profile network read, because
+  proteinGoal falls back to 180 and telling someone they are short against numbers that are not
+  theirs is worse than silence. No button — "See all →" in that header already goes to the pantry.
+  Measured against 68 real sweep decks: fires on 3, ALL of them the carb-heavy pantry, and silent on
+  the other 15 pantry types. **Needs a look on device** — it sits inside the measured header wrapper
+  that feeds the hero fit, so it should push the hero down rather than over it, and the copy wraps to
+  two lines on a narrow screen.
+- [ ] Optional follow-up: the Pantry tab's own "Cook tonight" card does not carry the same line.
 - [ ] Soft metrics still above where they should be, tracked per run: ~45% of meals reach fewer than
   2 flavour axes, ~20% unseasoned (was 50% before the seasoning rule), ~15% have an untimed cooking
   step. None blocks the gate; all are visible in `stepIssuesShown` / `flavourAxesShown`.

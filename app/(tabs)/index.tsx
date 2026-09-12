@@ -1138,6 +1138,16 @@ export default function HomeScreen() {
   const [mealSlots, setMealSlots] = useState<string[]>(DEFAULT_SLOT_LABELS)
   const mealSlotsRef = useRef<string[]>(DEFAULT_SLOT_LABELS)
 
+  // The per-meal protein target, and whether the whole deck missed it. 75% is the same floor the
+  // ranker uses (_shared/rank-deck.ts), so the line appears exactly when the server had nothing
+  // better to offer — never when one weak option sits beside two good ones.
+  // Only once the PROFILE has landed: proteinGoal falls back to 180 and the slots to a default list,
+  // and telling someone their pantry is short against numbers that are not theirs is worse than
+  // saying nothing. meal_slots is not in the goals cache, so the network read is the signal.
+  const perMealProtein = goalsFromNetworkRef.current && mealSlots.length > 0 ? proteinGoal / mealSlots.length : 0
+  const pantryProteinShort = meals.length > 0 && perMealProtein > 0
+    && meals.every(m => (Number(m.protein) || 0) < 0.75 * perMealProtein)
+
   // Persist the structure, then rebuild the day from it. Written to the profile rather than held in
   // state, which is the entire bug: a slot that lives only in React state cannot survive the next
   // refetch. Optimistic — the row is a list of strings, and a failed write costs a re-add, not data.
@@ -1906,6 +1916,20 @@ export default function HomeScreen() {
                   }]} />
                 </View>
               )}
+              {/* EVERY option short on protein means the PANTRY is the ceiling, not the generator.
+                  Measured across 10 pantries: a shelf of peanut butter, milk, sliced cheese and
+                  canned beans tops out near 33g a meal against a 38g floor, and no prompt reaches it
+                  without a dish nobody would cook. The app used to show the best it could and say
+                  nothing, so a shortfall read as the app being bad at its job. No button: "See all →"
+                  above already goes to the pantry, and a second CTA in the same header competes
+                  with it. */}
+              {pantryProteinShort && (
+                <View style={styles.carryoverRow}>
+                  <Text style={styles.pantryLimitNote} numberOfLines={2}>
+                    Light on protein for your {Math.round(perMealProtein)}g-a-meal goal — add one when you shop.
+                  </Text>
+                </View>
+              )}
             </View>
 
             {mealsPending ? (
@@ -2444,6 +2468,9 @@ const styles = StyleSheet.create({
   // the title directly above it.
   carryoverRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   carryoverNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
+  // Muted, matching the carryover line: this is context, not an alarm. Green would read as good news
+  // and red as an error, and it is neither — the pantry is simply the limit today.
+  pantryLimitNote: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600', flex: 1, lineHeight: 16 },
   carryoverSep: { width: 3, height: 3, borderRadius: 1.5, backgroundColor: COLORS.textMuted, opacity: 0.5, marginHorizontal: 7 },
   // A live indicator, not a spinner — the language of a recording light. Slow enough to read as
   // breathing rather than blinking.
