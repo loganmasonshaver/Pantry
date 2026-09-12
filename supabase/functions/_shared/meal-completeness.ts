@@ -36,13 +36,24 @@ export function isDrink(name: unknown): boolean {
   return /\b(shake|smoothie|latte|frappe|protein drink|milkshake)\b/i.test(String(name ?? ''))
 }
 
+// Neither is an omelet. The carb rule was written against protein-and-veg PLATES, and an egg dish is
+// not one — nobody serves a starch inside a frittata to make it a meal. Enforcing it on eggs is what
+// put rice "alongside" a scramble (run 48) and granola on a savory omelet (run 51): with potato
+// base-banned, the only carbs this pantry could offer were rice, protein cereal and granola.
+// Name-based, like isDrink, and restricted to forms that ARE the egg dish — "Egg and Cheese Breakfast
+// Wrap" is a wrap and still owes a carb.
+export function isEggDish(name: unknown): boolean {
+  return /\b(omelet(?:te)?s?|frittatas?|scrambles?|scrambled eggs|shakshuka|quiches?|egg bakes?|egg cups?|egg bites?|fried eggs|poached eggs|boiled eggs|deviled eggs|egg salad)\b/i.test(String(name ?? ''))
+}
+
 // Keto / low-carb / carnivore users are the prompt's own exception to the carb rule.
 export function carbRequired(dietaryRestrictions: readonly unknown[]): boolean {
   return !dietaryRestrictions.some(d => /keto|low[- ]?carb|carnivore/i.test(String(d)))
 }
 
 export function isCompleteMeal(meal: { name?: unknown; ingredients?: unknown }, dietaryRestrictions: readonly unknown[] = []): boolean {
-  return !carbRequired(dietaryRestrictions) || isDrink(meal?.name) || hasCarbSource(meal?.ingredients, meal?.name)
+  return !carbRequired(dietaryRestrictions) || isDrink(meal?.name) || isEggDish(meal?.name)
+    || hasCarbSource(meal?.ingredients, meal?.name)
 }
 
 // Water and ice carry no calories. Looked up by name, FatSecret's top hit for "Ice Cubes" was an

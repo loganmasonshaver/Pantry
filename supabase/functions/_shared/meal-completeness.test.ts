@@ -99,3 +99,15 @@ test('sweet food in a savory dish clashes, but savory sweetness is left alone', 
   // A sweet dish is still allowed to hold sweet food.
   assert.equal(savoryClash({ name: 'Greek Yogurt and Granola Parfait', ingredients: ings('greek yogurt', 'granola', 'berries') }), false)
 })
+
+// An omelet is a meal. Enforcing the carb rule on egg dishes put rice "alongside" a scramble (run 48)
+// and granola on a savory omelet (run 51). Measured: this flips 9 of the 129 stored generated meals
+// from incomplete to complete, every one of them a scramble, frittata or omelet.
+test('egg dishes are complete without a carb, but a wrap still owes one', async () => {
+  const { isCompleteMeal, isEggDish } = await import('./meal-completeness.ts')
+  const ing = (...names: string[]) => names.map(name => ({ name }))
+  assert.equal(isCompleteMeal({ name: 'Savory Egg White and Onion Frittata', ingredients: ing('liquid egg whites', 'yellow onion', 'shredded cheese', 'butter') }), true)
+  assert.equal(isCompleteMeal({ name: 'Cottage Cheese and Vegetable Scramble', ingredients: ing('eggs', 'cottage cheese', 'leafy greens') }), true)
+  assert.equal(isEggDish('Egg and Cheese Breakfast Wrap'), false, 'a wrap is a wrap')
+  assert.equal(isCompleteMeal({ name: 'Chicken and Cauliflower Stir-Fry', ingredients: ing('chicken', 'cauliflower', 'soy sauce') }), false)
+})

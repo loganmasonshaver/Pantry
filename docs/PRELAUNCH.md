@@ -763,18 +763,28 @@ and Vegetable Frittata (51g/527). Target 40g/525. Photos viewed; every quantity 
   Honey, maple and brown sugar deliberately excluded — honey-garlic chicken is real. Measured: flags
   this dish and adds zero new flags across the 129 generated and 219 Discover meals. Tell:
   `savoryClashShown` stays 0 and no sweet cereal appears in a savory dish.
-- [ ] **No salt or pepper in ANY of the three, and 51% of all 129 generated meals mention neither.**
+- [x] **PROMPT RULE ADDED 2026-09-11, UNVERIFIED — needs the next generation.** "SEASON IT, AND WRITE THE
+  SEASONING DOWN": the rule now says salt and the assumed spices are free, can never make a meal
+  uncookable, and must appear in BOTH the steps and the ingredients. Baseline to beat, measured tonight
+  over 129 stored meals: 50% unseasoned. Tell: funnel `stepIssuesShown[].unseasoned` all false.
+  Was: **No salt or pepper in ANY of the three, and 51% of all 129 generated meals mention neither.**
   Numbers, not taste: `flavourAxesShown` was [1, 0, 1]. Hypothesis worth testing before any prompt
   edit: INGREDIENT COMPLETENESS ("EVERY item referenced in any step MUST appear in the ingredients
   array") makes mentioning salt cost an ingredient line, so the model stays silent instead. A prompt
   line telling it that assumed basics may be named in steps AND listed would test that directly.
-- [ ] **The frittata never says to preheat the oven** — step 4 says "transfer to a preheated oven at
+- [x] **PROMPT RULES ADDED 2026-09-11 for all three step defects, UNVERIFIED.** Every cooking step must
+  carry a time and a protein step a doneness cue; the FIRST step preheats the oven when one is used;
+  pre-cooked pantry food is cold and must be reheated in a step. Counters added (`_shared/step-checks.ts`,
+  funnel `stepIssuesShown`). Baselines measured tonight over the 129 stored meals: 8 of the 14 oven dishes
+  had no preheat step, 42% had a cooking step with no time, 5 served cold pre-cooked rice unheated.
+  Tell: those three counters at 0 on the next run.
+  Was: **The frittata never says to preheat the oven** — step 4 says "transfer to a preheated oven at
   375°F". A cold oven adds ~10 min to a dish whose cookTime claims 20.
-- [ ] **The BBQ chicken step has no time and no doneness cue** ("sear until cooked through") on a whole
+- [ ] (covered by the rules above) **The BBQ chicken step has no time and no doneness cue** ("sear until cooked through") on a whole
   breast. The prompt's own example step says "cook 6-7 minutes per side until golden". Food safety plus
   beginner usability. Its 15 min cook is also short: chicken 12-14 + glaze 1 + cauliflower 5-7, all
   sequential in one pan, is ~22. No rest for the chicken either.
-- [ ] **Cold "Cooked Rice" is still served without a reheat step** — "over a bed of warm cooked rice"
+- [ ] (covered by the rules above) **Cold "Cooked Rice" is still served without a reheat step** — "over a bed of warm cooked rice"
   and "stir in the cooked rice". Second run in a row (§2n).
 - [ ] **360g of liquid egg whites (1.5 cups, ~12 whites) in a one-serving frittata** — about 80% of a
   16oz carton, and 1.5 cups of liquid plus veg and rice needs a small skillet the recipe never names.
@@ -784,7 +794,16 @@ and Vegetable Frittata (51g/527). Target 40g/525. Photos viewed; every quantity 
   candidate the water bug cost cannot be recovered. Same argument that put names into `nameGapDetail`.
 - [ ] **Mixed quantity formats in one list** — the model writes "1.5 cups" and "1/4 cup", the scaler
   writes "½ cup" and "¾ tbsp", and both appear on the same screen. Normalise at display.
-- [ ] Still true from §2n: rice in 2 of 3, and 2 of 3 were egg dishes.
+- [x] **EGG DISHES NO LONGER NEED A CARB (2026-09-11), UNVERIFIED.** `isEggDish` exempts omelets,
+  frittatas, scrambles, shakshuka, quiche and egg bakes from the carb rule, and the prompt says so
+  explicitly ("do NOT bolt cereal, granola or a side of rice onto one"). This is the root cause behind
+  rice beside a scramble (run 48), rice in a "wrap" (run 48) and granola on an omelet (run 51): the rule
+  was written against protein-and-veg PLATES and an egg dish is not one. Measured: flips 9 of 129 stored
+  meals from incomplete to complete, every one a scramble, frittata or omelet; a wrap and a stir-fry
+  still owe a carb. Tell: an egg dish shows with no starch bolted on, `incompleteShown` stays 0.
+- [ ] Still true from §2n: rice in 2 of 3 shown, and 2 of 3 were egg dishes. The base ban leaves this
+  pantry ONE savory carb (rice) whenever potato is banned — consider protecting the last savory carb the
+  way `maxProteinBans` protects proteins.
 
 ## 2m. POST-LAUNCH — popularity signals  *(Logan asked 2026-09-10: "most liked in 7 days" as the hero?)*
 - [ ] **Decided: NOT the hero.** Pre-launch every recipe has 0 likes, and early on 1-2 taps would pick
