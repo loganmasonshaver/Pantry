@@ -13,11 +13,37 @@ import { stepIssues } from '../../supabase/functions/_shared/step-checks.ts'
 import { flavourAxes } from '../../supabase/functions/_shared/flavour-axes.ts'
 import { detectBases, dishArchetype, isSameDish } from '../../supabase/functions/_shared/dish-key.ts'
 import { dietViolations } from '../../supabase/functions/_shared/diet-check.ts'
-import { pantryCarbs } from '../../supabase/functions/_shared/meal-completeness.ts'
+import { pantryCarbs, pantryProteins } from '../../supabase/functions/_shared/meal-completeness.ts'
+import { estimateMacros } from '../../supabase/functions/_shared/macro-estimate.ts'
 import { FORBIDDEN } from './fixtures.mjs'
 
 const names = (ings) => (Array.isArray(ings) ? ings : []).map(i => String(i?.name ?? i ?? ''))
 const SWEET_DISH = /\b(parfait|smoothie|shake|oats|porridge|pancakes?|crepes?|waffles?|pudding|dessert|ice cream|cheesecake|muffins?|cookies?|bites|clusters?)\b/i
+
+// The most protein this pantry can honestly put in ONE meal: the two densest protein foods it holds,
+// each at a culinary-normal 200g, inside the calorie target. Without this the bar punishes the app for
+// a shelf holding peanut butter, milk, sliced cheese and canned beans against a 38g/meal floor — no
+// recipe reaches that without 1.5 cans of beans, which the prompt's own absurd-quantity rule forbids.
+// A miss under the ceiling is the app's fault; a miss above it is the pantry's, and the product answer
+// is to TELL the user, not to generate a better lie.
+const ceilingCache = new Map()
+export function proteinCeiling(pantry, calorieTarget) {
+  const key = `${pantry.length}:${pantry[0]}:${calorieTarget}`
+  if (ceilingCache.has(key)) return ceilingCache.get(key)
+  const scored = pantryProteins(pantry).map(name => {
+    const e = estimateMacros([{ name, grams: '100g' }])
+    return { name, p: e.protein, kcal: e.kcal }
+  }).filter(x => x.p > 0).sort((a, b) => b.p - a.p)
+  let kcal = 0, protein = 0
+  for (const item of scored.slice(0, 2)) {
+    const grams = Math.min(200, Math.max(0, ((calorieTarget - kcal) / Math.max(item.kcal, 1)) * 100))
+    protein += (item.p * grams) / 100
+    kcal += (item.kcal * grams) / 100
+  }
+  const out = Math.round(protein)
+  ceilingCache.set(key, out)
+  return out
+}
 
 /** HARD = the deck is not shippable. SOFT = measured, tracked against a baseline. */
 export function scoreMeal(meal, ctx) {
@@ -65,8 +91,15 @@ export function scoreMeal(meal, ctx) {
 
   // 8. Macros. The bands the function itself enforces, read from the caller's own targets.
   const p = Number(meal?.protein) || 0, c = Number(meal?.calories) || 0
-  if (ctx.proteinTarget > 0 && p < 0.70 * ctx.proteinTarget) hard.push(`protein ${p}g under floor (${Math.round(0.75 * ctx.proteinTarget)}g)`)
-  else if (ctx.proteinTarget > 0 && p < 0.75 * ctx.proteinTarget) soft.push(`protein ${p}g just under the ${Math.round(0.75 * ctx.proteinTarget)}g floor`)
+  const floor = Math.round(0.75 * ctx.proteinTarget)
+  const ceiling = proteinCeiling(ctx.pantry, ctx.calorieTarget)
+  if (ctx.proteinTarget > 0 && p < 0.70 * ctx.proteinTarget) {
+    // Only a miss the pantry could have avoided is the app's failure.
+    if (ceiling >= floor) hard.push(`protein ${p}g under floor (${floor}g, pantry could reach ~${ceiling}g)`)
+    else soft.push(`protein ${p}g — pantry ceiling is only ~${ceiling}g against a ${floor}g floor`)
+  } else if (ctx.proteinTarget > 0 && p < 0.75 * ctx.proteinTarget) {
+    soft.push(`protein ${p}g just under the ${floor}g floor`)
+  }
   if (c > ctx.calorieTarget * 1.4) hard.push(`calories ${c} over band`)
   if (c < ctx.calorieTarget * 0.75) hard.push(`calories ${c} under band`)
 

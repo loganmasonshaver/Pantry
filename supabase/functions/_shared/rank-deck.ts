@@ -21,6 +21,8 @@ export type Candidate = {
   _tier?: number
   _repeat?: boolean
   _notCookable?: boolean
+  /** meets the protein floor (75% of target). Coverage may not displace a meal that does. */
+  _proteinOk?: boolean
   _fitScore?: number
 }
 
@@ -81,13 +83,15 @@ export function selectDeck<T extends Candidate>(candidates: T[], n: number): { d
   if (n < 2) return { deck, promoted, duplicates }
   for (const need of NEEDS) {
     if (deck.some(need)) continue
-    // Coverage may not DEGRADE the deck. On the asian pantry it pulled a 30g tofu scramble in over
-    // 43g stir-fries purely because the deck held no light meal — against a 47g target, that trade
-    // is not worth making. A spread the user can eat all day is worth less than every meal hitting
-    // their macros, so a promotion only happens at a tier the deck already contains.
+    // Coverage may not DEGRADE the deck, and the PROTEIN FLOOR is the line. On the asian pantry it
+    // pulled a 30g tofu scramble in over 43g stir-fries; across the vegetarian week it cost ~15g on
+    // the third meal every time, because the best light dish on most pantries is a yogurt bowl or
+    // toast. The user cooks ONE of these three, so a spread they can eat at any hour is worth less
+    // than every option hitting their macros. If no light dish clears the floor, the deck goes
+    // without one and the client's own time-of-day sort decides what leads.
     const worstTier = Math.max(...deck.map(m => Number(m._tier) || 0), 0)
     const pick = sorted.find(m => !deck.includes(m) && need(m) && !m._clash && !m._notCookable
-      && (Number(m._tier) || 0) <= worstTier)
+      && m._proteinOk !== false && (Number(m._tier) || 0) <= worstTier)
     if (!pick) continue
     for (let i = deck.length - 1; i >= 0; i--) {
       const rest = deck.filter((_, j) => j !== i)

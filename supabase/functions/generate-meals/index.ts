@@ -562,6 +562,7 @@ ${ingredients.join(", ")}
 Rules:
 ${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
+- DO THE PROTEIN ARITHMETIC BEFORE YOU RETURN (blocking). Add up the protein from the QUANTITIES you actually wrote, using roughly: chicken/turkey breast 31g per 100g, lean beef or pork 26g, salmon 20g, shrimp 24g, canned tuna 25g, whole eggs 13g (about 6g per egg), liquid egg whites 11g, Greek yogurt 10g, cottage cheese 11g, hard cheese 25g, firm tofu 17g, tempeh 19g, cooked lentils or beans 9g, milk 3g, cooked rice or pasta 3g, bread 9g, protein powder 75g. If your total falls short of the band above, RAISE THE PORTION of the protein ingredient or add a SECOND protein source from the pantry before returning it — never hand back a recipe you already know is short. PLANT AND DAIRY PROTEINS ARE LESS DENSE and this is where it goes wrong: a 50g-protein vegetarian dish is roughly 250g of tofu, or 200g of Greek yogurt plus two eggs — a 100g portion of tofu is 17g and will not get there however the dish is described.
 - PROTEIN DISTRIBUTION (blocking constraint): every recipe MUST have ${batchProteinMin}g–${batchProteinMax}g protein in TOTAL (target ~${batchProteinTarget}g). Distribute protein EVENLY across the ${genCount} recipes — never pile into one and starve another. A single SERVING above ${proteinMax}g causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
 - CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${proteinSourcesLine}${bannedBasesLine}${bannedFormsLine}
@@ -1203,13 +1204,20 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           const proteinOk = proteinTarget <= 0 || Number(m.protein) >= 0.75 * proteinTarget
           // Protein powder or a sweet-flavoured product in a savory dish — see savoryClash.
           const clash = savoryClash(m)
-          const pDelta = (Number(m.protein) - proteinTarget) / Math.max(proteinTarget, 1)
+          // PROTEIN IS ONE-SIDED AND WEIGHTED, like fat but in the other direction. Symmetric was
+          // wrong twice over on a macro app: it punished a 73g meal exactly as hard as a 27g one,
+          // and weighting protein level with calories let a 29g dish with perfect calories outrank a
+          // 33g dish that was 100 kcal off. Measured on the vegetarian depth run (7 days): days 2 and
+          // 7 showed 29g and 31g while 33g and 35g candidates sat unshown, inside the same tier.
+          // Over-target protein is not a defect — the calorie band and the fat ceiling already bound
+          // the meal — so only the SHORTFALL scores, and it counts double against calorie drift.
+          const pShort = Math.max(0, (proteinTarget - Number(m.protein)) / Math.max(proteinTarget, 1))
           const cDelta = (Number(m.calories) - calorieTarget) / Math.max(calorieTarget, 1)
           // One-sided fat penalty: only meals ABOVE the fat target lose points, so leaner meals
           // rank higher without punishing a naturally-lean dish. Off for keto/low-carb.
           const fExcess = highFatDiet ? 0 : Math.max(0, (Number(m.fat) - fatTarget) / Math.max(fatTarget, 1))
-          const fitScore = pDelta * pDelta + cDelta * cDelta + fExcess * fExcess
-          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1), _clash: clash }
+          const fitScore = 2 * pShort * pShort + cDelta * cDelta + fExcess * fExcess
+          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1), _clash: clash, _proteinOk: proteinOk }
         })
 
       // EVERY INPUT THE SORT BELOW USES, recorded before it runs. proteinCandidates alone could not
@@ -1238,7 +1246,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       const { deck, promoted, duplicates } = selectDeck(scored, displayCount)
       funnel.slotPromoted = promoted
       funnel.duplicateBackfill = duplicates
-      meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, ...rest } = m; return rest })
+      meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, _proteinOk, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = carbPossible ? meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length : 0
       funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < 0.75 * proteinTarget).length

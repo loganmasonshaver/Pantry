@@ -139,3 +139,18 @@ test('slot coverage never drags in a worse tier than the deck already holds', ()
   ], 3)
   assert.deepEqual(better.promoted, ['Chicken and Shiitake Scramble'])
 })
+
+// The vegetarian week (7 days): coverage cost ~15g on the third meal every single day, because the
+// best light dish on that pantry is a yogurt bowl. One meal gets cooked, so macros win.
+test('coverage does not promote a dish below the protein floor', () => {
+  const pool: Candidate[] = [
+    { name: 'Lentil and Feta Bake', slot: 'dinner', _tier: 0, _proteinOk: true, _fitScore: 0.1 },
+    { name: 'Tofu and Chickpea Curry', slot: 'dinner', _tier: 0, _proteinOk: true, _fitScore: 0.2 },
+    { name: 'Paneer and Spinach Skillet', slot: 'lunch', _tier: 0, _proteinOk: true, _fitScore: 0.3 },
+    { name: 'Greek Yogurt and Berry Bowl', slot: 'breakfast', _tier: 1, _proteinOk: false, _fitScore: 0.4 },
+  ]
+  assert.deepEqual(selectDeck(pool, 3).promoted, [])
+  // A light dish that DOES clear the floor is still worth the slot.
+  const ok = [...pool.slice(0, 3), { name: 'Greek Yogurt and Egg Scramble', slot: 'breakfast', _tier: 0, _proteinOk: true, _fitScore: 0.9 }]
+  assert.deepEqual(selectDeck(ok, 3).promoted, ['Greek Yogurt and Egg Scramble'])
+})
