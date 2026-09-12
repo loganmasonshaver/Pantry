@@ -181,3 +181,30 @@ test('counted food no longer leaves the result short of target', () => {
   const up = scaleToTarget(small, 430, 525)
   assert.ok(Math.abs(430 * up.macroFactor - 525) < 525 * 0.02, `${(430 * up.macroFactor).toFixed(0)}`)
 })
+
+// The asian pantry on a cutting target (467 kcal) shipped 690 kcal meals: "1 pack" of udon and
+// "15 large" shrimp were counted, so the only movable food left was a spoon of soy sauce.
+test('a count of four or more is bulk and scales to whole items', () => {
+  assert.equal(isScalable({ visual: '15 large' }), true)
+  assert.equal(isScalable({ visual: '8 florets' }), true)
+  assert.equal(isScalable({ visual: '3 large' }), false, 'the 0.5-egg landmine stays shut')
+  assert.equal(isScalable({ visual: '2 medium' }), false)
+  assert.equal(isScalable({ visual: '1 pack' }), false)
+  assert.equal(scaleVisualText('15 large', 0.7), '11 large')
+  assert.equal(scaleVisualText('8 florets', 0.5), '4 florets')
+  assert.equal(scaleVisualText('4 slices', 0.3), '1 slices', 'never below one')
+  // Measured visuals keep their fractions.
+  assert.equal(scaleVisualText('1 cup', 0.5), '½ cup')
+})
+
+test('the cutting-target shrimp bowl now comes down', () => {
+  const meal = [
+    { name: 'shrimp', grams: '170g', visual: '15 large' },
+    { name: 'udon', grams: '200g', visual: '1 pack' },
+    { name: 'frozen edamame', grams: '56g', visual: '¼ cup' },
+    { name: 'soy sauce', grams: '11ml', visual: '¾ tbsp' },
+  ]
+  const out = scaleToTarget(meal, 689, 467)
+  assert.ok(689 * out.macroFactor < 620, `moved well down: ${(689 * out.macroFactor).toFixed(0)}`)
+  assert.equal(out.ingredients[0].visual, '11 large')
+})

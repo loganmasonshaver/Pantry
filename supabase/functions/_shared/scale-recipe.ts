@@ -39,8 +39,23 @@ const LEAN_SHARE = 0.3
 
 export type ScalableIngredient = { name?: unknown; grams?: unknown; visual?: unknown }
 
+// A COUNT of four or more is divisible in practice. "15 large shrimp" and "8 florets" are bulk
+// written as a count, and leaving them fixed is what let a 690 kcal dish sit against a 467 kcal
+// cutting target: the only movable things left were a tablespoon of soy sauce and half a clove of
+// garlic. The landmine this file exists to avoid is "0.5 large eggs" — a count of 3 or fewer stays
+// untouchable, and counts that do scale round to WHOLE items, never quarters.
+const COUNT_MIN_SCALABLE = 4
+const LEADING_COUNT = /^\s*(\d+)(?!\s*[\/.])/
+
+export function countScalable(visual: string | undefined): boolean {
+  if (!visual || MEASURE_WORDS.test(visual)) return false
+  const m = visual.match(LEADING_COUNT)
+  return !!m && Number(m[1]) >= COUNT_MIN_SCALABLE
+}
+
 export function isScalable(ing: ScalableIngredient): boolean {
-  return MEASURE_WORDS.test(String(ing?.visual ?? ''))
+  const visual = String(ing?.visual ?? '')
+  return MEASURE_WORDS.test(visual) || countScalable(visual)
 }
 
 /** Scale the leading number of a visual, preserving ranges and the trailing text. */
@@ -76,6 +91,11 @@ export function scaleVisualText(visual: string | undefined, factor: number): str
   const lo = toNum(m[1])
   if (!Number.isFinite(lo) || lo <= 0) return visual
   const rest = visual.slice(m[0].length)
+  // "15 large shrimp" x0.7 is 11 shrimp, not 10½ — a count has no quarters.
+  if (countScalable(visual)) {
+    const scaledCount = Math.max(1, Math.round(lo * factor))
+    return `${scaledCount}${rest}`
+  }
   if (m[3] !== undefined) {
     const hi = toNum(m[3])
     if (!Number.isFinite(hi) || hi <= 0) return visual
