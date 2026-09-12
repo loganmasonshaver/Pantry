@@ -111,6 +111,15 @@ export function isStructural(ingredientName: unknown, grams?: unknown): boolean 
   return Number.isFinite(g) && g > GARNISH_MAX_GRAMS
 }
 
+// Plain water comes out of the tap, and the prompt already tells the model so ("you may ALWAYS use
+// these ... and water"). It was never in the staples ARRAY the code checks, so a recipe that listed
+// water was disqualified as uncookable — Cook Tonight run 51 lost a candidate exactly that way, with
+// `notCookableMissing: ["water"]` as the only trace. Handled here rather than by adding "water" to
+// that array because isInPantry matches substrings: a bare "water" staple would also make
+// "watermelon" and "coconut water" assumed in stock, the same trap that forced "ice cubes".
+// Qualifiers stack in real recipes ("reserved pasta water"), so the prefix repeats.
+const PLAIN_WATER = /^(?:(?:cold|warm|hot|boiling|filtered|tap|ice|iced|room temperature|lukewarm|reserved|pasta|cooking|starchy)\s+)*water$/
+
 export type MissingReport = { structural: string[]; garnish: string[] }
 
 export function findMissing(
@@ -123,6 +132,7 @@ export function findMissing(
   for (const ing of ingredients) {
     const name = String(ing?.name ?? '').trim()
     if (!name) continue
+    if (PLAIN_WATER.test(norm(name))) continue
     if (isInPantry(name, pantry)) continue
     // The kitchen is assumed to stock these, so they are never "missing" — the prompt says as much
     // to the model and the code has to agree, or salt would disqualify every meal.

@@ -157,3 +157,17 @@ test('the product itself, and the generous swaps, still match', () => {
   assert.equal(isInPantry('chicken', ['Chicken Breast']), true)
   assert.equal(isInPantry('oats', ['Oat Milk', 'Rolled Oats']), true, 'real oats elsewhere in the pantry')
 })
+
+// Run 51 (2026-09-11) dropped a candidate with notCookableMissing ["water"]: the prompt promises
+// water is always available and the staples array never had it.
+test('plain water is never missing, but food named after water still is', () => {
+  const pantry = ['Eggs', 'Cooked Rice']
+  for (const w of ['water', 'Water', 'cold water', 'boiling water', 'reserved pasta water', ' filtered water ']) {
+    const out = findMissing([{ name: w, grams: '240g' }], pantry, [])
+    assert.deepEqual([...out.structural, ...out.garnish], [], w)
+  }
+  const coconut = findMissing([{ name: 'coconut water', grams: '240g' }], pantry, [])
+  assert.deepEqual(coconut.structural, ['coconut water'])
+  const melon = findMissing([{ name: 'watermelon', grams: '200g' }], pantry, [])
+  assert.deepEqual(melon.structural, ['watermelon'])
+})

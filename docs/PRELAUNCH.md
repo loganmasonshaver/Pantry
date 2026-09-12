@@ -735,6 +735,57 @@ Breakfast Wrap (24g/559). Target 40g/525 (160g ÷ 4 meals). Rows in `generated_m
   min today, 8 in 45 min on 09-07), so 7/10 repeats is partly testing. But this pantry supports ~6
   real dinners, so a once-a-day user would exhaust them within a week anyway.
 
+## 2o. AUDIT — Cook Tonight run 51 (2026-09-11 23:05), first run on last night's four fixes
+Shown: BBQ Chicken and Rice Plate (52g/553), Savory Greek Yogurt and Egg Omelet (46g/525), Egg White
+and Vegetable Frittata (51g/527). Target 40g/525. Photos viewed; every quantity and step read.
+
+**Confirmed working (was the point of the fixes):**
+- [x] **Protein 52/46/51 — all above the floor**, against 36/33/24 in run 48. `belowProteinFloorShown` 0,
+  `incompleteShown` 0, `repeatsShown` 1 (the frittata), `slotPromoted` empty because the top three
+  already held two dinners and one breakfast. `rankCandidates` now carries `slot`.
+- [x] **The protein-first scaler behaved exactly as designed.** BBQ plate 777 -> 553 by halving sauce,
+  rice and oil while the 160g chicken and the cauliflower were untouched. Omelet 613 -> 525 by cutting
+  cheese, butter and granola ~0.73 with eggs, egg whites and yogurt untouched; butter's visual went
+  "1 tbsp" -> "¾ tbsp" correctly.
+- [ ] Form check NOT exercised — nothing was named wrap/taco/sandwich. `nameGaps` 0.
+
+**New, found in this run:**
+- [x] **FIXED tonight: a candidate was dropped for "missing" water.** `notCookableMissing: ["water"]`.
+  The prompt promises water is always available; the ASSUMED array never had it, so any recipe listing
+  water (soups, oatmeal, anything simmered) was disqualified as uncookable. Fixed in `pantry-check.ts`
+  rather than by adding "water" to ASSUMED, because isInPantry matches substrings and a bare "water"
+  would make "watermelon" and "coconut water" assumed in stock. Tell: `notCookableMissing` stops
+  naming water.
+- [x] **FIXED tonight: granola on a savory omelet.** The carb rule demanded a carb, potato is
+  base-banned, and the only carbs offered were rice, protein cereal and granola — so a dish named
+  "Savory ... Omelet" was served "with a side of yogurt topped with granola". Sweet FOOD (granola,
+  cereal, cookies, ice cream, chocolate chips...) now counts as a savory clash and sorts last.
+  Honey, maple and brown sugar deliberately excluded — honey-garlic chicken is real. Measured: flags
+  this dish and adds zero new flags across the 129 generated and 219 Discover meals. Tell:
+  `savoryClashShown` stays 0 and no sweet cereal appears in a savory dish.
+- [ ] **No salt or pepper in ANY of the three, and 51% of all 129 generated meals mention neither.**
+  Numbers, not taste: `flavourAxesShown` was [1, 0, 1]. Hypothesis worth testing before any prompt
+  edit: INGREDIENT COMPLETENESS ("EVERY item referenced in any step MUST appear in the ingredients
+  array") makes mentioning salt cost an ingredient line, so the model stays silent instead. A prompt
+  line telling it that assumed basics may be named in steps AND listed would test that directly.
+- [ ] **The frittata never says to preheat the oven** — step 4 says "transfer to a preheated oven at
+  375°F". A cold oven adds ~10 min to a dish whose cookTime claims 20.
+- [ ] **The BBQ chicken step has no time and no doneness cue** ("sear until cooked through") on a whole
+  breast. The prompt's own example step says "cook 6-7 minutes per side until golden". Food safety plus
+  beginner usability. Its 15 min cook is also short: chicken 12-14 + glaze 1 + cauliflower 5-7, all
+  sequential in one pan, is ~22. No rest for the chicken either.
+- [ ] **Cold "Cooked Rice" is still served without a reheat step** — "over a bed of warm cooked rice"
+  and "stir in the cooked rice". Second run in a row (§2n).
+- [ ] **360g of liquid egg whites (1.5 cups, ~12 whites) in a one-serving frittata** — about 80% of a
+  16oz carton, and 1.5 cups of liquid plus veg and rice needs a small skillet the recipe never names.
+- [ ] **The omelet splits 115g of yogurt** between the egg mixture ("half the Greek yogurt") and the
+  side, without the ingredient list saying so.
+- [ ] **Funnel gap:** `notCookableMissing` names the missing FOOD but not the dish that died, so which
+  candidate the water bug cost cannot be recovered. Same argument that put names into `nameGapDetail`.
+- [ ] **Mixed quantity formats in one list** — the model writes "1.5 cups" and "1/4 cup", the scaler
+  writes "½ cup" and "¾ tbsp", and both appear on the same screen. Normalise at display.
+- [ ] Still true from §2n: rice in 2 of 3, and 2 of 3 were egg dishes.
+
 ## 2m. POST-LAUNCH — popularity signals  *(Logan asked 2026-09-10: "most liked in 7 days" as the hero?)*
 - [ ] **Decided: NOT the hero.** Pre-launch every recipe has 0 likes, and early on 1-2 taps would pick
   it; a popularity hero also self-reinforces (most shown → most liked → stays shown) and repeats for

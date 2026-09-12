@@ -82,3 +82,20 @@ test('plain yogurt in a curry, or chocolate chips anywhere, is not a clash', asy
   assert.equal(savoryClash({ name: 'Chicken Tikka Curry', ingredients: ing('chicken', 'non-fat plain greek yogurt', 'garlic', 'rice') }), false)
   assert.equal(savoryClash({ name: 'Cottage Cheese Pasta Bake', ingredients: ing('pasta', 'cottage cheese', 'tomato sauce', 'garlic') }), false)
 })
+
+// Cook Tonight run 51 (2026-09-11): with potato base-banned, the only carbs left were rice, protein
+// cereal and granola, and the carb rule put granola on a savory omelet — served as "a side of yogurt
+// topped with granola". Measured over the 129 generated and 219 Discover meals stored at the time,
+// adding sweet FOOD to the clash flags this and nothing else.
+test('sweet food in a savory dish clashes, but savory sweetness is left alone', async () => {
+  const { savoryClash } = await import('./meal-completeness.ts')
+  const ings = (...names: string[]) => names.map(name => ({ name }))
+  assert.equal(savoryClash({ name: 'Savory Greek Yogurt and Egg Omelet',
+    ingredients: ings('eggs', 'liquid egg whites', 'non-fat plain greek yogurt', 'shredded cheese', 'butter', 'granola') }), true)
+  assert.equal(savoryClash({ name: 'Chicken Taco Skillet', ingredients: ings('chicken', 'salsa', 'protein cereal') }), true)
+  // Real cooking: sweetness that belongs in a savory dish.
+  assert.equal(savoryClash({ name: 'Honey Garlic Chicken Skillet', ingredients: ings('chicken', 'honey', 'garlic', 'soy sauce') }), false)
+  assert.equal(savoryClash({ name: 'BBQ Chicken and Rice Plate', ingredients: ings('chicken', 'barbecue sauce', 'cooked rice', 'brown sugar') }), false)
+  // A sweet dish is still allowed to hold sweet food.
+  assert.equal(savoryClash({ name: 'Greek Yogurt and Granola Parfait', ingredients: ings('greek yogurt', 'granola', 'berries') }), false)
+})

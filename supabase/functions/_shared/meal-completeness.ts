@@ -73,13 +73,20 @@ const SWEET_FLAVOUR = /\b(vanilla|chocolate|cocoa|cookies? (?:and|&|n) cream|coo
 const FLAVOURED_PRODUCT = /\b(protein|whey|yogurt|yoghurt|skyr|kefir|milk|creamer|shake|cottage cheese)\b/i
 const SAVORY_INGREDIENT = /\b(chicken|beef|pork|turkey|lamb|bacon|ham|sausages?|salmon|tuna|cod|tilapia|shrimp|prawns?|fish|steak|garlic|onions?|shallots?|soy sauce|broth|stock|salsa|pesto|mustard|cumin|curry|chil(?:l)?i|paprika|italian seasoning|oregano|tomato sauce|marinara|parmesan)\b/i
 const SAVORY_DISH = /\b(soup|stew|curry|stir[- ]?fry|skillet|chili|tacos?|burritos?|pizza|pasta|casserole|risotto|fried rice|hash|frittata|omelet(?:te)?|quesadilla|burger|sandwich)\b/i
+// Sweet FOOD that is wrong in a savory dish whatever it is flavoured with. Kept to items that are
+// never a savory ingredient: honey, maple and brown sugar are deliberately absent, because
+// honey-garlic chicken and a brown-sugar BBQ rub are real cooking. Granola is here because the carb
+// rule put it on a savory omelet (run 51) and on an egg plate before that — with potato base-banned,
+// granola and protein cereal are the only carbs left that the model can reach for.
+const SWEET_FOOD = /\b(granola|cereal|cookies?|ice cream|whipped cream|chocolate chips?|marshmallows?|jam|jelly|frosting|sprinkles)\b/i
+
 const POWDER_HOMES = /\b(pancakes?|waffles?|crepes?|oats|oatmeal|porridge|overnight|muffins?|smoothie|shake|parfait|pudding|bars?|bites|balls|brownies?|cookies?|mug cake|cake|ice cream|french toast)\b/i
 
 export function savoryClash(meal: { name?: unknown; ingredients?: unknown }): boolean {
   const name = String(meal?.name ?? '')
   if (POWDER_HOMES.test(name)) return false
   const names = ingredientNames(meal?.ingredients)
-  const offending = names.some(n => PROTEIN_POWDER.test(n) || (SWEET_FLAVOUR.test(n) && FLAVOURED_PRODUCT.test(n)))
+  const offending = names.some(n => PROTEIN_POWDER.test(n) || SWEET_FOOD.test(n) || (SWEET_FLAVOUR.test(n) && FLAVOURED_PRODUCT.test(n)))
   if (!offending) return false
   return SAVORY_DISH.test(name) || names.some(n => SAVORY_INGREDIENT.test(n) && !PROTEIN_POWDER.test(n))
 }
