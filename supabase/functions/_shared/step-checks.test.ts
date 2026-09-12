@@ -40,6 +40,12 @@ test('a followable recipe reports nothing', () => {
   assert.deepEqual(i, { unseasoned: false, noPreheat: false, untimedCook: 0, coldCarb: false })
 })
 
+test('soy sauce is seasoning, and a parfait owes no salt', () => {
+  assert.equal(stepIssues({ name: 'Thai Peanut Sauce Beef Stir-Fry', ingredients: [{ name: 'ground beef' }, { name: 'soy sauce' }], steps: [] }).unseasoned, false)
+  assert.equal(stepIssues({ name: 'Cottage Cheese and Protein Cereal Bowl', ingredients: [{ name: 'cottage cheese' }, { name: 'protein cereal' }], steps: [] }).unseasoned, false)
+  assert.equal(stepIssues({ name: 'Egg and Vegetable Scramble', ingredients: [{ name: 'eggs' }, { name: 'butter' }], steps: [] }).unseasoned, true)
+})
+
 test('bad input does not crash', () => {
   assert.equal(stepIssues(undefined).unseasoned, true)
   assert.equal(stepIssues({ steps: 'cook it' }).untimedCook, 0)

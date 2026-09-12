@@ -14,7 +14,7 @@ import { selectDeck } from '../_shared/rank-deck.ts'
 import { flavourAxes } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
-import { nameFormGaps, nameIngredientGaps, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
+import { nameFormGaps, nameIngredientGaps, nameTechniqueGaps, dryStapleOverload, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { assumedStaplesFor } from '../_shared/staples.ts'
 import { dietViolations } from '../_shared/diet-check.ts'
@@ -617,6 +617,7 @@ ${maxPrepMinutes <= 10 ? `- ⚠️ MAX PREP IS ${maxPrepMinutes} MINUTES — thi
   • CONDIMENTS/DRESSINGS (ranch, salsa, ketchup, BBQ): finishing sauces in SMALL amounts — never a primary base dumped in by the cup (also blows the fat/calorie budget).
   • NAME THE PREPARED FORM, NOT THE PANTRY ITEM (blocking). When a pantry item has to be transformed before anyone can eat it, the ingredient NAME must be what actually goes into the dish: coffee beans → "brewed coffee" or "espresso"; dry pasta cooked in the steps → "cooked pasta"; uncooked rice → "cooked rice"; whole spices you grind → "ground <spice>". The ingredient name is BOTH the line the cook reads AND the description the dish photo is generated from, so writing "coffee beans" for a shot of espresso puts a pile of whole roasted beans on top of the finished oatmeal. If a step says "brewed coffee", the ingredient must say brewed coffee too.
   • NAME THE DISH AFTER WHAT THE PANTRY ACTUALLY SAYS (blocking). Do not upgrade a generic pantry item into a specific one in the title. If the pantry says "leafy greens", the dish is not a "Spinach Frittata" — it is a "Greens Frittata". If it says "yogurt", do not title it "Greek Yogurt". Naming a food the user does not own is the same broken promise as omitting one, and it is the single most common one: six of the last fifty-one meals claimed spinach while using generic leafy greens.
+  • DRY OR COOKED — SAY WHICH (blocking). For rice, pasta, lentils, quinoa, oats and couscous the ingredient NAME must say "dry" or "cooked" ("dry red lentils", "cooked rice"), because the two weigh nothing alike: one serving is 60-100g DRY or 150-200g COOKED. 334g of dry lentils is a pot for four, not a bowl for one.
   • UNITS MUST MATCH THE STATE (blocking): a solid is measured in grams, a liquid in ml. An ingredient carrying a volume unit IS a liquid and must be named as one — "30ml coffee beans" is not a thing. If you find yourself writing ml beside a solid, the name is wrong, not the unit.
 - CRITICAL: You do NOT need to use every pantry ingredient. Only include ingredients that make culinary sense for THIS specific meal. It is BETTER to skip a pantry ingredient than to force it into a meal where it doesn't belong.
 - CUISINE COHERENCE IS MANDATORY: Every meal must fit ONE identifiable cuisine or style (Italian, Mexican, Asian/Thai/Chinese/Japanese, Mediterranean, American comfort, Middle Eastern, Indian, etc.). Before picking ingredients, decide the cuisine FIRST, then only include pantry items that belong in that cuisine. Do NOT create cuisine mash-ups (e.g. no peanut butter in Italian pasta, no soy sauce in Mediterranean bowls, no curry powder in Tex-Mex).
@@ -942,6 +943,22 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       funnel.ghostIngredients = beforeGhosts - followable.length
     }
 
+    // A POT FOR FOUR IN ONE SERVING. "Hearty Lentil and Vegetable Stew" listed 334g of dry red
+    // lentils for one person and claimed 667 kcal, because the lookup priced them cooked. Floored
+    // like the gates around it — a false positive here costs a dinner, and lentils by the pot are a
+    // minority — but every one of them is recorded.
+    {
+      const before = meals.length
+      const detail: string[] = []
+      const sane = meals.filter((m: any) => {
+        const over = dryStapleOverload(m)
+        if (over.length) { detail.push(`${String(m?.name ?? '')} -> ${over.join(', ')}`); console.log(`[portion] "${m?.name}" ${over.join(', ')}`) }
+        return over.length === 0
+      })
+      if (sane.length >= displayCount && sane.length < before) meals = sane
+      funnel.dryStapleOverload = detail
+    }
+
     // DOES THE DISH CONTAIN WHAT ITS NAME PROMISES? The inverse of the cookability check above,
     // and invisible to it: there, an ingredient was in the recipe but not the pantry; here the
     // ingredient is missing from the RECIPE ITSELF while everything listed is on hand.
@@ -956,8 +973,11 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       const beforeGaps = meals.length
       const gapDetail: string[] = []
       const honest = meals.filter((m: any) => {
-        // Foods AND forms: "Egg and Cheese Breakfast Wrap" promised a wrap, listed none, and shipped.
-        const gaps = [...nameIngredientGaps(String(m?.name ?? ''), m?.ingredients), ...nameFormGaps(String(m?.name ?? ''), m?.ingredients)]
+        // Foods, forms AND techniques: "Egg and Cheese Breakfast Wrap" promised a wrap and listed none;
+        // the eye test found a "Bake" with no oven, "Roasted" in a skillet and a "Scramble" of
+        // hard-boiled eggs — 6 of 54 titles promising something the steps never did.
+        const gaps = [...nameIngredientGaps(String(m?.name ?? ''), m?.ingredients), ...nameFormGaps(String(m?.name ?? ''), m?.ingredients),
+                      ...nameTechniqueGaps(String(m?.name ?? ''), m?.steps, m?.ingredients)]
         if (gaps.length > 0) {
           gapDetail.push(`${String(m?.name ?? '')} -> ${gaps.join(', ')}`)
           console.log(`[name-gap] "${m?.name}" promises ${gaps.join(', ')} and lists none`)
@@ -1370,6 +1390,14 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
   } catch (error) {
     if (!dryRun) await refundScan(req, 'meal_gen') // unexpected failure — refund the slot
     console.error('[generate-meals] error:', (error as Error).message) // detail server-side only
+    // A failed generation must still leave a row: without one the daily report's "N generations"
+    // counts successes only, and a morning of nothing but 500s would read as a quiet day.
+    try {
+      await db.from("pipeline_runs").insert({
+        provider: 'generate-meals-funnel', dry_run: dryRun, stored: 0,
+        funnel: { user: user.id, failed: true, error: String((error as Error).message).slice(0, 200) },
+      })
+    } catch { /* instrumentation never fails the response */ }
     return new Response(
       JSON.stringify({ error: "Meal generation failed" }), // generic — don't leak internals
       { status: 500, headers: { "Content-Type": "application/json" } },

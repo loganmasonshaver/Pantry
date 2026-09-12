@@ -7,7 +7,7 @@
 
 import { findMissing } from '../../supabase/functions/_shared/pantry-check.ts'
 import { assumedStaplesFor } from '../../supabase/functions/_shared/staples.ts'
-import { nameIngredientGaps, nameFormGaps, ghostIngredients } from '../../supabase/functions/_shared/recipe-integrity.ts'
+import { nameIngredientGaps, nameFormGaps, nameTechniqueGaps, dryStapleOverload, ghostIngredients } from '../../supabase/functions/_shared/recipe-integrity.ts'
 import { isCompleteMeal, savoryClash } from '../../supabase/functions/_shared/meal-completeness.ts'
 import { stepIssues } from '../../supabase/functions/_shared/step-checks.ts'
 import { flavourAxes } from '../../supabase/functions/_shared/flavour-axes.ts'
@@ -58,8 +58,11 @@ export function scoreMeal(meal, ctx) {
 
   // 2. The title promises a food, or a form, the dish does not contain.
   const gaps = [...nameIngredientGaps(String(meal?.name ?? ''), meal?.ingredients),
-                ...nameFormGaps(String(meal?.name ?? ''), meal?.ingredients)]
+                ...nameFormGaps(String(meal?.name ?? ''), meal?.ingredients),
+                ...nameTechniqueGaps(String(meal?.name ?? ''), meal?.steps, meal?.ingredients)]
   if (gaps.length) hard.push(`name promises ${gaps.join(', ')}`)
+  const over = dryStapleOverload(meal)
+  if (over.length) hard.push(`a pot for four: ${over.join(', ')}`)
 
   // 3. A step tells you to cook something the recipe never lists.
   const ghosts = ghostIngredients(meal?.steps, meal?.ingredients, staples)

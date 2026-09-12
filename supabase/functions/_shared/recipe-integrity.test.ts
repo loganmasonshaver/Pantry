@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
+import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, nameTechniqueGaps, dryStapleOverload, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
@@ -619,4 +619,49 @@ test('a form word used as a flavour, or disclaimed, promises nothing', () => {
 
 test('a flavouring line does not carry the form', () => {
   assert.deepEqual(nameFormGaps('Chicken Tacos', ings('chicken', 'taco seasoning', 'tortilla chips')), ['taco (no tortilla or shell)'])
+})
+
+// ── techniques and portions ─────────────────────────────────────────────────────────────────
+// All six from the 2026-09-12 eye test over 54 sweep meals.
+test('a technique in the title must happen in the steps', () => {
+  const st = (...d: string[]) => d.map(detail => ({ title: '', detail }))
+  assert.deepEqual(nameTechniqueGaps('Cheesy Black Bean & Onion Spaghetti Bake', st('Boil spaghetti.', 'Top with cheese, cover, let sit on low heat.'), ings('spaghetti', 'cheese')),
+    ['baked, but nothing goes in an oven'])
+  assert.deepEqual(nameTechniqueGaps('Pork Chop with Roasted Sweet Potato', st('Sauté in a skillet 10 minutes.'), ings('pork chops', 'sweet potato')),
+    ['roasted, but nothing goes in an oven'])
+  assert.deepEqual(nameTechniqueGaps('Grilled Peanut Butter & Banana Toast', st('Toast the bread.'), ings('bread', 'peanut butter')),
+    ['grilled, but nothing is grilled'])
+  assert.deepEqual(nameTechniqueGaps('Tuna Caesar Lettuce Wraps', st('Warm tortillas.'), ings('canned tuna', 'flour tortillas', 'bagged caesar salad')),
+    ['lettuce wraps with no lettuce'])
+  assert.deepEqual(nameTechniqueGaps('Greek Yogurt Herb Bowl', st('Assemble.'), ings('greek yogurt', 'granola', 'orange')),
+    ['herb in the name, no herb in the dish'])
+  assert.deepEqual(nameTechniqueGaps('Turkey and Egg Power Scramble', st('Slice eggs and heat.'), ings('deli turkey', 'hard-boiled eggs')),
+    ['a scramble of hard-boiled eggs'])
+})
+
+test('honest titles pass, and a grilled cheese is pan-fried by definition', () => {
+  const st = (...d: string[]) => d.map(detail => ({ title: '', detail }))
+  assert.deepEqual(nameTechniqueGaps('Garlic Butter Chicken and Roasted Potatoes', st('Preheat oven to 400°F.', 'Roast potatoes 20 minutes.'), ings('chicken', 'red potatoes')), [])
+  assert.deepEqual(nameTechniqueGaps('Grilled Cheese and Egg Sandwich', st('Toast in a skillet until golden.'), ings('bread', 'cheese', 'eggs')), [])
+  assert.deepEqual(nameTechniqueGaps('Lemon Herb Seared Salmon with Quinoa', st('Sear salmon.'), ings('salmon', 'quinoa', 'parsley')), [])
+  assert.deepEqual(nameTechniqueGaps('Chicken Lettuce Wraps', st('Fill leaves.'), ings('chicken', 'butter lettuce')), [])
+  assert.deepEqual(nameTechniqueGaps('Bacon and Spinach Scramble', st('Scramble eggs.'), ings('eggs', 'bacon', 'spinach')), [])
+})
+
+test('the measured false positives: no-bake, microwave, pre-roasted ingredients, dried herb blends', () => {
+  const st = (...d: string[]) => d.map(detail => ({ title: '', detail }))
+  assert.deepEqual(nameTechniqueGaps('No-Bake Protein Brownies', st('Press into a pan and chill.'), ings('oats', 'peanut butter')), [])
+  assert.deepEqual(nameTechniqueGaps('Microwave Chocolate Baked Oats', st('Microwave 2 minutes.'), ings('oats', 'cocoa')), [])
+  assert.deepEqual(nameTechniqueGaps('Roasted Chana Protein Brownie', st('Blend and chill.'), ings('roasted chana', 'dates')), [])
+  assert.deepEqual(nameTechniqueGaps('Garlic Herb Chicken Thighs with Zucchini', st('Sear 7 minutes per side.'), ings('chicken thighs', 'italian seasoning')), [])
+})
+
+test('a dry grain or legume by the pot is flagged; cooked and canned are not', () => {
+  assert.deepEqual(dryStapleOverload({ ingredients: [{ name: 'red lentils', grams: '334g', visual: '1¾ cups' }] }), ['334g dry red lentils'])
+  assert.deepEqual(dryStapleOverload({ ingredients: [{ name: 'jasmine rice', grams: '150g', visual: '1 cup cooked' }] }), [])
+  assert.deepEqual(dryStapleOverload({ ingredients: [{ name: 'cooked rice', grams: '250g', visual: '1.5 cups' }] }), [])
+  assert.deepEqual(dryStapleOverload({ ingredients: [{ name: 'canned black beans', grams: '316g', visual: '1¼ cups' }] }), [])
+  assert.deepEqual(dryStapleOverload({ ingredients: [{ name: 'quinoa', grams: '90g', visual: '1/2 cup dry' }] }), [], 'a normal dry portion')
+  // Batch scale: 400g of dry rice across 4 servings is 100g each.
+  assert.deepEqual(dryStapleOverload({ servings: 4, ingredients: [{ name: 'basmati rice', grams: '400g', visual: '2 cups' }] }), [])
 })

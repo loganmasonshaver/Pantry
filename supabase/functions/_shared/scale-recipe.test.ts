@@ -208,3 +208,11 @@ test('the cutting-target shrimp bowl now comes down', () => {
   assert.ok(689 * out.macroFactor < 620, `moved well down: ${(689 * out.macroFactor).toFixed(0)}`)
   assert.equal(out.ingredients[0].visual, '11 large')
 })
+
+// "1¼ pinchs" reached a real recipe.
+test('units ending in ch/sh take -es', () => {
+  assert.equal(scaleVisualText('1 pinch', 1.25), '1¼ pinches')
+  assert.equal(scaleVisualText('1 dash', 2), '2 dashes')
+  assert.equal(scaleVisualText('1 splash', 2), '2 splashes')
+  assert.equal(scaleVisualText('1 cup', 2), '2 cups')
+})

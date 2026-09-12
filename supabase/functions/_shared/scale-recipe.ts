@@ -124,7 +124,8 @@ function agree(rest: string, value: number): string {
     const lower = word.toLowerCase()
     const base = lower.endsWith('s') ? lower.slice(0, -1) : lower
     if (!PLURAL_UNITS.includes(base)) return whole
-    return `${space}${base}${value > 1 ? 's' : ''}`
+    // "1¼ pinchs" reached a real recipe: a unit ending in ch/sh/s/x takes -es.
+    return `${space}${base}${value > 1 ? (/(?:ch|sh|s|x|z)$/.test(base) ? 'es' : 's') : ''}`
   })
 }
 

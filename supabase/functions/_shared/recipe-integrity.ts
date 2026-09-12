@@ -442,6 +442,65 @@ export function nameFormGaps(name: string, ingredients: any[] | undefined): stri
   return has ? [] : [`${head} (no ${form.needs})`]
 }
 
+// A TECHNIQUE in the title that the steps never perform. The prompt says it outright ("If nothing is
+// roasted, it is not 'Roasted ___'") and the eye test over 54 sweep meals found six: a "Bake" with no
+// oven, "Roasted" in a skillet, "Grilled" toast, "Lettuce Wraps" made with tortillas, a "Herb Bowl"
+// with no herb, and a "Scramble" of hard-boiled eggs. nameIngredientGaps checks FOODS and
+// nameFormGaps checks VESSELS; this is the third promise a title can make.
+const TECHNIQUES: ReadonlyArray<{ name: RegExp; steps: RegExp; label: string }> = [
+  { name: /\b(?:oven[- ]?)?roast(?:ed)?\b/i, steps: /\b(?:oven|roast\w*|air[- ]?fry\w*|bake[ds]?|baking)\b/i, label: 'roasted, but nothing goes in an oven' },
+  { name: /\bbake[ds]?\b/i, steps: /\b(?:oven|bake[ds]?|baking|broil\w*)\b/i, label: 'baked, but nothing goes in an oven' },
+  // "Grilled cheese" is pan-fried by definition and is exempt below.
+  { name: /\bgrill(?:ed)?\b/i, steps: /\b(?:grill\w*|griddle|broil\w*|char\w*)\b/i, label: 'grilled, but nothing is grilled' },
+]
+// Dried blends count: "Garlic Herb Chicken" seasoned with Italian seasoning has its herbs.
+const HERB = /\b(?:parsley|cilantro|coriander|basil|dill|chives?|mint|thyme|rosemary|oregano|sage|tarragon|herbs?|herbes|italian seasoning|poultry seasoning|za'?atar|seasoning blend)\b/i
+const LETTUCE = /\b(?:lettuce|romaine|iceberg|butter lettuce|cabbage|collard)\b/i
+
+export function nameTechniqueGaps(name: string, steps: unknown, ingredients: any[] | undefined): string[] {
+  const n = String(name ?? '')
+  if (!n) return []
+  const stepText = (Array.isArray(steps) ? steps : [])
+    .map(s => (typeof s === 'string' ? s : `${(s as any)?.title ?? ''} ${(s as any)?.detail ?? ''}`)).join(' \n ')
+  const lines = realIngredients(ingredients).map(i => (typeof i === 'string' ? i : String((i as any)?.name ?? '')))
+  const gaps: string[] = []
+  for (const t of TECHNIQUES) {
+    if (!t.name.test(n)) continue
+    if (/\bgrilled cheese\b/i.test(n) && t.label.startsWith('grilled')) continue
+    // "No-Bake Brownies" and "Microwave Baked Oats" say so; measured on 1,170 meals, both fired.
+    if (t.label.startsWith('baked') && /\b(?:no[- ]bake|microwave)\b/i.test(n)) continue
+    // A pre-roasted or pre-grilled INGREDIENT ("roasted chana", "roasted red peppers") satisfies
+    // the title without a step: the creator bought it that way.
+    if (lines.some(l => t.name.test(l))) continue
+    if (!t.steps.test(stepText)) gaps.push(t.label)
+  }
+  if (/\bscrambled?\b/i.test(n) && lines.some(l => /\bhard[- ]?boiled\b/i.test(l))) gaps.push('a scramble of hard-boiled eggs')
+  if (/\blettuce wraps?\b/i.test(n) && !lines.some(l => LETTUCE.test(l))) gaps.push('lettuce wraps with no lettuce')
+  if (/\bherbs?\b/i.test(n) && !lines.some(l => HERB.test(l))) gaps.push('herb in the name, no herb in the dish')
+  return gaps
+}
+
+// A DRY grain or legume in a quantity that is a pot for four. "Hearty Lentil and Vegetable Stew"
+// listed 334g of red lentils — 1¾ cups dry — for one serving, and claimed 667 kcal because the macro
+// lookup priced them cooked. Beans and chickpeas are left out: in these pantries they are canned.
+// The name OR the visual may say cooked; "jasmine rice 150g (1 cup cooked)" is fine.
+const DRY_STAPLE = /\b(?:lentils?|rice|quinoa|oats|oatmeal|pasta|spaghetti|penne|macaroni|fusilli|rigatoni|linguine|orzo|couscous|bulgur|farro|barley|noodles?)\b/i
+const ALREADY_COOKED = /\b(?:cooked|pre-?cooked|canned|microwave|leftover|instant|steamed|boiled)\b/i
+export const DRY_STAPLE_MAX_G = 150
+
+export function dryStapleOverload(meal: { ingredients?: unknown; servings?: unknown } | null | undefined): string[] {
+  const servings = Math.max(1, Number(meal?.servings) || 1)
+  const out: string[] = []
+  for (const raw of (Array.isArray(meal?.ingredients) ? meal!.ingredients as unknown[] : [])) {
+    const name = String((raw as any)?.name ?? '')
+    const visual = String((raw as any)?.visual ?? '')
+    if (!DRY_STAPLE.test(name) || ALREADY_COOKED.test(`${name} ${visual}`)) continue
+    const g = parseFloat(String((raw as any)?.grams ?? '').replace(/[^0-9.]/g, ''))
+    if (Number.isFinite(g) && g / servings >= DRY_STAPLE_MAX_G) out.push(`${Math.round(g / servings)}g dry ${name}`)
+  }
+  return out
+}
+
 /**
  * The list used for the retention COUNT: junk removed and duplicates collapsed.
  *
