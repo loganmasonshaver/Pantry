@@ -905,7 +905,21 @@ the limit, rather than generating around it.
   two lines on a narrow screen.
 - [ ] Optional follow-up: the Pantry tab's own "Cook tonight" card does not carry the same line.
 **SHIP CHECKLIST — what is actually left (2026-09-12, after ~750 generations):**
-- [ ] **One real generation from the phone.** Every run above was the service-role dry run, which
+- [x] **One real generation from the phone — PASSED 2026-09-12 00:56** (pipeline_runs 503, `dry_run =
+  false`, 3 generated_meals rows, recent_meal_names updated, 6 image rows within 5 s). **BUT the phone
+  was on a stale bundle:** Metro had been up since Sep 7 and its served bundle held none of the client
+  changes (diet-style merge, empty-pantry error, pantry warning line, Pantry-tab evening sort). Server
+  path verified; the client still needs `npx expo start -c` from `/Users/loganshaver/pantry` + a reload,
+  then the two device checks.
+- [ ] **OPEN — Logan's question: why two 32g meals against a 40g target?** (row 503). In order: only 2
+  of 7 survivors were fresh and both were 32g (cheese and chicken were banned for overuse); 32g clears
+  the code's 75% floor (30g) so both rank tier 0, and fresh beats a 59g repeat inside a tier; the
+  model's own arithmetic said 140g beef ≈ 40g but FatSecret priced it at 32g. "Supposed to happen"
+  under the current floor — which is looser than the prompt's own minimum (85% = 34g). Proposed, NOT
+  built: (1) a deterministic protein top-up after macro correction — scale the lean protein anchor up
+  toward the target, bounded by a per-food cap and the calorie band, then let the dense trim rebalance;
+  (2) raise the code floor to 0.85 to match the prompt. Sweep + depth before shipping either.
+- [x] ~~One real generation from the phone.~~ Was: Every run above was the service-role dry run, which
   skips auth, the daily cap, the history writes, recent_meal_names and images. The production path
   shares the code but has NOT been exercised since any of these changes. Tap Generate once; the tell
   is a `pipeline_runs` row with `dry_run = false` (the column was hardcoded true until today), three
@@ -913,10 +927,24 @@ the limit, rather than generating around it.
 - [ ] **Two device checks:** the pantry-limit line (raise your protein goal in Profile to force it;
   it must push the hero down, not overlap it) and the Pantry tab at dinner time floating a "lunch"
   dish ahead of a parfait.
-- [ ] **The eye test — yours, not the harness's.** 17 decks / 51 meals from the final sweeps are in
+- [x] **Eye test DONE by Claude over 54 meals: 44 would-cook (81%; 88% excluding the impossible
+  pantry), 9 wouldn't, 1 embarrassing** — 334g of DRY lentils in one serving, priced as cooked. The
+  nine were mostly titles promising a technique the steps never do (a "Bake" with no oven, "Roasted"
+  in a skillet, "Grilled" toast, "Lettuce Wraps" in tortillas, a "Herb Bowl" with no herb, a "Scramble"
+  of hard-boiled eggs). **BUILT 2026-09-12, unverified live:** `nameTechniqueGaps` (in the name gate,
+  floored) and `dryStapleOverload` (floored) plus a DRY-OR-COOKED prompt line; measured on 1,170 meals
+  first — no-bake / microwave / pre-roasted-ingredient / dried-herb-blend false positives are exempted
+  and tested. "1¼ pinchs" fixed. Logan's own read for appetite is still worth doing.
+- [x] ~~The eye test — yours, not the harness's.~~ Was: 17 decks / 51 meals from the final sweeps are in
   a digest (sent to you). Rate each *would cook / wouldn't / embarrassing*. Bar: >=80% would-cook,
   zero embarrassing. The harness cannot judge appetite, and photos only exist for real runs.
-- [ ] **Quality counters in the daily email** (`unseasoned`, `flavourAxesShown`, `belowProteinFloorShown`,
+- [x] **Quality counters in the daily email — LIVE 2026-09-12** (migration `20260912061834`). One line
+  under the Discover health line, red when: any generation failed, any savory clash shown, unseasoned
+  > 30%, uncookable-shown > 10%, protein-floor misses > 20%. A failed generation now writes a funnel
+  row (`failed: true`) so "N generations" is honest. The first line read 67% unseasoned from row 503's
+  OLD counter (soy sauce and sweet bowls were not credited); the counter is fixed and every later
+  generation reads correctly. Keys `cook_tonight` / `cook_tonight_bad` in ops_report_data().
+- [x] ~~Quality counters in the daily email~~ Was: (`unseasoned`, `flavourAxesShown`, `belowProteinFloorShown`,
   `notCookableKept`, `droppedByDiet` from `pipeline_runs`), so a prompt regression after launch is
   visible the next morning instead of when a user complains. SQL in `ops_report_data()`; a migration.
 - Not needed to ship, tracked: soft metrics still above where they should be — ~45% of meals reach fewer than
