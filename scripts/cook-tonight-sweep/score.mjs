@@ -12,6 +12,8 @@ import { isCompleteMeal, savoryClash } from '../../supabase/functions/_shared/me
 import { stepIssues } from '../../supabase/functions/_shared/step-checks.ts'
 import { flavourAxes } from '../../supabase/functions/_shared/flavour-axes.ts'
 import { detectBases, dishArchetype, isSameDish } from '../../supabase/functions/_shared/dish-key.ts'
+import { dietViolations } from '../../supabase/functions/_shared/diet-check.ts'
+import { pantryCarbs } from '../../supabase/functions/_shared/meal-completeness.ts'
 import { FORBIDDEN } from './fixtures.mjs'
 
 const names = (ings) => (Array.isArray(ings) ? ings : []).map(i => String(i?.name ?? i ?? ''))
@@ -39,12 +41,21 @@ export function scoreMeal(meal, ctx) {
 
   // 4/5. Plate coherence.
   if (savoryClash(meal)) hard.push('sweet food in a savory dish')
-  if (!isCompleteMeal(meal, ctx.dietaryRestrictions)) hard.push('no carb base (and not a drink or egg dish)')
+  // A pantry with no carb in it cannot produce one — the keto shelf. Production exempts this too.
+  if (pantryCarbs(ctx.pantry).length > 0 && !isCompleteMeal(meal, ctx.dietaryRestrictions))
+    hard.push('no carb base (and not a drink or egg dish)')
 
-  // 6. A restriction violated is food the user cannot eat — the most serious failure here.
+  // 6. A restriction violated is food the user cannot eat — the most serious failure here. Checked
+  // by production's own rules AND by an independent list, because a shared list cannot catch its own
+  // blind spot. A disagreement is reported as "independent check only" and read by hand: the first
+  // one was coconut milk, where the independent list was the wrong one.
+  for (const v of dietViolations(meal, ctx.dietaryRestrictions)) hard.push(`${v.restriction} violated: ${v.ingredients.join(', ')}`)
+  const flagged = new Set(dietViolations(meal, ctx.dietaryRestrictions).flatMap(v => v.ingredients))
   for (const r of ctx.dietaryRestrictions) {
     const re = FORBIDDEN[String(r).toLowerCase()]
-    if (re) { const bad = ings.filter(n => re.test(n)); if (bad.length) hard.push(`${r} violated: ${bad.join(', ')}`) }
+    if (!re) continue
+    const bad = ings.filter(n => re.test(n) && !flagged.has(n))
+    if (bad.length) soft.push(`independent check only: ${r} vs ${bad.join(', ')}`)
   }
   // 7. A disliked food is one the user explicitly rejected.
   for (const d of ctx.foodDislikes ?? []) {
@@ -54,7 +65,8 @@ export function scoreMeal(meal, ctx) {
 
   // 8. Macros. The bands the function itself enforces, read from the caller's own targets.
   const p = Number(meal?.protein) || 0, c = Number(meal?.calories) || 0
-  if (ctx.proteinTarget > 0 && p < 0.75 * ctx.proteinTarget) hard.push(`protein ${p}g under floor (${Math.round(0.75 * ctx.proteinTarget)}g)`)
+  if (ctx.proteinTarget > 0 && p < 0.70 * ctx.proteinTarget) hard.push(`protein ${p}g under floor (${Math.round(0.75 * ctx.proteinTarget)}g)`)
+  else if (ctx.proteinTarget > 0 && p < 0.75 * ctx.proteinTarget) soft.push(`protein ${p}g just under the ${Math.round(0.75 * ctx.proteinTarget)}g floor`)
   if (c > ctx.calorieTarget * 1.4) hard.push(`calories ${c} over band`)
   if (c < ctx.calorieTarget * 0.75) hard.push(`calories ${c} under band`)
 
@@ -70,6 +82,27 @@ export function scoreMeal(meal, ctx) {
   if (si.coldCarb) soft.push('cold pre-cooked carb never reheated')
   const axes = flavourAxes(meal)
   if (axes.length < 2 && !SWEET_DISH.test(String(meal?.name ?? ''))) soft.push(`${axes.length} flavour axis`)
+
+  // The prompt bans invented marketing names by name ("power bowl / protein bowl") and demands real,
+  // established dishes. Worth counting: it is the difference between a recipe and a macro assembly.
+  if (/\b(power|protein|super|mega|ultimate|energy|balanced|wholesome)\s+(bowl|plate|stack|box)\b/i.test(String(meal?.name ?? '')))
+    soft.push('invented marketing name')
+
+  // "A protein used in an absurd quantity is diet food wearing a recipe's clothes" — the prompt's own
+  // rule, unenforced. 360g of egg whites (run 51) is most of a carton in one serving.
+  const servings = Math.max(1, Number(meal?.servings) || 1)
+  for (const ing of (Array.isArray(meal?.ingredients) ? meal.ingredients : [])) {
+    const g = parseFloat(String(ing?.grams ?? '').replace(/[^0-9.]/g, ''))
+    if (Number.isFinite(g) && g / servings >= 350 && !/\b(water|milk|broth|stock|juice)\b/i.test(String(ing?.name ?? '')))
+      soft.push(`${Math.round(g / servings)}g of ${ing?.name} in one serving`)
+  }
+
+  // The same food listed twice buys a free point toward every count that judges the recipe.
+  const seen = new Set()
+  for (const n of ings.map(x => x.toLowerCase().trim())) {
+    if (seen.has(n)) soft.push(`duplicate ingredient line "${n}"`)
+    seen.add(n)
+  }
 
   return { name: String(meal?.name ?? ''), hard, soft, protein: p, calories: c, axes: axes.length }
 }
@@ -94,7 +127,7 @@ export function scoreDeck(meals, funnel, ctx) {
   const cands = funnel?.rankCandidates ?? []
   const shownNames = new Set(funnel?.namesShown ?? [])
   const shownRepeats = cands.filter(c => shownNames.has(c.name) && c.repeat)
-  const freshUnshown = cands.filter(c => !shownNames.has(c.name) && !c.repeat && !c.clash)
+  const freshUnshown = cands.filter(c => !shownNames.has(c.name) && !c.repeat && !c.clash && !c.notCookable)
   for (const r of shownRepeats) {
     const better = freshUnshown.find(f => (f.tier ?? 0) <= (r.tier ?? 0))
     if (better) deckHard.push(`repeat "${r.name}" shown over fresh "${better.name}"`)

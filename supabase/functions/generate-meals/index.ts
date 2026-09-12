@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
-import { isCompleteMeal, isZeroCalorie, pantryCarbs, savoryCarbs, carbRequired, savoryClash } from '../_shared/meal-completeness.ts'
+import { isCompleteMeal, isZeroCalorie, pantryCarbs, savoryCarbs, pantryProteins, carbRequired, savoryClash } from '../_shared/meal-completeness.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
 import { checkScanCap, refundScan } from '../_shared/scan-cap.ts'
@@ -17,6 +17,7 @@ import { findMissing } from '../_shared/pantry-check.ts'
 import { nameFormGaps, nameIngredientGaps, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { assumedStaplesFor } from '../_shared/staples.ts'
+import { dietViolations } from '../_shared/diet-check.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -422,6 +423,14 @@ Deno.serve(async (req: Request) => {
     // with the incomplete dishes the rule exists to prevent. Banned bases are left out of the list.
     const ownCarbs = pantryCarbs(ingredients as string[])
       .filter((c: string) => !bannedBases.some((b: string) => c.toLowerCase().includes(String(b).toLowerCase())))
+    const carbPossible = ownCarbs.length > 0
+    // NAME THE PROTEINS, for the same reason the carbs are named. Told only a target, the model
+    // invents food: the protein-poor sweep pantry produced a pan-seared chicken breast and a beef
+    // bagel from a shelf with neither, and three of those decks were unusable for that reason alone.
+    const ownProteins = pantryProteins(ingredients as string[])
+    const proteinSourcesLine = !(mode === 'cookNow') ? '' : ownProteins.length > 0
+      ? `\n- PROTEINS THIS PANTRY ACTUALLY HAS: ${ownProteins.join(', ')}. Build every meal's protein from THIS list. If the biggest honest portion of these still falls short of the protein target, return the best HONEST dish and let it fall short — a dish built on food the user does not own is worth nothing to them, however good its macros look. NEVER add a protein that is not on this list.`
+      : `\n- This pantry holds NO protein source. Make each meal as complete as the pantry allows, and never invent a protein it does not have.`
     const carbSourcesLine = !(mode === 'cookNow') || !carbRequired(dietaryRestrictions) ? '' : ownCarbs.length > 0
       ? `\n- CARBS THIS PANTRY ACTUALLY HAS: ${ownCarbs.join(', ')}. In the STRICT meals the carb MUST be one of these. Bread, pasta, noodles or tortillas the pantry does not list make the meal NOT cookable, and it is thrown away.\n- EGG DISHES NEED NO CARB: an omelet, frittata, scramble or shakshuka is a complete meal as it is. Do NOT bolt cereal, granola or a side of rice onto one to satisfy the carb rule — a sweet cereal beside a savory egg dish is the worst version of this and is rejected.`
       : `\n- This pantry holds NO carb base. Make each meal as complete as the pantry allows — never invent a carb it does not have.`
@@ -555,7 +564,7 @@ ${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - PRIORITIZE ingredients listed first — they've been in the pantry longest and should be used up before newer items
 - PROTEIN DISTRIBUTION (blocking constraint): every recipe MUST have ${batchProteinMin}g–${batchProteinMax}g protein in TOTAL (target ~${batchProteinTarget}g). Distribute protein EVENLY across the ${genCount} recipes — never pile into one and starve another. A single SERVING above ${proteinMax}g causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
-- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${bannedBasesLine}${bannedFormsLine}
+- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${proteinSourcesLine}${bannedBasesLine}${bannedFormsLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - PROTEIN POWDER belongs ONLY in shakes, smoothies, oats/porridge, yogurt bowls, pancakes, baking and desserts — NEVER in a savory dish (a soup, stir-fry, skillet, pasta or curry, or anything with meat, fish, garlic, onion or broth). It does not thicken; in hot milk it clumps and tastes of sweet dairy. To raise protein in a savory meal use MORE OF THE REAL PROTEIN (140g chicken, not 70g plus a scoop). The same goes for sweet-flavoured products — vanilla or chocolate yogurt, flavoured milk or creamer. Savory dishes containing them are checked in code and ranked below every other meal.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.${carbSourcesLine}
@@ -712,6 +721,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       bannedBases, bannedForms, maxPrepMinutes,
       pantryItems: ingredients.length, windowNames: recentServed.length, pantryCarbsOffered: ownCarbs,
       savoryCarbsHeld: carbBasesHeld, // why a carb ban was or was not allowed
+      pantryProteinsOffered: ownProteins,
     }
 
     // STRIP PHANTOM FOOD, before anything sums the ingredient list. An ingredient no step ever
@@ -873,6 +883,31 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       funnel.notCookable = beforeCookable - meals.length
       funnel.notCookableKept = meals.filter((m: any) => m._notCookable).length
       funnel.afterCookable = meals.length
+    }
+
+    // DIETARY RESTRICTIONS — the ONE gate here that is never floored.
+    //
+    // Every other drop in this file gives way rather than show a short deck, and that is right when
+    // the cost is a repeat or a missing garnish. It is not right here. The 2026-09-12 sweep across
+    // pantries this generator was never tuned on served soy sauce and sourdough to a gluten-free
+    // profile, feta and butter to a dairy-free one, and pecans twice to a nut-free one: 6 violations
+    // in 102 meals, with restrictions carried by the prompt alone. A prompt is a request.
+    //
+    // So a violating meal is removed even if it empties the deck — the no-meals path below returns a
+    // real error, and an empty screen is a bad session where an allergen is a hospital visit.
+    {
+      const beforeDiet = meals.length
+      const violations: string[] = []
+      meals = meals.filter((m: any) => {
+        const v = dietViolations(m, dietaryRestrictions)
+        if (v.length === 0) return true
+        const why = v.map(x => `${x.restriction}: ${x.ingredients.join(', ')}`).join('; ')
+        console.log(`[diet] DROPPED "${m?.name}" — ${why}`)
+        violations.push(`${String(m?.name ?? '')} -> ${why}`)
+        return false
+      })
+      funnel.dietViolations = violations
+      funnel.droppedByDiet = beforeDiet - meals.length
     }
 
     // CAN YOU ACTUALLY FOLLOW THE STEPS? A recipe that says "Cook pasta according to package
@@ -1158,7 +1193,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         .map((m: any) => {
           // Complete = has a carb base (or is a drink, or the user is keto/low-carb). See
           // _shared/meal-completeness.ts for why the prompt's rule needed enforcing.
-          const complete = isCompleteMeal(m, dietaryRestrictions)
+          // A pantry with no carb in it cannot produce one. Without this every meal on a keto or
+          // low-stock shelf reads "incomplete", the tier signal collapses to noise, and the funnel
+          // reports a failure where the truth is "impossible" — measured on the keto sweep case.
+          const complete = isCompleteMeal(m, dietaryRestrictions) || !carbPossible
           // PROTEIN FLOOR, soft: under 75% of target ranks below meals that meet it, alongside
           // completeness — Pan-Fried Eggs with Potatoes shipped at 24g against 40g, and the
           // completeness ordering alone would favour exactly that kind of dish.
@@ -1185,6 +1223,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
         c: Number(m?.calories) || 0,
         f: Number(m?.fat) || 0,
         repeat: !!m?._repeat,
+        notCookable: !!m?._notCookable,
         slot: String(m?.slot ?? ''),
         complete: !!m?._complete,
         tier: Number(m?._tier) || 0,
@@ -1196,11 +1235,12 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       // clash -> tier -> fresh -> fit, then at least one lunch/dinner and one lighter meal. See
       // _shared/rank-deck.ts for the run that moved tier ahead of freshness.
       // Tier = 0 when complete AND over the protein floor, 1 when one of the two, 2 when neither.
-      const { deck, promoted } = selectDeck(scored, displayCount)
+      const { deck, promoted, duplicates } = selectDeck(scored, displayCount)
       funnel.slotPromoted = promoted
+      funnel.duplicateBackfill = duplicates
       meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
-      funnel.incompleteShown = meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length
+      funnel.incompleteShown = carbPossible ? meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length : 0
       funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < 0.75 * proteinTarget).length
       funnel.savoryClash = scored.filter((m: any) => m._clash).map((m: any) => String(m?.name ?? ''))
       funnel.savoryClashShown = meals.filter((m: any) => savoryClash(m)).length

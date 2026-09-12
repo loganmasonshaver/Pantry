@@ -58,6 +58,12 @@ const norm = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^a-z0-9\s]/
 // The same shape let "rice vinegar" cover rice, "tomato sauce" tomatoes, "almond butter" almonds.
 const DERIVED_PRODUCT = /^(.+?) (milk|flour|butter|oil|syrup|water|juice|powder|sauce|paste|extract|cream|vinegar|broth|stock|chips|bars?|cookies|cakes|drink|spread|wine)$/
 
+// Last words that name a CLASS of product rather than a food. Two items sharing one of these share
+// nothing: the modifier in front of it is the actual ingredient. See the head-noun rule below.
+const GENERIC_HEAD = new Set(['powder', 'sauce', 'oil', 'butter', 'milk', 'cream', 'flour', 'vinegar',
+  'syrup', 'paste', 'seasoning', 'stock', 'broth', 'juice', 'extract', 'spread', 'dressing', 'mix',
+  'crumb', 'chip', 'bar', 'drink', 'water', 'sugar', 'salt'])
+
 // The food a derived pantry product is made from, or null. Singularised to match the head rule.
 const derivedBase = (item: string): string | null => {
   const m = DERIVED_PRODUCT.exec(item)
@@ -95,7 +101,15 @@ export function isInPantry(ingredientName: unknown, pantry: readonly string[]): 
     }
     const head = sing(ing.split(' ').filter(Boolean).pop() ?? '')
     const itemLast = sing(item.split(' ').filter(Boolean).pop() ?? '')
-    if (head && head.length > 2 && (sing(item) === head || itemLast === head || item.startsWith(head + ' '))) return true
+    // A CLASS word is not a food, and the head-noun rule cannot be trusted with one. "protein powder"
+    // and "garlic powder" share a last word and nothing else — and because garlic powder is an ASSUMED
+    // staple, every pantry on earth counted as holding protein powder. The 2026-09-12 sweep served two
+    // protein shakes off a shelf with no protein powder on it, and the cookability gate saw nothing
+    // wrong. Same shape for "sesame oil" vs "vegetable oil" and "chicken broth" vs "beef broth": the
+    // modifier IS the ingredient. Exact and substring matches above still cover the honest cases
+    // ("whole milk" against a pantry "Milk"), so this only removes the last-word guess.
+    if (head && head.length > 2 && !GENERIC_HEAD.has(head)
+        && (sing(item) === head || itemLast === head || item.startsWith(head + ' '))) return true
   }
   return false
 }

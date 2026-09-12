@@ -43,7 +43,7 @@ export function isDrink(name: unknown): boolean {
 // Name-based, like isDrink, and restricted to forms that ARE the egg dish — "Egg and Cheese Breakfast
 // Wrap" is a wrap and still owes a carb.
 export function isEggDish(name: unknown): boolean {
-  return /\b(omelet(?:te)?s?|frittatas?|scrambles?|scrambled eggs|shakshuka|quiches?|egg bakes?|egg cups?|egg bites?|fried eggs|poached eggs|boiled eggs|deviled eggs|egg salad)\b/i.test(String(name ?? ''))
+  return /\b(omelet(?:te)?s?|frittatas?|scrambled?s?|shakshuka|quiches?|egg bakes?|egg cups?|egg bites?|fried eggs|poached eggs|boiled eggs|deviled eggs|egg salad)\b/i.test(String(name ?? ''))
 }
 
 // Keto / low-carb / carnivore users are the prompt's own exception to the carb rule.
@@ -80,6 +80,17 @@ const SWEET_CARB = /\b(granola|cereal|oats|oatmeal|porridge|pancakes?|waffles?|c
 
 export function savoryCarbs(pantryNames: readonly string[]): string[] {
   return pantryCarbs(pantryNames).filter(n => !SWEET_CARB.test(String(n)))
+}
+
+// The protein sources a pantry actually holds, for naming in the prompt. Same lever as pantryCarbs
+// and for the same measured reason: told only a TARGET, the model invents food to reach it. On the
+// carb-heavy sweep pantry (milk, cheese, peanut butter, canned beans) it returned "Garlic Butter
+// Pan-Seared Chicken Breast" and a beef bagel — from a shelf holding neither — rather than admit the
+// pantry could not reach 50g. Naming what IS there gives it somewhere honest to go.
+const PROTEIN_FOOD = /\b(chicken|beef|steak|mince|pork|bacon|ham|turkey|lamb|veal|duck|sausages?|salmon|tuna|cod|tilapia|halibut|sardines?|shrimps?|prawns?|crab|scallops?|eggs?|egg whites?|tofu|tempeh|seitan|edamame|greek yogurt|yogurt|yoghurt|skyr|cottage cheese|cheese|milk|protein powder|whey|lentils?|chickpeas?|beans?|peanut butter|nut butter|hummus|deli meat|rotisserie)\b/i
+
+export function pantryProteins(pantryNames: readonly string[]): string[] {
+  return pantryNames.filter(n => PROTEIN_FOOD.test(String(n)))
 }
 
 // Protein powder — or any sweet-flavoured product — in a SAVORY dish. Logan's 2026-09-10 17:47 deck

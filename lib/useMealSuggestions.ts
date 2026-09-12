@@ -124,7 +124,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const [{ data: profile }, { data: pantryItems }, { data: ratings }] = await Promise.all([
         supabase
           .from('profiles')
-          .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences, staples_excluded')
+          .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, diet_type, food_dislikes, cuisine_preferences, staples_excluded')
           .eq('id', userId)
           .single(),
         supabase
@@ -166,6 +166,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       const ok = await requestConsent()
       if (!ok) { setLoading(false); return }
 
+      const dietRestrictions = [
+        ...(profile?.dietary_restrictions ?? []),
+        ...(profile?.diet_type && profile.diet_type !== 'Classic' ? [profile.diet_type] : []),
+      ].filter(Boolean)
+
       const generated = await generateMeals({
         ingredients: ingredients.length > 0 ? ingredients : ['chicken breast', 'rice', 'eggs', 'broccoli'], // GPT needs at least some ingredients to generate meaningful meals
         calorieGoal: profile?.calorie_goal || 2400,
@@ -173,7 +178,11 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
         mealsPerDay: profile?.meals_per_day || 3,
         cookingSkill: profile?.cooking_skill || 'moderate',
         maxPrepMinutes: profile?.max_prep_minutes || 30,
-        dietaryRestrictions: profile?.dietary_restrictions || ['None'],
+        // diet_type (Pescatarian / Vegetarian / Vegan) lives in its OWN column — onboarding split it
+        // out of dietary_restrictions so Discover could match on tags — and this call was never
+        // updated, so every generation since has been told only about allergies. A vegetarian's deck
+        // was built with no idea they are one. Discover has always read both.
+        dietaryRestrictions: dietRestrictions.length ? dietRestrictions : ['None'],
         foodDislikes: profile?.food_dislikes || [],
         dislikedMeals,
         likedMeals,

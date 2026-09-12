@@ -12,17 +12,25 @@
 // for a spread, got five dinners among ten candidates, and the sort discarded all five as repeats:
 // three breakfast-ish dishes at 6pm with chicken and ground beef in the pantry.
 
+import { isSameDish } from './dish-key.ts'
+
 export type Candidate = {
   name?: unknown
   slot?: unknown
   _clash?: boolean
   _tier?: number
   _repeat?: boolean
+  _notCookable?: boolean
   _fitScore?: number
 }
 
 export function compareCandidates(a: Candidate, b: Candidate): number {
   if (!!a._clash !== !!b._clash) return a._clash ? 1 : -1
+  // A meal needing food the pantry lacks is kept only because the cookability gate is floored — it
+  // exists to stop a short deck, not to lead one. It had no rank of its own, so on a thin pantry a
+  // dish requiring chicken the user does not own could be shown FIRST, above one they could cook
+  // (measured on the carb-heavy sweep case, 2026-09-12). "Cook Tonight" is the whole promise.
+  if (!!a._notCookable !== !!b._notCookable) return a._notCookable ? 1 : -1
   const ta = Number(a._tier) || 0, tb = Number(b._tier) || 0
   if (ta !== tb) return ta - tb
   if (!!a._repeat !== !!b._repeat) return a._repeat ? 1 : -1
@@ -50,14 +58,36 @@ const NEEDS: ReadonlyArray<(m: Candidate) => boolean> = [isSubstantial, m => !is
  * loss leaves the other need met, and never promotes a clash — protein powder whisked into a soup
  * is worse than a missing dinner. `promoted` names what coverage pulled in, for the funnel.
  */
-export function selectDeck<T extends Candidate>(candidates: T[], n: number): { deck: T[]; promoted: string[] } {
+export function selectDeck<T extends Candidate>(candidates: T[], n: number): { deck: T[]; promoted: string[]; duplicates: string[] } {
   const sorted = [...candidates].sort(compareCandidates)
-  const deck = sorted.slice(0, n)
+  // Two spellings of one dish in the same deck is one idea shown twice — the sweep produced
+  // "Savory Spaghetti with Garlic and Beans" beside "Spaghetti with Savory Tomato and Bean Sauce".
+  // Near-duplicates are skipped while anything else is left, and only backfilled when the
+  // alternative is a short deck, which this file's every other rule already treats as worse.
+  const deck: T[] = []
+  const duplicates: string[] = []
+  for (const m of sorted) {
+    if (deck.length >= n) break
+    if (deck.some(d => isSameDish(String(d.name ?? ''), String(m.name ?? '')))) continue
+    deck.push(m)
+  }
+  for (const m of sorted) {
+    if (deck.length >= n) break
+    if (deck.includes(m)) continue
+    duplicates.push(String(m.name ?? ''))
+    deck.push(m)
+  }
   const promoted: string[] = []
-  if (n < 2) return { deck, promoted }
+  if (n < 2) return { deck, promoted, duplicates }
   for (const need of NEEDS) {
     if (deck.some(need)) continue
-    const pick = sorted.find(m => !deck.includes(m) && need(m) && !m._clash)
+    // Coverage may not DEGRADE the deck. On the asian pantry it pulled a 30g tofu scramble in over
+    // 43g stir-fries purely because the deck held no light meal — against a 47g target, that trade
+    // is not worth making. A spread the user can eat all day is worth less than every meal hitting
+    // their macros, so a promotion only happens at a tier the deck already contains.
+    const worstTier = Math.max(...deck.map(m => Number(m._tier) || 0), 0)
+    const pick = sorted.find(m => !deck.includes(m) && need(m) && !m._clash && !m._notCookable
+      && (Number(m._tier) || 0) <= worstTier)
     if (!pick) continue
     for (let i = deck.length - 1; i >= 0; i--) {
       const rest = deck.filter((_, j) => j !== i)
@@ -68,5 +98,5 @@ export function selectDeck<T extends Candidate>(candidates: T[], n: number): { d
       }
     }
   }
-  return { deck: deck.sort(compareCandidates), promoted }
+  return { deck: deck.sort(compareCandidates), promoted, duplicates }
 }

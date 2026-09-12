@@ -79,3 +79,63 @@ test('nothing to patch with leaves the deck alone', () => {
   assert.equal(deck.length, 3)
   assert.deepEqual(promoted, [])
 })
+
+// From the 2026-09-12 sweep across pantries this generator was never tuned on.
+test('a meal the pantry cannot cook never leads the deck', () => {
+  const { deck } = selectDeck([
+    { name: 'Garlic Butter Pan-Seared Chicken Breast', slot: 'dinner', _tier: 0, _notCookable: true, _fitScore: 0.01 },
+    { name: 'Black Bean and Onion Skillet', slot: 'dinner', _tier: 0, _fitScore: 0.4 },
+    { name: 'Cheesy Potato Bake', slot: 'dinner', _tier: 1, _fitScore: 0.5 },
+    { name: 'Peanut Butter Banana Toast', slot: 'breakfast', _tier: 1, _fitScore: 0.6 },
+  ], 3)
+  assert.equal(String(deck[0].name), 'Black Bean and Onion Skillet', 'cookable first, even with a worse macro fit')
+  // With three cookable candidates it does not reach the deck at all; it only ever fills a tail.
+  assert.ok(!names(deck).includes('Garlic Butter Pan-Seared Chicken Breast'))
+  const thin = selectDeck([
+    { name: 'Garlic Butter Pan-Seared Chicken Breast', slot: 'dinner', _tier: 0, _notCookable: true, _fitScore: 0.01 },
+    { name: 'Black Bean and Onion Skillet', slot: 'dinner', _tier: 0, _fitScore: 0.4 },
+  ], 3)
+  assert.equal(String(thin.deck[thin.deck.length - 1].name), 'Garlic Butter Pan-Seared Chicken Breast')
+})
+
+test('one dish is not shown twice under two names', () => {
+  const { deck, duplicates } = selectDeck([
+    { name: 'Savory Spaghetti with Garlic and Beans', slot: 'dinner', _tier: 0, _fitScore: 0.1 },
+    { name: 'Spaghetti with Savory Tomato and Bean Sauce', slot: 'dinner', _tier: 0, _fitScore: 0.2 },
+    { name: 'Black Bean and Cheese Toasted Bagel', slot: 'breakfast', _tier: 0, _fitScore: 0.9 },
+    { name: 'Cheesy Potato and Vegetable Bake', slot: 'dinner', _tier: 1, _fitScore: 0.95 },
+  ], 3)
+  assert.equal(duplicates.length, 0)
+  assert.equal(new Set(deck.map(m => String(m.name))).size, 3)
+  assert.ok(!deck.some(m => String(m.name) === 'Spaghetti with Savory Tomato and Bean Sauce'))
+})
+
+test('a short deck is still worse: duplicates backfill when nothing else is left', () => {
+  const { deck, duplicates } = selectDeck([
+    { name: 'Chicken Fried Rice', slot: 'dinner', _tier: 0, _fitScore: 0.1 },
+    { name: 'Fried Rice with Chicken', slot: 'dinner', _tier: 0, _fitScore: 0.2 },
+  ], 3)
+  assert.equal(deck.length, 2, 'nothing invented to fill the third slot')
+  assert.deepEqual(duplicates, ['Fried Rice with Chicken'])
+})
+
+// Asian pantry, cutting profile, 2026-09-12 sweep: coverage pulled a 30g scramble in over 43g
+// stir-fries because the deck held no light meal. Against a 47g target that trade is not worth it.
+test('slot coverage never drags in a worse tier than the deck already holds', () => {
+  const { deck, promoted } = selectDeck([
+    { name: 'Shrimp and Shiitake Udon', slot: 'dinner', _tier: 0, _fitScore: 0.1 },
+    { name: 'Ginger Chicken Thigh Rice Bowl', slot: 'dinner', _tier: 0, _fitScore: 0.2 },
+    { name: 'Shrimp and Bok Choy Stir-Fry', slot: 'lunch', _tier: 0, _fitScore: 0.3 },
+    { name: 'Tofu Scramble with Napa Cabbage', slot: 'breakfast', _tier: 1, _fitScore: 0.4 },
+  ], 3)
+  assert.deepEqual(promoted, [], 'a tier-1 light meal is not worth a tier-0 dinner')
+  assert.ok(!names(deck).includes('Tofu Scramble with Napa Cabbage'))
+  // ...but when the light option is just as good, coverage still fires.
+  const better = selectDeck([
+    { name: 'Shrimp and Shiitake Udon', slot: 'dinner', _tier: 0, _fitScore: 0.1 },
+    { name: 'Ginger Chicken Thigh Rice Bowl', slot: 'dinner', _tier: 0, _fitScore: 0.2 },
+    { name: 'Shrimp and Bok Choy Stir-Fry', slot: 'lunch', _tier: 0, _fitScore: 0.3 },
+    { name: 'Chicken and Shiitake Scramble', slot: 'breakfast', _tier: 0, _fitScore: 0.9 },
+  ], 3)
+  assert.deepEqual(better.promoted, ['Chicken and Shiitake Scramble'])
+})

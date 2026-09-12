@@ -171,3 +171,20 @@ test('plain water is never missing, but food named after water still is', () => 
   const melon = findMissing([{ name: 'watermelon', grams: '200g' }], pantry, [])
   assert.deepEqual(melon.structural, ['watermelon'])
 })
+
+// The 2026-09-12 sweep served two protein shakes from a pantry holding no protein powder: the
+// head-noun rule matched it against the ASSUMED staple "garlic powder" on the last word alone.
+test('a class word as the last word is not a match — the modifier is the ingredient', () => {
+  const staples = ['salt', 'black pepper', 'garlic powder', 'onion powder', 'olive oil', 'cooking oil']
+  assert.equal(isInPantry('protein powder', staples), false, 'garlic powder does not stock protein powder')
+  assert.equal(isInPantry('protein powder', ['Milk', 'Corn Flakes', 'Bananas']), false)
+  assert.equal(isInPantry('sesame oil', ['Vegetable Oil']), false)
+  assert.equal(isInPantry('chicken broth', ['Beef Broth']), false)
+  assert.equal(isInPantry('tomato sauce', ['Soy Sauce']), false)
+  // The honest matches still work — they never needed the last-word guess.
+  assert.equal(isInPantry('whole milk', ['Milk']), true)
+  assert.equal(isInPantry('protein powder', ['Chocolate Protein Powder']), true)
+  assert.equal(isInPantry('soy sauce', ['Soy Sauce']), true)
+  assert.equal(isInPantry('diced onion', ['Yellow Onions']), true, 'a real food head noun still matches')
+  assert.equal(isInPantry('large eggs', ['Eggs']), true)
+})
