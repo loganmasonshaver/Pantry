@@ -16,6 +16,7 @@ import { stepIssues } from '../_shared/step-checks.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
 import { nameFormGaps, nameIngredientGaps, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
+import { assumedStaplesFor } from '../_shared/staples.ts'
 import { servingsForPortion, toPerServing } from '../_shared/servings.ts'
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -194,22 +195,36 @@ Deno.serve(async (req: Request) => {
     })
   }
 
+  // DRY RUN — service-role only, for sweeping the generator across pantries it was never tuned on.
+  //
+  // Every rule in this file was calibrated on ONE pantry. A dry run executes the whole pipeline and
+  // returns the deck WITH its funnel, while touching nothing a user can see: no daily cap, no
+  // recent-name window, no generation history, no images (those are a separate function anyway). So
+  // a sweep cannot change what the app shows anyone, and cannot be replayed by a user: the bearer
+  // must be the service key itself, which never leaves the server. `asUser` points the history reads
+  // at an existing id — the depth test needs a pantry's own past, an empty id gives a first-ever run.
+  // Mirrors generate-trending-meals' ?dryRun=true.
+  const url = new URL(req.url)
+  const bearer = (req.headers.get("Authorization") ?? req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim()
+  const dryRun = url.searchParams.get("dryRun") === "true" && bearer !== "" && bearer === supabaseServiceKey
   // Manual auth check — gateway JWT verification is disabled (ES256 incompatibility)
-  const user = await verifyUser(req)
+  const user = dryRun
+    ? { id: url.searchParams.get("asUser") || "00000000-0000-0000-0000-000000000000", email: null }
+    : await verifyUser(req)
   if (!user) return unauthorizedResponse()
   // Server-side premium gate (dormant until PREMIUM_ENFORCEMENT=on; fails open on errors).
-  const denied = await requirePremium(user.id)
+  const denied = dryRun ? null : await requirePremium(user.id)
   if (denied) return denied
 
   // Key on the verified user id, not x-forwarded-for — XFF is fully client-controlled,
   // so an attacker could send a unique value per request and land each in a fresh bucket,
   // defeating the limiter on this (expensive) endpoint entirely.
-  const { allowed } = rateLimit(`u:${user.id}`, 10, 60000)
+  const { allowed } = dryRun ? { allowed: true } : rateLimit(`u:${user.id}`, 10, 60000)
   if (!allowed) return rateLimitResponse()
 
   // Per-user daily cap — atomic check+increment up front; refunded on failure below
   // so a flaky-network retry doesn't burn the user's slot.
-  const cap = await checkScanCap(req, 'meal_gen', MEAL_GEN_CAP_PER_DAY)
+  const cap = dryRun ? { allowed: true, used: 0 } : await checkScanCap(req, 'meal_gen', MEAL_GEN_CAP_PER_DAY)
   if (!cap.allowed) {
     console.log(`[generate-meals] daily cap hit: ${cap.used}/${MEAL_GEN_CAP_PER_DAY}`)
     return new Response(
@@ -490,19 +505,9 @@ Deno.serve(async (req: Request) => {
     // must come from the scanned pantry. KEEP IN SYNC with constants/staples.ts (client copy).
     const excludedStaples: string[] = (Array.isArray(rawStaplesExcluded) ? rawStaplesExcluded : [])
       .map((s: any) => String(s).toLowerCase().trim()).filter(Boolean)
-    // Diet-aware auto-exclusion: never assume butter for a vegan/dairy-free user, or flour for a
-    // gluten-free one — using restrictions we already have, no opt-out needed. KEEP IN SYNC with
-    // dietExcludedStaples() in constants/staples.ts.
-    const dietLower = (dietaryRestrictions as string[]).map((x: string) => x.toLowerCase())
-    if (dietLower.includes('vegan') || dietLower.includes('dairy-free')) excludedStaples.push('butter')
-    if (dietLower.includes('gluten-free')) excludedStaples.push('all-purpose flour')
-    const ASSUMED = ['salt', 'black pepper', 'cooking oil', 'olive oil', 'butter', 'all-purpose flour', 'sugar',
-      'garlic powder', 'onion powder', 'paprika', 'cumin', 'chili powder', 'oregano', 'basil', 'Italian seasoning', 'cinnamon', 'red pepper flakes',
-      // "ice cubes", never bare "ice" — isInPantry matches on substrings, so 'ice' would make
-      // rice and juice permanently in-stock and they would silently stop showing as missing.
-      // The head-noun rule still matches a recipe line that just says "ice".
-      'ice cubes']
-      .filter(s => !excludedStaples.includes(s.toLowerCase()))
+    // The list itself (and the diet-aware exclusions) live in _shared/staples.ts so the sweep
+    // harness scores cookability against the same staples this run was given, not a second copy.
+    const ASSUMED = assumedStaplesFor(dietaryRestrictions as string[], excludedStaples)
     const excludedClause = excludedStaples.length
       ? ` EXCEPTION — the user has told us they do NOT keep: ${excludedStaples.join(', ')}; treat those as missing if a recipe needs them.`
       : ''
@@ -691,7 +696,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     }
 
     if (!meals || meals.length === 0) {
-      await refundScan(req, 'meal_gen') // generation failed — don't burn the user's daily slot
+      if (!dryRun) await refundScan(req, 'meal_gen') // generation failed — don't burn the user's daily slot
       return new Response(JSON.stringify({ error: "All providers failed to generate meals" }), {
         status: 500, headers: { "Content-Type": "application/json" },
       })
@@ -1222,7 +1227,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // If every candidate got filtered out (bad input, impossible macro/prep constraints),
     // refund the slot — the user got nothing usable, so it shouldn't count against their cap.
     if (meals.length === 0) {
-      await refundScan(req, 'meal_gen')
+      if (!dryRun) await refundScan(req, 'meal_gen')
       return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } })
     }
 
@@ -1250,7 +1255,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       ], RECENT_MEMORY)
       // Service-role write to the caller's own verified row; no entitlement data involved.
       // Never allowed to fail the response — the user already paid for this generation.
-      await db.from("profiles").update({ recent_meal_names: nextRecent }).eq("id", user.id)
+      if (!dryRun) await db.from("profiles").update({ recent_meal_names: nextRecent }).eq("id", user.id)
     } catch (e) {
       console.log("recent_meal_names update failed:", (e as Error).message)
     }
@@ -1267,7 +1272,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // silently stops history from being recorded, and one log line would then be blaming the wrong
     // write. Neither is allowed to fail the response: the user already paid for this generation.
     try {
-      await db.from("generated_meals").insert(
+      if (!dryRun) await db.from("generated_meals").insert(
         meals.map((m: any) => ({
           user_id: user.id,
           // Strip the diagnostic — meal_data is the permanent record of the MEAL, and this history
@@ -1290,7 +1295,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       funnel.namesShown = meals.map((m: any) => String(m?.name ?? ''))
       funnel.macroSources = traces.map((t: any) => t.applied ? t.source : 'uncorrected')
       await db.from("pipeline_runs").insert({
-        provider: 'generate-meals-funnel', dry_run: true, stored: meals.length,
+        provider: 'generate-meals-funnel', dry_run: dryRun, stored: meals.length,
         funnel: { user: user.id, mode, ...funnel, macros: traces },
       })
     } catch (e) {
@@ -1299,11 +1304,14 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
 
     // Return meals immediately, images will be fetched by a separate function. _fsTrace is
     // diagnostics and must never reach the client cache.
+    if (dryRun) {
+      return new Response(JSON.stringify({ meals, funnel }), { headers: { "Content-Type": "application/json" } })
+    }
     return new Response(JSON.stringify(meals.map((m: any) => { const { _fsTrace, ...rest } = m; return { ...rest, image: null } })), {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
-    await refundScan(req, 'meal_gen') // unexpected failure — refund the slot
+    if (!dryRun) await refundScan(req, 'meal_gen') // unexpected failure — refund the slot
     console.error('[generate-meals] error:', (error as Error).message) // detail server-side only
     return new Response(
       JSON.stringify({ error: "Meal generation failed" }), // generic — don't leak internals

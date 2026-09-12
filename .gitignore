@@ -69,3 +69,6 @@ supabase/.temp/
 # a committed lock + `deno check --frozen` in CI — at which point remove this line.
 deno.lock
 image-ab/
+
+# sweep output: raw decks + reports, regenerated on demand
+scripts/cook-tonight-sweep/results/
