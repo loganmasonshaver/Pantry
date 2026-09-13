@@ -499,3 +499,34 @@ export function computePerServingMacros(
   const per = (v: number) => Math.max(0, Math.round(v / n))
   return { calories: per(est.kcal), protein: per(est.protein), carbs: per(est.carbs), fat: per(est.fat) }
 }
+
+// A whole batch called ONE serving. The prompt tells the model that ingredients are the batch and
+// macros are per serving, and to work out how many servings the batch makes; on 9 of 245 live rows
+// it reported the creator's per-slice numbers and wrote servings: 1 anyway — a 1,637 g apple cake
+// at "420 kcal, 1 serving", a 958 g stuffed loaf at 750. The card is then honest about one slice
+// and absurd about the whole, and the servings picker has nothing to divide.
+//
+// The disagreement branch already sees this — computed batch calories run 2-7x the stated figure —
+// and keeps the model's numbers because a disagreement alone cannot say which side is wrong. This
+// is the one shape where it can: servings is exactly 1, the batch computes to at least TWICE the
+// stated per-serving figure, and rounding the ratio gives a count at which the two agree within the
+// normal band. Only the serving count changes. Never the ingredients (CLAUDE.md) and never the
+// stated macros, which stay the creator's per-portion truth. Capped at 16: past that the model has
+// misread something else, and a cake does not serve 20.
+export const MAX_INFERRED_SERVINGS = 16
+
+export function inferServings(
+  ingredients: MacroIngredient[] | undefined,
+  statedPerServingKcal: number,
+  servings: number,
+): { servings: number; batchKcal: number; ratio: number } | null {
+  if (Math.round(Number(servings) || 1) !== 1 || !(statedPerServingKcal > 0)) return null
+  const batch = computePerServingMacros(ingredients, 1)
+  if (!batch) return null
+  const ratio = batch.calories / statedPerServingKcal
+  if (ratio < 2) return null
+  const n = Math.min(MAX_INFERRED_SERVINGS, Math.round(ratio))
+  const perServing = batch.calories / n
+  if (Math.abs(perServing - statedPerServingKcal) / statedPerServingKcal > COMPUTED_AGREEMENT_BAND) return null
+  return { servings: n, batchKcal: batch.calories, ratio }
+}

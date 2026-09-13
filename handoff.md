@@ -21,7 +21,7 @@ its root causes found and deployed — the retention count collapsed split lines
 unioned and rotated — with PASS pending two scheduled runs ≥ 12 (Sep 14, 15). A forced real run at
 20:35 UTC stored 12 with 12 photos. The funnel row was found to be silently lost on rich days (lone
 surrogate → jsonb refusal) and fixed the same evening; `pipeline_runs` before 20:24 UTC Sep 13 is
-incomplete. One NEW open item in PRELAUNCH §0: whole-batch recipes stored as one serving (9 of 245).
+incomplete. The one-serving-batch item was built and the 9 rows repaired. PRELAUNCH §0 now opens with Logan's audit-rerun item, and §0b holds the Chicken and Rice Soup analysis (flavour-blind ranker), decision pending.
 Tests 591. YouTube quota 7/7 used on Sep 13 — do not run the pipeline again before 07:00 UTC Sep 14.
 Everything below §0 is the state as it was at the chat switch.
 

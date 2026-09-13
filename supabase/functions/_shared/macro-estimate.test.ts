@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros, leadingNumber } from './macro-estimate.ts'
+import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros, leadingNumber, inferServings } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -394,4 +394,38 @@ test('parseQty converts the creator quantities recovery hands it', () => {
   assert.equal(parseQty('2 tbsp').g, 30)
   assert.equal(parseQty('120g').g, 120)
   assert.equal(parseQty('pinch of salt').known, false)
+})
+
+// Live rows, 2026-09-13. The cake computes to 3,346 kcal for the batch against a stated 420 per
+// serving; the cucumber bowl to 711 against 450 — a big bowl, but one bowl.
+const APPLE_PIE = [
+  { name: 'eggs', grams: '150g' }, { name: 'sugar', grams: '100g' }, { name: '10% cream or milk', grams: '250g' },
+  { name: 'vegetable oil', grams: '80g' }, { name: 'all-purpose flour', grams: '300g' }, { name: 'baking powder', grams: '10g' },
+  { name: 'apples', grams: '250g' }, { name: 'cottage cheese', grams: '250g' }, { name: 'egg', grams: '50g' },
+  { name: 'sugar', grams: '25g' }, { name: 'vanilla extract', grams: '5g' }, { name: 'apple', grams: '125g' },
+  { name: 'sugar', grams: '12g' }, { name: 'cinnamon', grams: '2g' }, { name: 'melted butter', grams: '28g' },
+]
+const CUCUMBER_BOWL = [
+  { name: 'cucumber', grams: '200g' }, { name: 'red onion', grams: '40g' }, { name: 'low-fat greek yogurt', grams: '160g' },
+  { name: 'garlic', grams: '3g' }, { name: 'lemon juice', grams: '15ml' }, { name: 'olive oil', grams: '10g' },
+  { name: 'salt and pepper', grams: '2g' }, { name: 'cooked chicken breast', grams: '150g' }, { name: 'chickpeas', grams: '80g' },
+  { name: 'shelled edamame', grams: '80g' }, { name: 'avocado', grams: '100g' },
+]
+
+test('a 1.6 kg cake stored as one 420 kcal serving is eight servings', () => {
+  const inf = inferServings(APPLE_PIE, 420, 1)
+  assert.ok(inf, 'expected an inference')
+  assert.equal(inf!.servings, 8)
+  assert.ok(inf!.ratio > 7.5 && inf!.ratio < 8.5, `ratio ${inf!.ratio}`)
+})
+
+test('a big bowl that computes under twice its stated figure stays one serving', () => {
+  assert.equal(inferServings(CUCUMBER_BOWL, 450, 1), null)
+})
+
+test('only servings 1 is ever touched, and the rounded count must reconcile within the band', () => {
+  assert.equal(inferServings(APPLE_PIE, 420, 4), null, 'a wrong 4 is ambiguous — left alone')
+  assert.equal(inferServings(APPLE_PIE, 0, 1), null)
+  assert.equal(inferServings(APPLE_PIE, 100, 1), null, 'ratio 33 caps at 16, 209 vs 100 does not reconcile — leave it')
+  assert.equal(inferServings(APPLE_PIE, 209, 1)?.servings, 16, 'ratio 16 reconciles exactly at the cap')
 })

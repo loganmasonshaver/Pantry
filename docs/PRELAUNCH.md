@@ -9,6 +9,11 @@ Ordered by what should be done first. Later items depend on earlier ones.
 ---
 
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
+- [ ] **AUDIT RERUN — Logan 2026-09-13, top of the list:** once the Sep 14 and Sep 15 crons have run,
+  do a full pass on Fable 5.1 over both stored batches and their `pipeline_runs` rows (they persist
+  now): every fix below verified in production output, every failure kind in `rejected` explained,
+  and NO new failure kinds. Methods in `docs/TRENDING-OPEN.md`. Quota is 7 runs/day; the audit
+  should need at most 2 dry runs on top of the cron.
 **2026-09-13 evening: ROOT CAUSES FOUND, FIXES DEPLOYED, PASS STILL PENDING (two cron days ≥ 12).**
 The 16-day series is 4, 18, 4, 18, 11, 2, 15, 14, 12, 2, (outage), 13, 9, 5, 2 — not a decline, a coin
 flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neither the model:
@@ -57,7 +62,16 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   (`dry_run=false`): `llmRaw`/`llmYields` per attempt, `rejected.dropped`, `ingredientsRecovered`.
   If a thin day recurs, compare KINDS: low `llmRaw` on every attempt is the model, high `dropped`
   is the parser — never widen tolerance.
-- [ ] **NEW, DECISION NEEDED — a whole cake stored as one serving.** Apple Pie Cottage Cheese Cake:
+- [x] **BUILT + REPAIRED 2026-09-13 (Logan: "your call") — a whole cake stored as one serving.**
+  `inferServings` in `_shared/macro-estimate.ts`: when `servings` is 1 and the batch computes to ≥ 2x
+  the stated per-serving kcal, servings = round(ratio), capped at 16, and only if the two then agree
+  within the normal 25% band. Changes the COUNT only — never an ingredient, never the stated
+  macros. Runs before either macro branch in the pipeline; `servingsInferred` in the funnel. Replay
+  of all 88 live one-serving rows: 9 change, every one a batch — cake 1→8 (3,346 vs 420 kcal),
+  cheesecake 1→6, ice cream 1→4, pizza 1→3, flatbread 1→3, five bowls/loaves 1→2 — and the four big
+  single bowls (Sukiyaki 1.73x, Lauki Pasta 1.67x, Pulao 1.62x, Cucumber 1.58x, Sweet Potato Beef
+  1.43x) stay at 1. Those 9 live rows were repaired via REST the same evening (verify: no YouTube
+  row with servings 1 computes to ≥ 2x). Was: Apple Pie Cottage Cheese Cake:
   1,637 g of ingredients, `servings` 1, 420 kcal / 12 g protein, `macros_source` 'model'. The model
   reported the creator's per-slice numbers and called the batch one serving; computed macros
   disagreed by ~7x, and on disagreement the code keeps the model's numbers and stores the row. In
@@ -78,6 +92,40 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   legacy service_role JWT is NOT accepted as internal. 100% ingredient retention is a product
   requirement — never widen tolerance to fill a thin day; the levers are candidate volume and
   parser precision (CLAUDE.md). Methods and standing procedure: `docs/TRENDING-OPEN.md`.
+
+## 0b. RAISED BY LOGAN 2026-09-13 — the Chicken and Rice Soup  *(analysed, DECISION PENDING — Logan: "don't fix it right away")*
+Run 678 (20:04 UTC), Cook Now, target 40 g / 525 kcal, pantry 55 items. Shown: Bulgarian Yogurt and
+Protein Shake, Greek Yogurt and Protein Cereal Bowl, Chicken and Rice Soup. The soup: chicken, cooked
+rice, leafy greens, garlic, WATER, salt — "Dice chicken. Boil water with garlic and chicken 7 min. Add
+rice and greens 2 min." Photo matches it exactly: cubed chicken, rice and wilted greens in clear water.
+- **Is it a real dish?** Chicken and rice soup is universal (avgolemono, arroz caldo, the American one).
+  THIS one is not one anyone cooks on purpose: water instead of stock, no fat, no acid, no pepper, no
+  aromatic beyond garlic. It is the "plain grilled chicken + plain rice" diet plate the prompt bans, in
+  a bowl. The pantry could have made a real one — soy sauce, lime, salsa, butter, peanut butter,
+  shredded cheese, pad thai sauce are all on the shelf and the model used none of them.
+- **Why it was shown — three mechanisms, none of them "the pantry is too small":**
+  1. **The ranker is blind to flavour.** `flavourAxes` is computed AFTER `selectDeck` (index.ts 1307
+     vs 1318) and only measured. The 7 candidates carried: Pan-Seared Chicken w/ Cauliflower 2 axes
+     (tier 1, incomplete); Ground Beef and Potato Hash 2 axes (tier 0, worst calorie fit 0.706);
+     Chicken and Pesto Rice Bowl 2 axes (umami + aromatic, tier 0, fit 0.028); Chicken and Rice Soup 0
+     axes (tier 0, fit 0.002). The soup took the dinner slot over the pesto bowl on a 0.026 difference
+     in calorie fit. All three shown meals: 0 axes. Last 10 days: 12 meals shown, 5 with ZERO axes,
+     avg 1.33, against a prompt rule that demands ≥ 2. The daily line goes red only on salt/pepper
+     absence, so a salted, flavourless deck reads as healthy.
+  2. **The pool is exhausted.** 6 of 7 candidates were repeats (33 names in the recent window); cheese
+     and egg were banned as overused. The one fresh dish was the shake. On repeats the ranker has only
+     tier and calorie fit left to choose by.
+  3. **The model strips real dishes to macro skeletons** when the targets bind — the same failure the
+     prompt already names for protein quantity ("diet food wearing a recipe's clothes"), here for
+     flavour. Nothing in code catches it.
+- **Verdict:** the model is not inventing random dishes; it is picking real dish types and gutting
+  them, and the ranker cannot tell. Logan's instinct is right, his hypothesis (pantry-only → made-up
+  food) is the wrong cause.
+- [ ] **Levers, in order, none built:** (a) rank flavour inside a tier — a complete dish with ≥ 2 axes
+  beats one with 0 before calorie fit decides (the pesto bowl would have shipped); (b) offer the
+  pantry's FLAVOUR items in the prompt the way proteins and carbs are offered ("FLAVOUR THIS PANTRY
+  HAS: soy sauce, lime, salsa, butter…"); (c) a savory dinner with 0 axes never outranks a 1+ axis
+  candidate. All measurable through `flavourAxesShown` before and after. Logan to decide.
 
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
 - [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.

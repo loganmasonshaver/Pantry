@@ -12,7 +12,7 @@ import { stepsLookUntranslated, translateSteps } from '../_shared/translate-step
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
-import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, macroIncoherence } from '../_shared/macro-estimate.ts'
+import { COMPUTED_AGREEMENT_BAND, inferServings, computePerServingMacros, macroIncoherence } from '../_shared/macro-estimate.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const youtubeKey = Deno.env.get("YOUTUBE_API_KEY")
@@ -1023,6 +1023,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0
     let rawTotal = 0, sanitizedTotal = 0
     const droppedDetail: any[] = []
+    const servingsInferred: { name: string; to: number; ratio: number }[] = []
     // Each attempt sees the candidates in a DIFFERENT order. The model is near-deterministic for a
     // given prompt — a run whose five attempts yielded [2,0,0,0,0] re-proposed the same two dishes
     // every time — and it picks from the top of a 44-video list far more than from the bottom.
@@ -1299,6 +1300,16 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // narrow filters — only ~28% of candidates have a parseable ingredient list at all —
             // and the pipeline's yield problem is measured (24 raw vs 5 on identical runs). Same
             // videos, better numbers.
+            // A whole batch called one serving — fix the COUNT before either branch reads it, so
+            // creator macros stay per-portion and a model disagreement can resolve to 'computed'.
+            {
+              const inf = inferServings(r.ingredients, Number(r.calories) || 0, toInt(r.servings) ?? 1)
+              if (inf) {
+                console.log(`[funnel] servings inferred "${name}": 1 → ${inf.servings} (batch ${inf.batchKcal} kcal vs ${Number(r.calories)} stated per serving, ratio ${inf.ratio.toFixed(1)})`)
+                servingsInferred.push({ name, to: inf.servings, ratio: Math.round(inf.ratio * 10) / 10 })
+                r.servings = inf.servings
+              }
+            }
             if (r.macros_from_creator === true) {
               r._macrosSource = 'creator'
             } else {
@@ -1348,6 +1359,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
               nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName },
             droppedDetail,
+            servingsInferred,
           }
           if (sanitized.length > 0) {
             recipes = [...(recipes ?? []), ...sanitized]
