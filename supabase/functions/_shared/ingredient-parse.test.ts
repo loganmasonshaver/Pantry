@@ -420,3 +420,10 @@ test('a Turkish description stops at its method heading', () => {
   assert.equal(lines.length, 3, lines.join(' | '))
   assert.ok(lines.every(l => !/püre|pişir/.test(l)))
 })
+
+test('a two-glyph emoji bullet is stripped whole, never leaving a lone surrogate', () => {
+  const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/
+  for (const line of parseIngredientBlock('Ingredients:\n👨‍🍳 2 eggs\n👩‍🍳 100g flour\n🥣 1 cup milk')) {
+    assert.doesNotMatch(line, lone, JSON.stringify(line))
+  }
+})

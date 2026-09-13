@@ -2,6 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
 import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
+import { jsonSafe } from '../_shared/json-safe.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
@@ -1694,7 +1695,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // run's result survives. Wrapped so a logging failure can never fail the run itself.
       try {
         const { error: logErr } = await db.from('pipeline_runs').insert({
-          dry_run: true, provider: (funnel.providerUsed as string | undefined) ?? null, stored: recipes.length, funnel,
+          dry_run: true, provider: (funnel.providerUsed as string | undefined) ?? null, stored: recipes.length, funnel: jsonSafe(funnel),
         })
         if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
       } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
@@ -1796,7 +1797,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const { data: priorRows } = await db.from('trending_meals')
       .select('id').eq('generated_at', today()).eq('trend_source', 'YouTube trending')
     const priorIds = (priorRows ?? []).map((r: any) => r.id)
-    const { error } = await db.from('trending_meals').insert(meals)
+    // Scrubbed: one lone surrogate in any string refuses the WHOLE batch (see json-safe.ts).
+    const { error } = await db.from('trending_meals').insert(jsonSafe(meals))
     stageLog(`[funnel] db insert: ${error ? '0 (FAILED)' : meals.length} rows — error: ${error?.message ?? 'none'}`)
     // Only remove the stale rows once the new ones are safely in (keeps them as fallback on failure).
     if (!error && priorIds.length) {
@@ -1882,7 +1884,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     console.log(`Success: ${meals.length} trending meals from YouTube + Groq`)
     try {
       const { error: logErr } = await db.from('pipeline_runs').insert({
-        dry_run: false, provider: (funnel.providerUsed as string | undefined) ?? null, stored: meals.length, funnel,
+        dry_run: false, provider: (funnel.providerUsed as string | undefined) ?? null, stored: meals.length, funnel: jsonSafe(funnel),
       })
       if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
     } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }

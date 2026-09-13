@@ -65,10 +65,14 @@ const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
 // Decimals are unaffected: in "2.5 cups" the lookahead sees "5", not whitespace, so nothing strips.
 const NUMBERED_MARKER = String.raw`\d+[.)]{1,2}(?=\s|$)`
 
+// The `u` flag is load-bearing. Without it a character class matches UTF-16 code UNITS, so a
+// two-glyph emoji bullet ("👨‍🍳 HAZIRLANIŞI") lost only the high half of 👨 and the line went on
+// carrying a lone low surrogate — which Postgres jsonb refuses, and which silently cost the run
+// its pipeline_runs row on every day that dropped such a recipe (see _shared/json-safe.ts).
 function stripBullet(raw: string): string {
   return raw
-    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)+\\s*`), '')
-    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS})+\\s*`), '')
+    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)+\\s*`, 'u'), '')
+    .replace(new RegExp(`^\\s*(?:${BULLET_CHARS})+\\s*`, 'u'), '')
     .trim()
     .replace(/[:\s]+$/, '')
 }
