@@ -8,6 +8,30 @@ Ordered by what should be done first. Later items depend on earlier ones.
 
 ---
 
+## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
+New recipes per day (`trending_meals.generated_at`): **Sep 10: 13 · Sep 11: 9 · Sep 12: 5 · Sep 13: 2.** All
+have photos, all split/phased, so it is the FRONT of the pipeline, not storage. The health check has
+said "unhealthy" three mornings running and the daily report carried it; nobody acted.
+- [ ] **Find the stage that collapsed.** From `pipeline_runs` (provider `Google`, `dry_run = false`,
+  03:01 daily): candidates are steady — `sentToLLM` 38 → 45 → 44 — but the model's usable output fell
+  from `raw` 20 (Sep 12) to `raw` 3 (Sep 13), `llmYields` [7,2,2] → [0,3,5] → [1,2,0]. On Sep 12 the
+  rejections were `nearDup` 8 (the pool saturating against 219 stored?) + `dropped` 5 + `nameGap` 2;
+  on Sep 13 all 3 raw were `dropped`. Read `llm_Google.droppedDetail` for WHY, and the run's console
+  in the dashboard for Gemini errors/truncation.
+- [ ] **Suspects, in order:** (1) the 2026-09-10 extraction changes — time split, ordered `time_phases`,
+  the translation net, emoji strip — landed the same day yield started falling; a stricter extractor
+  output that fails validation reads as `dropped`. Diff what the prompt asked for on Sep 9 vs Sep 10.
+  (2) `nearDup` against a 219-recipe pool — if dedup is now rejecting most of what YouTube returns,
+  the candidate SEARCH needs to move, not the gate. (3) Gemini quota/5xx (the cron gives up at 5s —
+  `net._http_response` says timed_out, which is expected; the function's own log is the record).
+- [ ] **Constraints, do not relearn:** YouTube quota is 10,000 units/day = **7 runs**, dry runs cost the
+  same; run tests SEQUENTIALLY. Force a run with the cron's own `net.http_post` +
+  `?refresh=true&dryRun=true` (mechanism in `handoff.md` §3). 100% ingredient retention is a product
+  requirement — never widen tolerance to fill a thin day; the levers are candidate volume and parser
+  precision (CLAUDE.md). Methods and standing procedure: `docs/TRENDING-OPEN.md`.
+- [ ] PASS = a scheduled 03:00 run stores ≥ 12 with the fix, two days running, and the daily line
+  reads "Discover: N new recipes, all have photos" in grey.
+
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
 - [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.
       Real product IDs are `com.kobalabs.pantry.monthly` (1 month) and `com.kobalabs.pantry.annual`
