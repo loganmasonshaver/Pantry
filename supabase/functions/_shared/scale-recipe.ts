@@ -165,7 +165,7 @@ export function scaleToTarget(
   ingredients: ScalableIngredient[] | undefined,
   currentKcal: number,
   targetKcal: number,
-  { min = SCALE_MIN, max = SCALE_MAX, denseMin = DENSE_MIN, tolerance = 0.15 } = {},
+  { min = SCALE_MIN, max = SCALE_MAX, denseMin = DENSE_MIN, tolerance = 0.15, servings = 1 } = {},
 ): ScaleResult {
   const ings = Array.isArray(ingredients) ? ingredients : []
   const unit1 = { kcal: 1, protein: 1, carbs: 1, fat: 1 }
@@ -194,24 +194,22 @@ export function scaleToTarget(
     const afterDense = F + D * denseFactor + L
     if (afterDense > edge && L > 0) leanFactor = clamp(min, 1, (edge - F - D * denseFactor) / L)
   } else {
-    // Counted food does not grow, so the measured share must grow by MORE than the ratio. Using the
-    // ratio itself left the old version short of target whenever a recipe held eggs.
-    denseFactor = leanFactor = clamp(1, max, (want - F) / (D + L))
+    // UP is the mirror of down: the calories that are missing come from DENSE food first (rice, oil,
+    // butter — cheap calories that do not change what the dish is), and lean food grows only if the
+    // dish is still short, and never past its normal portion. Growing everything alike is how a
+    // 298 kcal scramble reached 504g of egg whites — more than a carton — to look like 525 kcal.
+    // Counted food does not grow, so the measured share must grow by MORE than the ratio.
+    if (D > 0) denseFactor = clamp(1, max, 1 + (want - total) / D)
+    const afterDense = F + D * denseFactor + L
+    if (afterDense < want && L > 0) {
+      const leanCap = Math.min(...ings.map((ing, i) => group[i] === 'lean' ? maxGrowth(ing, servings) : Infinity))
+      leanFactor = clamp(1, Math.min(max, Math.max(1, leanCap)), 1 + (want - afterDense) / L)
+    }
   }
   if (Math.abs(denseFactor - 1) < 0.05 && Math.abs(leanFactor - 1) < 0.05) return noop('adjustment too small to be worth making')
 
   const factorOf = (i: number) => (group[i] === 'dense' ? denseFactor : group[i] === 'lean' ? leanFactor : 1)
-  const scaled = ings.map((ing, i) => {
-    const f = factorOf(i)
-    if (f === 1) return ing
-    const g = parseFloat(String(ing.grams ?? '').replace(/[^0-9.]/g, ''))
-    const unit = String(ing.grams ?? '').replace(/[0-9.\s]/g, '') || 'g'
-    return {
-      ...ing,
-      grams: Number.isFinite(g) && g > 0 ? `${Math.max(1, Math.round(g * f))}${unit}` : ing.grams,
-      visual: scaleVisualText(String(ing.visual ?? '') || undefined, f),
-    }
-  })
+  const scaled = ings.map((ing, i) => scaleIngredient(ing, factorOf(i)))
 
   const factors = { ...unit1 }
   for (const key of KEYS) {
@@ -254,7 +252,7 @@ const MEAT_FISH = /\b(chicken|turkey|beef|steak|mince|pork|lamb|veal|duck|salmon
 const POWDER = /\b(protein powder|whey|casein|protein isolate)\b/i
 export function anchorCap(name: unknown): number {
   const n = String(name ?? '')
-  return POWDER.test(n) ? 60 : MEAT_FISH.test(n) ? 250 : 350
+  return POWDER.test(n) ? 60 : MEAT_FISH.test(n) ? 250 : /\beggs?\b/i.test(n) && !/white/i.test(n) ? 250 : 350
 }
 // Below this an ingredient is not a protein source worth growing — vegetables clear LEAN_SHARE on
 // share alone (they have almost no calories), and 300g of cauliflower is not the answer to anything.
@@ -307,4 +305,61 @@ export function topUpProtein(
     added: { protein: per(a.e.protein), kcal: per(a.e.kcal), carbs: per(a.e.carbs), fat: per(a.e.fat) },
     reason: `${String(a.ing.name)} ${Math.round(a.g)}g → ${newG}g (+${Math.round(per(a.e.protein))}g protein, +${Math.round(per(a.e.kcal))} kcal)`,
   }
+}
+
+// ── Portions ───────────────────────────────────────────────────────────────────────────────────
+/** How far one ingredient may grow before it passes its normal portion (1 = cannot grow). */
+export function maxGrowth(ing: ScalableIngredient, servings = 1): number {
+  const g = parseFloat(String(ing?.grams ?? '').replace(/[^0-9.]/g, ''))
+  if (!Number.isFinite(g) || g <= 0) return Infinity
+  return Math.max(1, (anchorCap(ing?.name) * servings) / g)
+}
+
+/** One place that scales an ingredient, so grams and a whole-item count cannot drift apart: "4 large"
+ *  eggs x1.4 is "6 large", and the grams follow the SIX, not the 1.4. */
+export function scaleIngredient(ing: ScalableIngredient, factor: number): ScalableIngredient {
+  if (!Number.isFinite(factor) || factor === 1) return ing
+  const g = parseFloat(String(ing?.grams ?? '').replace(/[^0-9.]/g, ''))
+  const unit = String(ing?.grams ?? '').replace(/[0-9.\s]/g, '') || 'g'
+  const visual = String(ing?.visual ?? '')
+  let f = factor
+  if (countScalable(visual)) {
+    const count = Number(visual.match(/^\s*(\d+)/)?.[1])
+    const newCount = Math.max(1, Math.round(count * factor))
+    f = newCount / count
+  }
+  return {
+    ...ing,
+    grams: Number.isFinite(g) && g > 0 ? `${Math.max(1, Math.round(g * f))}${unit}` : ing?.grams,
+    visual: scaleVisualText(visual || undefined, f),
+  }
+}
+
+export type ClampResult = { ingredients: ScalableIngredient[]; factors: Record<'kcal' | 'protein' | 'carbs' | 'fat', number>; clamped: string[] }
+
+/**
+ * Bring any LEAN protein item written past its normal portion back down to it. The model itself
+ * wrote 360g of egg whites for one scramble; the resize then made it 504g. anchorCap is the same
+ * line the top-up respects, so the two can never disagree about what a portion is. Runs before the
+ * top-up so it works from clamped numbers.
+ */
+export function clampPortions(ingredients: ScalableIngredient[] | undefined, servings = 1): ClampResult {
+  const ings = Array.isArray(ingredients) ? ingredients : []
+  const unit1 = { kcal: 1, protein: 1, carbs: 1, fat: 1 }
+  const clamped: string[] = []
+  const out = ings.map(ing => {
+    const g = parseFloat(String(ing?.grams ?? '').replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(g) || g <= 0 || !isScalable(ing)) return ing
+    const e = estimateMacros([ing] as never)
+    const lean = e.kcal > 0 && (e.protein * 4) / e.kcal >= LEAN_SHARE && (e.protein / g) * 100 >= 9
+    const cap = anchorCap(ing?.name) * servings
+    if (!lean || g <= cap * 1.05) return ing
+    clamped.push(`${String(ing?.name)} ${Math.round(g)}g → ${Math.round(cap)}g`)
+    return scaleIngredient(ing, cap / g)
+  })
+  if (clamped.length === 0) return { ingredients: ings, factors: unit1, clamped }
+  const before = estimateMacros(ings as never), after = estimateMacros(out as never)
+  const factors = { ...unit1 }
+  for (const k of ['kcal', 'protein', 'carbs', 'fat'] as const) factors[k] = before[k] > 0 ? after[k] / before[k] : 1
+  return { ingredients: out, factors, clamped }
 }

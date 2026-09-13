@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { scaleToTarget, scaleVisualText, isScalable, topUpProtein, anchorCap, SCALE_MIN, SCALE_MAX, DENSE_MIN } from './scale-recipe.ts'
+import { scaleToTarget, scaleVisualText, isScalable, topUpProtein, anchorCap, clampPortions, scaleIngredient, SCALE_MIN, SCALE_MAX, DENSE_MIN } from './scale-recipe.ts'
 
 // The real over-shooting recipe this was written for: 806 kcal against a 525 target.
 const PESTO_BOWL = [
@@ -277,4 +277,38 @@ test('a condiment is never the protein anchor', () => {
   const out = topUpProtein(stirFry, 32, 40, 531, 735)
   assert.match(out.reason, /^ground beef/)
   assert.equal(String(out.ingredients[3].grams), '15ml', 'soy sauce untouched')
+})
+
+
+// ── portions ──────────────────────────────────────────────────────────────────────────────────
+// Logan's phone, 2026-09-13 13:26: "Egg White and Vegetable Scramble", 504g of liquid egg whites in
+// one serving — the model wrote 360g, then the calorie resize grew it 1.4x to look like 525 kcal.
+const SCRAMBLE = [
+  { name: 'liquid egg whites', visual: '1½ cups', grams: '360g' },
+  { name: 'leafy greens', visual: '2 handfuls', grams: '60g' },
+  { name: 'yellow onion', visual: '¼ cup', grams: '30g' },
+  { name: 'butter', visual: '1 tbsp', grams: '14g' },
+]
+
+test('the calorie resize grows dense food first and never pushes a protein past its portion', () => {
+  const out = scaleToTarget(SCRAMBLE, 298, 525)
+  const whites = parseFloat(String(out.ingredients[0].grams))
+  assert.ok(whites <= 360, `egg whites did not grow: ${whites}g`)
+  assert.ok(parseFloat(String(out.ingredients[3].grams)) > 14, 'butter (dense) grew instead')
+})
+
+test('a protein written past its portion is clamped back before anything else runs', () => {
+  const out = clampPortions([{ name: 'liquid egg whites', visual: '2 cups', grams: '504g' }, { name: 'butter', visual: '1 tbsp', grams: '14g' }])
+  assert.equal(String(out.ingredients[0].grams), '350g')
+  assert.deepEqual(out.clamped, ['liquid egg whites 504g → 350g'])
+  assert.ok(out.factors.protein < 0.75 && out.factors.protein > 0.65, `macros follow: x${out.factors.protein.toFixed(2)}`)
+  assert.equal(clampPortions(SCRAMBLE).clamped.length, 0, 'a normal portion is left alone')
+  assert.equal(anchorCap('eggs'), 250, 'five eggs is a lot; ten is not a meal')
+  assert.equal(anchorCap('liquid egg whites'), 350)
+})
+
+test('a scaled count keeps its grams honest', () => {
+  const eggs = scaleIngredient({ name: 'eggs', visual: '4 large', grams: '200g' }, 1.395)
+  assert.equal(eggs.visual, '6 large')
+  assert.equal(eggs.grams, '300g', 'six eggs weigh 300g, not 279g')
 })

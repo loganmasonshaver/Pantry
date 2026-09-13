@@ -9,7 +9,7 @@ import { sanitizeList } from '../_shared/sanitize.ts'
 import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-match.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, detectBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
-import { scaleToTarget, topUpProtein } from '../_shared/scale-recipe.ts'
+import { scaleToTarget, topUpProtein, clampPortions } from '../_shared/scale-recipe.ts'
 import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
 import { flavourAxes } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
@@ -788,11 +788,24 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     let scaledToTargetCount = 0
     let toppedUpCount = 0
     const topUps: string[] = []
+    const clampedTotal: string[] = []
     {
       meals = meals.map((m: any) => {
         // PROTEIN FIRST. Grown toward the target from the corrected numbers, capped at a normal
         // portion and the calorie drop line, BEFORE the calorie resize takes rice or oil back down.
         // Row 503's answer to "why not just more beef?" — nothing could, until this.
+        // PORTION FIRST. A protein written past its normal portion comes back down before anything
+        // else sizes the dish — the model wrote 360g of egg whites for one scramble.
+        const clampRes = clampPortions(m?.ingredients, servings)
+        if (clampRes.clamped.length) {
+          clampedTotal.push(`${String(m?.name ?? '')}: ${clampRes.clamped.join(', ')}`)
+          console.log(`[portion] "${m?.name}" ${clampRes.clamped.join(', ')}`)
+          m = {
+            ...m, ingredients: clampRes.ingredients,
+            protein: Math.round(Number(m.protein) * clampRes.factors.protein), calories: Math.round(Number(m.calories) * clampRes.factors.kcal),
+            carbs: Math.round(Number(m.carbs) * clampRes.factors.carbs), fat: Math.round(Number(m.fat) * clampRes.factors.fat),
+          }
+        }
         const top = topUpProtein(m?.ingredients, Number(m?.protein), batchProteinTarget, Number(m?.calories), calorieDropThreshold, { servings })
         if (top.added.protein > 0) {
           toppedUpCount++
@@ -804,7 +817,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
             carbs: Math.round(Number(m.carbs) + top.added.carbs), fat: Math.round(Number(m.fat) + top.added.fat),
           }
         }
-        const res = scaleToTarget(m?.ingredients, Number(m?.calories), batchCalorieTarget)
+        const res = scaleToTarget(m?.ingredients, Number(m?.calories), batchCalorieTarget, { servings })
         if (res.macroFactor === 1) return m
         scaledToTargetCount++
         console.log(`[scale] "${m?.name}" ${res.reason}`)
@@ -821,6 +834,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       if (scaledToTargetCount > 0) console.log(`Scaled ${scaledToTargetCount}/${meals.length} meals toward ${batchCalorieTarget} kcal`)
       funnel.scaledToTarget = scaledToTargetCount
       funnel.proteinToppedUp = toppedUpCount
+      funnel.portionsClamped = clampedTotal
       funnel.proteinTopUps = topUps
     }
 
