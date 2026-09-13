@@ -938,6 +938,14 @@ the limit, rather than generating around it.
   the other 15 pantry types. **Needs a look on device** — it sits inside the measured header wrapper
   that feeds the hero fit, so it should push the hero down rather than over it, and the copy wraps to
   two lines on a narrow screen.
+- [x] **Line seen on device 2026-09-13 — and Logan caught the trigger being wrong.** It fired when the
+  GOAL was raised to 300g, blaming the pantry for a shortfall the goal caused. Rebuilt: it now needs
+  the symptom (every meal under 75% of the per-meal target) AND the cause — the pantry's own protein
+  sources cannot reach the target at normal portions (`lib/proteinCeiling.ts`, two densest sources at
+  200g inside the calorie budget) — AND a target a single meal could carry at all (≤ 70g). Copy:
+  "Your pantry can't reach 40g of protein a meal — add a protein source." Note the spec: few sources
+  is not the test; eggs and steak alone can carry 40g, so a short deck there is the generator's fault
+  and stays silent. UNVERIFIED on device in the new form — needs a pantry that is actually thin.
 - [ ] Optional follow-up: the Pantry tab's own "Cook tonight" card does not carry the same line.
 **SHIP CHECKLIST — what is actually left (2026-09-12, after ~750 generations):**
 - [x] **One real generation from the phone — PASSED 2026-09-12 00:56** (pipeline_runs 503, `dry_run =

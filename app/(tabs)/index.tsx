@@ -32,6 +32,7 @@ import { formatTimeLine, activeMinutes } from '@/lib/ingredientDisplay'
 import { todayStr } from '@/lib/localDate'
 import { setSelectedDay } from '@/lib/selectedDay'
 import { DEFAULT_SLOT_LABELS, slotId } from '@/lib/mealSlots'
+import { pantryProteinCeiling, REALISTIC_MEAL_PROTEIN_MAX } from '@/lib/proteinCeiling'
 import { MealImage } from '@/components/MealImage'
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAuth } from '../../context/AuthContext'
@@ -1138,15 +1139,21 @@ export default function HomeScreen() {
   const [mealSlots, setMealSlots] = useState<string[]>(DEFAULT_SLOT_LABELS)
   const mealSlotsRef = useRef<string[]>(DEFAULT_SLOT_LABELS)
 
-  // The per-meal protein target, and whether the whole deck missed it. 75% is deliberately LOWER
-  // than the ranker's floor (85%, _shared/rank-deck.ts PROTEIN_FLOOR): this line claims the shelf
-  // itself is the ceiling, and must not trip on a merely weak deck — only when every option is far
-  // short, which is when the server had nothing better to offer.
+  // "Light on protein" fires only when all three hold: the deck is short (every meal under 75% of
+  // the per-meal target — the SYMPTOM the user is looking at), the goal is one a single meal can
+  // carry at all (above ~70g no shelf reaches it, and the shortfall is the goal's), and the pantry's
+  // own protein sources cannot reach the target at normal portions (the CAUSE — lib/proteinCeiling).
+  // The first version tested the symptom alone and blamed the pantry when the goal was raised to
+  // 300g; Logan caught it. A short deck on a shelf that COULD do better is the generator's fault,
+  // tracked server-side, and says nothing here. 75% is deliberately looser than the ranker's 85%.
   // Only once the PROFILE has landed: proteinGoal falls back to 180 and the slots to a default list,
-  // and telling someone their pantry is short against numbers that are not theirs is worse than
-  // saying nothing. meal_slots is not in the goals cache, so the network read is the signal.
+  // and judging someone's pantry against numbers that are not theirs is worse than saying nothing.
   const perMealProtein = goalsFromNetworkRef.current && mealSlots.length > 0 ? proteinGoal / mealSlots.length : 0
+  const perMealCalories = mealSlots.length > 0 ? calorieGoal / mealSlots.length : 0
+  const pantryCeiling = pantryProteinCeiling(pantryNames, perMealCalories)
   const pantryProteinShort = meals.length > 0 && perMealProtein > 0
+    && perMealProtein <= REALISTIC_MEAL_PROTEIN_MAX
+    && pantryCeiling < perMealProtein
     && meals.every(m => (Number(m.protein) || 0) < 0.75 * perMealProtein)
 
   // Persist the structure, then rebuild the day from it. Written to the profile rather than held in
@@ -1927,7 +1934,7 @@ export default function HomeScreen() {
               {pantryProteinShort && (
                 <View style={styles.carryoverRow}>
                   <Text style={styles.pantryLimitNote} numberOfLines={2}>
-                    Light on protein for your {Math.round(perMealProtein)}g-a-meal goal — add one when you shop.
+                    Your pantry can&rsquo;t reach {Math.round(perMealProtein)}g of protein a meal — add a protein source.
                   </Text>
                 </View>
               )}
