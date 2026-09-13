@@ -16,6 +16,7 @@ export type StepIssues = {
   noPreheat: boolean
   untimedCook: number
   coldCarb: boolean
+  unpreppedForms: number
 }
 
 // Anything salty counts: a soy-sauce stir-fry is seasoned, and the first live report would have gone
@@ -34,6 +35,25 @@ const PRECOOKED_COLD = /\b(cooked rice|cooked pasta|cooked quinoa|cooked potatoe
 // the recipe ever warmed — that sentence is the defect, so a bare "warm" must not satisfy this.
 const REHEATS = /\b(reheat\w*|microwav\w*|heat\s+(?:it\s+|the\s+\w+\s+)?through|warm\s+(?:it\s+|the\s+)?(?:through|up|rice|pasta|quinoa|potatoes)|steam\w*|toast\w*|fry|fried|saut)\b/i
 
+// A cut whose first mention is inside a cooking step. "Heat butter, add diced onions" on a recipe
+// whose onion line reads "1/4 medium": the cook preps from the ingredient list, and nothing there
+// said to dice anything. Counted per FORM, not per ingredient, because matching "diced onions" back
+// to "yellow onion" is the pantry matcher's problem, not this one's. A form is cleared by any
+// ingredient name or visual carrying it ("diced yellow onion", "1/4 medium, diced") or by a step
+// that gives the cut as an instruction ("Dice the onion") — the imperative, never the participle,
+// or the usage being checked would clear itself.
+const KNIFE_WORK: { used: RegExp; verb: RegExp }[] = [
+  { used: /\bdiced\b/i, verb: /\bdice\b/i },
+  { used: /\bminced\b/i, verb: /\bmince\b/i },
+  { used: /\bsliced\b/i, verb: /\bslice\b/i },
+  { used: /\bchopped\b/i, verb: /\bchop\b/i },
+  { used: /\bgrated\b/i, verb: /\bgrate\b/i },
+  { used: /\bshredded\b/i, verb: /\bshred\b/i },
+  { used: /\bcubed\b/i, verb: /\bcube\b/i },
+  { used: /\bcrushed\b/i, verb: /\bcrush\b/i },
+  { used: /\bjulienned\b/i, verb: /\bjulienne\b/i },
+]
+
 const textOf = (steps: unknown): string =>
   (Array.isArray(steps) ? steps : [])
     .map(s => (typeof s === 'string' ? s : `${(s as any)?.title ?? ''} ${(s as any)?.detail ?? ''}`))
@@ -47,6 +67,10 @@ export function stepIssues(meal: { name?: unknown; ingredients?: unknown; steps?
   const ingredients = (Array.isArray(meal?.ingredients) ? meal!.ingredients as unknown[] : [])
     .map(i => String((i as any)?.name ?? i ?? ''))
     .join(' | ')
+  // Names AND visuals: the form may be declared in either ("diced onion" / "1/4 medium, diced").
+  const prepText = (Array.isArray(meal?.ingredients) ? meal!.ingredients as unknown[] : [])
+    .map(i => `${(i as any)?.name ?? i ?? ''} ${(i as any)?.visual ?? ''}`)
+    .join(' | ')
   const steps = textOf(meal?.steps)
   const all = `${ingredients} \n ${steps}`
   return {
@@ -54,5 +78,6 @@ export function stepIssues(meal: { name?: unknown; ingredients?: unknown; steps?
     noPreheat: USES_OVEN.test(steps) && !PREHEAT_STEP.test(steps),
     untimedCook: stepDetails(meal?.steps).filter(d => COOK_VERB.test(d) && !DURATION.test(d)).length,
     coldCarb: PRECOOKED_COLD.test(ingredients) && !REHEATS.test(steps),
+    unpreppedForms: KNIFE_WORK.filter(k => k.used.test(steps) && !k.used.test(prepText) && !k.verb.test(steps)).length,
   }
 }

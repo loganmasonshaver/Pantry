@@ -976,6 +976,14 @@ the limit, rather than generating around it.
   from dense food first and never grows a protein past its portion; a scaled count keeps its grams
   honest ("6 large" eggs = 300g). Two sweeps after: 29/38 then 32/38 clean with only the accepted
   failure kinds; portions at or over the cap 14 → 6 (the six sit exactly AT the cap).
+- [x] **Row 601 too: step 1 says "add diced onions" under an onion line that reads "1/4 medium" —
+  nothing in the recipe dices anything.** The prompt's prepared-form rule now covers knife work: the
+  cut goes in the ingredient NAME ("diced yellow onion"), which is where the display code, the pantry
+  matcher and the image describer already expect it (`recipeTemplates` has used "diced potato" all
+  along). Measured, not gated: `unpreppedForms` in the funnel's `stepIssuesShown` counts cuts whose
+  first mention is inside a cooking step. Deployed 2026-09-13. **UNVERIFIED on a real generation** —
+  tell: the next `pipeline_runs` funnel row shows `unpreppedForms` 0 on the shown meals, or names
+  which form slipped; if it keeps slipping, the lever is a prep step, not the visual field.
 - [x] **FOUND 2026-09-13 in Logan's 300g generation (row 548): a smoothie shipped as ONE ingredient** —
   45g protein powder claiming 78g protein and 500 kcal. The phantom-ingredient prune drops anything
   the steps never name, and "Combine all ingredients in a blender" names nothing, so yogurt, fruit and
