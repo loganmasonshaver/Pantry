@@ -694,8 +694,8 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] **Cup-measured produce drawn whole** (Sukiyaki "1 cup shiitake", "2 cups cabbage"). The extractor
   should name the prepared form ("sliced shiitake").
 - [ ] **"fruit" never matches a specific fruit** — needs a category taxonomy.
-- [ ] **Image cache key is the meal name only — confirmed a THIRD time 2026-09-13. MEASURED, PLAN WRITTEN,
-  DECISION PENDING (Logan).** "Egg White and Vegetable Scramble" on his phone (greens, onion, butter, no
+- [x] **Image cache key is the meal name only — confirmed a THIRD time 2026-09-13. BUILT + DEPLOYED the same
+  day (plan A below, Logan's go), VERIFIED server-side, device tell still open.** "Egg White and Vegetable Scramble" on his phone (greens, onion, butter, no
   paprika) shows the photo generated 2026-09-02 for a different recipe of the same name (cauliflower,
   cheese, potatoes, paprika). Earlier: "Greek Yogurt and Granola Power Bowl" lists pineapple and shows a
   July photo with banana.
@@ -731,6 +731,27 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
   ingredient-list names. (C) vision-check the photo against the ingredients on every hit — a paid call on
   the common path to save $0.003 on the rare one. (D) fingerprint ALL ingredients — every garnish change
   is a miss; the top 3 is what a photo shows.
+  **VERIFIED 2026-09-13 19:20 UTC:** row 601's exact payload through the deployed function → MISS, new
+  file `egg-white-vegetable-scramble-egg-white-leafy-green-onion.jpg`, photo shows egg whites, wilted
+  greens, diced onion, pepper, no paprika (the Sep 2 file: potatoes, cheese, paprika). Same payload
+  again → instant HIT on `…scramble#egg white+leafy green+onion`, same `?v=`. The Sep 2 bare rows are
+  untouched (created_at unchanged). A non-internal, non-user caller with the same payload got the bare
+  photo — the pre-auth fallback, as designed. `_shared/image-fingerprint.ts` (+8 tests),
+  `lib/imageCacheKey.ts` (+2); tsc 135/16.
+  - [ ] **Device tell:** today's scramble on Logan's phone KEEPS the old photo — the URL was written into
+    the cached meal object at generation, and nothing re-requests it. The tell is the NEXT generation
+    that repeats a name with different mains (or the next same-name meal shows its own mains). The
+    client half is JS-only: a Metro reload picks it up, no rebuild.
+  - [ ] **Measure after a week:** `select count(*) from image_cache where meal_key like '%#%' and
+    created_at > now() - interval '7 days'` against the week's `generated_meals` count = the real
+    Cook Tonight regeneration rate. Function logs carry `[image-cache] HIT|MISS|HIT-bare-fallback fp|name`.
+  - [ ] Follow-ups, deliberately left: onboarding's Home pre-fill (`app/onboarding/index.tsx` ~4054) reads
+    `image_cache` by BARE name, which fingerprinted reads now ignore — harmless (Home fetches anyway),
+    but it is dead weight serving the old bug's photos; the Saved backfill (`saved.tsx` ~298) sends no
+    ingredients, so legacy saved rows without `image_url` still get a name-level photo.
+  - **Mechanism note:** the legacy `service_role` JWT is NOT internal to generate-meal-image (its
+    `SUPABASE_SERVICE_ROLE_KEY` env holds the `sb_secret_` key) — a call with the JWT is treated as an
+    anonymous caller. Use the `sb_secret_` key, same as the generate-meals dry run.
 - [ ] Undecided, carried from 2026-09-07: Home layout (own-row vs one row); feedback board Phase 2
   (Profile has NO support/contact row at all).
 - [ ] **Pantry tab's Cook tonight uses its OWN two-way substring matcher** (`missingFor` in

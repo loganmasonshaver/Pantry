@@ -4,6 +4,7 @@ import { checkScanCap, refundScan, scanCapResponse } from '../_shared/scan-cap.t
 import { IMAGE_GEN_DAILY_CAP } from '../_shared/caps.ts'
 import { dishArchetype } from '../_shared/dish-key.ts'
 import { rewriteInvisibleIngredients } from '../_shared/image-colour.ts'
+import { imageFingerprint, singularize } from '../_shared/image-fingerprint.ts'
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 // Photographic direction, varied per DISH and stable for it.
@@ -19,8 +20,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 //     would multiply generations per dish, which is the cost model that must not be touched.
 //
 // Changing this string does NOT invalidate anything already stored: the cache key is
-// normalizeKey(mealName), not the prompt. Existing images keep resolving; only new dishes pick up
-// the variation.
+// normalizeKey(mealName) plus the ingredient fingerprint, not the prompt. Existing images keep
+// resolving; only new dishes pick up the variation.
 function photoVariant(mealName: string): string {
   let h = 0
   for (let i = 0; i < mealName.length; i++) h = (h * 31 + mealName.charCodeAt(i)) >>> 0
@@ -116,16 +117,8 @@ const KEY_FILLER = new Set([
   'style', 'recipe', 'my', 'your', 'the', 'a', 'an', 'with', 'and', 'of', 'in', 'on', 'for',
 ])
 
-// Fold plurals so "Tacos"/"Taco" and "Noodles"/"Noodle" don't buy two images. Guarded against the
-// words that merely end in s (hummus, couscous, swiss) rather than being plural.
-function singularize(w: string): string {
-  // NOT guarding on -os: tacos/burritos are real plurals. Only ss/us/is are the false friends.
-  if (w.length < 4 || /(?:ss|us|is)$/.test(w)) return w
-  if (/ies$/.test(w)) return w.slice(0, -3) + 'y'
-  if (/oes$/.test(w)) return w.slice(0, -2)          // potatoes -> potato
-  if (/(?:ch|sh|x|z|s)es$/.test(w)) return w.slice(0, -2)
-  return w.endsWith('s') ? w.slice(0, -1) : w
-}
+// Plural folding ("Tacos"/"Taco") is `singularize` from _shared/image-fingerprint.ts — shared with
+// the ingredient fingerprint so the two halves of the key cannot drift.
 
 // Cache key for a meal name. Deliberately lossy: every variant that plates the same should collapse
 // to one paid image, since cost scales with UNIQUE KEYS, not users.
@@ -320,19 +313,38 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ description: desc, steps: stepStrings }), { headers: jsonHeaders })
     }
 
-    const cacheKey = normalizeKey(mealName)
+    const nameKey = normalizeKey(mealName)
     const legacyKey = legacyNormalizeKey(mealName)
+    const orderKey = sortedKey(mealName)
+    // THE NAME IS NOT THE KEY ANY MORE. Cook Tonight produces the same generic name from every
+    // pantry with the same staples, and a name-only key served the 2026-09-02 "Egg White and
+    // Vegetable Scramble" (potatoes, cauliflower, cheese, paprika) to the 09-13 one (greens, onion):
+    // 19 of 141 generated meals were served an image older than the meal. The fingerprint is the
+    // first three ingredients a photo would show (see _shared/image-fingerprint.ts); a request that
+    // sends no usable ingredients keeps the name-only key, so nothing that worked before breaks.
+    // Cost: a Flux image at 512px is ~$0.003, so even a 0% hit rate on Cook Tonight is under 3% of
+    // the subscription — the cost model the name key protected was never the binding constraint.
+    const fp = imageFingerprint(ingredients)
+    const cacheKey = fp ? `${nameKey}#${fp}` : nameKey
+    const fpKeys = fp ? [...new Set([cacheKey, `${orderKey}#${fp}`])] : []
+    const bareKeys = [...new Set([nameKey, legacyKey, orderKey].filter(Boolean))] as string[]
 
     // Check DB cache FIRST (free, no auth) — globally-cached images are shared across all
     // users, so serving a hit costs nothing and preserves pre-auth use (e.g. onboarding).
     // Always cache-first: no client bypass, so a user can't force credit spend to drain quota.
     //
-    // Two keys are checked: the tightened one, plus the pre-tightening key so images stored under
-    // the old scheme still resolve. A legacy hit is backfilled under the new key, so each old entry
-    // costs one extra lookup exactly once and the library migrates itself instead of being re-paid for.
-    // Third variant: same words, any order. Catches the reorder duplicates described at sortedKey().
-    const orderKey = sortedKey(mealName)
-    const lookupKeys = [...new Set([cacheKey, legacyKey, orderKey].filter(Boolean))] as string[]
+    // A fingerprinted request looks up its fingerprinted keys; the bare-name keys ride along in the
+    // same `in()` only so a caller that CANNOT generate (pre-auth onboarding cards) is served the
+    // name-level photo rather than nothing. Anyone who can generate gets a miss instead — serving
+    // the bare hit to them IS the bug this replaces. A name-only request checks three variants: the
+    // tightened key, the pre-tightening key so images stored under the old scheme still resolve
+    // (backfilled under the new key on hit, so the library migrates itself), and the same words in
+    // any order — the reorder duplicates described at sortedKey().
+    const lookupKeys = [...fpKeys, ...bareKeys]
+    // verifyUser once, whichever branch asks first — the fingerprint fallback and the miss path both do.
+    let userChecked = false
+    let user: { id: string; email: string | null } | null = null
+    const getUser = async () => { if (!userChecked) { user = await verifyUser(req); userChecked = true } return user }
     // INTERNAL-ONLY cache bypass. Without it a dish that already has an image can never be
     // re-rendered without direct DB access, which is why "regenerate the stale images" has had no
     // mechanism: every call to fix one returns the broken one. Same trust level as seed and
@@ -342,9 +354,21 @@ Deno.serve(async (req: Request) => {
     const { data: cachedRows } = skipCache
       ? { data: null }
       : await db.from('image_cache').select('meal_key, image_url').in('meal_key', lookupKeys)
-    const hit = cachedRows?.find((r: any) => r.meal_key === cacheKey) ?? cachedRows?.[0]
+    const rows: { meal_key: string; image_url: string }[] = cachedRows ?? []
+    const fpHit = fpKeys.length ? rows.find(r => r.meal_key === cacheKey) ?? rows.find(r => fpKeys.includes(r.meal_key)) : undefined
+    const bareHit = rows.find(r => r.meal_key === nameKey) ?? rows.find(r => bareKeys.includes(r.meal_key))
+    let hit = fp ? fpHit : bareHit
+    let servedBare = false
+    if (!hit && fp && bareHit && !isInternal && !(await getUser())) {
+      hit = bareHit
+      servedBare = true
+    }
+    // The measurement: MISS-fp over a week is the real regeneration rate, not a guess.
+    console.log(`[image-cache] ${hit ? (servedBare ? 'HIT-bare-fallback' : 'HIT') : 'MISS'} ${fp ? 'fp' : 'name'} ${cacheKey}`)
     if (hit?.image_url) {
-      if (hit.meal_key !== cacheKey) {
+      // Never alias the fingerprinted key to a bare-name fallback: that would pin the possibly-wrong
+      // photo under the exact key and every later signed-in request would get it as a real hit.
+      if (!servedBare && hit.meal_key !== cacheKey) {
         const { error: backfillErr } = await db.from('image_cache').upsert({ meal_key: cacheKey, image_url: hit.image_url }, { onConflict: 'meal_key' })
         if (backfillErr) console.log('Backfill FAILED:', cacheKey, backfillErr.message)
       }
@@ -363,8 +387,7 @@ Deno.serve(async (req: Request) => {
     // with the service-role key (it has no user JWT). Its meal names are freshly generated =
     // always a cache miss, so without this bypass every new trending meal 401s and is left on
     // its YouTube-thumbnail fallback — the real cause of the all-YT Discover feed.
-    const user = isInternal ? null : await verifyUser(req)
-    if (!isInternal && !user) return new Response(JSON.stringify({ image: null, error: 'auth required' }), { status: 401, headers: jsonHeaders })
+    if (!isInternal && !(await getUser())) return new Response(JSON.stringify({ image: null, error: 'auth required' }), { status: 401, headers: jsonHeaders })
 
     if (!falApiKey) {
       console.log('FAL_API_KEY is missing or empty')
@@ -495,7 +518,11 @@ Deno.serve(async (req: Request) => {
         // CDN URLs expire ~24 hr and the cached row would then serve a 404 forever.
         const imageRes = await fetch(imageUrl)
         const blob = await imageRes.blob()
-        const filename = `${cacheKey.replace(/\s+/g, '-')}.jpg`
+        // The fingerprint is part of the object path. Uploads are upsert, so with the bare-name path
+        // a second variant of "egg white vegetable scramble" would overwrite the first variant's
+        // bytes under every URL already handed out. For a name-only key this is byte-identical to
+        // the old `\s+` -> '-' form (the key is already letters, digits and spaces).
+        const filename = `${cacheKey.replace(/[^a-z0-9]+/g, '-')}.jpg`
 
         let { error: uploadErr } = await db.storage.from('meal-images').upload(filename, blob, {
           contentType: 'image/jpeg',
@@ -527,8 +554,19 @@ Deno.serve(async (req: Request) => {
           // Store under BOTH the exact key and the order-insensitive one, so the next meal whose
           // name is these same words in a different order resolves to this image instead of paying
           // for its own. Two tiny rows against one Flux generation is the right trade.
-          const keyRows = [...new Set([cacheKey, orderKey])].map(k => ({ meal_key: k, image_url: permanentUrl }))
-          const { error: cacheErr } = await db.from('image_cache').upsert(keyRows, { onConflict: 'meal_key' })
+          // A fingerprinted generation ALSO writes the bare-name rows, but only where none exist:
+          // callers that send no ingredients (the Saved backfill, onboarding's warm-up) keep getting
+          // a name-level photo, and an existing one is never swapped under them. An internal
+          // regeneration (bypassCache) overwrites everything — that is what it is for.
+          const overwriteBare = !fp || skipCache
+          const fpRows = fpKeys.map(k => ({ meal_key: k, image_url: permanentUrl }))
+          const bareRows = [...new Set([nameKey, orderKey])].map(k => ({ meal_key: k, image_url: permanentUrl }))
+          const writes = [
+            fpRows.length ? db.from('image_cache').upsert(fpRows, { onConflict: 'meal_key' }) : null,
+            db.from('image_cache').upsert(bareRows, { onConflict: 'meal_key', ignoreDuplicates: !overwriteBare }),
+          ].filter(Boolean)
+          const results = await Promise.all(writes as Promise<{ error: { message: string } | null }>[])
+          const cacheErr = results.find(r => r?.error)?.error
           if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
           else console.log('Cached OK:', cacheKey)
           // Write the fresh URL to trending_meals HERE. This call was missing entirely: a

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
+import { imageCacheKey } from './imageCacheKey'
 
 const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 
@@ -10,11 +11,15 @@ const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 // Device cache is checked first — that's what makes a pre-warmed image resolve instantly (and for
 // free) when the reveal later asks for it.
 export async function fetchMealImage(name: string, ingredientNames: string[] = [], steps: any[] = []): Promise<string | null> {
+  // Name + mains, never the name alone: the server stopped keying images by name for the same
+  // reason (a same-name recipe with different mains was served the older photo), and a name-keyed
+  // device cache would have kept serving it after the server was fixed.
+  const localKey = imageCacheKey(name, ingredientNames)
   try {
     const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
     if (raw) {
       const localCache: Record<string, string> = JSON.parse(raw)
-      if (localCache[name]) return localCache[name]
+      if (localCache[localKey]) return localCache[localKey]
     }
   } catch {}
 
@@ -29,7 +34,7 @@ export async function fetchMealImage(name: string, ingredientNames: string[] = [
         try {
           const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
           let localCache: Record<string, string> = raw ? JSON.parse(raw) : {}
-          localCache[name] = data.image
+          localCache[localKey] = data.image
           // Cap the image-URL cache so it doesn't grow unbounded (synchronous Hermes
           // reads of a huge blob jank the JS thread). Keep the newest ~200 entries.
           const keys = Object.keys(localCache)
