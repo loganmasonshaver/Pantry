@@ -452,7 +452,13 @@ prompt annotation may well have worked; nobody could tell. Fixed in `19edbd9`'s 
 stop-list). The attempt loop is also now a UNION with the candidate list ROTATED per attempt, because
 the model is near-deterministic for a given prompt (five attempts, [2,0,0,0,0], the same two dishes
 each time); `funnel.llmRaw` records raw output per attempt. Three dry runs on the 2026-09-13 pool:
-13, 2 (before rotation), 17 — the cron had stored 2 from it that morning.
+13, 2 (before rotation), 17 — the cron had stored 2 from it that morning; the forced real run stored
+12 with 12 photos, and two more dry runs from the depleted pool gave 10 and 14.
+
+**`pipeline_runs` is an INCOMPLETE record before 2026-09-13 20:24 UTC.** A split emoji bullet put a
+lone UTF-16 surrogate into `droppedDetail.src`, jsonb refused the row, and the insert swallows errors
+by design — so exactly the rich days (Sep 5, 6, 10, 11) have no funnel row. Absence of a row before
+that timestamp means nothing about the run. From row 679 on, every run writes one.
 
 - [x] ~~**The remaining lever is DETERMINISTIC RECOVERY, not prompting.**~~ Shipped 09-04, effective only from 09-13 (see the correction above). When the model returns
       fewer entries than the source list, walk the unmatched source lines: if a line's food matches

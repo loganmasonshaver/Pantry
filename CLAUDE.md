@@ -232,7 +232,7 @@ npx expo run:ios   # build and run on iOS simulator
   edge functions and `./foo.ts` imports in unit tests no longer raise the count. Adding one is no
   longer free noise — if the number moves, something real moved.
 - **Unit tests run under plain node, no Deno CLI and no jest:**
-  `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts` — **588 tests** as of 2026-09-13 (138 on 2026-08-29).
+  `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts` — **591 tests** as of 2026-09-13 (138 on 2026-08-29).
   Node strips types natively; re-verified on **26.8.1** after `brew upgrade supabase` pulled node
   25→26 in as a dependency, so the type-stripping workflow survives that bump. Test files are
   typechecked by `tsc` too — keep them compiling.

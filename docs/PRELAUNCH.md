@@ -37,14 +37,36 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   `leadingNumber` now reads fractions, mixed numbers, unicode fractions and ranges. It feeds
   `estimateMacros` (generate-meals + scale-recipe); a grams field there is normally "120g", so the
   app path is unaffected in practice, but it was wrong.
-- **Three dry runs on today's pool (the cron stored 2 from it this morning): 13 (union only),
-  2 (union only — the deterministic-model sample), 17 (with rotation).** Tests 588, tsc 135/16.
-  YouTube quota: 4 of 7 units used today (cron + 3 dry runs); tomorrow's cron has a fresh bucket.
+- [x] **REAL RUN 2026-09-13 20:35 UTC (Logan: "rerun for cron"): stored 12, 12 durable photos, 12
+  source-verified, in 75s.** Replaced the morning's 2. The Apple Pie Cottage Cheese Cake is in with
+  its three sugar lines at the creator's amounts (100g / 25g / 12g); the Kinder Bueno bowl has 15
+  real ingredients and no dimension junk. `ops_report_data()` reads "Discover: 12 new recipes, all
+  have photos" — the grey line. **Samples on the new code, same day's pool:** 13 and 2 (union only,
+  before rotation), then 17, 12 (real), 10, 14 (with rotation; the last two from a pool the stored
+  batch had already depleted to 31-32 candidates). Tests 591, tsc 135/16. YouTube quota: 7 of 7
+  used today; tomorrow's cron draws a fresh bucket at 07:00 UTC.
+- [x] **FOUND + FIXED the same evening: the funnel row was silently LOST on every rich day.** None of
+  today's five runs wrote `pipeline_runs`; the crons of Sep 5, 6, 10, 11 (14, 12, 13, 9 stored) have
+  no row either, while the thin days do. `stripBullet` split a two-glyph emoji bullet ("👨‍🍳") and
+  left a lone UTF-16 surrogate in a source line; Postgres jsonb refuses it; the insert swallows the
+  error by design. Fixed (u flag + `_shared/json-safe.ts` at every jsonb insert, including the
+  meals batch, where one such string would have refused a whole day). Verified: row 679. **Read
+  `pipeline_runs` before 2026-09-13 20:24 as an incomplete record.**
 - [ ] **PASS = a scheduled 08:00 UTC run stores ≥ 12, two days running (Sep 14 + Sep 15)**, and the
   daily line reads "Discover: N new recipes, all have photos" in grey. Read `pipeline_runs`
   (`dry_run=false`): `llmRaw`/`llmYields` per attempt, `rejected.dropped`, `ingredientsRecovered`.
   If a thin day recurs, compare KINDS: low `llmRaw` on every attempt is the model, high `dropped`
   is the parser — never widen tolerance.
+- [ ] **NEW, DECISION NEEDED — a whole cake stored as one serving.** Apple Pie Cottage Cheese Cake:
+  1,637 g of ingredients, `servings` 1, 420 kcal / 12 g protein, `macros_source` 'model'. The model
+  reported the creator's per-slice numbers and called the batch one serving; computed macros
+  disagreed by ~7x, and on disagreement the code keeps the model's numbers and stores the row. In
+  the live pool: 9 of 245 YouTube rows have `servings` 1 with more than 800 g of ingredients, and
+  ALL 9 are `macros_source` 'model' (Chicken Rice Cooker Sukiyaki 1,579 g / 750 kcal; Lauki Pasta
+  1,106 g / 740; Double Chocolate Protein Cheesecake 1,061 g / 278; Stuffed Chicken Caesar Sourdough
+  958 g / 750; …). Pre-existing, not touched today. Deterministic fix, NOT built: when `servings` is 1
+  and computed ÷ stated ≥ 2, infer servings = round(computed ÷ stated) — changes the servings count,
+  never an ingredient (CLAUDE.md). Or reject. Needs the 9 rows replayed offline before trusting it.
 - [ ] Residual drops seen today, deliberately left: "Rajma Dahi Kebab" 21/22 — the model omitted
   "Lemon juice" (a real drop; the reject is correct). "High Protein Corn Wrap" 7/11 and "Corn and
   Tuna Fitness Wrap" 8/11 — not inspected. `nameGap` 3-5 and `fractional` 2-4 per run are the

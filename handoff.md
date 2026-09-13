@@ -18,8 +18,12 @@ if the phone cannot connect, Ctrl+C and `npx expo start` from `/Users/loganshave
 §1 items 2 and 3 are DONE (image cache keyed on name + ingredient fingerprint, `bef4170`; knife work
 named on the ingredient line, `f8baf8b`); item 1 was left as is by Logan. PRELAUNCH §0 (Discover) has
 its root causes found and deployed — the retention count collapsed split lines, attempts are now
-unioned and rotated — with PASS pending two scheduled runs ≥ 12 (Sep 14, 15). Tests 588. YouTube quota
-used 4/7 on Sep 13. Everything below §0 is the state as it was at the chat switch.
+unioned and rotated — with PASS pending two scheduled runs ≥ 12 (Sep 14, 15). A forced real run at
+20:35 UTC stored 12 with 12 photos. The funnel row was found to be silently lost on rich days (lone
+surrogate → jsonb refusal) and fixed the same evening; `pipeline_runs` before 20:24 UTC Sep 13 is
+incomplete. One NEW open item in PRELAUNCH §0: whole-batch recipes stored as one serving (9 of 245).
+Tests 591. YouTube quota 7/7 used on Sep 13 — do not run the pipeline again before 07:00 UTC Sep 14.
+Everything below §0 is the state as it was at the chat switch.
 
 ## 1. FIRST — Logan's words: "this issue needs to be addressed first" *(items 2-3 done, see §0)*
 
