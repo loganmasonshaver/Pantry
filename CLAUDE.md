@@ -134,6 +134,11 @@ npx expo run:ios   # build and run on iOS simulator
 
 ### Don't touch
 - **Image generation** — globally cached across users; per-user "optimizations" break the cost model.
+  The cache key is the meal NAME + a fingerprint of the first three ingredients a photo would show
+  (`_shared/image-fingerprint.ts`, since 2026-09-13). It was the name alone for six months and served
+  the wrong dish three times — never go back to name-only, and never let a fingerprinted request fall
+  back to a bare-name hit when the caller can generate. Cost was measured: ~$0.003/image, under 3% of
+  the subscription at a 0% hit rate.
 - **Yearly IAP ($29.99)** — works. When debugging Monthly, leave Yearly alone.
 - **Stripe** — web checkout only. Never import or reference Stripe in app code (App Review rejection).
 - **Discover expiry filter** — aggressive by design; it (not the diet bands) is why meals disappear.
@@ -227,7 +232,7 @@ npx expo run:ios   # build and run on iOS simulator
   edge functions and `./foo.ts` imports in unit tests no longer raise the count. Adding one is no
   longer free noise — if the number moves, something real moved.
 - **Unit tests run under plain node, no Deno CLI and no jest:**
-  `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts` — **138 tests** as of 2026-08-29.
+  `node --test lib/*.test.ts supabase/functions/_shared/*.test.ts` — **579 tests** as of 2026-09-13 (138 on 2026-08-29).
   Node strips types natively; re-verified on **26.8.1** after `brew upgrade supabase` pulled node
   25→26 in as a dependency, so the type-stripping workflow survives that bump. Test files are
   typechecked by `tsc` too — keep them compiling.
