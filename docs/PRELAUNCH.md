@@ -694,8 +694,14 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] **Cup-measured produce drawn whole** (Sukiyaki "1 cup shiitake", "2 cups cabbage"). The extractor
   should name the prepared form ("sliced shiitake").
 - [ ] **"fruit" never matches a specific fruit** — needs a category taxonomy.
-- [ ] **Image cache key is the meal name only** — confirmed twice: "Greek Yogurt and Granola Power
-  Bowl" lists pineapple and shows a July photo with banana.
+- [ ] **Image cache key is the meal name only — confirmed a THIRD time 2026-09-13, and Logan wants it
+  addressed first.** "Egg White and Vegetable Scramble" on his phone (greens, onion, butter, no paprika)
+  shows the photo generated 2026-09-02 for a different recipe of the same name (cauliflower, cheese,
+  potatoes, paprika) — paprika visible, no greens. DECISION NEEDED: key on name + a fingerprint of the
+  main ingredients (say the top 3 by grams), which means more misses and more image cost (globally
+  cached — do not change casually); or keep the name key and accept mismatches only when the name is
+  generic. Measure first: how many stored names have 2+ distinct ingredient sets in generated_meals.
+  Earlier: "Greek Yogurt and Granola Power Bowl" lists pineapple and shows a July photo with banana.
 - [ ] Undecided, carried from 2026-09-07: Home layout (own-row vs one row); feedback board Phase 2
   (Profile has NO support/contact row at all).
 - [ ] **Pantry tab's Cook tonight uses its OWN two-way substring matcher** (`missingFor` in
