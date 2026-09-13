@@ -443,7 +443,18 @@ marker cannot help because `sections` keys on the EXACT LINE and these lines dif
 prompt-shaped attempts have now failed; this is the same shape as the ban-list finding logged
 earlier in this file, where the model returned banned names verbatim.
 
-- [ ] **The remaining lever is DETERMINISTIC RECOVERY, not prompting.** When the model returns
+**CORRECTION 2026-09-13 — the result above was graded by a count that could not see compliance.**
+`countedIngredients` deduped by NAME, so when the model DID emit "sugar 100g" and "sugar 25g" as two
+entries, the count folded them to one and reported the same 13-of-15 as a merge. Production's
+`ingredientsRecovered` was 0 on every run for the same reason: recovery had nothing to recover. The
+prompt annotation may well have worked; nobody could tell. Fixed in `19edbd9`'s successor on
+2026-09-13 (count keyed on name + amount, recovery matching on head noun + subset with a prep/grade
+stop-list). The attempt loop is also now a UNION with the candidate list ROTATED per attempt, because
+the model is near-deterministic for a given prompt (five attempts, [2,0,0,0,0], the same two dishes
+each time); `funnel.llmRaw` records raw output per attempt. Three dry runs on the 2026-09-13 pool:
+13, 2 (before rotation), 17 — the cron had stored 2 from it that morning.
+
+- [x] ~~**The remaining lever is DETERMINISTIC RECOVERY, not prompting.**~~ Shipped 09-04, effective only from 09-13 (see the correction above). When the model returns
       fewer entries than the source list, walk the unmatched source lines: if a line's food matches
       an entry already present, append a new entry carrying that line's own quantity. This recovers
       the creator's real data rather than inventing any, and it is mechanical. It is also the only

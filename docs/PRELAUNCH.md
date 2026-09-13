@@ -9,39 +9,53 @@ Ordered by what should be done first. Later items depend on earlier ones.
 ---
 
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
-New recipes per day (`trending_meals.generated_at`): **Sep 10: 13 · Sep 11: 9 · Sep 12: 5 · Sep 13: 2.** All
-have photos, all split/phased, so it is the FRONT of the pipeline, not storage. The health check has
-said "unhealthy" three mornings running and the daily report carried it; nobody acted.
-- [ ] **Find the stage that collapsed.** From `pipeline_runs` (provider `Google`, `dry_run = false`,
-  03:01 daily): candidates are steady — `sentToLLM` 38 → 45 → 44 — but the model's usable output fell
-  from `raw` 20 (Sep 12) to `raw` 3 (Sep 13), `llmYields` [7,2,2] → [0,3,5] → [1,2,0]. On Sep 12 the
-  rejections were `nearDup` 8 (the pool saturating against 219 stored?) + `dropped` 5 + `nameGap` 2;
-  on Sep 13 all 3 raw were `dropped`. Read `llm_Google.droppedDetail` for WHY, and the run's console
-  in the dashboard for Gemini errors/truncation.
-- [ ] **STRONGEST LEAD (read from `droppedDetail`, 2026-09-13):** every `dropped` recipe on Sep 12 and 13
-  is a MULTI-SECTION recipe where the creator lists the same food in two parts — "1/2 cup sugar" in
-  the cake and "2 tbsp sugar" in the topping, "5g salt" then "4g salt", Greek yogurt and mayo once in
-  the bowl and again in the dressing. The parser counts every line (`src` 15, 13, 10, 21, 22); the
-  model merges the repeats (`got` 14, 12, 9, 17, 15); the 100%-retention gate reads got < src and
-  rejects the recipe. Apple Pie Cottage Cheese Cake, Honey Chipotle Chicken Quesadillas, Cheesy Beefy
-  Burrito Pasta, Hot Honey Halloumi Bowls, Street Corn Chicken Bowls — all real recipes, all lost to
-  the same shape. `retentionList` collapses only EXACT duplicate lines, not the same food at two
-  quantities. Fix direction that keeps the retention requirement intact: count DISTINCT FOODS on both
-  sides (fold "sugar" lines into one before comparing), or let the extractor keep per-section lines.
-  Verify on those five names with a dry run before trusting the count.
-- [ ] **Other suspects, in order:** (1) the 2026-09-10 extraction changes — time split, ordered `time_phases`,
-  the translation net, emoji strip — landed the same day yield started falling; a stricter extractor
-  output that fails validation reads as `dropped`. Diff what the prompt asked for on Sep 9 vs Sep 10.
-  (2) `nearDup` against a 219-recipe pool — if dedup is now rejecting most of what YouTube returns,
-  the candidate SEARCH needs to move, not the gate. (3) Gemini quota/5xx (the cron gives up at 5s —
-  `net._http_response` says timed_out, which is expected; the function's own log is the record).
-- [ ] **Constraints, do not relearn:** YouTube quota is 10,000 units/day = **7 runs**, dry runs cost the
-  same; run tests SEQUENTIALLY. Force a run with the cron's own `net.http_post` +
-  `?refresh=true&dryRun=true` (mechanism in `handoff.md` §3). 100% ingredient retention is a product
-  requirement — never widen tolerance to fill a thin day; the levers are candidate volume and parser
-  precision (CLAUDE.md). Methods and standing procedure: `docs/TRENDING-OPEN.md`.
-- [ ] PASS = a scheduled 03:00 run stores ≥ 12 with the fix, two days running, and the daily line
-  reads "Discover: N new recipes, all have photos" in grey.
+**2026-09-13 evening: ROOT CAUSES FOUND, FIXES DEPLOYED, PASS STILL PENDING (two cron days ≥ 12).**
+The 16-day series is 4, 18, 4, 18, 11, 2, 15, 14, 12, 2, (outage), 13, 9, 5, 2 — not a decline, a coin
+flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neither the model:
+- [x] **The retention count collapsed the very thing the contract asks for.** `countedIngredients`
+  deduped by NAME, so a creator's "1/2 cup sugar" + "2 tbsp sugar" (two lines) became one entry
+  whether the model split them or `recoverMergedIngredients` restored them — and the recipe was
+  rejected for a shortfall it did not have. That is why production's `ingredientsRecovered` was
+  always 0 (the model was complying, the count erased it) and why TRENDING-OPEN's "prompting
+  failed" result was graded wrong. Now keyed on name + amount; an echo at the same amount still
+  collapses.
+- [x] **Recovery could not read creator wording.** Exact word-set identity missed "1 onion, cut into
+  large dice" vs "onion", "thick fat-free skyr", "½ cup" (unicode fractions), "jalapeño". Rewritten
+  as head-noun + subset matching with a prep/grade stop-list; a dropped "chicken stock cube" is
+  still never absorbed by "chicken". All 8 recipes dropped on Sep 12/13 clear in unit tests.
+- [x] **Attempts were raced, not unioned.** Best single batch of three: [0,3,5] stored 5. Now the
+  union across up to 5 attempts, survivors-only dedup registration, cumulative counters, `llmRaw`
+  per attempt in the funnel. A whole run is ~85s.
+- [x] **The model is near-deterministic per prompt** — dry run 2 yielded [2,0,0,0,0], the same two
+  dishes five times. Each attempt now rotates the candidate list (offset = attempt × ⌈n/attempts⌉)
+  and `video_index` is mapped back; dry run 3 then yielded [11,6] from raw [20,23].
+- [x] **Parser precision:** container dimensions ("External: 19 × 14 × 5 cm", "Shape:", "Capacity:")
+  no longer count as ingredients; Turkish/Russian/Portuguese/Spanish headings stop the parse, and
+  the stop regex uses `(?!\p{L})` instead of the ASCII-only `\b` (the Turkish cookies read every
+  method step as food: 3 real ingredients, a 15-line contract).
+- [x] **Found on the way: `parseQty` read "1/2 cup" as 12 cups (2,880 g), "½ cup" as nothing.**
+  `leadingNumber` now reads fractions, mixed numbers, unicode fractions and ranges. It feeds
+  `estimateMacros` (generate-meals + scale-recipe); a grams field there is normally "120g", so the
+  app path is unaffected in practice, but it was wrong.
+- **Three dry runs on today's pool (the cron stored 2 from it this morning): 13 (union only),
+  2 (union only — the deterministic-model sample), 17 (with rotation).** Tests 588, tsc 135/16.
+  YouTube quota: 4 of 7 units used today (cron + 3 dry runs); tomorrow's cron has a fresh bucket.
+- [ ] **PASS = a scheduled 08:00 UTC run stores ≥ 12, two days running (Sep 14 + Sep 15)**, and the
+  daily line reads "Discover: N new recipes, all have photos" in grey. Read `pipeline_runs`
+  (`dry_run=false`): `llmRaw`/`llmYields` per attempt, `rejected.dropped`, `ingredientsRecovered`.
+  If a thin day recurs, compare KINDS: low `llmRaw` on every attempt is the model, high `dropped`
+  is the parser — never widen tolerance.
+- [ ] Residual drops seen today, deliberately left: "Rajma Dahi Kebab" 21/22 — the model omitted
+  "Lemon juice" (a real drop; the reject is correct). "High Protein Corn Wrap" 7/11 and "Corn and
+  Tuna Fitness Wrap" 8/11 — not inspected. `nameGap` 3-5 and `fractional` 2-4 per run are the
+  next-largest losses after dedup; both are deliberate gates, but the fractional gate's offending
+  items are not in the funnel — add them if it keeps costing 3+ a day.
+- [ ] **Constraints, do not relearn:** YouTube quota is 10,000 units/day = **7 runs**, dry runs cost
+  the same; run tests SEQUENTIALLY. Trigger a dry run with `?refresh=true&dryRun=true` and the
+  `sb_secret_` key as bearer (`npx supabase projects api-keys --reveal`, never on disk) — the
+  legacy service_role JWT is NOT accepted as internal. 100% ingredient retention is a product
+  requirement — never widen tolerance to fill a thin day; the levers are candidate volume and
+  parser precision (CLAUDE.md). Methods and standing procedure: `docs/TRENDING-OPEN.md`.
 
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
 - [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.

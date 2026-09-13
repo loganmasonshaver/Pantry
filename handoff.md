@@ -14,7 +14,14 @@ if the phone cannot connect, Ctrl+C and `npx expo start` from `/Users/loganshave
 
 ---
 
-## 1. FIRST — Logan's words: "this issue needs to be addressed first"
+## 0. UPDATE 2026-09-13 evening — read this before §1
+§1 items 2 and 3 are DONE (image cache keyed on name + ingredient fingerprint, `bef4170`; knife work
+named on the ingredient line, `f8baf8b`); item 1 was left as is by Logan. PRELAUNCH §0 (Discover) has
+its root causes found and deployed — the retention count collapsed split lines, attempts are now
+unioned and rotated — with PASS pending two scheduled runs ≥ 12 (Sep 14, 15). Tests 588. YouTube quota
+used 4/7 on Sep 13. Everything below §0 is the state as it was at the chat switch.
+
+## 1. FIRST — Logan's words: "this issue needs to be addressed first" *(items 2-3 done, see §0)*
 
 The **Egg White and Vegetable Scramble** on his phone (pipeline_runs 601, 13:26 today). Three things, in
 the order he raised them:
