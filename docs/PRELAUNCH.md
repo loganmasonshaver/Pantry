@@ -911,7 +911,21 @@ the limit, rather than generating around it.
   changes (diet-style merge, empty-pantry error, pantry warning line, Pantry-tab evening sort). Server
   path verified; the client still needs `npx expo start -c` from `/Users/loganshaver/pantry` + a reload,
   then the two device checks.
-- [ ] **OPEN — Logan's question: why two 32g meals against a 40g target?** (row 503). In order: only 2
+- [x] **BUILT 2026-09-13 (Logan: "fix the protein issue"): protein is sized to the target.**
+  `topUpProtein` grows the lean protein anchor toward the target from the corrected numbers before the
+  calorie resize, capped at 250g meat/fish, 350g yogurt/tofu/cottage cheese, 60g powder, and the
+  calorie drop line; condiments can never be the anchor (the first draft grew soy sauce to 7¾ tbsp —
+  caught by replaying row 503, not by a user). `PROTEIN_FLOOR` = 0.85 in one place, matching the
+  prompt. Sweep after: meals under 85% of target **27 → 15** of 114, median 100% of target (was 98%),
+  91 of 114 topped up; a week on Logan's pantry 7/7 clean with every meal 45-68g against 50; the
+  vegetarian week 6/7 (was 5/7), third meals 38-53g (were 26-33g). Home's warning line stays at 75%.
+- [x] **FOUND 2026-09-13 in Logan's 300g generation (row 548): a smoothie shipped as ONE ingredient** —
+  45g protein powder claiming 78g protein and 500 kcal. The phantom-ingredient prune drops anything
+  the steps never name, and "Combine all ingredients in a blender" names nothing, so yogurt, fruit and
+  milk were stripped before macro correction; the correction then refused a 159 kcal list and left
+  the model's numbers on the wreck. Fixed: a collective reference vouches for the whole list, and
+  steps naming half the food or less are a wording problem, never phantom food.
+- [x] ~~OPEN — Logan's question: why two 32g meals against a 40g target?~~ (row 503). Was: In order: only 2
   of 7 survivors were fresh and both were 32g (cheese and chicken were banned for overuse); 32g clears
   the code's 75% floor (30g) so both rank tier 0, and fresh beats a 59g repeat inside a tier; the
   model's own arithmetic said 140g beef ≈ 40g but FatSecret priced it at 32g. "Supposed to happen"
