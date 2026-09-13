@@ -962,6 +962,14 @@ the limit, rather than generating around it.
   prompt. Sweep after: meals under 85% of target **27 → 15** of 114, median 100% of target (was 98%),
   91 of 114 topped up; a week on Logan's pantry 7/7 clean with every meal 45-68g against 50; the
   vegetarian week 6/7 (was 5/7), third meals 38-53g (were 26-33g). Home's warning line stays at 75%.
+- [x] **FOUND 2026-09-13 on Logan's phone (row 601): 2 cups / 504g of egg whites in one scramble.** The
+  math was right (57g); the portion was a carton and a half. The model wrote 360g, the corrected meal
+  came in at 298 kcal, and the calorie UP-resize grew every measured item 1.4x to fill the gap — the
+  top-up had a portion cap, the resize never did. Fixed: `clampPortions` runs first (egg whites 350g,
+  whole eggs 250g, meat 250g, powder 60g — one shared `anchorCap`); the up-resize now takes calories
+  from dense food first and never grows a protein past its portion; a scaled count keeps its grams
+  honest ("6 large" eggs = 300g). Two sweeps after: 29/38 then 32/38 clean with only the accepted
+  failure kinds; portions at or over the cap 14 → 6 (the six sit exactly AT the cap).
 - [x] **FOUND 2026-09-13 in Logan's 300g generation (row 548): a smoothie shipped as ONE ingredient** —
   45g protein powder claiming 78g protein and 500 kcal. The phantom-ingredient prune drops anything
   the steps never name, and "Combine all ingredients in a blender" names nothing, so yogurt, fruit and
