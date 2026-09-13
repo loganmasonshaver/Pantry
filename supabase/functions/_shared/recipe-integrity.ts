@@ -1,3 +1,4 @@
+import { parseQty } from './macro-estimate.ts'
 // Integrity checks for an extracted creator recipe, run before it is allowed into trending_meals.
 //
 // The retention gate next to these compares COUNTS — the model's ingredient count against the
@@ -24,6 +25,12 @@
 // anything matching here is DISCARDED, so a false positive silently shortens a real recipe.
 const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /\b\d+\s*(kcal|kj|calories|cals)\b/i,                                  // "504 kcal"
+  // Container dimensions listed under the food. A dessert-bowl creator wrote "External: 19 × 14 ×
+  // 5 cm", "Internal: 17 × 12 × 4 cm", "Shape: Rectangular" and "Capacity: 0.8 L (27 US fl oz)"
+  // below the ingredients, all four were counted, and a 15-line recipe became a 19-line contract
+  // nobody could meet. The product rule needs TWO separators: "2 x 400g cans" is food.
+  /^\s*(?:external|internal|shape|capacity|dimensions?|size|container|mou?ld|tin|pan)\s*:/i,
+  /\d\s*[×x]\s*\d+(?:[.,]\d+)?\s*[×x]\s*\d/i,
   /\b(protein|carbs?|carbohydrates?|fats?|kalorien|kohlenhydrate?|eiwei(ß|ss)|fett|makro\w*)\s*[:=]/i, // "Protein: 51g", "Kohlenhydrate: 40,6 g"
   // A macro line does NOT always carry a colon. The existing rule above requires ":" or "=", which
   // is an English-formatting assumption: German creators print bare lines — "82,1 g Eiweiß",
@@ -513,12 +520,23 @@ export function dryStapleOverload(meal: { ingredients?: unknown; servings?: unkn
  * batter, 1 egg for the wash" is a real thing a recipe says and collapsing it would change the
  * quantities a cook follows.
  */
+// The dedupe key is the NAME plus the AMOUNT, never the name alone. Name-only collapsed the very
+// thing the retention contract demands: a creator who lists "1/2 cup sugar" for the cake and
+// "2 tbsp sugar" for the topping has two lines; the model emits two entries (or recovery restores
+// the second); a name-keyed count folded them back to one, and the recipe was rejected for a
+// shortfall it did not have. Every multi-section recipe dropped on runs 542 and 545 died this way,
+// and the prompt experiments in TRENDING-OPEN that "failed to stop the merging" were graded by this
+// count. An echo — the same name at the same amount — still collapses, which is all the dedupe was
+// ever for. Source lines (strings) dedupe on the whole line, as before.
 export function countedIngredients(ingredients: any[] | undefined): any[] {
   const seen = new Set<string>()
   const out: any[] = []
   for (const i of realIngredients(ingredients)) {
-    const key = String((typeof i === 'string' ? i : i?.name) ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
-    if (!key || seen.has(key)) continue
+    const name = String((typeof i === 'string' ? i : i?.name) ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+    if (!name) continue
+    const amount = typeof i === 'string' ? '' : String(i?.grams || i?.visual || '').toLowerCase().replace(/\s+/g, '')
+    const key = `${name}|${amount}`
+    if (seen.has(key)) continue
     seen.add(key)
     out.push(i)
   }
@@ -648,20 +666,76 @@ export function isNonEnglishSource(lang: string | null | undefined): boolean {
 // already present in the model's output, so it cannot introduce an ingredient the model rejected
 // for a reason of its own.
 
-/** Normalised food identity: drop the leading quantity/unit, parentheticals and punctuation. */
-function foodIdentity(text: string): string {
-  return text
+// A creator's line and the model's entry name the same food in different words: "1 onion, cut into
+// large dice" vs "onion"; "300g thick fat-free skyr (10.6 oz)" vs "fat-free skyr"; "½ cup
+// extra-virgin olive oil" vs "extra-virgin olive oil". The first matcher compared whole word sets
+// after stripping only a leading quantity, so every one of those was a different "food" and none
+// of the surplus lines were recovered — 4 of the 8 recipes dropped on 2026-09-12/13 died that way,
+// with the food present in the model's output.
+//
+// What a line is reduced to: letters only, accents folded, parentheticals gone, every token with a
+// digit gone (quantities and ranges), units and containers gone, prep and grade words gone, light
+// plural folding. What remains is the food: "onion", "fat free skyr", "olive oil", "garlic".
+const LINE_UNIT = /^(?:g|gr|kg|ml|l|oz|ounces?|lbs?|pounds?|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|packs?|cloves?|pinch(?:es)?|slices?|cans?|blocks?|ears?|stalks?|sprigs?|heads?|bunch(?:es)?|scoops?|pieces?|sticks?|handfuls?|dash(?:es)?|jars?|bottles?|tins?|bags?|boxes?|blatt|prise|el|tl)$/
+const LINE_NOISE = new Set([
+  // prep and cutting
+  'diced', 'minced', 'chopped', 'sliced', 'grated', 'shredded', 'crushed', 'crumbled', 'cubed',
+  'mashed', 'blended', 'melted', 'softened', 'beaten', 'whisked', 'peeled', 'trimmed', 'halved',
+  'quartered', 'seeded', 'deseeded', 'pitted', 'drained', 'rinsed', 'washed', 'soaked', 'removed',
+  'juiced', 'zested', 'toasted', 'roasted', 'cooked', 'dried', 'packed', 'heaped', 'heaping',
+  'level', 'rounded', 'divided', 'separated', 'finely', 'roughly', 'coarsely', 'thinly', 'cut',
+  'into', 'dice', 'chunks', 'planks', 'strips', 'cubes', 'leaves', 'stems', 'kernels', 'inch',
+  // size, state and grade
+  'large', 'small', 'medium', 'whole', 'half', 'thick', 'thin', 'fresh', 'frozen', 'raw', 'ripe',
+  'boneless', 'skinless', 'lean', 'fat', 'free', 'low', 'non', 'nonfat', 'plain', 'unsweetened',
+  'sweetened', 'light', 'lite', 'reduced', 'organic', 'homemade', 'zero', 'extra', 'virgin',
+  'style', 'total', 'about', 'approx', 'approximately', 'roughly', 'optional', 'plus', 'more',
+  'weight', 'skip', 'you', 'dont', 'have', 'taste', 'for', 'the', 'and', 'with', 'then', 'min',
+])
+const stem = (w: string): string =>
+  w.length < 4 ? w : /ies$/.test(w) ? w.slice(0, -3) + 'y' : /(?:ch|sh|x|s)es$/.test(w) ? w.slice(0, -2) : /[^s]s$/.test(w) ? w.slice(0, -1) : w
+
+function lineWords(text: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of String(text ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/^[\d\s./-]*(?:g|kg|ml|l|oz|lb|lbs|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|cloves?|pinch(?:es)?|slices?|cans?|blatt|prise)?\b/, '')
     .replace(/\([^)]*\)/g, ' ')
-    .replace(/[^a-z\s]/g, ' ')
-    .split(/\s+/).filter(w => w.length > 2).sort().join(' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(' ')) {
+    if (!raw || /\d/.test(raw) || raw.length < 3 || LINE_UNIT.test(raw) || LINE_NOISE.has(raw)) continue
+    const w = stem(raw)
+    if (!seen.has(w)) { seen.add(w); out.push(w) }
+  }
+  return out
 }
 
-/** The quantity a source line opens with — "2 tbsp sugar" -> "2 tbsp". Empty when it has none. */
+/** The quantity a source line opens with — "2 tbsp sugar" -> "2 tbsp", "½ cup oil" -> "½ cup". Empty when it has none. */
 function leadingQuantity(line: string): string {
-  const m = line.match(/^\s*([\d\s./-]+\s*(?:g|kg|ml|l|oz|lb|lbs|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|cloves?|slices?|cans?|blatt)?)/i)
+  const m = line.match(/^\s*([\d¼½¾⅓⅔⅛⅜⅝⅞][\d¼½¾⅓⅔⅛⅜⅝⅞\s./–-]*(?:to\s+\d+\s*)?\s*(?:g|kg|ml|l|oz|lbs?|cups?|tbsps?|tsps?|tablespoons?|teaspoons?|packets?|cloves?|slices?|cans?|blocks?|scoops?|blatt)?)/i)
   return (m?.[1] ?? '').trim()
+}
+
+// The creator's line, matched to ONE model entry. Either word set may contain the other ("olive
+// oil" under "extra virgin olive oil"; "juice lime" under "lime"), but the line's LAST word — its
+// head noun — must appear in the entry. That last rule is what stops a dropped "chicken stock cube"
+// from being absorbed by the model's "chicken", or a dropped "garlic powder" by "garlic": recovery
+// must never paper over a genuine omission, which is the case retention exists to catch.
+function matchLine(words: string[], entries: { key: string; words: string[] }[]): string | null {
+  if (words.length === 0) return null
+  const head = words[words.length - 1]
+  let best: { key: string; score: number } | null = null
+  for (const e of entries) {
+    if (e.words.length === 0 || !e.words.includes(head)) continue
+    const lineInEntry = words.every(w => e.words.includes(w))
+    const entryInLine = e.words.every(w => words.includes(w))
+    if (!lineInEntry && !entryInLine) continue
+    const overlap = words.filter(w => e.words.includes(w)).length
+    const score = overlap * 2 + (lineInEntry && entryInLine ? 1 : 0)
+    if (!best || score > best.score) best = { key: e.key, score }
+  }
+  return best?.key ?? null
 }
 
 /**
@@ -670,6 +744,10 @@ function leadingQuantity(line: string): string {
  * Only recovers a line whose food ALREADY appears in the model's output — a line for a food the
  * model omitted entirely is a genuine drop and must still fail retention, because that is the
  * case the contract exists to catch. Returns the ingredients unchanged when there is nothing to do.
+ *
+ * A recovered entry carries the creator's own quantity: `visual` is the line's quantity text and
+ * `grams` its gram weight where the unit is known ("2 tbsp" -> 30g), else the model's grams for the
+ * first occurrence. Before this, `grams` was set to the raw text, and "1/2 cup" read as 12 cups.
  */
 export function recoverMergedIngredients<T extends { name?: string; grams?: string; visual?: string; section?: string | null }>(
   ingredients: T[] | undefined,
@@ -678,29 +756,37 @@ export function recoverMergedIngredients<T extends { name?: string; grams?: stri
   const list = [...(ingredients ?? [])]
   if (!list.length || !sourceLines?.length) return { ingredients: list, recovered: [] }
 
-  // How many source lines name each food, versus how many entries the model produced for it.
-  const srcByFood = new Map<string, string[]>()
+  const entries = list.map(i => { const words = lineWords(String(i?.name ?? '')); return { key: words.join(' '), words, item: i } })
+    .filter(e => e.key)
+  // How many entries the model produced per food, versus how many creator lines name it.
+  const have = new Map<string, number>()
+  for (const e of entries) have.set(e.key, (have.get(e.key) ?? 0) + 1)
+  const linesByKey = new Map<string, string[]>()
   for (const line of sourceLines) {
-    const k = foodIdentity(line)
-    if (!k) continue
-    ;(srcByFood.get(k) ?? srcByFood.set(k, []).get(k)!).push(line)
-  }
-  const haveByFood = new Map<string, number>()
-  for (const i of list) {
-    const k = foodIdentity(String(i?.name ?? ''))
-    if (k) haveByFood.set(k, (haveByFood.get(k) ?? 0) + 1)
+    const key = matchLine(lineWords(line), entries)
+    if (key) (linesByKey.get(key) ?? linesByKey.set(key, []).get(key)!).push(line)
   }
 
   const recovered: string[] = []
-  for (const [food, lines] of srcByFood) {
-    const have = haveByFood.get(food) ?? 0
-    if (have === 0 || lines.length <= have) continue   // absent = a real drop; matched = nothing to do
-    const template = list.find(i => foodIdentity(String(i?.name ?? '')) === food)
-    // Recover the SURPLUS lines only. The model's own entry stands for the first occurrence, so
-    // take the last (lines.length - have) — the ones with no entry of their own.
-    for (const line of lines.slice(have)) {
+  for (const [key, lines] of linesByKey) {
+    const n = have.get(key) ?? 0
+    if (n === 0 || lines.length <= n) continue   // matched = nothing to do
+    const template = entries.find(e => e.key === key)!.item
+    // Recover the SURPLUS lines only. The model's own entries stand for the first occurrences, so
+    // take the last (lines.length - n) — the ones with no entry of their own.
+    for (const line of lines.slice(n)) {
       const qty = leadingQuantity(line)
-      list.push({ ...(template as T), grams: qty || (template as any)?.grams, visual: qty || undefined })
+      // Grams only when the creator wrote a UNIT. "1 onion" is a count, not a gram, and a line
+      // with no quantity ("Cinnamon, to taste") has no weight at all — inheriting the template's
+      // grams for those was a wrong number, and it also made the count fold the recovered line
+      // back into the entry it came from, because the amount key reads grams first.
+      const parsed = qty && /[a-z]/i.test(qty) ? parseQty(qty) : { g: 0, known: false }
+      const remainder = line.replace(/\([^)]*\)/g, '').split(',').slice(1).join(',').trim()
+      list.push({
+        ...(template as T),
+        grams: parsed.known && parsed.g > 0 ? `${Math.round(parsed.g)}g` : '',
+        visual: qty || remainder || 'as listed',
+      })
       recovered.push(line)
     }
   }

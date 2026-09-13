@@ -410,3 +410,13 @@ test('heading exclusion does not eat a quantified line that mentions a heading w
   assert.ok(out.includes('100g cream cheese frosting'), `quantified "frosting" line must survive: ${out.join(' / ')}`)
   assert.ok(out.includes('50g spices'), `quantified "spices" line must survive: ${out.join(' / ')}`)
 })
+
+// The Turkish cookies of 2026-09-13: "MALZEMELER" (ingredients) was not a known heading and
+// "HAZIRLANIŞI" (method) ends in a non-ASCII letter, so \b never stopped the parse — three real
+// ingredients became a 15-line contract with the method steps counted as food.
+test('a Turkish description stops at its method heading', () => {
+  const desc = 'MALZEMELER\n🥣 2 orta boy muz\n🥣 3/4 su bardağı tahin (yarım su bardağından biraz fazla)\n🥣 2 yemek kaşığı bitter damla çikolata (opsiyonel)\n👩‍🍳 HAZIRLANIŞI\n1. Muzları püre haline getir.\n2. Tahini ve çikolatayı ekle.\n3. 180 derecede 12 dakika pişir.'
+  const lines = parseIngredientBlock(desc)
+  assert.equal(lines.length, 3, lines.join(' | '))
+  assert.ok(lines.every(l => !/püre|pişir/.test(l)))
+})

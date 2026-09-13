@@ -660,7 +660,7 @@ Deno.serve(async (req: Request) => {
     stageLog('youtube fetch + dedup done')
 
     // Step 2: Send video titles + descriptions to Groq to generate accurate recipes
-    const videoList = uniqueVideos.map((v, i) => {
+    const renderVideoList = (videos: typeof uniqueVideos) => videos.map((v, i) => {
       // Shown-to-the-model slice only. The full text is still what parseIngredientBlock reads
       // below, so widening the parse window never costs prompt budget — see DESC_PROMPT_CHARS.
       const desc = v.description ? `\n   Description: ${truncateSafe(v.description, DESC_PROMPT_CHARS)}` : ''
@@ -760,8 +760,9 @@ Deno.serve(async (req: Request) => {
         : ''
       return `${i + 1}. "${v.title}"${desc}${langNote}${checklist}${extraList}${methodList}${cookList}`
     }).join('\n\n')
+    const videoList = renderVideoList(uniqueVideos)
 
-    const prompt = `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
+    const buildPrompt = (videoList: string) => `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
 
 Here are ${uniqueVideos.length} trending YouTube recipe videos. Use both the title AND description to understand what each recipe is.
 
@@ -933,6 +934,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     ]
   }
 ]`
+    const prompt = buildPrompt(videoList)
 
     // Gemini-only. Logan's call: previous OpenAI fallback was producing visibly worse
     // recipes (ignored brand-voice rules, ignored variety constraints, kept slipping
@@ -1000,13 +1002,38 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // against the SAME candidate list costs zero additional quota, which is the whole reason this
     // sits here rather than around the outside.
     //
-    // Appended to `selected` rather than written as a nested loop so the existing "keep the biggest
-    // sanitized pool" comparison and the `>= 12` early break govern it unchanged: a healthy first
-    // pass still breaks immediately and costs nothing, and only a thin one spends the extra calls.
-    const LLM_RETRIES = 2
+    // Attempts are UNIONED, not raced. The first version kept only the biggest single batch, so a
+    // day whose three attempts yielded 0, 3 and 5 stored 5 — the same model, asked the same
+    // question, had already handed over 8. The dedup registers below (names, word sets, ingredient
+    // signatures) live outside the loop so a later attempt cannot re-add a dish an earlier one kept,
+    // and only SURVIVORS are registered, so a dish an earlier attempt rejected for an incomplete
+    // list can still be accepted complete from a later one. The `>= 12` early break still makes a
+    // healthy first pass cost nothing; a whole cron run takes ~70s, so five attempts fit easily.
+    const LLM_RETRIES = 4
     const attempts = [...selected, ...Array.from({ length: LLM_RETRIES }, () => selected[0]).filter(Boolean)]
-    for (const provider of attempts) {
-      stageLog(`LLM call start: ${provider.name}`)
+    // Cross-attempt state. Names and word sets guard the same-dish-twice case; ingredient
+    // signatures guard same-recipe-different-label. All three are only ever written for a recipe
+    // that SURVIVED the whole filter (see the end of it).
+    const seenNames = new Set<string>()
+    const seenWordSets: Set<string>[] = []
+    const seenIngredientSigs: Set<string>[] = []
+    // Funnel counters — tally exactly why the LLM's raw output shrinks. Cumulative across attempts,
+    // so the stored funnel describes the run, not its last call.
+    let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0
+    let rawTotal = 0, sanitizedTotal = 0
+    const droppedDetail: any[] = []
+    // Each attempt sees the candidates in a DIFFERENT order. The model is near-deterministic for a
+    // given prompt — a run whose five attempts yielded [2,0,0,0,0] re-proposed the same two dishes
+    // every time — and it picks from the top of a 44-video list far more than from the bottom.
+    // Rotating the list so every video leads in some attempt is what makes a retry a new sample
+    // rather than a replay. video_index is mapped back to the canonical order right after parsing,
+    // so nothing downstream knows the prompt was rotated.
+    const rotationStep = Math.ceil(uniqueVideos.length / Math.max(1, attempts.length))
+    for (const [attemptNo, provider] of attempts.entries()) {
+      const offset = uniqueVideos.length ? (attemptNo * rotationStep) % uniqueVideos.length : 0
+      const order = uniqueVideos.map((_, i) => (i + offset) % uniqueVideos.length)
+      const attemptPrompt = attemptNo === 0 ? prompt : buildPrompt(renderVideoList(order.map(i => uniqueVideos[i])))
+      stageLog(`LLM call start: ${provider.name} (attempt ${attemptNo + 1}, list offset ${offset})`)
       try {
         // 90s hard timeout. Without this the fetch hangs indefinitely if the provider
         // stalls — and on Free-tier edge functions a hanging Gemini call would silently
@@ -1033,7 +1060,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           // leaves headroom), while gpt-4o-mini tops out at 16,384 — so the shared 32000 was an
           // invalid request to OpenAI before its body was even read. The cap is a truncation
           // guard, not a budget: nothing is charged for tokens the model does not emit.
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: prompt }], temperature: 0.7, max_tokens: provider.maxTokens }),
+          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: attemptPrompt }], temperature: 0.7, max_tokens: provider.maxTokens }),
           signal: controller.signal,
         }).finally(() => clearTimeout(timeoutId))
         const data = await res.json()
@@ -1056,6 +1083,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           providerErrors.push(`${provider.name}: unparseable JSON (finish_reason=${finish}, ${clean.length} chars): ${(pe as Error).message.slice(0, 120)}`)
           continue
         }
+        // Map video_index back from this attempt's rotated order to the canonical one.
+        if (Array.isArray(parsed)) for (const r of parsed) {
+          const k = Number(r?.video_index)
+          if (r && Number.isFinite(k) && k >= 1 && k <= order.length) r.video_index = order[k - 1] + 1
+        }
         if (!Array.isArray(parsed) || parsed.length === 0) {
           providerErrors.push(`${provider.name}: returned no recipes (finish_reason=${finish}, ${clean.length} chars)`)
         }
@@ -1076,9 +1108,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           // Within-batch name dedup — Groq sometimes ignores the variety prompt
           // and returns two recipes for the same dish (e.g. two oatmeal bowls)
           const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
-          const seenNames = new Set<string>()
-          const seenWordSets: Set<string>[] = [] // for same-day Jaccard dedup
-          const seenIngredientSigs: Set<string>[] = [] // same-day dedup on the RECIPE, not the name
+          // seenNames / seenWordSets / seenIngredientSigs are declared above the attempt loop.
           const STOPWORDS = new Set(['high', 'protein', 'recipe', 'easy', 'quick', 'best', 'the', 'a', 'an', 'with', 'and', 'of', 'for', 'low', 'macro', 'friendly', 'healthy'])
           const wordsOf = (s: string) => new Set(
             s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
@@ -1097,9 +1127,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             const union = new Set([...words, ...pw]).size
             return union > 0 ? overlap / union : 0
           }
-          // Funnel counters — tally exactly why the LLM's raw output shrinks.
-          let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0
-          const droppedDetail: any[] = []
+          // Funnel counters and droppedDetail are declared above the attempt loop (cumulative).
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
             if (!name) { rejNoName++; return false }
@@ -1146,7 +1174,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
                 console.log(`[funnel] rejected "${name}" — ingredient overlap ${maxIngJac.toFixed(2)} with an existing meal (different name, same recipe)`)
                 return false
               }
-              seenIngredientSigs.push(candSig)
+              // Registered at the survivor point below, not here: a candidate rejected further
+              // down (retention, name gap) must not block its complete twin from a later attempt.
             }
             // Enforced in CODE, not just the prompt. "Do not scale" was already an explicit
             // instruction and was ignored anyway — same lesson as the format cap. A recipe that
@@ -1306,20 +1335,27 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             if (incoherent) { rejMacroIncoherent++; console.log(`[funnel] rejected "${name}" — ${incoherent}`); return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
+            if (candSig.size >= 3) seenIngredientSigs.push(candSig)
             return true
           }).slice(0, 30)
-          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName}, macroIncoherent ${rejMacroIncoherent}, ingredientsRecovered ${rejRecovered})`)
+          rawTotal += parsed.length
+          sanitizedTotal += sanitized.length
+          console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized this attempt; cumulative ${rawTotal} → ${sanitizedTotal} (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName}, macroIncoherent ${rejMacroIncoherent}, ingredientsRecovered ${rejRecovered})`)
           funnel[`llm_${provider.name}`] = {
-            raw: parsed.length, sanitized: sanitized.length,
+            raw: rawTotal, sanitized: sanitizedTotal,
             rejected: { noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup,
               fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
               nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName },
             droppedDetail,
           }
-          if (!recipes || sanitized.length > recipes.length) { recipes = sanitized; funnel.providerUsed = provider.name }
+          if (sanitized.length > 0) {
+            recipes = [...(recipes ?? []), ...sanitized]
+            if (!funnel.providerUsed) funnel.providerUsed = provider.name
+          }
           funnel.llmAttempts = ((funnel.llmAttempts as number | undefined) ?? 0) + 1
           funnel.llmYields = [...((funnel.llmYields as number[]) ?? []), sanitized.length]
-          if (recipes.length >= 12) break // pool large enough for MMR to pick 6 with strong variety
+          funnel.llmRaw = [...((funnel.llmRaw as number[]) ?? []), parsed.length]
+          if ((recipes?.length ?? 0) >= 12) break // pool large enough for MMR to pick 6 with strong variety
         }
       } catch (e) {
         stageLog(`LLM call threw: ${(e as Error).message}`)

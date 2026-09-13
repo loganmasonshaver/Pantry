@@ -32,7 +32,13 @@ const BULLET_CHARS = "[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌�
 // would then fail the 100%-retention check and reject a perfectly good recipe for being "short".
 // The first group already stopped at METHOD/DIRECTIONS; this stops at the promo block when the
 // creator never wrote a method heading.
-const STOP_LINE = /^(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy|zubereitung|anleitung|przygotowanie|preparaci[oó]n|preparazione|more\s+recipes?|other\s+(?:recipes?|videos?)|recipes?\s+you|watch\s+next|related|playlist|chapters?|timestamps?)\b/i
+// `^[^\p{L}\p{N}]*` lets an emoji bullet precede the heading ("👩‍🍳 HAZIRLANIŞI") without letting a
+// numbered line ("2. Directions") count as one — digits are excluded from the prefix on purpose.
+// `(?!\p{L})` with the u flag, not `\b`: JS word boundaries are ASCII-only, so a heading that ends
+// in a non-ASCII letter ("Hazırlanışı", "Приготовление") would never satisfy \b and never stop the
+// parse — the Turkish cookies on 2026-09-13 read every method step as an ingredient for exactly
+// that reason, and demanded 15 ingredients of a 3-ingredient recipe.
+const STOP_LINE = /^[^\p{L}\p{N}]*(?:recipe\s+)?(?:directions?|instructions?|method|steps?|macros?|nutrition|how to|preparation|notes?|serve|enjoy|zubereitung|anleitung|przygotowanie|preparaci[oó]n|elaboraci[oó]n|preparazione|modo de preparo|haz[iı]rlan[iı]ş[iı]|yap[iı]l[iı]ş[iı]|приготовление|more\s+recipes?|other\s+(?:recipes?|videos?)|recipes?\s+you|watch\s+next|related|playlist|chapters?|timestamps?)(?!\p{L})/iu
 const NOISE_LINE = /(https?:\/\/|www\.|@[\w.]+|#\w+|comment |subscribe|follow me|link in bio|discount|instagram|tiktok)/i
 const QTY_START = /^(?:\d+[\d/.\s]*|½|¼|¾|⅓|⅔|⅛)\s*\S/
 
@@ -106,7 +112,7 @@ function parseIngredientBlock(desc: string, maxLine: number = MAX_INGREDIENT_LIN
   // patterns carry Składniki and Zutaten: this pipeline accepts non-English sources on purpose, and
   // a German description puts "Nährwerte" (macros) ABOVE "Zutaten" (ingredients) — so without
   // knowing the heading, the parse starts at the top and reads the macro block as ingredients.
-  const heading = desc.match(/(?:ingredients?|zutaten|składniki|ingredienti|ingr[ée]dients?|ingredientes|材料)\s*:?\s*\n/i)
+  const heading = desc.match(/(?:ingredients?|zutaten|składniki|ingredienti|ingr[ée]dients?|ingredientes|malzemeler|ингредиенты|材料)\s*:?\s*\n/i)
   const body = heading ? desc.slice(heading.index! + heading[0].length) : desc
   const bulleted: string[] = []
   const quantified: string[] = []

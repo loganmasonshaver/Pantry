@@ -129,6 +129,15 @@ test('emptying a non-Latin list used to blind the untranslated gate', () => {
   assert.equal(looksUntranslated(russian), true)
 })
 
+test('container dimensions under the ingredient list are not food; "2 x 400g cans" still is', () => {
+  for (const line of ['External: 19 × 14 × 5 cm (7.5 × 5.5 × 2 in)', 'Internal: 17 × 12 × 4 cm', 'Shape: Rectangular', 'Capacity: 0.8 L (27 US fl oz; about 3⅓ cups)']) {
+    assert.equal(isNonIngredientLine(line), true, line)
+  }
+  for (const line of ['2 x 400g cans chopped tomatoes', '1 x 400g can chickpeas', '3 Mini Kinder Bueno pieces (16.2 g; 0.57 oz total)']) {
+    assert.equal(isNonIngredientLine(line), false, line)
+  }
+})
+
 test('realIngredients strips junk and accepts both shapes', () => {
   const ings = [{ name: 'Greek yogurt' }, { name: 'Składniki' }, 'blueberries', { name: 'Kalorien: 504 kcal' }]
   assert.deepEqual(realIngredients(ings).map((i: any) => i.name ?? i), ['Greek yogurt', 'blueberries'])
@@ -138,6 +147,32 @@ test('the count collapses duplicates — they buy a free point at the retention 
   const ings = [{ name: 'Olive oil spray' }, { name: 'chicken' }, { name: 'olive oil spray' }]
   assert.equal(realIngredients(ings).length, 3)   // stored list keeps them
   assert.equal(countedIngredients(ings).length, 2) // counted list does not
+})
+
+test('the count keeps the same food at a DIFFERENT amount — a second creator line, not an echo', () => {
+  const model = [
+    { name: 'sugar', grams: '100g', visual: '1/2 cup' },
+    { name: 'sugar', grams: '25g', visual: '2 tbsp' },
+    { name: 'sugar', grams: '100g', visual: '1/2 cup' },   // an echo of the first
+    { name: 'sugar', grams: '100 g', visual: '½ cup' },    // the same echo, spelled differently
+  ]
+  assert.equal(countedIngredients(model).length, 2)
+})
+
+// Run 545 (2026-09-13): Apple Pie Cottage Cheese Cake, 15 source lines with sugar on three of them.
+// Whether the model emitted the three sugars itself or recovery restored them, the count has to see
+// 15 — under the name-only key it saw 14 and the recipe was rejected, every day it appeared.
+test('run 545: a multi-section recipe clears retention once recovered lines are counted', () => {
+  const src = ['3 eggs', '1/2 cup (100 g) sugar', '1 cup (250 ml) 10% cream or milk', '1/3 cup (80 g) vegetable oil', '2 cups (300 g) all-purpose flour', '2 tsp (10 g) baking powder', '2 apples, peeled and diced', '1 cup (250 g) cottage cheese', '1 egg', '2 tbsp sugar', '1 tsp vanilla extract', '1 apple', '1 tbsp sugar', '1/2 tsp cinnamon', '2 tbsp melted butter']
+  const merged = ['eggs', 'sugar', '10% cream or milk', 'vegetable oil', 'all-purpose flour', 'baking powder', 'apples', 'cottage cheese', 'egg', 'vanilla extract', 'apple', 'cinnamon', 'melted butter']
+    .map(name => ({ name, grams: name === 'sugar' ? '100g' : '10g', visual: '' }))
+  const rec = recoverMergedIngredients(merged, src)
+  assert.equal(rec.recovered.length, 2)
+  assert.ok(countedIngredients(rec.ingredients).length >= src.length, 'recovered sugar lines count toward retention')
+  // And the model's own split entries count too — the case that matched production's "0 recovered".
+  const split = [...merged, { name: 'sugar', grams: '25g', visual: '2 tbsp' }, { name: 'sugar', grams: '12g', visual: '1 tbsp' }]
+  assert.equal(recoverMergedIngredients(split, src).recovered.length, 0)
+  assert.ok(countedIngredients(split).length >= src.length)
 })
 
 // ── name / ingredient coherence ──────────────────────────────────────────────────────────────
@@ -432,7 +467,7 @@ test('recoverMergedIngredients restores a food the model consolidated', () => {
     '3 eggs', '1/2 cup (100 g) sugar', '2 cups (300 g) all-purpose flour',
     '2 tbsp sugar', '1 tsp vanilla extract', '1 tbsp sugar',
   ]
-  const model = [
+  const model: { name: string; grams: string; visual?: string }[] = [
     { name: 'eggs', grams: '150g' },
     { name: 'sugar', grams: '100g' },
     { name: 'all-purpose flour', grams: '300g' },
@@ -441,9 +476,55 @@ test('recoverMergedIngredients restores a food the model consolidated', () => {
   const { ingredients, recovered } = recoverMergedIngredients(model, src)
   assert.equal(recovered.length, 2, `expected the two surplus sugar lines, got ${JSON.stringify(recovered)}`)
   assert.equal(ingredients.filter(i => i.name === 'sugar').length, 3, 'three sugar entries after recovery')
-  // Quantities come from the creator's own lines, never invented.
-  const qtys = ingredients.filter(i => i.name === 'sugar').map(i => i.grams)
+  // Quantities come from the creator's own lines, never invented: the text in `visual`, the weight in `grams`.
+  const qtys = ingredients.filter(i => i.name === 'sugar').map(i => i.visual)
   assert.ok(qtys.includes('2 tbsp') && qtys.includes('1 tbsp'), `creator quantities kept: ${qtys.join(', ')}`)
+  const grams = ingredients.filter(i => i.name === 'sugar').map(i => i.grams)
+  assert.deepEqual(grams, ['100g', '30g', '15g'])
+})
+
+// Run 542 (2026-09-12): the four multi-section recipes the exact-identity matcher could not see.
+// Every one had the food in the model's output under different wording than the creator's line.
+test('run 542: creator wording — prep phrases, grade words, unicode fractions — still matches the model entry', () => {
+  const cases: [string, string[], string[]][] = [
+    ['Chicken Jollof-Style Rice',
+      ['red bell pepper', 'tomato', 'onion', 'garlic', 'lemon juice', 'honey', 'chilli flakes', 'oregano', 'peri peri seasoning', 'turmeric powder', 'coriander powder', 'pepper powder', 'chicken stock cube', 'boneless chicken thighs', 'tomato paste', 'bay leaf', 'basmati rice', 'chicken cube'],
+      ['1 large red bell pepper, cut into large dice', '1 large tomato, cut into large dice', '1 onion, cut into large dice', '6–8 garlic cloves, whole', '1 tsp lemon juice', '2 tsp honey', '1.5 tsp chilli flakes', '1 tsp oregano (or Italian seasoning)', "1 tsp peri peri seasoning (skip if you don't have)", '1/4 tsp turmeric powder', '1 tsp coriander powder', '½ tsp pepper powder', '1 no-salt chicken stock cube', '500g boneless chicken thighs', '1 onion, finely chopped', '4–5 garlic cloves, finely chopped', '1 tbsp tomato paste or 2 tbsp tomato puree', '1 bay leaf', '1 cup basmati rice, washed and soaked 20–30 min then drained', '1 zero-salt chicken cube (optional)']],
+    ['Chocolate Biscoff Protein Bowl',
+      ['fat-free skyr', 'whey protein concentrate', 'unsweetened cocoa powder', 'cinnamon', 'salt', 'tea biscuits', 'cookie-flavored plant protein', 'Biscoff biscuits', 'milk chocolate', 'coconut oil', 'desiccated coconut', 'tahini', 'blueberries'],
+      ['300g thick fat-free skyr (10.6 oz; about 1¼ cups)', '40g chocolate-flavored whey protein concentrate (WPC) (1.4 oz)', '10g unsweetened cocoa powder (0.35 oz; about 2 tbsp)', 'About 2g cinnamon (roughly ¾ tsp)', 'Pinch of salt', '4 petit-beurre-style tea biscuits, 20g total (0.7 oz)', '200g thick fat-free skyr (7.1 oz; about ¾ cup + 1 tbsp)', '20g cookie-flavored plant-based protein (0.7 oz)', 'Cinnamon, to taste', '2 Lotus Biscoff biscuits, about 15.5g total (0.55 oz)', '50g milk chocolate (1.8 oz)', '4g coconut oil (0.14 oz; about 1 tsp)', '3–4g desiccated coconut (about 2 tsp)', '5–7g tahini total (about 1–1½ tsp)', '6 blueberries, approximately 12g (0.4 oz)']],
+    ['Hot Honey Halloumi Bowls',
+      ['extra-virgin olive oil', 'halloumi cheese', 'garlic', 'hot honey', 'sweet potatoes', 'smoked paprika', 'garlic powder', 'cayenne pepper', 'dry farro', 'corn', 'chives', 'fresh basil', 'chickpeas', 'chili powder', 'onion powder', 'apple cider vinegar', 'Dijon mustard'],
+      ['2 Tbsp extra-virgin olive oil', '2 (8-ounce) blocks halloumi cheese, sliced into ⅛-inch planks', '2 cloves garlic, minced', '3 Tbsp hot honey', '2 medium sweet potatoes, cubed', '1 Tbsp extra-virgin olive oil', '1 tsp smoked paprika', '½ tsp garlic powder', '¼ tsp cayenne pepper', '1 cup dry farro, rinsed', '3 ears corn, kernels removed', '¼ cup chopped chives', '¼ cup chopped fresh basil', '2 (15-ounce) cans chickpeas, drained and rinsed', '1 tsp chili powder', '1 tsp garlic powder', '½ tsp onion powder', '½ cup extra-virgin olive oil', '¼ cup apple cider vinegar', '¼ cup hot honey', '3 Tbsp Dijon mustard']],
+    ['Street Corn Chicken Bowls',
+      ['chicken thighs', 'olive oil', 'garlic', 'lime juice', 'corn kernels', 'red onion', 'jalapeno', 'avocado', 'cilantro', 'cotija cheese', 'chile lime seasoning', 'greek yogurt', 'mayonnaise', 'black pepper', 'salt'],
+      ['1.5 lbs (680g) boneless, skinless chicken thighs', '3 tbsp olive oil', '6 garlic cloves, minced', '1 lime, juiced', '30 oz (850 g) corn kernels (or 4 cobs)', '⅓ cup red onion, finely diced', '1 fresh jalapeno, diced (deseeded)', '½ avocado, cubed', '¼ cup fresh cilantro, chopped', '⅓ cup cotija cheese (or feta), crumbled', 'Seasonings: 2 tsp chile lime, 1 tsp salt, 1 tsp pepper', '¼ cup greek yogurt', '¼ cup mayonnaise', '½ lime, juiced', '½ cup greek yogurt', '½ cup mayonnaise', '1 small jalapeño, deseeded', '1 1/2 cups cilantro, leaves and stems', '4 to 5 garlic cloves', '2 tsp black pepper', '1 tsp salt', 'Juice of 1 lime']],
+  ]
+  for (const [name, got, src] of cases) {
+    const model = got.map((n, i) => ({ name: n, grams: `${10 + i}g`, visual: '' }))
+    const rec = recoverMergedIngredients(model, src)
+    const counted = countedIngredients(rec.ingredients).length
+    assert.ok(counted >= src.length, `${name}: ${got.length} + ${rec.recovered.length} recovered = ${counted} < ${src.length} source lines; recovered: ${rec.recovered.join(' | ')}`)
+  }
+})
+
+test('a recovered line carries the creator quantity as grams the macro path can read', () => {
+  const src = ['1 cup olive oil', '½ cup olive oil', '1/2 cup sugar', '2 tbsp sugar']
+  const model = [{ name: 'olive oil', grams: '240g', visual: '1 cup' }, { name: 'sugar', grams: '100g', visual: '1/2 cup' }]
+  const { ingredients } = recoverMergedIngredients(model, src)
+  const oil = ingredients.filter(i => i.name === 'olive oil').map(i => i.grams)
+  const sugar = ingredients.filter(i => i.name === 'sugar').map(i => i.grams)
+  assert.deepEqual(oil, ['240g', '120g'], '½ cup is 120g, not nothing')
+  assert.deepEqual(sugar, ['100g', '30g'], '2 tbsp is 30g')
+})
+
+test('recovery never absorbs a dropped food into a shorter entry that shares a word', () => {
+  // The head noun rule: "chicken" must not stand in for a missing "chicken stock cube", nor
+  // "garlic" for a missing "garlic powder".
+  const src = ['500g chicken thighs', '1 chicken stock cube', '2 garlic cloves', '½ tsp garlic powder']
+  const model = [{ name: 'chicken thighs', grams: '500g' }, { name: 'garlic', grams: '6g' }]
+  const { recovered } = recoverMergedIngredients(model, src)
+  assert.equal(recovered.length, 0, `nothing should be recovered, got ${recovered.join(' | ')}`)
 })
 
 test('recoverMergedIngredients does NOT invent a food the model omitted entirely', () => {

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros } from './macro-estimate.ts'
+import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros, leadingNumber } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -373,4 +373,25 @@ test('COMPUTED_AGREEMENT_BAND is the guard that makes replacement safe', () => {
   const beyond = Math.abs(1615 - 750) / 750 <= COMPUTED_AGREEMENT_BAND  // Stuffed Chicken Caesar Sourdough
   assert.ok(within, 'a 4% difference must count as agreement')
   assert.ok(!beyond, 'a 2x difference must NOT count as agreement')
+})
+
+test('leadingNumber reads quantities the way a recipe writes them', () => {
+  assert.equal(leadingNumber('1/2 cup'), 0.5)        // was 12
+  assert.equal(leadingNumber('½ cup'), 0.5)          // was NaN
+  assert.equal(leadingNumber('1 1/2 cups'), 1.5)
+  assert.equal(leadingNumber('1½ tbsp'), 1.5)
+  assert.equal(leadingNumber('6–8 cloves'), 6)       // a range takes its first number
+  assert.equal(leadingNumber('25-35 min'), 25)       // was 2535
+  assert.equal(leadingNumber('120g'), 120)
+  assert.equal(leadingNumber('1.5 oz'), 1.5)
+  assert.equal(leadingNumber('About 2g cinnamon'), 2)
+  assert.ok(Number.isNaN(leadingNumber('pinch of salt')))
+})
+
+test('parseQty converts the creator quantities recovery hands it', () => {
+  assert.equal(parseQty('½ cup').g, 120)
+  assert.equal(parseQty('1/2 cup').g, 120)
+  assert.equal(parseQty('2 tbsp').g, 30)
+  assert.equal(parseQty('120g').g, 120)
+  assert.equal(parseQty('pinch of salt').known, false)
 })

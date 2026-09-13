@@ -261,11 +261,28 @@ export type ParsedQty = {
  * "1 scoop" protein powder, "1 tbsp" butter and "1 tsp" maple syrup, and reading those as 1g each
  * cost ~24g of protein and made an honest meal look like it was overstating by 1.51x.
  */
+const UNICODE_FRACTION: Record<string, number> = { '¼': 0.25, '½': 0.5, '¾': 0.75, '⅓': 1 / 3, '⅔': 2 / 3, '⅛': 0.125, '⅜': 0.375, '⅝': 0.625, '⅞': 0.875 }
+
+// The number a quantity opens with, read the way a recipe writes it. The previous reader stripped
+// every non-digit and parsed what was left, so "1/2 cup" became 12 cups (2,880 g), "½ cup" became
+// nothing, and "25-35 min" became 2535. Handles decimals, "1/2", "1 1/2", "1½", "½", and ranges
+// ("6-8", "6–8", "4 to 5"), where the first number is taken.
+export function leadingNumber(text: string): number {
+  const s = String(text ?? '').trim().toLowerCase()
+  let m = s.match(/^\s*(?:(\d+)\s+)?(\d+)\s*\/\s*(\d+)/)                // "1/2", "1 1/2"
+  if (m) return (m[1] ? parseInt(m[1], 10) : 0) + parseInt(m[2], 10) / parseInt(m[3], 10)
+  m = s.match(/^\s*(\d+(?:\.\d+)?)?\s*([¼½¾⅓⅔⅛⅜⅝⅞])?/)                    // "2.5", "1½", "½"
+  if (m && (m[1] !== undefined || m[2])) return (m[1] ? parseFloat(m[1]) : 0) + (m[2] ? UNICODE_FRACTION[m[2]] : 0)
+  const any = s.match(/(\d+(?:\.\d+)?)\s*(?:\/\s*(\d+))?/)                 // "about 2g cinnamon"
+  if (!any) return NaN
+  return any[2] ? parseFloat(any[1]) / parseInt(any[2], 10) : parseFloat(any[1])
+}
+
 export function parseQty(raw: string | number | undefined): ParsedQty {
   if (raw === undefined || raw === null) return { g: 0, known: false }
   if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? { g: raw, known: true } : { g: 0, known: false }
   const s = String(raw).trim().toLowerCase()
-  const n = parseFloat(s.replace(/[^0-9.]/g, ''))
+  const n = leadingNumber(s)
   if (!Number.isFinite(n) || n <= 0) return { g: 0, known: false }
 
   if (/\bkg\b/.test(s)) return { g: n * 1000, known: true }
