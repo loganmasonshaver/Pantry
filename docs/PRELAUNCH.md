@@ -93,7 +93,7 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   requirement — never widen tolerance to fill a thin day; the levers are candidate volume and
   parser precision (CLAUDE.md). Methods and standing procedure: `docs/TRENDING-OPEN.md`.
 
-## 0b. RAISED BY LOGAN 2026-09-13 — the Chicken and Rice Soup  *(analysed, DECISION PENDING — Logan: "don't fix it right away")*
+## 0b. RAISED BY LOGAN 2026-09-13 — the Chicken and Rice Soup  *(analysed; then Logan: "go build it, all 4 steps" — BUILT + DEPLOYED the same evening)*
 Run 678 (20:04 UTC), Cook Now, target 40 g / 525 kcal, pantry 55 items. Shown: Bulgarian Yogurt and
 Protein Shake, Greek Yogurt and Protein Cereal Bowl, Chicken and Rice Soup. The soup: chicken, cooked
 rice, leafy greens, garlic, WATER, salt — "Dice chicken. Boil water with garlic and chicken 7 min. Add
@@ -121,11 +121,37 @@ rice and greens 2 min." Photo matches it exactly: cubed chicken, rice and wilted
 - **Verdict:** the model is not inventing random dishes; it is picking real dish types and gutting
   them, and the ranker cannot tell. Logan's instinct is right, his hypothesis (pantry-only → made-up
   food) is the wrong cause.
-- [ ] **Levers, in order, none built:** (a) rank flavour inside a tier — a complete dish with ≥ 2 axes
-  beats one with 0 before calorie fit decides (the pesto bowl would have shipped); (b) offer the
-  pantry's FLAVOUR items in the prompt the way proteins and carbs are offered ("FLAVOUR THIS PANTRY
-  HAS: soy sauce, lime, salsa, butter…"); (c) a savory dinner with 0 axes never outranks a 1+ axis
-  candidate. All measurable through `flavourAxesShown` before and after. Logan to decide.
+- [x] **BUILT 2026-09-13 evening, all four steps** (`rank-deck.ts`, `flavour-axes.ts`, `dish-key.ts`,
+  `generate-meals`, migration `20260913204647`):
+  1. **Flavour ranks inside a tier, above freshness:** two-or-more axes, then one, then none, then
+     fresh, then calorie fit. Sweet dishes are exempt (the name list, or a fruit/nut name with no
+     meat or egg in it). Unit test replays run 678: the pesto bowl ships, the soup does not, the
+     shake is not penalised, the incomplete pan-seared chicken still loses on tier.
+  2. **The pantry's flavour shelf is in the prompt**, grouped by axis in the ranker's own vocabulary
+     (`flavourShelf`, assumed staples included), with "water is not stock" spelled out. Funnel:
+     `pantryFlavourOffered`.
+  3. **Bans only ever take a protein or a carb base.** Cheese, cream cheese and peanut butter still
+     detect as bases (a cheese dish repeats a cheese dish) but are never banned — the old rule
+     "banning them costs the deck nothing" cost it its umami.
+  4. **Daily report goes red on any savory meal shown with no flavour axis** (`savoryZeroAxesShown`).
+  **Logan's real pantry, dry run on the new code:** shelf offered acid (BBQ sauce, lime, pickles,
+  salsa, relish) · heat (ground pepper, hot sauce, chili powder, red pepper flakes) · umami (pad thai
+  sauce, pesto, soy sauce, tomato sauce) · aromatics (garlic, onions, basil) · fat (butter, oils).
+  Deck: Ground Beef Skillet with Garlic and Onions (3 axes), Cheesy Beef and Potato Skillet (2), a
+  sweet porridge. Zero savory meals without an axis. Chicken was the one ban (overused — correct).
+  **Sweep, 38 decks / 114 meals, before → after (compare KINDS; counts swing ±4):**
+  savory meals with 2+ axes **57% → 76%**; with none 9% → 5%; harness "N flavour axis" soft flags
+  49 → 28; **uncookable-kept 20 → 2** (before, the carb-heavy decks "met" the floor with dishes
+  needing lean beef, chicken breast or protein powder the pantry did not hold — the shelf line keeps
+  the model on what it has); under-protein-floor shown 17 → 25, concentrated in the carb-heavy and
+  vegan pantries whose ceiling is below the floor (harness "pantry ceiling" soft flag 6 → 12) — the
+  honest, cookable version of the same decks.
+- [ ] **WATCH, not proven:** 4 hard protein misses after vs 0 before on pantries the harness says
+  could have reached the floor (Black Bean and Cheddar Skillet 30g/41g; Egg and Black Bean Salad
+  28g/70g; two vegan black-bean bowls 26g/46g). Tier still outranks flavour, so a floor-clearing
+  candidate would have won — these are runs where the model returned none. Within the ±4 swing; the
+  next sweep (RUNS=3) settles it. The daily line's own red threshold (>20% under floor) guards
+  production meanwhile.
 
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
 - [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.

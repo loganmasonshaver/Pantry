@@ -438,10 +438,14 @@ test('maxProteinBans is a knob, and raising it restores the old behaviour exactl
   )
 })
 
-test('fat-dominant bases are not protected — banning them costs the deck nothing', () => {
-  // peanut butter and cheese carry protein but nobody anchors a 40g meal on them, so they stay
-  // bannable and leave the real protein budget untouched.
-  assert.deepEqual(overusedBases(rep('Peanut Butter Cheese Toast')), ['cheese', 'peanut butter'])
+test('fat-dominant bases are never BANNED — they are the flavour carriers, and a ban that costs the deck nothing for protein cost it its umami', () => {
+  // Was the opposite until 2026-09-13: cheese and peanut butter sat outside the protein budget so a
+  // ban could take them "for free". Run 678 banned cheese as overused and shipped three meals with
+  // no flavour axis at all. They still DETECT as bases (a cheese dish repeats a cheese dish); they
+  // just never leave the shelf.
+  const rep = (name: string, n = 12) => Array.from({ length: n }, () => ({ name }))
+  assert.deepEqual(overusedBases([...rep('Cheese Omelette'), ...rep('Peanut Butter Oats')]), [])
+  assert.ok(detectBases('Cheese Omelette').has('cheese'), 'still a base for repeat detection')
 })
 
 // Cook Tonight runs 48 and 51: Logan's pantry holds two savory carbs, rice and potato. Banning potato
@@ -459,4 +463,11 @@ test('a carb ban is refused when it would leave the pantry one savory carb', () 
     'three savory carbs: the ban still fires, two remain')
   // The protein ban is untouched by any of this.
   assert.ok(overusedBases(history, { carbBases: ['rice', 'potato'] }).includes('chicken'))
+})
+
+test('a ban never takes a flavour carrier: cheese saturating the window is not banned, chicken is', () => {
+  const rep = (name: string, n = 12) => Array.from({ length: n }, () => ({ name }))
+  assert.deepEqual(overusedBases(rep('Cream Cheese Delight')), [], 'cream cheese is detected as a base but never banned')
+  assert.deepEqual(overusedBases(rep('Peanut Butter Protein Bowl')), [], 'nor peanut butter')
+  assert.deepEqual(overusedBases(rep('Chicken Rice Bowl'), { carbBases: ['rice', 'potato', 'pasta'] }), ['chicken', 'rice'])
 })

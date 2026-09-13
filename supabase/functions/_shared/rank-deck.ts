@@ -1,7 +1,8 @@
 // Which of the surviving Cook Tonight candidates reach the screen, and in what order.
 //
 // Order: a savory clash sorts below everything; then TIER (complete AND over the protein floor);
-// then fresh before repeat; then macro fit. Tier moved ahead of freshness on Logan's call after
+// then FLAVOUR (two or more axes, then one, then none — sweet dishes exempt); then fresh before
+// repeat; then macro fit. Tier moved ahead of freshness on Logan's call after
 // run 48, where seven of ten candidates were repeats: freshness-first had no choice left to make,
 // so the three fresh dishes shipped whatever they were — one at 24g against a 40g target, over
 // seven dishes that met the floor. On a finite pantry the "fresh" dishes are the model's oddest
@@ -31,7 +32,13 @@ export type Candidate = {
   /** meets the protein floor (75% of target). Coverage may not displace a meal that does. */
   _proteinOk?: boolean
   _fitScore?: number
+  /** Flavour axes the dish reaches (flavour-axes.ts); null when the dish is sweet and owes none. */
+  _axes?: number | null
 }
+// Capped at two because that is what the prompt asks for: a fourth axis is not a better dinner
+// than a second. Null (a sweet dish) ranks as satisfied — a parfait owes no umami, and sinking
+// every shake below every dinner is not what this is for.
+const axesRank = (m: Candidate) => (m._axes == null ? 2 : Math.min(2, Number(m._axes) || 0))
 
 export function compareCandidates(a: Candidate, b: Candidate): number {
   if (!!a._clash !== !!b._clash) return a._clash ? 1 : -1
@@ -42,6 +49,13 @@ export function compareCandidates(a: Candidate, b: Candidate): number {
   if (!!a._notCookable !== !!b._notCookable) return a._notCookable ? 1 : -1
   const ta = Number(a._tier) || 0, tb = Number(b._tier) || 0
   if (ta !== tb) return ta - tb
+  // Flavour sits ABOVE freshness on purpose. On a finite pantry the fresh candidates are the
+  // model's oddest recombinations, and a seasoned repeat beats a fresh dish built on water and
+  // salt: run 678's Chicken and Rice Soup (no axis at all) took the dinner slot from a pesto rice
+  // bowl (umami + aromatic) on a 0.026 difference in calorie fit, because nothing here could see
+  // the difference that a person eating it would.
+  const fa = axesRank(a), fb = axesRank(b)
+  if (fa !== fb) return fb - fa
   if (!!a._repeat !== !!b._repeat) return a._repeat ? 1 : -1
   return (Number(a._fitScore) || 0) - (Number(b._fitScore) || 0)
 }

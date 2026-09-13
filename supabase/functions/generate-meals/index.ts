@@ -11,7 +11,7 @@ import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDis
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
 import { scaleToTarget, topUpProtein, clampPortions } from '../_shared/scale-recipe.ts'
 import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
-import { flavourAxes } from '../_shared/flavour-axes.ts'
+import { flavourAxes, flavourShelf, isSweetDish } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
 import { nameFormGaps, nameIngredientGaps, nameTechniqueGaps, dryStapleOverload, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
@@ -526,6 +526,16 @@ Deno.serve(async (req: Request) => {
     // The list itself (and the diet-aware exclusions) live in _shared/staples.ts so the sweep
     // harness scores cookability against the same staples this run was given, not a second copy.
     const ASSUMED = assumedStaplesFor(dietaryRestrictions as string[], excludedStaples)
+    // The pantry's seasoning shelf, in the axis vocabulary the ranker measures. The prompt has
+    // asked for "at least TWO of the four flavor axes" since run 48 and been ignored; the proteins
+    // and carbs lines exist because the model invents unless told what it has, and flavour was the
+    // one shelf it was never shown. Run 678 built a soup on water and salt with soy sauce, lime,
+    // salsa and butter all on the shelf. Assumed staples ride along: black pepper is a heat axis.
+    const shelf = flavourShelf([...(ingredients as string[]), ...ASSUMED])
+    const shelfLine = (label: string, items: string[]) => items.length ? `${label}: ${items.slice(0, 8).join(', ')}` : ''
+    const shelfParts = [shelfLine('acid', shelf.acid), shelfLine('heat', shelf.heat), shelfLine('umami', shelf.umami), shelfLine('aromatics', shelf.aromatic), shelfLine('fat to cook them in', shelf.fat)].filter(Boolean)
+    const flavourSourcesLine = !(mode === 'cookNow') || shelfParts.length === 0 ? '' :
+      `\n- FLAVOUR THIS PANTRY HAS (blocking for savory dishes) — ${shelfParts.join(' · ')}. Every savory dish reaches at least TWO different axes from THIS list: an acid, a heat, an umami, or an aromatic cooked in fat. These are the exact words the ranker counts, and a savory dish that reaches none sorts to the bottom of the deck however good its macros. Water is not stock: a soup or braise is built on fat, aromatics and something umami or acid — never on salt alone.`
     const excludedClause = excludedStaples.length
       ? ` EXCEPTION — the user has told us they do NOT keep: ${excludedStaples.join(', ')}; treat those as missing if a recipe needs them.`
       : ''
@@ -574,7 +584,7 @@ ${ingredientRule}${proteinVarietyRule}${formVarietyRule}${servingsRule}
 - DO THE PROTEIN ARITHMETIC BEFORE YOU RETURN (blocking). Add up the protein from the QUANTITIES you actually wrote, using roughly: chicken/turkey breast 31g per 100g, lean beef or pork 26g, salmon 20g, shrimp 24g, canned tuna 25g, whole eggs 13g (about 6g per egg), liquid egg whites 11g, Greek yogurt 10g, cottage cheese 11g, hard cheese 25g, firm tofu 17g, tempeh 19g, cooked lentils or beans 9g, milk 3g, cooked rice or pasta 3g, bread 9g, protein powder 75g. If your total falls short of the band above, RAISE THE PORTION of the protein ingredient or add a SECOND protein source from the pantry before returning it — never hand back a recipe you already know is short. PLANT AND DAIRY PROTEINS ARE LESS DENSE and this is where it goes wrong: a 50g-protein vegetarian dish is roughly 250g of tofu, or 200g of Greek yogurt plus two eggs — a 100g portion of tofu is 17g and will not get there however the dish is described.
 - PROTEIN DISTRIBUTION (blocking constraint): every recipe MUST have ${batchProteinMin}g–${batchProteinMax}g protein in TOTAL (target ~${batchProteinTarget}g). Distribute protein EVENLY across the ${genCount} recipes — never pile into one and starve another. A single SERVING above ${proteinMax}g causes poor absorption + GI discomfort.
 - MACROS MUST MATCH THE FOOD (verified): the calories/protein/carbs/fat you report are recomputed from your own ingredient list and their gram weights, and a meal whose numbers the ingredients cannot support is DISCARDED. Hitting the protein band by writing a bigger number does not work — change the INGREDIENTS (more of the protein source, or a different one) until the food genuinely reaches the target. If the pantry cannot reach ${proteinMin}g honestly, return a meal that misses the band rather than one that misreports.
-- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${proteinSourcesLine}${bannedBasesLine}${bannedFormsLine}
+- CALORIE DISTRIBUTION (blocking constraint): every recipe MUST have ${batchCalorieMin}–${batchCalorieMax} kcal in TOTAL (target ~${batchCalorieTarget} kcal). Daily total ${calorieGoal} ÷ ${mealsPerDay} eating occasions = ${calorieTarget} kcal per portion${servings > 1 ? `, and each recipe makes ${servings} portions` : ''}. Distribute calories EVENLY — recipes far outside this band wreck the user's daily macro plan.${fatLine}${proteinSourcesLine}${flavourSourcesLine}${bannedBasesLine}${bannedFormsLine}
 - Every meal MUST include a strong protein source (chicken, beef, turkey, fish, eggs, tofu, greek yogurt, protein powder, or shrimp). Beans/lentils alone are NOT enough protein — they must be paired with a primary protein source.
 - PROTEIN POWDER belongs ONLY in shakes, smoothies, oats/porridge, yogurt bowls, pancakes, baking and desserts — NEVER in a savory dish (a soup, stir-fry, skillet, pasta or curry, or anything with meat, fish, garlic, onion or broth). It does not thicken; in hot milk it clumps and tastes of sweet dairy. To raise protein in a savory meal use MORE OF THE REAL PROTEIN (140g chicken, not 70g plus a scoop). The same goes for sweet-flavoured products — vanilla or chocolate yogurt, flavoured milk or creamer. Savory dishes containing them are checked in code and ranked below every other meal.
 - Every meal MUST include a carbohydrate source (rice, pasta, bread, potatoes, oats, quinoa, tortillas, noodles, beans, lentils, or similar) UNLESS the user has a keto or low-carb dietary restriction. A meal with only protein + vegetables is NOT a complete meal.${carbSourcesLine}
@@ -733,6 +743,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       pantryItems: ingredients.length, pantryHiddenByDiet, windowNames: recentServed.length, pantryCarbsOffered: ownCarbs,
       savoryCarbsHeld: carbBasesHeld, // why a carb ban was or was not allowed
       pantryProteinsOffered: ownProteins,
+      pantryFlavourOffered: shelf,
     }
 
     // STRIP PHANTOM FOOD, before anything sums the ingredient list. An ingredient no step ever
@@ -1286,8 +1297,11 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       // prove a better option existed and say nothing about WHY it lost. fitScore weighs calories
       // and fat alongside protein, and `repeat` outranks the score entirely, so the choice is only
       // auditable with all four in the row.
+      // Flavour ranks inside a tier (rank-deck.ts). Sweet dishes are exempt: a shake owes no umami.
+      for (const m of scored) m._axes = isSweetDish(m?.name) ? null : flavourAxes(m).length
       funnel.rankCandidates = scored.map((m: any) => ({
         name: String(m?.name ?? ''),
+        axes: m?._axes ?? null,
         p: Number(m?.protein) || 0,
         c: Number(m?.calories) || 0,
         f: Number(m?.fat) || 0,
@@ -1307,7 +1321,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       const { deck, promoted, duplicates } = selectDeck(scored, displayCount)
       funnel.slotPromoted = promoted
       funnel.duplicateBackfill = duplicates
-      meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, _proteinOk, ...rest } = m; return rest })
+      meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, _proteinOk, _axes, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = carbPossible ? meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length : 0
       funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < PROTEIN_FLOOR * proteinTarget).length
@@ -1317,6 +1331,8 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       // _shared/flavour-axes.ts; rank on it only once these show how often candidates fall short.
       funnel.flavourAxes = scored.map((m: any) => ({ name: String(m?.name ?? ''), axes: flavourAxes(m) }))
       funnel.flavourAxesShown = meals.map((m: any) => flavourAxes(m).length)
+      // Savory meals shown with no flavour axis at all — the daily report goes red on any.
+      funnel.savoryZeroAxesShown = deck.filter((m: any) => m._axes === 0).length
       // Followability, also measured not gated — see _shared/step-checks.ts for tonight's baselines.
       funnel.stepIssuesShown = meals.map((m: any) => { const i = stepIssues(m); return { name: String(m?.name ?? ''), ...i } })
       const shownRepeats = meals.filter((m: any) => m._repeat).length

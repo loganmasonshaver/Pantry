@@ -154,3 +154,30 @@ test('coverage does not promote a dish below the protein floor', () => {
   const ok = [...pool.slice(0, 3), { name: 'Greek Yogurt and Egg Scramble', slot: 'breakfast', _tier: 0, _proteinOk: true, _fitScore: 0.9 }]
   assert.deepEqual(selectDeck(ok, 3).promoted, ['Greek Yogurt and Egg Scramble'])
 })
+
+// Run 678 (2026-09-13): the seven candidates as scored, with the flavour axes each carried. The soup
+// took the dinner slot from the pesto bowl on a 0.026 calorie-fit difference, carrying no axis.
+test('run 678: inside a tier, a seasoned repeat beats an unseasoned one before calorie fit decides', () => {
+  const cands = [
+    { name: 'Pan-Seared Chicken with Sautéed Cauliflower and Garlic', slot: 'dinner', _tier: 1, _repeat: true, _fitScore: 0.695, _axes: 2 },
+    { name: 'Ground Beef and Potato Hash', slot: 'lunch', _tier: 0, _repeat: true, _fitScore: 0.706, _axes: 2 },
+    { name: 'Cottage Cheese and Granola Breakfast Bowl', slot: 'breakfast', _tier: 0, _repeat: true, _fitScore: 0.049, _axes: null },
+    { name: 'Greek Yogurt and Protein Cereal Bowl', slot: 'breakfast', _tier: 0, _repeat: true, _fitScore: 0, _axes: null },
+    { name: 'Chicken and Pesto Rice Bowl', slot: 'lunch', _tier: 0, _repeat: true, _fitScore: 0.028, _axes: 2 },
+    { name: 'Chicken and Rice Soup', slot: 'dinner', _tier: 0, _repeat: true, _fitScore: 0.002, _axes: 0 },
+    { name: 'Bulgarian Yogurt and Protein Shake', slot: 'any', _tier: 0, _repeat: false, _fitScore: 0, _axes: null },
+  ]
+  const { deck } = selectDeck(cands, 3)
+  const names = deck.map(m => m.name)
+  assert.ok(names.includes('Chicken and Pesto Rice Bowl'), names.join(' | '))
+  assert.ok(!names.includes('Chicken and Rice Soup'), names.join(' | '))
+  assert.equal(names[0], 'Bulgarian Yogurt and Protein Shake', 'a sweet fresh dish is not penalised for owing no umami')
+  // Tier still outranks flavour: the seasoned but incomplete pan-seared chicken stays out.
+  assert.ok(!names.includes('Pan-Seared Chicken with Sautéed Cauliflower and Garlic'))
+})
+
+test('two axes and four axes rank the same — the prompt asks for two', () => {
+  const a = { name: 'A', _tier: 0, _repeat: false, _fitScore: 0.3, _axes: 2 }
+  const b = { name: 'B', _tier: 0, _repeat: false, _fitScore: 0.1, _axes: 4 }
+  assert.equal(compareCandidates(a, b) > 0, true, 'fit decides between them, and B fits better')
+})

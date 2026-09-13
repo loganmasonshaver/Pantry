@@ -273,13 +273,18 @@ const BASE_FOODS: string[] = [
 
 // Bases a meal can actually be BUILT ON to reach a protein target, as opposed to bases that merely
 // contain protein. Cheese, cream cheese and peanut butter are deliberately absent: they carry
-// protein but are fat-dominant, and nobody anchors a 40g meal on them — banning one of those costs
-// the deck nothing, which is exactly why they belong on the cheap side of this line.
+// protein but are fat-dominant, and nobody anchors a 40g meal on them.
 const PROTEIN_BASES = new Set([
   "cottage cheese", "greek yogurt", "egg white", "protein powder", "ground beef", "chicken salad",
   "chicken", "beef", "turkey", "pork", "salmon", "tuna", "shrimp", "tofu", "paneer",
   "yogurt", "egg", "lentil", "chickpea", "bean",
 ])
+
+// The only bases a ban may ever take. Cheese, cream cheese and peanut butter are detected as bases
+// (so a dish built on them still counts as a repeat of that dish) but are never BANNED: they are
+// the pantry's flavour carriers, and a ban that "costs the deck nothing" for protein cost it its
+// umami — run 678 banned cheese as overused and shipped three meals with no flavour axis.
+const CARB_BASES = new Set(["oats", "rice", "potato", "pasta", "quinoa", "granola"])
 
 /** Base foods a dish is built on, read from its name and (when present) its ingredient list. */
 export function detectBases(name: unknown, ingredients?: unknown): Set<string> {
@@ -369,6 +374,7 @@ export function overusedBases(
   for (const base of ranked) {
     if (out.length >= topK) break
     const isProtein = PROTEIN_BASES.has(base)
+    if (!isProtein && !CARB_BASES.has(base)) continue   // a flavour carrier, never banned
     if (isProtein && proteinBans >= maxProteinBans) continue
     const isCarb = !isProtein && carbBases.includes(base)
     if (isCarb && carbBases.length - carbBans - 1 < minCarbsLeft) continue

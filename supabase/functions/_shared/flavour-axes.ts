@@ -43,3 +43,50 @@ export function flavourAxes(meal: { ingredients?: unknown; steps?: unknown } | n
   if (has(AROMATIC_FAT) || AROMATIC_TECHNIQUE.test(steps) || aromaticInFat) out.push('aromatic')
   return out
 }
+
+// A dish that is sweet by nature owes no acid, heat or umami. Ranking it on savory axes would sink
+// every shake and parfait below every dinner for reasons the prompt never asked of them. The same
+// list step-checks uses to excuse a dessert from salt — one list, so the two cannot disagree.
+export const SWEET_DISH = /\b(parfait|smoothie|shake|oats|oatmeal|porridge|pudding|dessert|cereal|granola|yogurt bowl|cottage cheese bowl|fruit bowl|pancakes?|waffles?|crepes?|muffins?|cookies?|bites?|clusters?|brownies?|french toast|ice cream|bars?)\b/i
+// A bowl or plate named for a fruit or a nut with no meat, fish or egg in the title is a sweet dish
+// too — "Bulgarian Yogurt and Pineapple Protein Bowl" is not on the list above, and it was ranked
+// as a savory dish with no seasoning. "Pineapple Chicken Rice Bowl" keeps its savory obligations.
+const SWEET_MARKER = /\b(pineapple|berr(?:y|ies)|banana|mango|apple|peach|strawberr(?:y|ies)|blueberr(?:y|ies)|raspberr(?:y|ies)|orange|fruit|pecans?|almonds?|walnuts?|honey|maple|chocolate|cocoa|vanilla)\b/i
+const SAVORY_MARKER = /\b(chicken|beef|pork|turkey|salmon|tuna|shrimp|fish|eggs?|omelet(?:te)?|scramble|frittata|tofu|bacon|sausage|ham|steak|lentils?|chickpeas?|beans?)\b/i
+export function isSweetDish(name: unknown): boolean {
+  const n = String(name ?? '')
+  return SWEET_DISH.test(n) || (SWEET_MARKER.test(n) && !SAVORY_MARKER.test(n))
+}
+
+// The axes a single PANTRY ITEM can supply, so the prompt can tell the model what it has to season
+// with — in the same vocabulary the ranker measures, so the shelf it is shown and the count it is
+// judged by agree. "fat" is not an axis: it is the other half of the aromatic one ("garlic in oil",
+// "browned butter"), listed so the model pairs an aromatic with something to cook it in.
+export type ShelfSlot = Axis | 'fat'
+// Nut and seed butters are spreads, not cooking fats. FAT matches "butter" inside them.
+const SPREAD_BUTTER = /\b(peanut|almond|cashew|nut|seed|sunflower|cookie|granola|apple|cocoa)\s+butter\b/i
+export function itemAxes(name: unknown): ShelfSlot[] {
+  const n = String(name ?? '').toLowerCase().trim()
+  if (!n) return []
+  const out: ShelfSlot[] = []
+  if (ACID.test(n)) out.push('acid')
+  if (HEAT.test(n) || BARE_PEPPER.test(n)) out.push('heat')
+  if (UMAMI.test(n)) out.push('umami')
+  if (AROMATIC_FAT.test(n) || (AROMATIC.test(n) && !POWDER.test(n))) out.push('aromatic')
+  if (FAT.test(n) && !AROMATIC_FAT.test(n) && !SPREAD_BUTTER.test(n)) out.push('fat')
+  return out
+}
+
+/** The pantry's own seasoning shelf, grouped by what each item can do. Names kept as the user wrote them. */
+export function flavourShelf(items: readonly unknown[]): Record<ShelfSlot, string[]> {
+  const shelf: Record<ShelfSlot, string[]> = { acid: [], heat: [], umami: [], aromatic: [], fat: [] }
+  const seen = new Set<string>()
+  for (const raw of items) {
+    const name = String((raw as any)?.name ?? raw ?? '').trim()
+    const key = name.toLowerCase()
+    if (!name || seen.has(key)) continue
+    seen.add(key)
+    for (const slot of itemAxes(name)) shelf[slot].push(name)
+  }
+  return shelf
+}

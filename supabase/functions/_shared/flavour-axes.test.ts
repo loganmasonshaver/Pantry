@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { flavourAxes } from './flavour-axes.ts'
+import { flavourAxes, flavourShelf, itemAxes, isSweetDish } from './flavour-axes.ts'
 
 const meal = (...names: string[]) => ({ ingredients: names.map(name => ({ name })) })
 
@@ -40,4 +40,30 @@ test('seasoning blends and cooked tomato count — creators list them instead of
 test('bad input is zero axes, not a crash', () => {
   assert.deepEqual(flavourAxes(undefined), [])
   assert.deepEqual(flavourAxes({ ingredients: 'eggs' }), [])
+})
+
+// Logan's shelf on 2026-09-13, the day a soup was built on water and salt with all of this in reach.
+test('the pantry shelf groups items by the axis they can supply, in the ranker\'s vocabulary', () => {
+  const shelf = flavourShelf(['Soy Sauce', 'Lime', 'Salsa', 'Butter', 'Peanut Butter', 'Shredded Cheese', 'Garlic Powder', 'Red Pepper Flakes', 'Black pepper', 'Yellow Onions', 'Olive oil', 'Pad Thai Sauce', 'Sweet Relish', 'soy sauce'])
+  assert.deepEqual(shelf.umami, ['Soy Sauce', 'Pad Thai Sauce'])
+  assert.deepEqual(shelf.acid, ['Lime', 'Salsa', 'Sweet Relish'])
+  assert.deepEqual(shelf.heat, ['Red Pepper Flakes', 'Black pepper'])
+  assert.deepEqual(shelf.aromatic, ['Yellow Onions'])
+  assert.deepEqual(shelf.fat, ['Butter', 'Olive oil'], 'peanut butter is a spread, not a cooking fat')
+  assert.deepEqual(itemAxes('Shredded Cheese'), [], 'cheddar is not on the umami list the ranker uses')
+  assert.deepEqual(itemAxes('Garlic Powder'), [], 'a powder is not an aromatic cooked in fat')
+  assert.deepEqual(itemAxes('Pesto'), ['umami', 'aromatic'])
+})
+
+test('sweet dishes are exempt from the savory axes', () => {
+  assert.equal(isSweetDish('Bulgarian Yogurt and Protein Shake'), true)
+  assert.equal(isSweetDish('Greek Yogurt and Protein Cereal Bowl'), true)
+  assert.equal(isSweetDish('Chicken and Rice Soup'), false)
+  assert.equal(isSweetDish('Egg White and Vegetable Scramble'), false)
+  // Named for a fruit or nut, no meat or egg in the title: sweet, whatever the list above says.
+  assert.equal(isSweetDish('Bulgarian Yogurt and Pineapple Protein Bowl'), true)
+  assert.equal(isSweetDish('Bulgarian Yogurt and Pecan Power Plate'), true)
+  assert.equal(isSweetDish('Greek Yogurt and Orange Protein Bowl'), true)
+  assert.equal(isSweetDish('Pineapple Chicken Rice Bowl'), false)
+  assert.equal(isSweetDish('Savory Greek Yogurt and Egg Omelet'), false)
 })

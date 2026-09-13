@@ -1,3 +1,4 @@
+import { SWEET_DISH } from './flavour-axes.ts'
 // Can the recipe actually be FOLLOWED in a kitchen? Four things Cook Tonight run 51 got wrong that
 // nothing in the pipeline looks at:
 //
@@ -22,7 +23,7 @@ export type StepIssues = {
 // Anything salty counts: a soy-sauce stir-fry is seasoned, and the first live report would have gone
 // red on one. A sweet dish (parfait, smoothie, cereal bowl) is not expected to carry salt at all.
 const SEASONING = /\b(salt|salted|pepper|peppercorns?|soy sauce|tamari|fish sauce|oyster sauce|miso|salsa|hot sauce|sriracha|seasoning|bouillon|stock|broth|pesto|parmesan|feta|pickles?|kimchi|worcestershire|gochujang|teriyaki)\b/i
-const SWEET_NAME = /\b(parfait|smoothie|shake|oats|oatmeal|porridge|pudding|dessert|cereal|granola|yogurt bowl|cottage cheese bowl|fruit bowl|pancakes?|waffles?|crepes?|muffins?|cookies?|bites?|clusters?|brownies?|french toast)\b/i
+// The sweet-dish list lives in flavour-axes.ts, shared with the ranker's flavour exemption.
 // "preheated oven" must NOT satisfy this — that phrase is the bug, not the instruction. Requiring the
 // word "oven" right after the verb separates "Preheat the oven to 375°F" from "a preheated oven".
 const PREHEAT_STEP = /\bpre-?heats?\s+(?:your\s+|the\s+)?(?:oven|air fryer|broiler)\b/i
@@ -74,7 +75,7 @@ export function stepIssues(meal: { name?: unknown; ingredients?: unknown; steps?
   const steps = textOf(meal?.steps)
   const all = `${ingredients} \n ${steps}`
   return {
-    unseasoned: !SWEET_NAME.test(String(meal?.name ?? '')) && !SEASONING.test(all),
+    unseasoned: !SWEET_DISH.test(String(meal?.name ?? '')) && !SEASONING.test(all),
     noPreheat: USES_OVEN.test(steps) && !PREHEAT_STEP.test(steps),
     untimedCook: stepDetails(meal?.steps).filter(d => COOK_VERB.test(d) && !DURATION.test(d)).length,
     coldCarb: PRECOOKED_COLD.test(ingredients) && !REHEATS.test(steps),
