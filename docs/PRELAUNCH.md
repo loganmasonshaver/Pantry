@@ -18,7 +18,18 @@ said "unhealthy" three mornings running and the daily report carried it; nobody 
   rejections were `nearDup` 8 (the pool saturating against 219 stored?) + `dropped` 5 + `nameGap` 2;
   on Sep 13 all 3 raw were `dropped`. Read `llm_Google.droppedDetail` for WHY, and the run's console
   in the dashboard for Gemini errors/truncation.
-- [ ] **Suspects, in order:** (1) the 2026-09-10 extraction changes — time split, ordered `time_phases`,
+- [ ] **STRONGEST LEAD (read from `droppedDetail`, 2026-09-13):** every `dropped` recipe on Sep 12 and 13
+  is a MULTI-SECTION recipe where the creator lists the same food in two parts — "1/2 cup sugar" in
+  the cake and "2 tbsp sugar" in the topping, "5g salt" then "4g salt", Greek yogurt and mayo once in
+  the bowl and again in the dressing. The parser counts every line (`src` 15, 13, 10, 21, 22); the
+  model merges the repeats (`got` 14, 12, 9, 17, 15); the 100%-retention gate reads got < src and
+  rejects the recipe. Apple Pie Cottage Cheese Cake, Honey Chipotle Chicken Quesadillas, Cheesy Beefy
+  Burrito Pasta, Hot Honey Halloumi Bowls, Street Corn Chicken Bowls — all real recipes, all lost to
+  the same shape. `retentionList` collapses only EXACT duplicate lines, not the same food at two
+  quantities. Fix direction that keeps the retention requirement intact: count DISTINCT FOODS on both
+  sides (fold "sugar" lines into one before comparing), or let the extractor keep per-section lines.
+  Verify on those five names with a dry run before trusting the count.
+- [ ] **Other suspects, in order:** (1) the 2026-09-10 extraction changes — time split, ordered `time_phases`,
   the translation net, emoji strip — landed the same day yield started falling; a stricter extractor
   output that fails validation reads as `dropped`. Diff what the prompt asked for on Sep 9 vs Sep 10.
   (2) `nearDup` against a 219-recipe pool — if dedup is now rejecting most of what YouTube returns,
