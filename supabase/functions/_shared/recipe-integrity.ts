@@ -782,8 +782,14 @@ export function unusedIngredients(
 ): any[] {
   const blob = stepBlob(steps).toLowerCase()
   if (!blob.trim()) return []
+  // "Combine all ingredients in a blender" names nothing and means everything. A smoothie reached
+  // Logan's phone as a single 45g scoop of protein powder claiming 78g of protein, because every
+  // other line was stripped here as phantom and the macro correction then refused a 159 kcal list.
+  // A collective reference vouches for the whole list.
+  if (/\b(?:all|every|remaining|rest of)\s+(?:the\s+|of\s+the\s+)?ingredients\b|\beverything\b/.test(blob)) return []
   const stepTokens = tokens(blob)
-  return realIngredients(ingredients).filter(i => {
+  const real = realIngredients(ingredients)
+  const unused = real.filter(i => {
     const name = String((typeof i === 'string' ? i : (i as any)?.name) ?? '')
     if (!name.trim() || IMPLIED_BY_TECHNIQUE.test(name)) return false
     const grams = parseFloat(String((i as any)?.grams ?? '').replace(/[^0-9.]/g, ''))
@@ -791,4 +797,7 @@ export function unusedIngredients(
     const words = [...tokens(name)]
     return !words.some(w => stepTokens.has(w))
   })
+  // Steps that name less than half the food are a WORDING problem. Removing the food does not fix
+  // the wording — it invents a different, smaller dish and prices it wrong.
+  return unused.length * 2 >= real.length ? [] : unused
 }

@@ -230,3 +230,81 @@ export function scaleToTarget(
       `dense ×${denseFactor.toFixed(2)} (${nDense}), lean ×${leanFactor.toFixed(2)} (${nLean}), protein ×${factors.protein.toFixed(2)}`,
   }
 }
+
+// ── PROTEIN FIRST ──────────────────────────────────────────────────────────────────────────────
+// Nothing sized the protein to the target. The calorie side was corrected by FatSecret and then
+// resized by scaleToTarget; protein just rode along on whatever the model wrote. Logan's row 503:
+// two 32g dishes against a 40g target, both built on 140g of ground beef, because the model's own
+// table said 140g ≈ 40g and FatSecret said 32g. Asked "why not just more beef?", the honest answer
+// was that nothing in the pipeline could. Now something can: the lean protein anchor is grown toward
+// the target, capped at a culinary-normal portion and the calorie ceiling, BEFORE scaleToTarget
+// takes rice or oil back down to fit. Deterministic, and it works from the corrected numbers.
+
+type Nutrient = 'protein' | 'kcal' | 'carbs' | 'fat'
+export type TopUpResult = {
+  ingredients: ScalableIngredient[]
+  added: Record<Nutrient, number>
+  reason: string
+}
+
+// One serving's ceiling for the anchor, whatever the target asks for. The prompt's absurd-quantity
+// rule in numbers: 250g of chicken is a big plate, 400g is diet food wearing a recipe's clothes.
+// Protein powder is capped at a scoop and a half so a savory dish can never be "fixed" with it.
+const MEAT_FISH = /\b(chicken|turkey|beef|steak|mince|pork|lamb|veal|duck|salmon|tuna|cod|tilapia|halibut|shrimps?|prawns?|fish|scallops?)\b/i
+const POWDER = /\b(protein powder|whey|casein|protein isolate)\b/i
+export function anchorCap(name: unknown): number {
+  const n = String(name ?? '')
+  return POWDER.test(n) ? 60 : MEAT_FISH.test(n) ? 250 : 350
+}
+// Below this an ingredient is not a protein source worth growing — vegetables clear LEAN_SHARE on
+// share alone (they have almost no calories), and 300g of cauliflower is not the answer to anything.
+// Nine keeps beans and lentils (9g/100g) as anchors for a vegetarian and drops soy sauce (8).
+const ANCHOR_MIN_DENSITY = 9 // g protein per 100g
+// Condiments are protein-dense per CALORIE and useless as food: replaying Logan's stir-fry, the first
+// draft grew soy sauce from 15ml to 115ml because it "bought the most protein per kcal". Never.
+const NOT_AN_ANCHOR = /\b(sauce|paste|seasoning|broth|stock|bouillon|vinegar|dressing|salsa|spice|extract|miso|mustard|ketchup|mayo(?:nnaise)?|relish|gravy|glaze|marinade)\b/i
+
+export function topUpProtein(
+  ingredients: ScalableIngredient[] | undefined,
+  currentProtein: number,
+  proteinTarget: number,
+  currentKcal: number,
+  calorieCeiling: number,
+  { servings = 1, tolerance = 0.05 } = {},
+): TopUpResult {
+  const ings = Array.isArray(ingredients) ? ingredients : []
+  const zero = { protein: 0, kcal: 0, carbs: 0, fat: 0 }
+  const noop = (reason: string): TopUpResult => ({ ingredients: ings, added: zero, reason })
+  if (ings.length === 0 || !(proteinTarget > 0)) return noop('nothing to size')
+  const short = proteinTarget - (Number(currentProtein) || 0)
+  if (short <= tolerance * proteinTarget) return noop(`already within ${Math.round(tolerance * 100)}% of the protein target`)
+
+  const grams = (ing: ScalableIngredient) => parseFloat(String(ing?.grams ?? '').replace(/[^0-9.]/g, ''))
+  const cands = ings.map((ing, i) => ({ i, ing, g: grams(ing), e: estimateMacros([ing] as never) }))
+    .filter(c => isScalable(c.ing) && Number.isFinite(c.g) && c.g > 0 && c.e.kcal > 0
+      && !NOT_AN_ANCHOR.test(String(c.ing.name ?? ''))
+      && (c.e.protein * 4) / c.e.kcal >= LEAN_SHARE && (c.e.protein / c.g) * 100 >= ANCHOR_MIN_DENSITY)
+    // The anchor that buys the most protein per calorie grows first.
+    .sort((a, b) => b.e.protein / b.e.kcal - a.e.protein / a.e.kcal)
+  const a = cands[0]
+  if (!a) return noop('no measured protein anchor to grow')
+
+  const pPerG = a.e.protein / a.g, kPerG = a.e.kcal / a.g
+  let add = short / pPerG
+  add = Math.min(add, Math.max(0, anchorCap(a.ing.name) * servings - a.g))
+  if (calorieCeiling > 0 && kPerG > 0) add = Math.min(add, Math.max(0, (calorieCeiling - (Number(currentKcal) || 0)) / kPerG))
+  if (add < 10) return noop(`${String(a.ing.name)} is already at its cap or the calorie ceiling`)
+
+  const newG = Math.round(a.g + add)
+  const factor = newG / a.g
+  const unit = String(a.ing.grams ?? '').replace(/[0-9.\s]/g, '') || 'g'
+  const ingredientsOut = ings.map((ing, i) => i !== a.i ? ing : {
+    ...ing, grams: `${newG}${unit}`, visual: scaleVisualText(String(ing.visual ?? '') || undefined, factor),
+  })
+  const per = (n: number) => (n / a.g) * (newG - a.g)
+  return {
+    ingredients: ingredientsOut,
+    added: { protein: per(a.e.protein), kcal: per(a.e.kcal), carbs: per(a.e.carbs), fat: per(a.e.fat) },
+    reason: `${String(a.ing.name)} ${Math.round(a.g)}g → ${newG}g (+${Math.round(per(a.e.protein))}g protein, +${Math.round(per(a.e.kcal))} kcal)`,
+  }
+}

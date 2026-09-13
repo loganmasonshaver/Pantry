@@ -665,3 +665,19 @@ test('a dry grain or legume by the pot is flagged; cooked and canned are not', (
   // Batch scale: 400g of dry rice across 4 servings is 100g each.
   assert.deepEqual(dryStapleOverload({ servings: 4, ingredients: [{ name: 'basmati rice', grams: '400g', visual: '2 cups' }] }), [])
 })
+
+
+// The smoothie that reached Logan's phone as one scoop of powder (pipeline_runs 548, 2026-09-13).
+test('"combine all ingredients" vouches for every ingredient, and half a recipe is never phantom', () => {
+  const smoothie = [
+    { name: 'bulgarian yogurt', grams: '200g' }, { name: 'protein powder', grams: '45g' },
+    { name: 'pineapple', grams: '100g' }, { name: 'oat milk', grams: '120ml' },
+  ]
+  assert.deepEqual(unusedIngredients([{ title: 'Blend', detail: 'Combine all ingredients in a blender.' }], smoothie), [])
+  assert.deepEqual(unusedIngredients([{ title: 'Blend', detail: 'Add everything to the blender and blend 60 seconds.' }], smoothie), [])
+  // Steps that name almost nothing are a wording problem, not phantom food.
+  assert.deepEqual(unusedIngredients([{ title: 'Blend', detail: 'Blend the yogurt until smooth.' }], smoothie), [])
+  // The case the prune exists for still works: one unused line in an otherwise-named recipe.
+  const bolognese = [{ name: 'ground beef', grams: '140g' }, { name: 'tomato sauce', grams: '120g' }, { name: 'all-purpose flour', grams: '42g' }, { name: 'onion', grams: '40g' }]
+  assert.deepEqual(unusedIngredients([{ title: 'Cook', detail: 'Brown the beef with the onion, add the tomato sauce and simmer.' }], bolognese).map((i: any) => i.name), ['all-purpose flour'])
+})

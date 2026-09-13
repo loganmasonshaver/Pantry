@@ -1138,9 +1138,10 @@ export default function HomeScreen() {
   const [mealSlots, setMealSlots] = useState<string[]>(DEFAULT_SLOT_LABELS)
   const mealSlotsRef = useRef<string[]>(DEFAULT_SLOT_LABELS)
 
-  // The per-meal protein target, and whether the whole deck missed it. 75% is the same floor the
-  // ranker uses (_shared/rank-deck.ts), so the line appears exactly when the server had nothing
-  // better to offer — never when one weak option sits beside two good ones.
+  // The per-meal protein target, and whether the whole deck missed it. 75% is deliberately LOWER
+  // than the ranker's floor (85%, _shared/rank-deck.ts PROTEIN_FLOOR): this line claims the shelf
+  // itself is the ceiling, and must not trip on a merely weak deck — only when every option is far
+  // short, which is when the server had nothing better to offer.
   // Only once the PROFILE has landed: proteinGoal falls back to 180 and the slots to a default list,
   // and telling someone their pantry is short against numbers that are not theirs is worse than
   // saying nothing. meal_slots is not in the goals cache, so the network read is the signal.

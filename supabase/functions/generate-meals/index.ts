@@ -9,8 +9,8 @@ import { sanitizeList } from '../_shared/sanitize.ts'
 import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-match.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, detectBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
-import { scaleToTarget } from '../_shared/scale-recipe.ts'
-import { selectDeck } from '../_shared/rank-deck.ts'
+import { scaleToTarget, topUpProtein } from '../_shared/scale-recipe.ts'
+import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
 import { flavourAxes } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
 import { findMissing } from '../_shared/pantry-check.ts'
@@ -786,8 +786,24 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // _shared/scale-recipe.ts; the rule is structural, not a rounding step afterwards. Shrinking
     // cuts rice, nuts, butter and cheese before the protein, which the old uniform cut did not.
     let scaledToTargetCount = 0
+    let toppedUpCount = 0
+    const topUps: string[] = []
     {
       meals = meals.map((m: any) => {
+        // PROTEIN FIRST. Grown toward the target from the corrected numbers, capped at a normal
+        // portion and the calorie drop line, BEFORE the calorie resize takes rice or oil back down.
+        // Row 503's answer to "why not just more beef?" — nothing could, until this.
+        const top = topUpProtein(m?.ingredients, Number(m?.protein), batchProteinTarget, Number(m?.calories), calorieDropThreshold, { servings })
+        if (top.added.protein > 0) {
+          toppedUpCount++
+          topUps.push(`${String(m?.name ?? '')}: ${top.reason}`)
+          console.log(`[protein] "${m?.name}" ${top.reason}`)
+          m = {
+            ...m, ingredients: top.ingredients,
+            protein: Math.round(Number(m.protein) + top.added.protein), calories: Math.round(Number(m.calories) + top.added.kcal),
+            carbs: Math.round(Number(m.carbs) + top.added.carbs), fat: Math.round(Number(m.fat) + top.added.fat),
+          }
+        }
         const res = scaleToTarget(m?.ingredients, Number(m?.calories), batchCalorieTarget)
         if (res.macroFactor === 1) return m
         scaledToTargetCount++
@@ -804,6 +820,8 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       })
       if (scaledToTargetCount > 0) console.log(`Scaled ${scaledToTargetCount}/${meals.length} meals toward ${batchCalorieTarget} kcal`)
       funnel.scaledToTarget = scaledToTargetCount
+      funnel.proteinToppedUp = toppedUpCount
+      funnel.proteinTopUps = topUps
     }
 
     const beforeBands = meals.length
@@ -1230,7 +1248,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           // PROTEIN FLOOR, soft: under 75% of target ranks below meals that meet it, alongside
           // completeness — Pan-Fried Eggs with Potatoes shipped at 24g against 40g, and the
           // completeness ordering alone would favour exactly that kind of dish.
-          const proteinOk = proteinTarget <= 0 || Number(m.protein) >= 0.75 * proteinTarget
+          const proteinOk = proteinTarget <= 0 || Number(m.protein) >= PROTEIN_FLOOR * proteinTarget
           // Protein powder or a sweet-flavoured product in a savory dish — see savoryClash.
           const clash = savoryClash(m)
           // PROTEIN IS ONE-SIDED AND WEIGHTED, like fat but in the other direction. Symmetric was
@@ -1278,7 +1296,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, _proteinOk, ...rest } = m; return rest })
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = carbPossible ? meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length : 0
-      funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < 0.75 * proteinTarget).length
+      funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < PROTEIN_FLOOR * proteinTarget).length
       funnel.savoryClash = scored.filter((m: any) => m._clash).map((m: any) => String(m?.name ?? ''))
       funnel.savoryClashShown = meals.filter((m: any) => savoryClash(m)).length
       // MEASURED, NOT RANKED: the prompt asks for 2 of 4 flavour axes and nothing checks it. See

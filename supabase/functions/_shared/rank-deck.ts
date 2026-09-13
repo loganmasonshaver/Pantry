@@ -14,6 +14,13 @@
 
 import { isSameDish } from './dish-key.ts'
 
+// The protein floor the ranker holds meals to. The prompt has always asked for 85% of target as a
+// blocking minimum; the code accepted 75%, so a 32g dish against a 40g target ranked as fully
+// acceptable and, being fresh, beat a 59g repeat (row 503). Now the two agree. The Home screen's
+// "pantry is light on protein" line deliberately still fires at 75% — it makes the stronger claim
+// that the shelf itself is the ceiling, and should not trip on a merely weak deck.
+export const PROTEIN_FLOOR = 0.85
+
 export type Candidate = {
   name?: unknown
   slot?: unknown

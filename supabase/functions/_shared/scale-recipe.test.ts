@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { scaleToTarget, scaleVisualText, isScalable, SCALE_MIN, SCALE_MAX, DENSE_MIN } from './scale-recipe.ts'
+import { scaleToTarget, scaleVisualText, isScalable, topUpProtein, anchorCap, SCALE_MIN, SCALE_MAX, DENSE_MIN } from './scale-recipe.ts'
 
 // The real over-shooting recipe this was written for: 806 kcal against a 525 target.
 const PESTO_BOWL = [
@@ -215,4 +215,66 @@ test('units ending in ch/sh take -es', () => {
   assert.equal(scaleVisualText('1 dash', 2), '2 dashes')
   assert.equal(scaleVisualText('1 splash', 2), '2 splashes')
   assert.equal(scaleVisualText('1 cup', 2), '2 cups')
+})
+
+
+// ── protein first ─────────────────────────────────────────────────────────────────────────────
+// Logan's row 503 (2026-09-12): 32g against a 40g target on 140g of ground beef. "Why not more beef?"
+const BOLOGNESE = [
+  { name: 'ground beef', visual: '1 cup', grams: '140g' },
+  { name: 'tomato sauce', visual: '½ cup', grams: '120g' },
+  { name: 'red potatoes', visual: '2 medium', grams: '200g' },
+  { name: 'yellow onion', visual: '¼ cup', grams: '40g' },
+  { name: 'olive oil', visual: '1 tsp', grams: '5ml' },
+]
+
+test('the protein anchor grows toward the target, and only the anchor', () => {
+  const out = topUpProtein(BOLOGNESE, 32, 40, 546, 735)
+  const beef = out.ingredients[0]
+  assert.ok(parseFloat(String(beef.grams)) > 160 && parseFloat(String(beef.grams)) <= 250, `beef grew: ${beef.grams}`)
+  assert.ok(out.added.protein >= 7, `+${out.added.protein.toFixed(1)}g protein`)
+  for (let i = 1; i < BOLOGNESE.length; i++) assert.deepEqual(out.ingredients[i], BOLOGNESE[i], 'nothing else moves')
+  assert.match(out.reason, /ground beef 140g → \d+g/)
+})
+
+test('a meal at target is left alone', () => {
+  assert.equal(topUpProtein(BOLOGNESE, 41, 40, 546, 735).added.protein, 0)
+})
+
+test('the portion cap and the calorie ceiling both bind', () => {
+  const big = [{ name: 'chicken breast', visual: '250g', grams: '250g' }, { name: 'cooked rice', visual: '1 cup', grams: '180g' }]
+  assert.equal(topUpProtein(big, 50, 80, 600, 900).added.protein, 0, 'chicken is already at 250g')
+  const tight = topUpProtein(BOLOGNESE, 32, 60, 546, 560)
+  assert.ok(tight.added.kcal <= 15, `ceiling held: +${tight.added.kcal.toFixed(0)} kcal`)
+})
+
+test('counted eggs are not an anchor, and protein powder is capped at a scoop and a half', () => {
+  const eggs = [{ name: 'eggs', visual: '2 large', grams: '100g' }, { name: 'cooked rice', visual: '1 cup', grams: '180g' }]
+  assert.equal(topUpProtein(eggs, 14, 40, 400, 700).added.protein, 0)
+  assert.equal(anchorCap('chocolate protein powder'), 60)
+  assert.equal(anchorCap('ground beef'), 250)
+  assert.equal(anchorCap('non-fat plain greek yogurt'), 350)
+  const shake = [{ name: 'protein powder', visual: '1 scoop', grams: '30g' }, { name: 'milk', visual: '1 cup', grams: '240ml' }]
+  const out = topUpProtein(shake, 30, 60, 300, 700)
+  assert.ok(parseFloat(String(out.ingredients[0].grams)) <= 60, `powder capped: ${out.ingredients[0].grams}`)
+})
+
+test('the anchor that buys the most protein per calorie grows first', () => {
+  const two = [{ name: 'chicken breast', visual: '100g', grams: '100g' }, { name: 'ground beef', visual: '100g', grams: '100g' }, { name: 'cooked rice', visual: '1 cup', grams: '180g' }]
+  const out = topUpProtein(two, 45, 60, 600, 900)
+  assert.ok(parseFloat(String(out.ingredients[0].grams)) > 100, 'chicken (leaner) grew')
+  assert.equal(String(out.ingredients[1].grams), '100g', 'beef did not')
+})
+
+
+// Replaying Logan's Thai Peanut Sauce Beef Stir-Fry (row 503) through the first draft grew the SOY
+// SAUCE from 15ml to 115ml: 8g protein per 100g at 53 kcal is the best ratio in the dish.
+test('a condiment is never the protein anchor', () => {
+  const stirFry = [
+    { name: 'ground beef', visual: '1 cup', grams: '130g' }, { name: 'cooked rice', visual: '½ cup', grams: '90g' },
+    { name: 'peanut butter', visual: '1 tbsp', grams: '16g' }, { name: 'soy sauce', visual: '1 tbsp', grams: '15ml' },
+  ]
+  const out = topUpProtein(stirFry, 32, 40, 531, 735)
+  assert.match(out.reason, /^ground beef/)
+  assert.equal(String(out.ingredients[3].grams), '15ml', 'soy sauce untouched')
 })
