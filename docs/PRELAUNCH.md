@@ -694,14 +694,43 @@ split time three ways at extraction. Deployed source was diffed byte-for-byte ag
 - [ ] **Cup-measured produce drawn whole** (Sukiyaki "1 cup shiitake", "2 cups cabbage"). The extractor
   should name the prepared form ("sliced shiitake").
 - [ ] **"fruit" never matches a specific fruit** — needs a category taxonomy.
-- [ ] **Image cache key is the meal name only — confirmed a THIRD time 2026-09-13, and Logan wants it
-  addressed first.** "Egg White and Vegetable Scramble" on his phone (greens, onion, butter, no paprika)
-  shows the photo generated 2026-09-02 for a different recipe of the same name (cauliflower, cheese,
-  potatoes, paprika) — paprika visible, no greens. DECISION NEEDED: key on name + a fingerprint of the
-  main ingredients (say the top 3 by grams), which means more misses and more image cost (globally
-  cached — do not change casually); or keep the name key and accept mismatches only when the name is
-  generic. Measure first: how many stored names have 2+ distinct ingredient sets in generated_meals.
-  Earlier: "Greek Yogurt and Granola Power Bowl" lists pineapple and shows a July photo with banana.
+- [ ] **Image cache key is the meal name only — confirmed a THIRD time 2026-09-13. MEASURED, PLAN WRITTEN,
+  DECISION PENDING (Logan).** "Egg White and Vegetable Scramble" on his phone (greens, onion, butter, no
+  paprika) shows the photo generated 2026-09-02 for a different recipe of the same name (cauliflower,
+  cheese, potatoes, paprika). Earlier: "Greek Yogurt and Granola Power Bowl" lists pineapple and shows a
+  July photo with banana.
+  **Numbers (generated_meals, 2026-09-02 → 09-13, 141 rows / 125 names):** 13 names recur, and ALL 13
+  recur with a different ingredient list; ~5 of the 13 differ in a way a photo shows (scramble:
+  potatoes+cauliflower+cheese vs greens; Thai bowl: chicken salad vs chicken+cauliflower; frittata: rice
+  vs cheese; power bowl: orange vs pineapple). 19 of 141 meals (13%) were served an image_cache row
+  created BEFORE the meal, 14 of them from before September. Zero generated names collide with
+  Discover, so today this is Cook Tonight vs Cook Tonight — and it gets WORSE with users, because every
+  pantry with egg whites produces the same generic names. Cost side: flux-2 at 512px is ~$0.003/image
+  (fal note in memory), so even a 0% hit rate is 3 images/day ≈ $0.28/user/month, under 3% of $9.99.
+  The cost model the name-only key protects is not the binding constraint anymore.
+  **RECOMMENDED (A) — key = normalised name + fingerprint of the first 3 non-staple ingredients.**
+  Server (`generate-meal-image`): every caller already sends `ingredients`; strip leading quantities
+  (the trending pipeline sends "1 slice American cheese"), prep words and colour adjectives, singularise,
+  drop `ASSUMED_STAPLES` + water/ice, take the first 3 in recipe order (the model lists the mains first
+  — row 601 gives egg whites+greens+onion), sort, join → `name#fp`. Look up `name#fp` ONLY when
+  ingredients were sent — falling back to the bare name IS the bug. Requests with no ingredients keep
+  the bare-name path (legacy + sorted aliases untouched). On generation write `name#fp`, and the bare
+  name only if absent, so `backfillTrendingImage` and no-ingredient callers keep working. **The storage
+  filename must carry the fp too** — today it is `${cacheKey}.jpg`, so a second variant would overwrite
+  the first variant's file under everyone already holding that URL. Log hit/miss by key type so the real
+  miss rate is measured after a week, not guessed. Client (`lib/mealImages.ts`): the AsyncStorage cache
+  is ALSO keyed by bare name — key it by name + first-3 ingredients or the phone keeps serving the old
+  photo after the server is fixed. `app/meal/[id].tsx` tags by name per screen, fine. Check that
+  `saved.tsx` and onboarding's two call sites pass ingredients. Discover is unaffected: names are
+  deduped by `nearDup`, the client reads `trending_meals.image` directly, and the self-heal path recomputes
+  the same fp from the same stored ingredients. One-time cost: the ~112 Cook Tonight names already in
+  cache regenerate once as they recur, ≈ $0.35 total. Tests: the fingerprint normaliser (quantities,
+  staples, order, fewer than 3 left). PASS: the scramble on the phone shows greens and no paprika; a
+  same-name same-mains meal logs a `name#fp` hit; a week of logs gives the miss rate.
+  **Rejected:** (B) make names more specific in the prompt — unenforceable, and the NAMING rule forbids
+  ingredient-list names. (C) vision-check the photo against the ingredients on every hit — a paid call on
+  the common path to save $0.003 on the rare one. (D) fingerprint ALL ingredients — every garnish change
+  is a miss; the top 3 is what a photo shows.
 - [ ] Undecided, carried from 2026-09-07: Home layout (own-row vs one row); feedback board Phase 2
   (Profile has NO support/contact row at all).
 - [ ] **Pantry tab's Cook tonight uses its OWN two-way substring matcher** (`missingFor` in
