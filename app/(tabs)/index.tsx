@@ -544,8 +544,10 @@ export default function HomeScreen() {
   // own slot, so the skeleton can never come back over cards already on screen, and yesterday's
   // carried-over meals stay up while today's generate underneath.
   const mealsPending = (!pantryFetched || !cacheChecked || loading) && meals.length === 0
-  // Drives the pulse dot and the sweep bar: generating with nothing up yet, or holding yesterday's.
-  const working = stale || mealsPending
+  // Drives the pulse dot and the sweep bar: generating with nothing up yet, holding yesterday's,
+  // or regenerating over a set already on screen — the redo row hides while this is true, so this
+  // is the only sign a redo is running.
+  const working = stale || mealsPending || loading
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -1655,23 +1657,7 @@ export default function HomeScreen() {
         {(!pantryFetched || pantryNames.size > 0) && (
           <View style={{ marginBottom: 14 }}>
             <View style={{ marginHorizontal: 20, marginBottom: 12 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={styles.sectionTitle}>Cook from your pantry</Text>
-                {/* ↻ came over from the Pantry tab with the list, replacing "See all →" — which led
-                    to the same three meals. Greyed at the daily cap rather than hidden, so the
-                    control stays where the finger learned it. */}
-                {!mealsPending && pantryMeals.length > 0 && (
-                  <TouchableOpacity
-                    onPress={regenerate}
-                    hitSlop={10}
-                    activeOpacity={0.7}
-                    disabled={!canRegenerate}
-                    style={[styles.regenBtn, !canRegenerate && { opacity: 0.35 }]}
-                  >
-                    <RefreshCw size={14} stroke={canRegenerate ? '#4ADE80' : '#888'} strokeWidth={2.2} />
-                  </TouchableOpacity>
-                )}
-              </View>
+              <Text style={styles.sectionTitle}>Cook from your pantry</Text>
 
               {/* Says what these are, so holding yesterday's meals up is honest rather than a stale
                   cache pretending to be fresh. The DOT and the rotating line are the point: a static
@@ -1742,30 +1728,35 @@ export default function HomeScreen() {
                     }}
                   />
                 ))}
-                {/* REPEAT REFRESHERS -> DISCOVER. A quiet text line, not a button: the ↻ above stays
-                    the primary action until the cap. At the cap the ↻ greys out and this becomes the
-                    one thing left to tap, so it becomes the SECONDARY pill — not the white primary,
-                    which would outshout food the user can cook tonight. */}
-                {(() => {
+                {/* The redo lives UNDER the three, not in the header: the decision to redo comes
+                    after reading them, and a row can say what the cap is ("4 left today") where the
+                    greyed ↻ icon said nothing. Quiet text, not a button — the cards are the content.
+                    At the cap, Discover (free to serve) is the one action left and becomes the
+                    SECONDARY pill, not the white primary, which would outshout food the user can
+                    cook tonight. Hidden while a generation runs; the status row above carries that. */}
+                {!loading && (() => {
                   const nudge = discoverNudge(genUsedToday, genCapPerDay)
-                  if (nudge === 'none') return null
                   // navigate, NOT push — pushing a tab route stacks a second copy of the tab
                   // navigator on top of itself and renders a black screen.
-                  const goDiscover = () => { trackDiscoverNudgeTapped(nudge, genUsedToday ?? 0); router.navigate({ pathname: '/(tabs)/discover' }) }
-                  if (nudge === 'capped') {
+                  const goDiscover = () => { trackDiscoverNudgeTapped(nudge === 'capped' ? 'capped' : 'redo', genUsedToday ?? 0); router.navigate({ pathname: '/(tabs)/discover' }) }
+                  if (nudge === 'capped' || !canRegenerate) {
                     return (
                       <View style={styles.discoverCapWrap}>
-                        <Text style={styles.discoverNudgeText}>That&rsquo;s today&rsquo;s refreshes.</Text>
+                        <Text style={styles.discoverNudgeText}>That&rsquo;s today&rsquo;s new picks.</Text>
                         <TouchableOpacity onPress={goDiscover} activeOpacity={0.8} style={styles.discoverCapButton}>
                           <Text style={styles.discoverCapButtonText}>Browse Discover</Text>
                         </TouchableOpacity>
                       </View>
                     )
                   }
+                  const left = genUsedToday === null ? null : Math.max(0, genCapPerDay - genUsedToday)
                   return (
-                    <TouchableOpacity onPress={goDiscover} activeOpacity={0.7} hitSlop={8} style={styles.discoverNudge}>
-                      <Text style={styles.discoverNudgeText}>Still not feeling it? <Text style={styles.discoverNudgeLink}>Browse Discover →</Text></Text>
-                    </TouchableOpacity>
+                    <Text style={[styles.discoverNudgeText, styles.discoverNudge]}>
+                      Not feeling these?{' '}
+                      <Text style={styles.discoverNudgeLink} onPress={regenerate}>New picks</Text>
+                      {left !== null ? ` · ${left} left today` : ''}
+                      {nudge === 'redo' ? <> · <Text style={styles.discoverNudgeLink} onPress={goDiscover}>Browse Discover</Text></> : null}
+                    </Text>
                   )
                 })()}
               </View>
@@ -2391,16 +2382,6 @@ const styles = StyleSheet.create({
   pantryRowReadyText: { fontSize: 11, color: '#4ADE80', fontWeight: '700' },
   pantryRowNeed: { fontSize: 11, color: '#F59E0B', fontWeight: '600' },
   pantryRowBetter: { fontSize: 11, color: COLORS.textMuted, fontWeight: '600' },
-  regenBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(74,222,128,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.2)',
-  },
   discoverNudge: { marginTop: 4, alignSelf: 'center' },
   discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
   discoverNudgeLink: { color: '#4ADE80', fontWeight: '700' },

@@ -1605,6 +1605,14 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       reads as abstract shapes.
 
 ---
+- [ ] **BUILT 2026-09-14 (Logan: "do your rec for the redo button") — ↻ moved out of the header,
+      UNVERIFIED ON DEVICE.** The header is just the title now. Under the third card: "Not feeling
+      these? New picks · 4 left today" (the link regenerates; the count is cap − used, omitted
+      while the count is unknown); after the third generation of the day "· Browse Discover" is
+      appended; at the cap the row is the existing "That's today's new picks." + Discover pill.
+      Hidden while a generation runs — `working` now includes `loading`, so the status line and
+      sweep bar show during a redo over a set already on screen (they did not before). Tells: tap
+      New picks → status row + sweep bar appear, three new rows land, the count drops by one.
 
 ## 6g. RAISED BY LOGAN 2026-09-14 — the food log screen (`components/FoodSearchModal.tsx`, detail step)
 
