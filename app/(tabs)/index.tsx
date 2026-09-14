@@ -311,7 +311,10 @@ function MealCardResting({ pantryCount, onPress, error, errorCode }: { pantryCou
 //
 // The photo slot is SQUARE on purpose. Generation renders 512x512, so this is the first place on
 // Home that shows the whole image — the old 3:2 hero cropped a third off every one.
-function PantryMealRow({ meal, missing, structural, onPress }: { meal: GeneratedMeal; missing: string[]; structural: string[]; onPress: () => void }) {
+// `known` is false until the pantry has loaded. Meals come from the disk cache faster than the
+// pantry query answers, so for that beat every ingredient read as missing and all three rows said
+// "Better with: <the whole recipe>" before flipping to "Ready to cook". Say nothing until it is known.
+function PantryMealRow({ meal, missing, structural, known, onPress }: { meal: GeneratedMeal; missing: string[]; structural: string[]; known: boolean; onPress: () => void }) {
   // Cap the list at three names — the line is one row, and the detail screen has the full list.
   const list = (xs: string[]) => `${xs.slice(0, 3).join(', ')}${xs.length > 3 ? ` +${xs.length - 3}` : ''}`
   return (
@@ -356,7 +359,9 @@ function PantryMealRow({ meal, missing, structural, onPress }: { meal: Generated
         </View>
         {/* Only a STRUCTURAL gap is a trip to the store; a missing garnish is "Better with", not a
             blocker — "Need:" over a dish short only of cilantro made a cookable meal look impossible. */}
-        {structural.length > 0 ? (
+        {!known ? (
+          <View style={styles.pantryRowReady} />
+        ) : structural.length > 0 ? (
           <Text style={styles.pantryRowNeed} numberOfLines={1}>Need: {list(structural)}</Text>
         ) : missing.length > 0 ? (
           <Text style={styles.pantryRowBetter} numberOfLines={1}>Better with: {list(missing)}</Text>
@@ -1726,6 +1731,7 @@ export default function HomeScreen() {
                     meal={meal}
                     missing={missing}
                     structural={structural}
+                    known={pantryFetched}
                     onPress={() => {
                       // Opening a pick IS the feature being used — this counter feeds Loops.
                       if (user) trackCookTonightUsed(user.id)
