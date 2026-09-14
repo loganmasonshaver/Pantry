@@ -347,3 +347,14 @@ export function pickerUnits(servings: FoodServing[], current?: Unit): Unit[] {
     return !((m === 'g' && hasG) || (m === 'ml' && hasMl))
   })
 }
+
+// Do the macros account for the calories? 4/4/9 per gram, the Atwater factors a label is built on.
+// A WARNING, never a block: labels themselves do not add up — calories are rounded to 5 or 10,
+// grams to whole numbers, fiber counts 0-2 not 4, sugar alcohols ~2, and alcohol is 7/g with no
+// macro at all (a 150 kcal beer computes to 56). The margin is 15% or 20 kcal, whichever is
+// larger: rounding alone reaches ~10% on a small item, and a dropped or extra digit blows past it.
+export function atwaterCheck(n: Nutrients): { computed: number; off: boolean } {
+  const computed = Math.round(n.protein * 4 + n.carbs * 4 + n.fat * 9)
+  const margin = Math.max(20, n.calories * 0.15)
+  return { computed, off: Math.abs(computed - n.calories) > margin }
+}

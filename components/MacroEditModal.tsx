@@ -21,7 +21,7 @@ import { pickDefaultServing, type FoodServing } from '@/lib/fatsecret'
 import {
   applyOverride, pickerUnits, correctionStartAmount, correctionToStore, defaultCorrectionPortion,
   fatsecretNutrients, findServing, formatAmount, metricBasis, metricOf, parseAmount, portionMetric,
-  sameUnit, servingTitle, unitKey, unitLabel, type Override, type Unit,
+  sameUnit, servingTitle, unitKey, unitLabel, atwaterCheck, type Override, type Unit,
 } from '@/lib/foodPortion'
 
 type Props = {
@@ -139,6 +139,11 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
     { label: 'Carbs',    value: carbs,    onChange: setCarbs,    unit: 'g',    color: COLORS.macroCarbs },
     { label: 'Fat',      value: fat,      onChange: setFat,      unit: 'g',    color: COLORS.macroFat },
   ]
+
+  // Live 4/4/9 check on what is typed. Warns past the margin, never blocks — see atwaterCheck.
+  const typed = { calories: parseFloat(calories.replace(',', '.')), protein: parseFloat(protein.replace(',', '.')), carbs: parseFloat(carbs.replace(',', '.')), fat: parseFloat(fat.replace(',', '.')) }
+  const typedValid = Object.values(typed).every(v => Number.isFinite(v))
+  const check = typedValid ? atwaterCheck(typed) : null
 
   const units = pickerUnits(servings, unit)
   const basis = metricBasis(servings)
@@ -267,6 +272,12 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
                 ))}
               </View>
 
+              {check?.off && (
+                <Text style={styles.checkNote}>
+                  These macros come to {check.computed} kcal by the 4/4/9 rule, not {Math.round(typed.calories)}. Alcohol, fiber or sugar alcohols can explain a gap — a typo can't.
+                </Text>
+              )}
+
               {/* Save */}
               <TouchableOpacity
                 style={[styles.saveBtn, (saving || !dirty) && { opacity: 0.5 }]}
@@ -380,6 +391,7 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 24,
   },
+  checkNote: { fontSize: 12, color: COLORS.macroPrep, lineHeight: 17, marginTop: -12, marginBottom: 16 },
   field: {
     width: '47%',
     backgroundColor: '#1A1A1A',

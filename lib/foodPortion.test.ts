@@ -4,7 +4,7 @@ import type { FoodServing } from './fatsecretServing.ts'
 import {
   sameUnit, availableUnits, metricBasis, portionMetric, fatsecretNutrients, applyOverride, correctionPortion,
   legacyBasis, logFields, unitFromLog, unitKey, unitFromKey, parseAmount, formatAmount, convertAmount,
-  calorieSplit, dayImpact, unitLabel, servingTitle, portionText, correctionToStore, defaultCorrectionPortion, correctionStartAmount, pickerUnits, type Override, type Unit,
+  calorieSplit, dayImpact, unitLabel, servingTitle, portionText, correctionToStore, defaultCorrectionPortion, correctionStartAmount, pickerUnits, atwaterCheck, type Override, type Unit,
 } from './foodPortion.ts'
 
 const srv = (id: string, desc: string, kcal: number, p: number, c: number, f: number, grams?: number, unit = 'g', extra: Partial<FoodServing> = {}): FoodServing => ({
@@ -239,4 +239,13 @@ test('pickers drop a metric-only serving that duplicates an offered unit, but ke
   // and on a millilitre-basis food it duplicates the millilitres unit, so it goes
   const honeyMl = [...honey, srv('hml', '100 ml', 425, 0.5, 115, 0, 100, 'ml')]
   assert.ok(!pickerUnits(honeyMl).some(u => u.kind === 'serving' && u.servingId === 'hml'))
+})
+
+test('the 4/4/9 check passes real labels and flags a dropped digit', () => {
+  assert.equal(atwaterCheck({ calories: 150, protein: 8, carbs: 11, fat: 8 }).off, false)   // milk, label 150 / computed 148
+  assert.equal(atwaterCheck({ calories: 190, protein: 7, carbs: 7, fat: 16 }).off, false)   // peanut butter, 200
+  assert.equal(atwaterCheck({ calories: 45, protein: 0, carbs: 3, fat: 3 }).off, false)     // small item: 39, inside the 20 kcal floor
+  assert.deepEqual(atwaterCheck({ calories: 150, protein: 1, carbs: 13, fat: 0 }), { computed: 56, off: true })  // beer: warns, and the copy explains why
+  assert.equal(atwaterCheck({ calories: 15, protein: 8, carbs: 11, fat: 8 }).off, true)     // "15" for 150
+  assert.equal(atwaterCheck({ calories: 1500, protein: 8, carbs: 11, fat: 8 }).off, true)   // "1500" for 150
 })

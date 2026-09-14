@@ -1800,6 +1800,17 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       nutrition → Per picker shows one "grams", no "100 g" serving; fields read 122 / 8 / 11 / 5;
       Save is dim until a field changes; tap outside closes; the main screen shows a NUTRITION
       DETAILS card with no chevron; "Delete entry" removes the entry from Home.
+- [ ] **BUILT 2026-09-14 (Logan: "make sure I can't type macros that don't add up") — a 4/4/9
+      WARNING, not a block, UNVERIFIED ON DEVICE.** Labels do not add up themselves (milk 150 vs
+      148 computed; peanut butter 190 vs 200) and a hard rule rejects real foods — beer computes
+      to 56 of 150 (alcohol), sugar-free candy, high-fiber bars. Margin 15% or 20 kcal, whichever
+      is larger; past it an amber line under the fields names the computed number and the
+      legitimate reasons; Save stays on. 6 tests incl. "15" and "1500" typed for 150. Tell: in
+      Edit nutrition set calories to 15 → the amber line appears; back to 150 → gone.
+      **VERIFIED in the DB 2026-09-14 19:30 UTC:** Logan's correction on `fatsecret:800` (2% Fat
+      Milk) stored 150/8/11/8 with basis 244 g / serving 18 under HIS user — the end-to-end proof
+      of the 36,000-kcal fix. He entered whole-milk numbers on 2% as a test; Reset to original
+      when done.
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
