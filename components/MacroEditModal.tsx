@@ -19,7 +19,7 @@ import { COLORS } from '@/constants/colors'
 import { saveOverride, deleteOverride } from '@/hooks/useMacroOverrides'
 import { pickDefaultServing, type FoodServing } from '@/lib/fatsecret'
 import {
-  applyOverride, availableUnits, correctionStartAmount, correctionToStore, defaultCorrectionPortion,
+  applyOverride, pickerUnits, correctionStartAmount, correctionToStore, defaultCorrectionPortion,
   fatsecretNutrients, findServing, formatAmount, metricBasis, metricOf, parseAmount, portionMetric,
   sameUnit, servingTitle, unitKey, unitLabel, type Override, type Unit,
 } from '@/lib/foodPortion'
@@ -35,9 +35,11 @@ type Props = {
   onSaved: () => void
 }
 
-// Prefill values: whole calories, macros to one decimal — FatSecret's precision, not float noise.
+// Prefill values read like a label: whole calories and whole grams — a label prints "8 g", and a
+// prefilled "7.9" beside it only makes the user doubt which is right. One decimal survives below
+// 1 g so a real 0.3 does not read as nothing. Decimals typed in are accepted as typed.
 const kcalText = (n: number) => String(Math.round(n))
-const gramText = (n: number) => String(Math.round(n * 10) / 10)
+const gramText = (n: number) => (n > 0 && n < 1 ? String(Math.round(n * 10) / 10) : String(Math.round(n)))
 const ACCESSORY_ID = 'macro-edit-done'
 
 // The correction is entered against the PORTION THE LABEL USES, chosen here, not the unit the user
@@ -61,6 +63,9 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
   const [carbs, setCarbs] = useState('')
   const [fat, setFat] = useState('')
   const [saving, setSaving] = useState(false)
+  // What the fields were prefilled with. Save stays off until one of them differs, so a stray tap
+  // cannot write a no-op correction that then reads "Your numbers" everywhere.
+  const [prefill, setPrefill] = useState<string[]>([])
 
   // Prefill from the correction scaled to THIS portion when one applies, else FatSecret's numbers
   // for it — so the user is always comparing like with like. Re-runs when the portion changes:
@@ -71,11 +76,11 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
     if (!fs) return
     const applied = applyOverride(fs, override, unit, amount, servings)
     const v = applied.overridden ? applied.nutrients : fs
-    setCalories(kcalText(v.calories))
-    setProtein(gramText(v.protein))
-    setCarbs(gramText(v.carbs))
-    setFat(gramText(v.fat))
+    const next = [kcalText(v.calories), gramText(v.protein), gramText(v.carbs), gramText(v.fat)]
+    setCalories(next[0]); setProtein(next[1]); setCarbs(next[2]); setFat(next[3])
+    setPrefill(next)
   }, [visible, foodKey, unitKey(unit), amount])
+  const dirty = [calories, protein, carbs, fat].some((v, i) => v.trim() !== prefill[i])
 
   const commitAmount = () => {
     const n = parseAmount(amountText)
@@ -135,7 +140,7 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
     { label: 'Fat',      value: fat,      onChange: setFat,      unit: 'g',    color: COLORS.macroFat },
   ]
 
-  const units = availableUnits(servings)
+  const units = pickerUnits(servings, unit)
   const basis = metricBasis(servings)
   const metric = unit.kind === 'serving' ? portionMetric(unit, amount, servings) : null
 
@@ -145,6 +150,9 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
         style={styles.backdrop}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        {/* Tap outside closes — keyboard first, per the keyboard-up rule. Replaces the Cancel
+            button, which was a second way to do what the ✕ already does. */}
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={picker ? () => setPicker(false) : closeOrDismiss} />
         <View style={styles.sheet}>
           {picker ? (
             // The unit list replaces the form rather than stacking a sheet on a sheet.
@@ -193,7 +201,7 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
                 })()}
               </ScrollView>
               <Text style={styles.pickHint}>
-                Label says ½ cup? Pick cup, then type 0.5. A serving size the list doesn't have? Pick grams and type the label's weight.
+                Label says ½ cup? Pick cup, then type 0.5. A serving size the list doesn't have? Pick grams and type the label's weight. Corrections are yours only, and scale to whatever amount you log.
               </Text>
             </>
           ) : (
@@ -234,7 +242,7 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
                 </TouchableOpacity>
               </View>
               <Text style={styles.hint}>
-                {metric ? `${Math.round(metric.amount)} ${metric.unit} · ` : ''}Type what the label says for this portion. Your account only — the app scales it to whatever amount you log.
+                {metric ? `${Math.round(metric.amount)} ${metric.unit} · ` : ''}What the label says for this portion.
               </Text>
 
               {/* Macro inputs */}
@@ -261,14 +269,14 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
 
               {/* Save */}
               <TouchableOpacity
-                style={[styles.saveBtn, saving && { opacity: 0.5 }]}
+                style={[styles.saveBtn, (saving || !dirty) && { opacity: 0.5 }]}
                 onPress={handleSave}
-                disabled={saving}
+                disabled={saving || !dirty}
                 activeOpacity={0.85}
               >
                 {saving
                   ? <ActivityIndicator color="#000000" />
-                  : <Text style={styles.saveBtnText}>Save Correction</Text>
+                  : <Text style={styles.saveBtnText}>Save</Text>
                 }
               </TouchableOpacity>
 
@@ -280,13 +288,10 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
                   disabled={saving}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.resetBtnText}>Reset to Original</Text>
+                  <Text style={styles.resetBtnText}>Reset to original</Text>
                 </TouchableOpacity>
               )}
 
-              <TouchableOpacity style={styles.cancelBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
             </>
           )}
         </View>
@@ -443,14 +448,6 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
   },
 
-  cancelBtn: {
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  cancelBtnText: {
-    fontSize: 15,
-    color: COLORS.textMuted,
-  },
 
   accessoryBar: {
     flexDirection: 'row',

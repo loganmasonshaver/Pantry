@@ -31,7 +31,7 @@ export type FoodServing = {
 // is kept only as a tiebreaker between household servings.
 
 // "100 g", "250ml", "1 g" — a pure metric quantity with no household unit attached.
-const METRIC_ONLY_RE = /^\s*\d+(\.\d+)?\s*(g|gram|grams|ml|milliliter|milliliters)\s*(\(|$)/i
+export const METRIC_ONLY_RE = /^\s*\d+(\.\d+)?\s*(g|gram|grams|ml|milliliter|milliliters)\s*(\(|$)/i
 
 // Ordered by how a person would naturally describe a portion. Index = priority, lower wins, so a
 // food offering both "1 cup" and "1 fl oz" lands on the cup — which is what MFP shows for milk.

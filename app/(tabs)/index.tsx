@@ -2002,6 +2002,11 @@ export default function HomeScreen() {
           initialQuantity={editEntry.quantity}
           initialSlot={slots.find(s => s.entries.some(e => e.id === editEntry.id))?.label}
           editOriginal={{ calories: editEntry.calories, protein: editEntry.protein }}
+          onDelete={() => {
+            const owner = slots.find(s => s.entries.some(e => e.id === editEntry.id))
+            if (owner) deleteEntry(owner.id, editEntry.id)
+            setEditEntry(null)
+          }}
         />
       )}
       {/* Fallback for AI-logged entries (no food_id) */}

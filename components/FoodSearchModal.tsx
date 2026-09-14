@@ -37,7 +37,7 @@ import {
 import { getFoodKey, loadOverrideMap, peekOverrideMap, refreshOverrideMap, saveOverride, type MacroOverride } from '@/hooks/useMacroOverrides'
 import { loadFood, peekFood, rememberFood, foodFromSearchResult } from '@/lib/foodCache'
 import {
-  availableUnits, applyOverride, calorieSplit, convertAmount, dayImpact,
+  pickerUnits, applyOverride, calorieSplit, convertAmount, dayImpact,
   fatsecretNutrients, findServing, formatAmount, legacyBasis, logFields, metricBasis, metricOf,
   parseAmount, portionMetric, portionText, sameUnit, servingTitle, unitFromKey, unitFromLog,
   unitKey, unitLabel, type Nutrients, type Override, type Unit,
@@ -67,6 +67,8 @@ type Props = {
   initialSlot?: string
   // The entry's current values, already inside dayTotals, so an edit replaces them instead of adding.
   editOriginal?: { calories: number; protein: number }
+  // Edit mode: removes the entry. Home does the delete (optimistic, no confirmation, same as its row ✕).
+  onDelete?: () => void
 }
 
 // Everything that belongs to ONE opened food, replaced as a unit. It used to be six separate state
@@ -117,7 +119,7 @@ const RING_STROKE = 7
 const RING_R = (RING - RING_STROKE) / 2
 const RING_C = 2 * Math.PI * RING_R
 
-export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, logDate, goals, dayTotals, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot, editOriginal }: Props) {
+export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, logDate, goals, dayTotals, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot, editOriginal, onDelete }: Props) {
   const { user } = useAuth()
   const [tab, setTab] = useState<Tab>('search')
   const [step, setStep] = useState<Step>('browse')
@@ -144,7 +146,6 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   // A ref as well as state: two taps inside one render both saw `saving` false and inserted twice.
   const savingRef = useRef(false)
   const [unitSheet, setUnitSheet] = useState(false)
-  const [showExtras, setShowExtras] = useState(false)
   const [macroEditVisible, setMacroEditVisible] = useState(false)
 
   const [recentFoods, setRecentFoods] = useState<RecentFood[]>([])
@@ -200,7 +201,6 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     const seq = ++openSeq.current
     Keyboard.dismiss()
     setUnitSheet(false)
-    setShowExtras(false)
     setMacroEditVisible(false)
     setStep('detail')
     const key = getFoodKey({ foodId })
@@ -290,7 +290,6 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     setSelectedSlot(defaultSlot)
     setSaving(false)
     setUnitSheet(false)
-    setShowExtras(false)
     setMacroEditVisible(false)
   }
 
@@ -529,7 +528,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     )
   }
 
-  const units = detail ? availableUnits(detail.food.servings) : []
+  const units = detail ? pickerUnits(detail.food.servings, detail.unit) : []
   const basis = detail ? metricBasis(detail.food.servings) : null
 
   return (
@@ -654,40 +653,40 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                     </View>
                   </View>
 
-                  {/* ── Details + correction ── */}
+                  {/* ── Correction link ── */}
+                  <View style={styles.linkRow}>
+                    <View />
+                    <TouchableOpacity onPress={() => setMacroEditVisible(true)} activeOpacity={0.7} hitSlop={8}>
+                      <Text style={[styles.linkText, computed.overridden && { color: '#4ADE80' }]}>
+                        {computed.overridden ? 'Your numbers · Edit' : 'Edit nutrition'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                  {/* Inline, no toggle: the screen had ~500pt of nothing under the meal chips, and a
+                      toggle over dead space was a tap for nothing. Only what FatSecret actually has —
+                      a value it lacks used to render as "0g". */}
                   {(() => {
                     const extras = EXTRAS.filter(x => computed.fs[x.key] !== undefined)
+                    if (extras.length === 0) return null
                     return (
-                      <>
-                        <View style={styles.linkRow}>
-                          {extras.length > 0 ? (
-                            <TouchableOpacity style={styles.linkBtn} onPress={() => setShowExtras(v => !v)} activeOpacity={0.7} hitSlop={8}>
-                              <Text style={styles.linkText}>Nutrition details</Text>
-                              {showExtras
-                                ? <ChevronDown size={14} stroke={COLORS.textMuted} strokeWidth={2} />
-                                : <ChevronRight size={14} stroke={COLORS.textMuted} strokeWidth={2} />}
-                            </TouchableOpacity>
-                          ) : <View />}
-                          <TouchableOpacity onPress={() => setMacroEditVisible(true)} activeOpacity={0.7} hitSlop={8}>
-                            <Text style={[styles.linkText, computed.overridden && { color: '#4ADE80' }]}>
-                              {computed.overridden ? 'Your numbers · Edit' : 'Edit nutrition'}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                        {/* Only what FatSecret actually has. A missing value used to render as "0g". */}
-                        {showExtras && (
-                          <View style={styles.card}>
-                            {extras.map((x, i) => (
-                              <View key={x.key} style={[styles.extraRow, i > 0 && styles.extraDivider]}>
-                                <Text style={styles.extraLabel}>{x.label}</Text>
-                                <Text style={styles.extraValue}>{Math.round(computed.fs[x.key] ?? 0)} {x.unit}</Text>
-                              </View>
-                            ))}
+                      <View style={styles.card}>
+                        <Text style={[styles.label, { marginBottom: 2 }]}>NUTRITION DETAILS</Text>
+                        {extras.map((x, i) => (
+                          <View key={x.key} style={[styles.extraRow, i > 0 && styles.extraDivider]}>
+                            <Text style={styles.extraLabel}>{x.label}</Text>
+                            <Text style={styles.extraValue}>{Math.round(computed.fs[x.key] ?? 0)} {x.unit}</Text>
                           </View>
-                        )}
-                      </>
+                        ))}
+                      </View>
                     )
                   })()}
+                  {/* Edit mode only. Home's row ✕ does the same thing; someone already in here should
+                      not have to back out to find it. No confirmation — Home has none either. */}
+                  {editLogId && onDelete && (
+                    <TouchableOpacity style={styles.deleteBtn} onPress={() => { onDelete(); handleClose() }} activeOpacity={0.7} hitSlop={8}>
+                      <Text style={styles.deleteText}>Delete entry</Text>
+                    </TouchableOpacity>
+                  )}
 
                   {/* Attribution — required by FatSecret free tier */}
                   <View style={styles.attribution}>
@@ -1150,7 +1149,8 @@ const styles = StyleSheet.create({
   chipTextActive: { color: '#000000' },
 
   linkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 8 },
-  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  deleteBtn: { alignSelf: 'center', paddingVertical: 10, marginTop: 6 },
+  deleteText: { fontSize: 13, fontWeight: '600', color: '#EF4444' },
   linkText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
   extraRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9 },
   extraDivider: { borderTopWidth: 1, borderTopColor: '#222222' },

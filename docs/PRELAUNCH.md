@@ -1785,6 +1785,21 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       Per 1 cup, type 150 / 8 / 11 / 8, Save → the link reads "Your numbers · Edit", 240 g reads
       ~148, and the DB row under Logan's user has basis_amount 244, basis_unit g, serving_id =
       the cup's id; (4) Done dismisses the keypad inside the sheet.
+- [ ] **BUILT 2026-09-14 (Logan: "do all changes you recommended") — the finish pass on the food
+      screen + Edit nutrition, UNVERIFIED ON DEVICE.** (1) A metric-only FatSecret serving
+      ("100 g") no longer sits in a unit list beside the grams unit it duplicates — both pickers,
+      `pickerUnits`, kept only while selected; a "100 ml" serving on a gram-basis food stays (the
+      only volume option). (2) The sheet's Cancel is gone; tapping the dark backdrop closes it,
+      keyboard first. (3) "Save" / "Reset to original", sentence case. (4) The Per hint is one
+      line ("244 g · What the label says for this portion."); the account/scaling sentence lives
+      once, in the picker. (5) Nutrition details are inline under the amount card, no toggle —
+      only values FatSecret has. (6) Save is disabled until a field differs from its prefill.
+      (7) Edit mode has a red "Delete entry" at the bottom — Home's delete, no confirmation, same
+      as its row ✕. Logan can veto (7). (8) Decimals: the sheet prefills WHOLE grams like a
+      label, one decimal only below 1 g; typed decimals are kept. Tells: open Whole Milk → Edit
+      nutrition → Per picker shows one "grams", no "100 g" serving; fields read 122 / 8 / 11 / 5;
+      Save is dim until a field changes; tap outside closes; the main screen shows a NUTRITION
+      DETAILS card with no chevron; "Delete entry" removes the entry from Home.
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 

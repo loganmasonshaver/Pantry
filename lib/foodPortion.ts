@@ -4,7 +4,7 @@
 // Pure and supabase-free so it runs under `node --test`. The component only renders what this
 // returns; every number on that screen and every number written to meal_logs comes from here, so
 // the screen can never show one thing and log another.
-import type { FoodServing } from './fatsecretServing.ts'
+import { METRIC_ONLY_RE, type FoodServing } from './fatsecretServing.ts'
 
 export type Nutrients = { calories: number; protein: number; carbs: number; fat: number }
 export type Extras = { fiber?: number; sugar?: number; saturated_fat?: number; sodium?: number; cholesterol?: number; potassium?: number }
@@ -323,4 +323,27 @@ export function defaultCorrectionPortion(servings: FoodServing[], override: Over
 // switching to tbsp means "per 1 tbsp", because the next thing typed is what the label says.
 export function correctionStartAmount(unit: Unit): number {
   return unit.kind === 'g' || unit.kind === 'ml' ? 100 : 1
+}
+
+// "100 g", "250ml" — a serving that is nothing but a metric quantity, and in which unit.
+export function isMetricOnlyServing(s: FoodServing): MetricUnit | null {
+  const m = METRIC_ONLY_RE.exec(s.serving_description)
+  if (!m) return null
+  return /^g/i.test(m[2]) ? 'g' : 'ml'
+}
+
+// The units a picker LISTS. FatSecret's "100 g" serving duplicated the grams unit, so "100 g" sat
+// in the list twice; a metric-only serving is dropped whenever the unit it duplicates is offered —
+// unless it is the one currently selected, which must stay visible to be unselected.
+export function pickerUnits(servings: FoodServing[], current?: Unit): Unit[] {
+  const units = availableUnits(servings)
+  const hasG = units.some(u => u.kind === 'g')
+  const hasMl = units.some(u => u.kind === 'ml')
+  return units.filter(u => {
+    if (u.kind !== 'serving') return true
+    if (current && sameUnit(u, current)) return true
+    const s = findServing(u, servings)
+    const m = s ? isMetricOnlyServing(s) : null
+    return !((m === 'g' && hasG) || (m === 'ml' && hasMl))
+  })
 }

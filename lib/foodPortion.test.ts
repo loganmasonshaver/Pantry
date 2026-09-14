@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { FoodServing } from './fatsecretServing.ts'
 import {
-  availableUnits, metricBasis, portionMetric, fatsecretNutrients, applyOverride, correctionPortion,
+  sameUnit, availableUnits, metricBasis, portionMetric, fatsecretNutrients, applyOverride, correctionPortion,
   legacyBasis, logFields, unitFromLog, unitKey, unitFromKey, parseAmount, formatAmount, convertAmount,
-  calorieSplit, dayImpact, unitLabel, servingTitle, portionText, correctionToStore, defaultCorrectionPortion, correctionStartAmount, type Override, type Unit,
+  calorieSplit, dayImpact, unitLabel, servingTitle, portionText, correctionToStore, defaultCorrectionPortion, correctionStartAmount, pickerUnits, type Override, type Unit,
 } from './foodPortion.ts'
 
 const srv = (id: string, desc: string, kcal: number, p: number, c: number, f: number, grams?: number, unit = 'g', extra: Partial<FoodServing> = {}): FoodServing => ({
@@ -226,4 +226,17 @@ test('the sheet opens on the correction\'s serving, else the label serving, else
   assert.deepEqual(defaultCorrectionPortion(metricOnly, null, metricOnly[0]), { unit: grams, amount: 100 })
   assert.equal(correctionStartAmount({ kind: 'ml' }), 100)
   assert.equal(correctionStartAmount(cup), 1)
+})
+
+test('pickers drop a metric-only serving that duplicates an offered unit, but keep the selected one', () => {
+  const withHg = [...cheddar, srv('hg', '100 g', 403, 25, 1, 33, 100)]
+  assert.deepEqual(pickerUnits(withHg).map(unitKey), ['serving:c1', 'serving:c2', 'serving:c3', 'g', 'oz'])
+  const hg: Unit = { kind: 'serving', servingId: 'hg' }
+  assert.ok(pickerUnits(withHg, hg).some(u => sameUnit(u, hg)))
+  // a "100 ml" serving on a GRAM-basis food is the only volume option, so it stays
+  const milkG = [...milk, srv('ml', '100 ml (103g)', 52, 3.3, 5, 2, 103)]
+  assert.ok(pickerUnits(milkG).some(u => u.kind === 'serving' && u.servingId === 'ml'))
+  // and on a millilitre-basis food it duplicates the millilitres unit, so it goes
+  const honeyMl = [...honey, srv('hml', '100 ml', 425, 0.5, 115, 0, 100, 'ml')]
+  assert.ok(!pickerUnits(honeyMl).some(u => u.kind === 'serving' && u.servingId === 'hml'))
 })
