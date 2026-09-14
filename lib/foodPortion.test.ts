@@ -4,7 +4,7 @@ import type { FoodServing } from './fatsecretServing.ts'
 import {
   availableUnits, metricBasis, portionMetric, fatsecretNutrients, applyOverride, correctionPortion,
   legacyBasis, logFields, unitFromLog, unitKey, unitFromKey, parseAmount, formatAmount, convertAmount,
-  calorieSplit, dayImpact, unitLabel, servingTitle, portionText, type Override, type Unit,
+  calorieSplit, dayImpact, unitLabel, servingTitle, portionText, correctionToStore, defaultCorrectionPortion, correctionStartAmount, type Override, type Unit,
 } from './foodPortion.ts'
 
 const srv = (id: string, desc: string, kcal: number, p: number, c: number, f: number, grams?: number, unit = 'g', extra: Partial<FoodServing> = {}): FoodServing => ({
@@ -187,4 +187,43 @@ test('the ratio tier leaves a macro FatSecret reports as 0 at 0', () => {
   const { nutrients } = applyOverride(fatsecretNutrients(grams, 50, food)!, override, grams, 50, food)
   assert.equal(nutrients.protein, 0)
   assert.equal(nutrients.calories, 200)
+})
+
+test('a label read as 2 tbsp (32 g) stores per ONE tbsp, and every later portion scales from it', () => {
+  const pb = [srv('tb', '1 tbsp (16g)', 95, 3.6, 3.5, 8.1, 16), srv('hg', '100 g', 590, 22, 22, 50, 100)]
+  const tbsp: Unit = { kind: 'serving', servingId: 'tb' }
+  const { nutrients, basis } = correctionToStore(tbsp, 2, { calories: 190, protein: 7, carbs: 7, fat: 16 }, pb)
+  assert.deepEqual(nutrients, { calories: 95, protein: 3.5, carbs: 3.5, fat: 8 })
+  assert.deepEqual(basis, { basis_amount: 16, basis_unit: 'g', serving_id: 'tb' })
+  const ov: Override = { ...nutrients, ...basis }
+  assert.equal(applyOverride(fatsecretNutrients(tbsp, 3, pb)!, ov, tbsp, 3, pb).nutrients.calories, 285)
+  assert.equal(Math.round(applyOverride(fatsecretNutrients(grams, 50, pb)!, ov, grams, 50, pb).nutrients.calories), Math.round(190 * 50 / 32))
+})
+
+test('a label read as ½ cup doubles to the cup, and a weightless serving × 1.5 normalizes with no basis', () => {
+  const { nutrients: perCup, basis } = correctionToStore(cup, 0.5, { calories: 200, protein: 14, carbs: 1, fat: 16 }, cheddar)
+  assert.equal(perCup.calories, 400)
+  assert.equal(basis.basis_amount, 113)
+  const bar: Unit = { kind: 'serving', servingId: 'n1' }
+  const n = correctionToStore(bar, 1.5, { calories: 300, protein: 30, carbs: 33, fat: 9 }, noMetric)
+  assert.deepEqual(n.basis, { basis_amount: null, basis_unit: null, serving_id: 'n1' })
+  assert.equal(n.nutrients.calories, 200)
+  const ov: Override = { ...n.nutrients, ...n.basis }
+  assert.equal(applyOverride(fatsecretNutrients(bar, 2, noMetric)!, ov, bar, 2, noMetric).nutrients.calories, 400)
+})
+
+test('weight portions store as typed with the typed weight as basis', () => {
+  const { nutrients, basis } = correctionToStore(grams, 45, { calories: 180, protein: 9, carbs: 20, fat: 6 }, cheddar)
+  assert.equal(nutrients.calories, 180)
+  assert.deepEqual(basis, { basis_amount: 45, basis_unit: 'g', serving_id: null })
+})
+
+test('the sheet opens on the correction\'s serving, else the label serving, else 100 g', () => {
+  assert.deepEqual(defaultCorrectionPortion(cheddar, null, cheddar[0]), { unit: cup, amount: 1 })
+  const ov: Override = { calories: 1, protein: 0, carbs: 0, fat: 0, basis_amount: 21, basis_unit: 'g', serving_id: 'c2' }
+  assert.deepEqual(defaultCorrectionPortion(cheddar, ov, cheddar[0]), { unit: slice, amount: 1 })
+  const metricOnly = [srv('__100g', '100 g', 60, 3, 5, 3, 100)]
+  assert.deepEqual(defaultCorrectionPortion(metricOnly, null, metricOnly[0]), { unit: grams, amount: 100 })
+  assert.equal(correctionStartAmount({ kind: 'ml' }), 100)
+  assert.equal(correctionStartAmount(cup), 1)
 })

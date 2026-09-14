@@ -37,7 +37,7 @@ import {
 import { getFoodKey, loadOverrideMap, peekOverrideMap, refreshOverrideMap, saveOverride, type MacroOverride } from '@/hooks/useMacroOverrides'
 import { loadFood, peekFood, rememberFood, foodFromSearchResult } from '@/lib/foodCache'
 import {
-  availableUnits, applyOverride, calorieSplit, convertAmount, correctionPortion, dayImpact,
+  availableUnits, applyOverride, calorieSplit, convertAmount, dayImpact,
   fatsecretNutrients, findServing, formatAmount, legacyBasis, logFields, metricBasis, metricOf,
   parseAmount, portionMetric, portionText, sameUnit, servingTitle, unitFromKey, unitFromLog,
   unitKey, unitLabel, type Nutrients, type Override, type Unit,
@@ -975,29 +975,19 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         </View>
       </InputAccessoryView>
 
-      {/* Correction editor — entered against one serving, 100 g, 1 oz or 100 ml of the current unit */}
-      {macroEditVisible && detail && user && (() => {
-        const servings = detail.food.servings
-        const cp = correctionPortion(detail.unit, servings)
-        const fs = fatsecretNutrients(cp.unit, cp.amount, servings)
-        if (!fs) return null
-        const applied = applyOverride(fs, detail.override, cp.unit, cp.amount, servings)
-        return (
-          <MacroEditModal
-            visible
-            onClose={() => setMacroEditVisible(false)}
-            foodKey={getFoodKey({ foodId: detail.food.food_id })}
-            foodName={detail.food.food_name}
-            userId={user.id}
-            portionLabel={portionText(cp.unit, cp.amount, servings, true)}
-            original={{ calories: fs.calories, protein: fs.protein, carbs: fs.carbs, fat: fs.fat }}
-            current={applied.overridden ? applied.nutrients : null}
-            basis={cp.basis}
-            hasCorrection={!!detail.override}
-            onSaved={reloadOverride}
-          />
-        )
-      })()}
+      {/* Correction editor — entered against the portion the LABEL uses, chosen in the sheet */}
+      {macroEditVisible && detail && user && (
+        <MacroEditModal
+          visible
+          onClose={() => setMacroEditVisible(false)}
+          foodKey={getFoodKey({ foodId: detail.food.food_id })}
+          foodName={detail.food.food_name}
+          userId={user.id}
+          servings={detail.food.servings}
+          override={detail.override}
+          onSaved={reloadOverride}
+        />
+      )}
     </Modal>
   )
 }

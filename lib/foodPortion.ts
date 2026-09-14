@@ -283,3 +283,44 @@ export function portionText(unit: Unit, amount: number, servings: FoodServing[],
   const metric = m ? ` (${Math.round(m.amount)} ${m.unit})` : ''
   return `${amount === 1 ? title : `${n} × ${title}`}${metric}`
 }
+
+// What a correction STORES, from what the user typed against the portion they chose. Serving
+// portions are normalized to ONE serving — every tier of applyOverride reads a serving-keyed
+// correction as per-serving — and weight portions are stored as typed, with the typed weight as
+// their basis. A label's "2 Tbsp (32 g) · 190 kcal" becomes 95 kcal per tbsp with a 16 g basis.
+export function correctionToStore(unit: Unit, amount: number, entered: Nutrients, servings: FoodServing[]): { nutrients: Nutrients; basis: Pick<Override, 'basis_amount' | 'basis_unit' | 'serving_id'> } {
+  if (unit.kind === 'serving') {
+    const one = portionMetric(unit, 1, servings)
+    return {
+      nutrients: scale(pickNutrients(entered), 1 / amount),
+      basis: { basis_amount: one?.amount ?? null, basis_unit: one?.unit ?? null, serving_id: unit.servingId },
+    }
+  }
+  const metric = portionMetric(unit, amount, servings)
+  return {
+    nutrients: pickNutrients(entered),
+    basis: { basis_amount: metric?.amount ?? null, basis_unit: metric?.unit ?? null, serving_id: null },
+  }
+}
+
+// Where the correction sheet opens: the correction's own serving when one exists, else the LABEL
+// serving — the household default, which is what a package prints — never the unit the user
+// happens to be logging in. A food with only metric servings opens on 100 of them.
+export function defaultCorrectionPortion(servings: FoodServing[], override: Override | null, defaultServing: FoodServing | null): { unit: Unit; amount: number } {
+  if (override?.serving_id && servings.some(s => s.serving_id === override.serving_id)) {
+    return { unit: { kind: 'serving', servingId: override.serving_id }, amount: 1 }
+  }
+  if (defaultServing && !defaultServing.serving_id.startsWith('__')) {
+    return { unit: { kind: 'serving', servingId: defaultServing.serving_id }, amount: 1 }
+  }
+  const units = availableUnits(servings)
+  const u = units.find(x => x.kind === 'g') ?? units.find(x => x.kind === 'ml') ?? units[0]
+  if (!u) return { unit: { kind: 'g' }, amount: 100 }
+  return { unit: u, amount: u.kind === 'serving' || u.kind === 'oz' ? 1 : 100 }
+}
+
+// The amount a unit starts at when picked in the correction sheet. No conversion: "per 1 cup"
+// switching to tbsp means "per 1 tbsp", because the next thing typed is what the label says.
+export function correctionStartAmount(unit: Unit): number {
+  return unit.kind === 'g' || unit.kind === 'ml' ? 100 : 1
+}

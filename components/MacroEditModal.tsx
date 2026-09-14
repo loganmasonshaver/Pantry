@@ -11,11 +11,18 @@ import {
   Platform,
   Alert,
   Keyboard,
+  ScrollView,
+  InputAccessoryView,
 } from 'react-native'
-import { X } from 'lucide-react-native'
+import { X, ChevronDown, Check } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { saveOverride, deleteOverride } from '@/hooks/useMacroOverrides'
-import type { Nutrients, Override } from '@/lib/foodPortion'
+import { pickDefaultServing, type FoodServing } from '@/lib/fatsecret'
+import {
+  applyOverride, availableUnits, correctionStartAmount, correctionToStore, defaultCorrectionPortion,
+  fatsecretNutrients, findServing, formatAmount, metricBasis, metricOf, parseAmount, portionMetric,
+  sameUnit, servingTitle, unitKey, unitLabel, type Override, type Unit,
+} from '@/lib/foodPortion'
 
 type Props = {
   visible: boolean
@@ -23,51 +30,76 @@ type Props = {
   foodKey: string
   foodName: string
   userId: string
-  // The portion these numbers describe — a serving, 100 g, 1 oz or 100 ml — and the basis saved
-  // with the correction so it can be scaled onto any other portion (lib/foodPortion.ts).
-  portionLabel: string
-  original: Nutrients
-  current: Nutrients | null
-  basis: Pick<Override, 'basis_amount' | 'basis_unit' | 'serving_id'>
-  hasCorrection: boolean
+  servings: FoodServing[]
+  override: Override | null
   onSaved: () => void
 }
 
 // Prefill values: whole calories, macros to one decimal — FatSecret's precision, not float noise.
 const kcalText = (n: number) => String(Math.round(n))
 const gramText = (n: number) => String(Math.round(n * 10) / 10)
+const ACCESSORY_ID = 'macro-edit-done'
 
-export default function MacroEditModal({
-  visible, onClose, foodKey, foodName, userId,
-  portionLabel, original, current, basis, hasCorrection,
-  onSaved,
-}: Props) {
+// The correction is entered against the PORTION THE LABEL USES, chosen here, not the unit the user
+// happens to be logging in. A label says "2 Tbsp (32 g) · 190 kcal"; the sheet used to say "per
+// 100 g" when the user was logging grams, which meant a calculator. The Per row opens on the label
+// serving and takes any amount of any unit the food has, so the four numbers are typed straight off
+// the package. lib/foodPortion.correctionToStore turns that into what is stored.
+export default function MacroEditModal({ visible, onClose, foodKey, foodName, userId, servings, override, onSaved }: Props) {
   // Keyboard up → this closes the KEYBOARD, not the form (people tap the nearest ✕/Cancel
   // just to dismiss it, and that used to discard everything typed). Second tap closes.
   const closeOrDismiss = () => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } onClose() }
-  const start = current ?? original
-  const [calories, setCalories] = useState(kcalText(start.calories))
-  const [protein, setProtein] = useState(gramText(start.protein))
-  const [carbs, setCarbs] = useState(gramText(start.carbs))
-  const [fat, setFat] = useState(gramText(start.fat))
+
+  const start = defaultCorrectionPortion(servings, override, pickDefaultServing(servings))
+  const [unit, setUnit] = useState<Unit>(start.unit)
+  const [amount, setAmount] = useState(start.amount)
+  const [amountText, setAmountText] = useState(formatAmount(start.amount, start.unit))
+  const [picker, setPicker] = useState(false)
+
+  const [calories, setCalories] = useState('')
+  const [protein, setProtein] = useState('')
+  const [carbs, setCarbs] = useState('')
+  const [fat, setFat] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Prefill from the correction scaled to THIS portion when one applies, else FatSecret's numbers.
-  // The caller computes both, so the form can never show a correction in a different portion's terms.
+  // Prefill from the correction scaled to THIS portion when one applies, else FatSecret's numbers
+  // for it — so the user is always comparing like with like. Re-runs when the portion changes:
+  // the numbers are per portion, so a new portion means new starting numbers.
   useEffect(() => {
     if (!visible) return
-    const v = current ?? original
+    const fs = fatsecretNutrients(unit, amount, servings)
+    if (!fs) return
+    const applied = applyOverride(fs, override, unit, amount, servings)
+    const v = applied.overridden ? applied.nutrients : fs
     setCalories(kcalText(v.calories))
     setProtein(gramText(v.protein))
     setCarbs(gramText(v.carbs))
     setFat(gramText(v.fat))
-  }, [visible, foodKey, portionLabel])
+  }, [visible, foodKey, unitKey(unit), amount])
+
+  const commitAmount = () => {
+    const n = parseAmount(amountText)
+    const next = n ?? amount
+    setAmount(next)
+    setAmountText(formatAmount(next, unit))
+  }
+
+  // No conversion on a unit change: "per 1 cup" → tbsp means "per 1 tbsp", because the next thing
+  // typed is what the label says for that unit.
+  const chooseUnit = (u: Unit) => {
+    setPicker(false)
+    if (sameUnit(u, unit)) return
+    const a = correctionStartAmount(u)
+    setUnit(u)
+    setAmount(a)
+    setAmountText(formatAmount(a, u))
+  }
 
   const handleSave = async () => {
-    const cal = parseInt(calories)
-    const prot = parseFloat(protein)
-    const carb = parseFloat(carbs)
-    const f = parseFloat(fat)
+    const cal = parseFloat(calories.replace(',', '.'))
+    const prot = parseFloat(protein.replace(',', '.'))
+    const carb = parseFloat(carbs.replace(',', '.'))
+    const f = parseFloat(fat.replace(',', '.'))
     // Reject empty/NaN AND negatives (and 0 calories) — these were silently persisting to
     // macro_overrides and corrupting log entries. Tell the user instead of no-op'ing.
     if (isNaN(cal) || isNaN(prot) || isNaN(carb) || isNaN(f)) {
@@ -79,15 +111,8 @@ export default function MacroEditModal({
       return
     }
     setSaving(true)
-    const { error } = await saveOverride(userId, {
-      food_key: foodKey,
-      food_name: foodName,
-      calories: cal,
-      protein: prot,
-      carbs: carb,
-      fat: f,
-      ...basis,
-    })
+    const { nutrients, basis } = correctionToStore(unit, amount, { calories: cal, protein: prot, carbs: carb, fat: f }, servings)
+    const { error } = await saveOverride(userId, { food_key: foodKey, food_name: foodName, ...nutrients, ...basis })
     setSaving(false)
     if (error) { Alert.alert('Save failed', error); return }
     onSaved()
@@ -110,6 +135,10 @@ export default function MacroEditModal({
     { label: 'Fat',      value: fat,      onChange: setFat,      unit: 'g',    color: COLORS.macroFat },
   ]
 
+  const units = availableUnits(servings)
+  const basis = metricBasis(servings)
+  const metric = unit.kind === 'serving' ? portionMetric(unit, amount, servings) : null
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <KeyboardAvoidingView
@@ -117,20 +146,95 @@ export default function MacroEditModal({
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.sheet}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Edit nutrition</Text>
-              <Text style={styles.subtitle} numberOfLines={1}>{foodName} · per {portionLabel}</Text>
-            </View>
-            <TouchableOpacity style={styles.closeBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
-              <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
-            </TouchableOpacity>
-          </View>
+          {picker ? (
+            // The unit list replaces the form rather than stacking a sheet on a sheet.
+            <>
+              <View style={styles.header}>
+                <Text style={styles.title}>Per</Text>
+                <TouchableOpacity style={styles.closeBtn} onPress={() => setPicker(false)} activeOpacity={0.7}>
+                  <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+                {(() => {
+                  const kcalFor = (u: Unit, a: number) => {
+                    const fs = fatsecretNutrients(u, a, servings)
+                    return fs ? Math.round(applyOverride(fs, override, u, a, servings).nutrients.calories) : null
+                  }
+                  const row = (u: Unit, title: string, sub: string | null) => (
+                    <TouchableOpacity key={unitKey(u)} style={styles.pickRow} onPress={() => chooseUnit(u)} activeOpacity={0.7}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.pickTitle}>{title}</Text>
+                        {sub ? <Text style={styles.pickSub}>{sub}</Text> : null}
+                      </View>
+                      {sameUnit(u, unit) && <Check size={18} stroke="#4ADE80" strokeWidth={2.5} />}
+                    </TouchableOpacity>
+                  )
+                  const servingUnits = units.filter(u => u.kind === 'serving')
+                  const metricUnits = units.filter(u => u.kind !== 'serving')
+                  return (
+                    <>
+                      {servingUnits.length > 0 && <Text style={styles.pickSection}>SERVINGS</Text>}
+                      {servingUnits.map(u => {
+                        const s = findServing(u, servings)!
+                        const m = metricOf(s)
+                        const kcal = kcalFor(u, 1)
+                        const sub = [m ? `${Math.round(m.amount)} ${m.unit}` : null, kcal !== null ? `${kcal} kcal` : null].filter(Boolean).join(' · ')
+                        return row(u, servingTitle(s), sub || null)
+                      })}
+                      {metricUnits.length > 0 && <Text style={styles.pickSection}>{basis?.unit === 'ml' ? 'BY VOLUME' : 'BY WEIGHT'}</Text>}
+                      {metricUnits.map(u => {
+                        if (u.kind === 'g') return row(u, 'grams', 'EU labels read per 100 g')
+                        if (u.kind === 'oz') return row(u, 'ounces', null)
+                        return row(u, 'milliliters', null)
+                      })}
+                    </>
+                  )
+                })()}
+              </ScrollView>
+              <Text style={styles.pickHint}>
+                Label says ½ cup? Pick cup, then type 0.5. A serving size the list doesn't have? Pick grams and type the label's weight.
+              </Text>
+            </>
+          ) : (
+            <>
+              {/* Header */}
+              <View style={styles.header}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.title}>Edit nutrition</Text>
+                  <Text style={styles.subtitle} numberOfLines={1}>{foodName}</Text>
+                </View>
+                <TouchableOpacity style={styles.closeBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
+                  <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+                </TouchableOpacity>
+              </View>
 
-          <>
+              {/* Per — the portion the label uses */}
+              <Text style={styles.label}>PER</Text>
+              <View style={styles.perRow}>
+                <View style={styles.amountBox}>
+                  <TextInput
+                    style={styles.amountInput}
+                    value={amountText}
+                    onChangeText={setAmountText}
+                    onBlur={commitAmount}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus
+                    inputAccessoryViewID={ACCESSORY_ID}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={styles.unitPill}
+                  onPress={() => { Keyboard.dismiss(); setPicker(true) }}
+                  disabled={units.length <= 1}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.unitText} numberOfLines={1}>{unitLabel(unit, servings)}</Text>
+                  {units.length > 1 && <ChevronDown size={16} stroke={COLORS.textMuted} strokeWidth={2} />}
+                </TouchableOpacity>
+              </View>
               <Text style={styles.hint}>
-                For your account only. Enter what {portionLabel} contains — the app scales it to whatever amount you log.
+                {metric ? `${Math.round(metric.amount)} ${metric.unit} · ` : ''}Type what the label says for this portion. Your account only — the app scales it to whatever amount you log.
               </Text>
 
               {/* Macro inputs */}
@@ -144,8 +248,9 @@ export default function MacroEditModal({
                         style={styles.fieldInput}
                         value={field.value}
                         onChangeText={field.onChange}
-                        keyboardType="numeric"
+                        keyboardType="decimal-pad"
                         selectTextOnFocus
+                        inputAccessoryViewID={ACCESSORY_ID}
                         placeholderTextColor={COLORS.textMuted}
                       />
                       <Text style={styles.fieldUnit}>{field.unit}</Text>
@@ -168,7 +273,7 @@ export default function MacroEditModal({
               </TouchableOpacity>
 
               {/* Reset — only if an override exists */}
-              {hasCorrection && (
+              {!!override && (
                 <TouchableOpacity
                   style={[styles.resetBtn, saving && { opacity: 0.5 }]}
                   onPress={handleReset}
@@ -182,9 +287,19 @@ export default function MacroEditModal({
               <TouchableOpacity style={styles.cancelBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-          </>
+            </>
+          )}
         </View>
       </KeyboardAvoidingView>
+
+      {/* decimal-pad has no return key; this is the only way to finish typing. */}
+      <InputAccessoryView nativeID={ACCESSORY_ID}>
+        <View style={styles.accessoryBar}>
+          <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={10} activeOpacity={0.7}>
+            <Text style={styles.accessoryDone}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </InputAccessoryView>
     </Modal>
   )
 }
@@ -233,12 +348,26 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  label: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2 },
+  perRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  // The input fills its box, so every point of the visible box focuses it.
+  amountBox: { width: 76, backgroundColor: '#1A1A1A', borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)' },
+  amountInput: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite, textAlign: 'center', paddingVertical: 12, paddingHorizontal: 6, width: '100%' },
+  unitPill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#1A1A1A', borderRadius: 12, paddingHorizontal: 14, gap: 8, borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)' },
+  unitText: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
   hint: {
-    fontSize: 13,
+    fontSize: 12,
     color: COLORS.textMuted,
-    lineHeight: 18,
-    marginBottom: 20,
+    lineHeight: 17,
+    marginTop: 8,
+    marginBottom: 16,
   },
+
+  pickRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#222222', gap: 12 },
+  pickTitle: { fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
+  pickSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  pickSection: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2, marginTop: 12, marginBottom: 2 },
+  pickHint: { fontSize: 12, color: COLORS.textMuted, lineHeight: 17, marginTop: 14 },
 
   fieldGrid: {
     flexDirection: 'row',
@@ -322,4 +451,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: COLORS.textMuted,
   },
+
+  accessoryBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  accessoryDone: { fontSize: 16, fontWeight: '700', color: '#4ADE80' },
 })

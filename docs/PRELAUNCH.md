@@ -1772,6 +1772,19 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
          relaunch → the card and the check mark are right on the first frame.
       Also seen in both screenshots: "Open debugger to view warnings" — the warning text was not
       captured (Metro is not in the desktop terminal pane). Tap the toast and paste the warning.
+- [ ] **BUILT 2026-09-14 (Logan: "go") — Edit nutrition has a "Per" row. UNVERIFIED ON DEVICE.**
+      Logan: the sheet said "per 100 g" when logging grams, and a label is per serving size — a
+      calculator job. The sheet now opens on the LABEL serving (the household default; the
+      correction's own serving if one exists), never the logging unit, with an amount box + unit
+      pill listing the food's servings and grams/ounces. "2 Tbsp (32 g) · 190 kcal" → Per 2 tbsp,
+      type 190/7/7/16. ½ cup → cup, 0.5. `correctionToStore` normalizes serving portions to ONE
+      serving (basis = one serving's weight) and stores weight portions as typed; 4 tests. A
+      decimal-pad Done bar was added to the sheet's five inputs (it never had one). Tells:
+      (1) open Edit nutrition while logging in grams → it reads "Per 1 cup · 244 g", fields
+      146/7.9/11/7.9; (2) Per → tbsp → the amount resets to 1 (no conversion); (3) on Whole Milk:
+      Per 1 cup, type 150 / 8 / 11 / 8, Save → the link reads "Your numbers · Edit", 240 g reads
+      ~148, and the DB row under Logan's user has basis_amount 244, basis_unit g, serving_id =
+      the cup's id; (4) Done dismisses the keypad inside the sheet.
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
