@@ -360,7 +360,7 @@ function PantryMealRow({ meal, missing, structural, known, onPress }: { meal: Ge
         {/* Only a STRUCTURAL gap is a trip to the store; a missing garnish is "Better with", not a
             blocker — "Need:" over a dish short only of cilantro made a cookable meal look impossible. */}
         {!known ? (
-          <View style={styles.pantryRowReady} />
+          <View style={{ height: 14 }} />
         ) : structural.length > 0 ? (
           <Text style={styles.pantryRowNeed} numberOfLines={1}>Need: {list(structural)}</Text>
         ) : missing.length > 0 ? (
