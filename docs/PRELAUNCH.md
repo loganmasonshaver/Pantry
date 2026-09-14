@@ -1633,9 +1633,38 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       cannot find its serving. Fix direction: edit mode has no back-to-search at all.
 - [ ] **Edit mode ignores a meal change.** The chips are shown and tappable, but the update never
       writes `slot` — move an entry to Lunch, tap Update, it stays in Breakfast. Silent.
-- [ ] **A macro fix is per FOOD, applied to every serving.** The override stores absolute numbers
-      taken from whichever serving was selected when saved; switch "1 cup (113g)" to "1 slice (21g)"
-      and the slice shows the cup's calories. 1 override exists in prod.
+- [ ] **A macro fix is per FOOD, applied to every serving — and on the gram path it multiplies.**
+      The override stores absolute numbers taken from whichever serving was selected when saved,
+      and both the display and `saveLog` use them as the PER-SERVING base for any serving. Switch
+      "1 cup (113g)" to "1 slice (21g)" and the slice shows the cup's calories. Worse, pick the
+      synthetic "1 g" serving and type 240: 150 kcal × 240 = **36,000 kcal logged**. The one prod
+      override is exactly that shape: `fatsecret:794` Whole Milk, 150 kcal / 8P / 11C / 8F — 1 cup
+      values. Fix direction: migration adds the serving's gram basis (`per_grams`) to
+      `macro_overrides`, backfill 794 from its cup serving, scale on apply; a serving with no gram
+      data applies the fix only when it is the serving the fix was made on.
+- [ ] **Barcode scanner dies after one successful scan.** `scanningRef` is only reset on failure, and
+      ‹ back from the detail step resets neither it nor `scanned` — the camera shows but never
+      scans again until the modal is closed. Re-tapping the Scan tab does not help (it resets
+      `scanned`, not the ref).
+- [ ] **Per-food state leaks into the next food.** `openDetail` resets qty and barcode; the Recents
+      tap and the scan path do not, and ‹ back resets nothing but the food. Set qty 3 on one food,
+      back, tap a Recent → it opens at 3. Scan product X, back, open a Recent Y, tap "Fix it" →
+      the correction is saved under X's BARCODE key. The previous food's override also stays
+      applied until the next lookup resolves (and forever if it fails). Fix direction: one
+      `openFood()` that resets every per-food field, used by search, Recents, scan and edit.
+- [ ] **Recents are per DEVICE, not per account, and survive sign-out.** `pantry_recent_foods` is not
+      user-stamped and is not in AuthContext's sign-out `multiRemove` list (Profile's reset does
+      clear it). The App Review demo account signed in on Logan's phone would open on his Recents.
+- [ ] **The synthetic "100 g" / "1 g" options are built from an ml serving and labelled grams.**
+      `getFoodById` accepts `metric_serving_unit === 'ml'` for the reference — for milk, near enough;
+      for honey or oil, "100 g" is 100 ml, ~40% off. Label it ml when the source is ml.
+- [ ] **"No results for 'chedd'" flashes while typing** (browse step): the empty state checks
+      `!searching`, and `searching` only turns on when the 500 ms debounce fires.
+- [ ] **~58pt of dead space above the title.** Measured from Logan's screenshot against MFP's on the
+      same phone: our header sits ~50pt lower. The detail header adds `insets.top - 4` inside a
+      `SafeAreaView edges={['top']}` that evidently already applies the inset here (the browse step
+      does the same with `+ 8`). Contradicts the CLAUDE.md note that SafeAreaView reads 0 inside a
+      Modal — so verify on device, not by reasoning, when fixing.
 - [ ] **Same product, two override keys.** Scanned → `barcode:<ean>`; opened from Recents or search →
       `fatsecret:<id>`. A fix made after scanning is missing the next time it is opened from Recents.
 - [ ] **Log button does not name the day.** It logs to whatever day Home is showing; the meal detail
@@ -1657,16 +1686,26 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
 - [ ] **Fiber shows "0g" when FatSecret has no fiber value** — unknown presented as zero, on a
       number the app tracks nowhere else.
 
-- [ ] **DESIGN — proposed, not decided (2026-09-14 session).** The screen is a nutrition label with
-      the decision tacked on the end: ~450pt of read-only display (150pt ring, % legend, four
-      ~100pt tiles — the same three numbers encoded three times) before serving / qty / meal / Log,
-      which sit at the fold and under the keypad. Proposed order: header (name + brand) →
-      PORTION first (serving as a sheet, qty as − n + stepper with typing secondary) → RESULT (kcal
-      + P/C/F in one row, and "after this: N kcal · Ng protein left today" from Home's goals) →
-      meal chips (own slots; pre-selected is RIGHT here, unlike the log picker — the user chose the
-      slot by tapping its card) → Log pinned to the bottom, naming the day when not today. Ring,
-      legend and fiber cut; "Fix it" becomes a small "Edit nutrition". Edit mode: "Edit entry" /
-      "Save changes", no back-to-search.
+- [ ] **DESIGN — mock v2 shown 2026-09-14, awaiting Logan's "go".** Logan AGREED: meal chip
+      pre-selected (he chose the slot by tapping its card), Log pinned to the bottom naming the day
+      when not today. He likes MFP's "% of calories per macro" row most — it is how he judges a
+      food's protein-to-calorie ratio. Mock v2, top-down: ✕ (and ‹ only when not editing) → name →
+      ONE card: small segmented kcal ring + Protein / Carbs / Fat columns, each % of calories over
+      grams (protein first), and under a divider "TODAY AFTER THIS" as two bars, Calories and
+      Protein, with this food as a lighter segment on top of what is already logged (edit mode
+      excludes the entry's own current values) → AMOUNT: typed number + a unit pill that opens a
+      sheet of servings (each with grams + kcal) and "By weight: grams / ounces" → MEAL chips from
+      `meal_slots` → "Nutrition details ›" (only values FatSecret actually has) + "Edit nutrition"
+      → pinned "Log to Breakfast" / "Save changes". Cut: the 150pt ring, the % legend, the four
+      tiles, the Fiber-as-0 tile. Edit mode: "EDIT ENTRY" eyebrow, no ‹, meal change saved.
+      REVISED from v1: the − n + stepper is DROPPED — research found no tracker using one, and it
+      cannot express "40 g". Research (sources in the 2026-09-14 session; much of it unverifiable):
+      MacroFactor shows the day-after-this impact on this screen and Carbon has an eye-icon preview,
+      while Cronometer charges for it; MacroFactor and Foodvisor switch between household units and
+      grams by tapping the unit; Carbon and MacroFactor can solve the amount from a target protein
+      or calorie number — POST-LAUNCH idea, not in v2. No app verified shows a protein-per-100-kcal
+      number; the % of calories already carries that fact (25% protein = 6 g per 100 kcal), so it
+      is not added as a second number.
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
