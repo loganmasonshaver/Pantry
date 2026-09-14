@@ -235,11 +235,22 @@ correctly all along).
   `chicken (raw, local table)@120/100g=168` for 140 g. Two dry runs on Logan's pantry after:
   protein [43,48,52] and [40,50,49] against a 40 g target, 0 under target, 0 below floor. Tests
   607 → 610, tsc 135/16 unchanged.
-- [ ] **Side effect to watch, NOT yet measured:** the same table feeds `computePerServingMacros` in
-  the TRENDING pipeline. Creators also list raw weights, so this is more correct there too, but it
-  lowers computed calories on any Discover recipe containing chicken/steak/pork and may move some
-  rows between `macros_source` 'computed' and 'model' via `COMPUTED_AGREEMENT_BAND`. Check the
-  next cron's `macrosSource` split against the 2026-09-13 baseline (creator 3 / model 5 / computed 4).
+- [x] **MEASURED 2026-09-14, no run needed — the raw table makes Discover BETTER, and by a lot.**
+  Replayed the whole 245-row pool offline through the new table: **47 rows (19%) contain an affected
+  raw meat**, and of those 8 are `creator` (untouched), 15 keep their label, **23 gain 'computed'**
+  and 1 loses it. In other words our arithmetic now AGREES with the creator's published per-serving
+  macros on 23 more recipes than it did — independent confirmation that creators list RAW weights
+  and that cooked pricing was the thing putting us out of band. No Discover change is needed.
+  The one loss is "Protein Jello" (107 stored vs 60 recomputed), which was marginal either way.
+  Yesterday's own batch is unaffected: **none of its 12 recipes contain chicken, steak or pork.**
+  Replaying it gives creator 3 / model 3 / computed 6 against the stored creator 3 / model 5 /
+  computed 4, and both flips (Soya Mutter Paratha, Apple Pie Cottage Cheese Cake) come from the
+  SERVINGS repair, not the meat change — with servings finally right, the per-serving division
+  agrees. Method: `scripts/` equivalents are in the session scratchpad; the query is a REST pull of
+  `trending_meals` fed through `computePerServingMacros` + `COMPUTED_AGREEMENT_BAND`.
+- [ ] **Small pre-existing table-matching quirk, low priority:** the `\b(steak|sirloin|beef)\b` row
+  matches "beef gelatin", which is not beef. It affects one known row (Protein Jello). Worth an
+  exclusion next time that file is open; not worth a deploy on its own.
 - [ ] **Logan's already-generated history carries the old inflated numbers.** `generated_meals` rows
   written before 2026-09-14 05:30 UTC overstate protein on meat meals by ~10-13 g. He is the only
   user; nothing is being recomputed. If he logged any of those meals, the day totals are overstated.
