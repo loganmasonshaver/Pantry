@@ -1745,17 +1745,17 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
          tick as the step change — no await, no spinner frame. Home warms both while the day's
          entries render. Tell: tap a logged entry → no spinner at all, including the first tap
          after a cold restart of a day whose entries were logged since this build.
-      2. **"240 g shows 144 kcal" — not a bug in the math, but the correction was NOT applied.**
-         144 = FatSecret's own whole milk (60 kcal/100 g × 2.4); the corrected figure would be
-         ~148. The prod row `fatsecret:794` still has basis NULL, so the app never read it as the
-         food that was open: either the "Whole Milk" opened was a different FatSecret entry than
-         the one corrected in March (search returns many), or the correction's cup is in
-         MILLILITRES and grams could not be bridged. The second case is now handled: a third tier
-         in `applyOverride` scales FatSecret's numbers for the portion by the correction's ratio on
-         the serving it was made on (test: ml cup + 100 g serving → 148). Tell: open the food →
-         the link under the card reads "Your numbers · Edit" when the correction is applied,
-         "Edit nutrition" when it is not; if the latter on food 794, the basis-upgrade write is
-         being refused and the console now logs why.
+      2. **"240 g shows 144 kcal" — RESOLVED: 144 is correct for Logan's account.** The prod
+         correction row `fatsecret:794` (150/8/11/8) belongs to a March TEST account
+         (`aaaaaa@gmail.com`), not to Logan's current user — RLS hides it from him, correctly.
+         His account has ZERO corrections, so 144 is FatSecret's own whole milk (60 kcal/100 g ×
+         2.4), which is what he logged (meal_logs: food 794, `__1g` × 240 → 144). The "~148" tell
+         assumed the row was his; it was not. Neither guessed cause applied. The ml/g ratio tier
+         added on the way stays — it is right for milk-shaped foods. The orphan row is left alone.
+         **Verification of the correction machinery end to end (the 36,000-kcal fix), still
+         open:** Whole Milk → Edit nutrition → 150 / 8 / 11 / 8 per cup → Save → link reads "Your
+         numbers · Edit"; unit → grams → 240 → ~148; then `select * from macro_overrides` shows a
+         row under Logan's user_id WITH basis_amount / basis_unit / serving_id filled.
       3. **Home painted 0 / "Nothing logged yet" / empty circles for ~1s on launch, then jumped.**
          The goals were disk-cached (GOALS_CACHE_KEY); today's rows and the week's were not. Both
          are mirrored now (`pantry_day_logs:<uid>:<date>`, `pantry_week_logs:<uid>:<week>`),
