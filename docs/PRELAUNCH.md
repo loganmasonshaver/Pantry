@@ -204,6 +204,46 @@ measured, not gated). The three things he saw share ONE root:
   install the expected versions of the packages" on start — a pre-existing version mismatch worth a
   `npx expo install --check` before the next build.
 
+## 0d. RAISED BY LOGAN 2026-09-14 — meat was priced COOKED, so every meat meal overclaimed protein  *(FIXED + VERIFIED)*
+Run 784's trace read `Chicken Breast@195/100g`. That is the COOKED density; raw is 120. A recipe's
+"150g chicken" is what the cook puts on the scale, and a cook weighs raw, so the card sold 47 g of
+protein where the raw weight gives ~34. **Measured on Logan's own week: 26 of 75 meals carried raw
+meat, averaging 45.8 g claimed protein.** A two-meat day finished ~22 g under a 160 g goal while the
+app showed it met — the precise failure he called out ("going under is not fun"). Two more effects:
+the calorie resize inherited the inflation and trimmed ~15% more food off the plate than it needed
+to, and the at-target tier built on 2026-09-13 was ranking meat above dairy and egg dishes on a
+phantom ~35% protein bonus (dairy and eggs are eaten in the state they are sold, so they were priced
+correctly all along).
+- [x] **The 2026-09-13 `pickFatSecretMatch` fix was only HALF a fix, and I reported it as done.** It
+  ranks results by whether the NAME says raw or names a cooking method. It worked for beef (run 785:
+  `Ground Beef (85% Lean / 15% Fat)@215/100g`, was `Ground Beef (Cooked)@276`) and did nothing for
+  chicken, because FatSecret's generic "Chicken Breast" entry is cooked-weight by convention and
+  says so nowhere. Verified through dry runs, which return a funnel WITHOUT the `macros` key — the
+  trace is only in the `pipeline_runs` row, which dry runs DO write. Read the row, not the response.
+- [x] **RAW IS NOW THE DEFAULT** (Logan's call, 2026-09-14). Three local-table rows carried cooked
+  densities under unqualified names and are now raw: `chicken` 165/31 → **120/22.5**, `steak|sirloin|
+  beef` 217/26 → **201/21**, `pork|chop` 242/27 → **231/21**. The cooked figures survive only on rows
+  that NAME the state (`rotisserie|shredded|cooked chicken` 165/31, `chicken salad`, `bacon`, deli).
+  `ground beef` (215/18.6), `ground turkey`, `salmon`, `shrimp`, `tuna` and the white-fish row were
+  already raw and are untouched.
+- [x] **Raw meat and fish are now priced from the local table, not FatSecret** (`tableReference()` in
+  `_shared/macro-estimate.ts`, used by `lookupMacros`). The table's meat rows are curated raw, so they
+  are the better answer here rather than a fallback. An ingredient that names its cooked state still
+  goes to FatSecret — it IS the cooked food — and so does a raw protein the table does not know,
+  where `pickFatSecretMatch` still biases toward a raw entry.
+- **VERIFIED in production 2026-09-14 05:34 UTC:** run 786's trace reads
+  `chicken (raw, local table)@120/100g=168` for 140 g. Two dry runs on Logan's pantry after:
+  protein [43,48,52] and [40,50,49] against a 40 g target, 0 under target, 0 below floor. Tests
+  607 → 610, tsc 135/16 unchanged.
+- [ ] **Side effect to watch, NOT yet measured:** the same table feeds `computePerServingMacros` in
+  the TRENDING pipeline. Creators also list raw weights, so this is more correct there too, but it
+  lowers computed calories on any Discover recipe containing chicken/steak/pork and may move some
+  rows between `macros_source` 'computed' and 'model' via `COMPUTED_AGREEMENT_BAND`. Check the
+  next cron's `macrosSource` split against the 2026-09-13 baseline (creator 3 / model 5 / computed 4).
+- [ ] **Logan's already-generated history carries the old inflated numbers.** `generated_meals` rows
+  written before 2026-09-14 05:30 UTC overstate protein on meat meals by ~10-13 g. He is the only
+  user; nothing is being recomputed. If he logged any of those meals, the day totals are overstated.
+
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
 - [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.
       Real product IDs are `com.kobalabs.pantry.monthly` (1 month) and `com.kobalabs.pantry.annual`

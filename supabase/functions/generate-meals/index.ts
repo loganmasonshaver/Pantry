@@ -9,7 +9,7 @@ import { mapLimit } from '../_shared/concurrency.ts'
 import { sanitizeList } from '../_shared/sanitize.ts'
 import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-match.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, detectBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
-import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
+import { verifyMacros, estimateMacros, MACRO_TOLERANCE, tableReference } from '../_shared/macro-estimate.ts'
 import { scaleToTarget, topUpProtein, clampPortions, roundIngredientGrams, fundProtein } from '../_shared/scale-recipe.ts'
 import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
 import { flavourAxes, flavourShelf, isSweetDish } from '../_shared/flavour-axes.ts'
@@ -64,6 +64,31 @@ async function fsSignedUrl(params: Record<string, string>): Promise<string> {
 }
 
 async function lookupMacros(name: string, grams: number): Promise<{ cal: number; p: number; c: number; f: number; matched: string; per100: number } | null> {
+  // RAW MEAT AND FISH ARE PRICED FROM THE LOCAL TABLE, NOT FATSECRET.
+  //
+  // A recipe's "150g chicken" is what the cook puts on the scale, and a cook weighs raw. FatSecret's
+  // top hit for a bare meat name is its COOKED entry — "Chicken Breast" at 195 kcal/100g against a
+  // raw 120 — and nothing in that entry's name or description says "cooked", so ranking results by
+  // their wording (the first attempt at this, 2026-09-13) changed nothing: the trace on run 784
+  // still read 195. Measured cost on Logan's own week: 26 of 75 meals carried raw meat, each
+  // claiming ~46 g protein where the raw weight gives ~35, so a two-meat day finished ~22 g under a
+  // 160 g goal while the app showed it met. The calorie resize inherited the same inflation and
+  // trimmed ~15% more food off the plate than it needed to.
+  //
+  // The table's meat rows are curated raw, so they are the better answer here, not merely a
+  // fallback. An ingredient that NAMES its cooked state ("rotisserie chicken", "canned tuna",
+  // "bacon", "deli") fails wantsRawMatch and still goes to FatSecret, which is correct — it IS the
+  // cooked food. A raw protein the table does not know also still goes to FatSecret, where
+  // pickFatSecretMatch at least biases toward a raw entry.
+  if (wantsRawMatch(name)) {
+    const ref = tableReference(name)
+    if (ref) {
+      const k = grams / 100
+      const round1 = (n: number) => Math.round(n * 10) / 10
+      return { cal: Math.round(ref.kcal * k), p: round1(ref.p * k), c: round1(ref.c * k), f: round1(ref.f * k),
+               matched: `${name} (raw, local table)`, per100: ref.kcal }
+    }
+  }
   try {
     // A raw protein fetches a page and takes the RAW entry; anything else keeps the top hit. See
     // _shared/fatsecret-match.ts for why — the cooked entry was inflating meat by 40-80%.

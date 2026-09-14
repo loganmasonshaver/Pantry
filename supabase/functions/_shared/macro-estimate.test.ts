@@ -6,7 +6,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros, leadingNumber, inferServings } from './macro-estimate.ts'
+import { COMPUTED_AGREEMENT_BAND, computePerServingMacros, estimateMacros, macroIncoherence, parseGrams, parseQty, verifyMacros, leadingNumber, inferServings, tableReference } from './macro-estimate.ts'
 
 // REAL — "Savory Cottage Cheese and Egg Scramble". Audited by hand against USDA values and found
 // accurate; the ~350g of egg whites is what the "7 liquid whites eggs" display bug was hiding.
@@ -157,8 +157,11 @@ const CANONICAL: Array<[string, number]> = [
   ['parmesan', 38.5], ['feta', 14.2], ['mozzarella', 22.2], ['cheddar', 24.9],
   ['shredded cheese', 24.9], ['almond milk', 1.2], ['milk', 3.3], ['protein powder', 75],
   // meats
-  ['chicken breast', 22.5], ['rotisserie chicken', 31], ['chicken salad', 14], ['chicken', 31],
-  ['ground beef', 18.6], ['steak', 26], ['ground turkey', 19.7], ['turkey', 22],
+  // MEAT IS RAW unless the name says otherwise — a cook weighs raw, so that is what a recipe's
+  // gram figure means. Bare 'chicken' and 'steak' carried COOKED densities until 2026-09-14; the
+  // cooked figures survive on the rotisserie row, which is the one that names its state.
+  ['chicken breast', 22.5], ['rotisserie chicken', 31], ['chicken salad', 14], ['chicken', 22.5],
+  ['ground beef', 18.6], ['steak', 21], ['ground turkey', 19.7], ['turkey', 22],
   ['bacon', 37], ['salmon', 20.4], ['tuna', 25.5], ['shrimp', 20.1], ['tofu', 17.3],
   // starches
   ['cooked rice', 2.7], ['quinoa', 4.4], ['rolled oats', 16.9], ['granola', 10.1],
@@ -428,4 +431,30 @@ test('only servings 1 is ever touched, and the rounded count must reconcile with
   assert.equal(inferServings(APPLE_PIE, 0, 1), null)
   assert.equal(inferServings(APPLE_PIE, 100, 1), null, 'ratio 33 caps at 16, 209 vs 100 does not reconcile — leave it')
   assert.equal(inferServings(APPLE_PIE, 209, 1)?.servings, 16, 'ratio 16 reconciles exactly at the cap')
+})
+
+// Run 784 (2026-09-14): the Pad Thai bowl's "chicken 150g" was priced from FatSecret's cooked
+// entry at 195 kcal/100g and sold as 47 g of protein. Weighed raw, 150 g of chicken breast is ~34 g.
+test('a bare meat name prices RAW, which is the weight a cook puts on the scale', () => {
+  const per100 = (name: string) => estimateMacros([{ name, grams: '100g' }])
+  assert.equal(per100('chicken').protein, 22.5)
+  assert.equal(per100('chicken').kcal, 120)
+  assert.equal(per100('steak').protein, 21)
+  assert.equal(per100('pork').protein, 21)
+  // 150 g of chicken is ~34 g of protein, not the 47 g run 784 claimed.
+  assert.equal(Math.round(estimateMacros([{ name: 'chicken', grams: '150g' }]).protein), 34)
+})
+
+test('a name that STATES its cooked form keeps the cooked figure', () => {
+  for (const [name, p] of [['rotisserie chicken', 31], ['shredded chicken', 31], ['cooked chicken', 31], ['chicken salad', 14]] as const) {
+    assert.equal(estimateMacros([{ name, grams: '100g' }]).protein, p, name)
+  }
+})
+
+test('tableReference answers per 100g for what the table knows, and null for what it does not', () => {
+  assert.deepEqual(tableReference('chicken'), { kcal: 120, p: 22.5, c: 0, f: 2.6 })
+  assert.deepEqual(tableReference('ground beef'), { kcal: 215, p: 18.6, c: 0, f: 15 })
+  assert.equal(tableReference('durian'), null)
+  assert.equal(tableReference(''), null)
+  assert.equal(tableReference(undefined), null)
 })

@@ -126,13 +126,19 @@ const TABLE: Row[] = [
   { re: /\bchicken (breast|thigh|tenderloin)s?\b/i, kcal: 120, p: 22.5, c: 0, f: 2.6 },
   { re: /\b(rotisserie|shredded|cooked) chicken\b/i, kcal: 165, p: 31, c: 0, f: 3.6 },
   { re: /\bchicken salad\b/i, kcal: 190, p: 14, c: 3, f: 13 },
-  { re: /\bchicken\b/i, kcal: 165, p: 31, c: 0, f: 3.6 },
+  // RAW, matching the specific breast/thigh row above. An unqualified "chicken" in a recipe is
+  // what the cook WEIGHS, and a cook weighs raw — cooked meat has lost water, so pricing it cooked
+  // overstates protein by ~35% and calories by ~60%. The cooked figure lives on the rotisserie /
+  // shredded / cooked row above, where the name says so.
+  { re: /\bchicken\b/i, kcal: 120, p: 22.5, c: 0, f: 2.6 },
   { re: /\bground (beef|chuck)\b/i, kcal: 215, p: 18.6, c: 0, f: 15 },
-  { re: /\b(steak|sirloin|beef)\b/i, kcal: 217, p: 26, c: 0, f: 12 },
+  // RAW lean sirloin. Was 26 g protein, which is a cooked density — see the chicken note above.
+  { re: /\b(steak|sirloin|beef)\b/i, kcal: 201, p: 21, c: 0, f: 13 },
   { re: /\bground turkey\b/i, kcal: 148, p: 19.7, c: 0, f: 7.7 },
   { re: /\b(turkey|deli meat|ham)\b/i, kcal: 135, p: 22, c: 1.5, f: 4 },
   { re: /\bbacon\b/i, kcal: 541, p: 37, c: 1.4, f: 42 },
-  { re: /\b(pork|chop)\b/i, kcal: 242, p: 27, c: 0, f: 14 },
+  // RAW loin chop. Was 27 g protein, a cooked density.
+  { re: /\b(pork|chop)\b/i, kcal: 231, p: 21, c: 0, f: 16 },
   { re: /\bsalmon\b/i, kcal: 208, p: 20.4, c: 0, f: 13.4 },
   { re: /\b(tuna)\b/i, kcal: 116, p: 25.5, c: 0, f: 0.8 },
   { re: /\b(shrimp|prawns?)\b/i, kcal: 85, p: 20.1, c: 0, f: 0.5 },
@@ -300,6 +306,22 @@ export function parseQty(raw: string | number | undefined): ParsedQty {
 /** Back-compat convenience — grams only. */
 export function parseGrams(raw: string | number | undefined): number {
   return parseQty(raw).g
+}
+
+/**
+ * The table's per-100g figures for one ingredient name, or null when the table does not know it.
+ *
+ * Exists so a caller that has a BETTER-CURATED answer than an external service can say so. The
+ * FatSecret lookup in generate-meals uses it for raw meat and fish: that service's top hit for a
+ * bare meat name is its COOKED entry ("Chicken Breast" at 195 kcal/100g), and no word in the name
+ * or description marks it as cooked, so no amount of result-ranking can tell them apart. The rows
+ * here are deliberately raw, which is the state a cook weighs in.
+ */
+export function tableReference(name: unknown): { kcal: number; p: number; c: number; f: number } | null {
+  const n = String(name ?? '').trim()
+  if (!n) return null
+  const row = TABLE.find(r => r.re.test(n))
+  return row ? { kcal: row.kcal, p: row.p, c: row.c, f: row.f } : null
 }
 
 export function estimateMacros(ingredients: MacroIngredient[] | undefined): MacroEstimate {
