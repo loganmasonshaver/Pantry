@@ -1562,15 +1562,23 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       double-generation race with Home), `missingFor`, the fresh-date key and ~120 lines of
       styles are gone; the tab is ingredients + scan. Home's "See all →" went with it (it led to
       the same three meals).
-- [ ] **UNVERIFIED ON DEVICE — the whole Home change above.** Tells: (1) three rows above the
-      fold with the log header + top of Breakfast cut at the fold on Logan's phone, and no
-      horizontal scroll left anywhere on Home; (2) a meal with a garnish gap reads "Better with:",
-      a structural gap "Need:", a full match a green "Ready to cook" check — compare against the
-      same meal's detail screen; (3) tapping an EMPTY slot card opens the food search for that
-      slot (it is the whole card now, no "Log" pill; the `+` pill only appears once a slot has an
-      entry); (4) the macro tiles read label / number / bar top-down; (5) at 0 logged the calorie
-      card says "Nothing logged yet", not "Keep logging!". Also check a 6.1" size if one is around:
-      the third row should be the cut element there instead of Breakfast.
+- [x] **VERIFIED ON DEVICE 2026-09-14 01:25 (Logan: "really happy with the changes overall").**
+      Measured from his screenshot: three rows above the fold, "Daily meal log" header at 711pt,
+      Breakfast card top at 739pt against a fold at ~782pt — so ~43pt of Breakfast is the cut
+      element. Readiness line confirmed ("verify 2 did work from before"), empty-slot tap confirmed
+      (3), spacing confirmed (1), tiles and "Nothing logged yet" visible in the shot (4, 5).
+- [ ] Residual tell, needs a logged entry to see: on a slot WITH an entry, the entry row's own tap
+      (edit / open meal) still works inside the now-disabled outer touchable, and the `+` pill
+      appears. Also the 6.1" size if one is ever around: the third row should be the cut element
+      there, not Breakfast.
+- [ ] **OPEN — Logan's eye keeps going to the centred-ring card (the "Hello Aman" Dribbble
+      shot).** Read the note in the 2026-09-14 session before reopening: the number-left /
+      ring-right layout was chosen on 09-04 for the fold, and a centred ring that carries the
+      number needs ≥104pt (84 cannot hold "2,200" legibly) = +46pt, which is more than the 43pt
+      of Breakfast currently showing. Break-even version if it is still wanted after seeing a
+      FILLED ring: ring 104 centred with the number inside, "0 consumed" / "2,200 goal" flanks
+      replacing the consumed line (−18), day nav folded into the card's top edge (−20) → net +8pt.
+      Decision deferred until a meal is logged and the ring is seen with data in it.
 - [ ] **Scan-card placement.** Probably state-gated rather than fixed — an empty pantry has nothing
       else to show and scan IS the content; a stocked one should not be pitched a feature it has
       already adopted. Logan pushed back on demoting scan and that pushback is recorded.
