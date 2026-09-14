@@ -23,7 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScrollToTop } from '@react-navigation/native'
-import { Check, Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Droplets, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
+import { Check, Clock, RefreshCw, Utensils, ScanLine, Milk, UtensilsCrossed, Cookie, ChevronDown, ChevronLeft, Pencil, Plus, X, Trash2, ChevronRight, ThumbsUp, ThumbsDown, Camera, Flame, Dumbbell, Apple, Egg, Drumstick, Salad, Carrot, BarChart3 } from 'lucide-react-native'
 import { Swipeable, Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Svg, { Circle as SvgCircle, Rect as SvgRect, Line as SvgLine, Path as SvgPath, Ellipse as SvgEllipse, G as SvgG } from 'react-native-svg'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -139,7 +139,7 @@ function iconForSlot(label: string): React.ElementType {
   if (l.includes('breakfast') || l.includes('morning')) return Milk
   if (l.includes('lunch') || l.includes('midday')) return Utensils
   if (l.includes('dinner') || l.includes('supper') || l.includes('evening')) return UtensilsCrossed
-  if (l.includes('snack')) return Droplets
+  if (l.includes('snack')) return Cookie
   return Utensils
 }
 
@@ -1782,58 +1782,70 @@ export default function HomeScreen() {
             {slots.map((slot) => {
               const hasEntries = slot.entries.length > 0
               const slotCal = slot.entries.reduce((s, e) => s + e.calories, 0)
+              const slotPro = slot.entries.reduce((s, e) => s + e.protein, 0)
               const SlotIcon = iconForSlot(slot.label)
               const openLog = () => { setFoodSearchSlot(slot.label); setShowFoodSearchModal(true) }
+              const openEntry = (entry: LogEntry) => {
+                if (entry.food_id) {
+                  setEditEntry(entry)
+                } else if (entry.meal_data) {
+                  router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify(entry.meal_data) }})
+                } else {
+                  router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify({
+                    name: entry.name, calories: entry.calories, protein: entry.protein,
+                    carbs: entry.carbs, fat: entry.fat, ingredients: [], steps: [], image: null,
+                  })}})
+                }
+              }
               return (
-                // An EMPTY slot is one tap target — the whole card. Three "Log" pills under three
-                // meal cards was six calls to action above the fold; the row itself is the action
-                // now, and the pill only appears once there is something in the slot to add to.
-                // `disabled` once it has entries, so the entry rows inside keep their own taps.
-                <TouchableOpacity key={slot.id} style={styles.mealSlotCard} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                // An EMPTY slot is one tap target — the whole card, header only: the `+` is the
+                // affordance and three cards each saying "Nothing logged yet" was noise (the macro
+                // card already says it at 0). `disabled` once it has entries, so the rows keep
+                // their own taps and swipes.
+                <TouchableOpacity key={slot.id} style={[styles.mealSlotCard, !hasEntries && styles.mealSlotCardEmpty]} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
+                  {/* flex-start, not center: the icon belongs beside the header, and on a four-entry
+                      card it used to float beside the second row. */}
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
                     <View style={styles.mealSlotIcon}>
                       <SlotIcon size={18} stroke={hasEntries ? '#4ADE80' : COLORS.textMuted} strokeWidth={1.8} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={styles.mealSlotHeader}>
                         <Text style={styles.mealSlotLabel}>{slot.label}</Text>
-                        {hasEntries ? (
-                          <TouchableOpacity style={styles.mealSlotLogBtn} onPress={openLog} activeOpacity={0.8}>
-                            <Text style={styles.mealSlotLogBtnText}>+</Text>
-                          </TouchableOpacity>
-                        ) : (
-                          <Plus size={16} stroke={COLORS.textMuted} strokeWidth={2} />
-                        )}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                          {/* The slot's total — "how big was breakfast" without adding up rows. */}
+                          {hasEntries && <Text style={styles.mealSlotTotals}>{slotCal.toLocaleString()} kcal · {Math.round(slotPro)}P</Text>}
+                          {/* One `+`, in the same place on every card; green once the slot has entries. */}
+                          {hasEntries ? (
+                            <TouchableOpacity onPress={openLog} activeOpacity={0.7} hitSlop={10}>
+                              <Plus size={18} stroke="#4ADE80" strokeWidth={2.2} />
+                            </TouchableOpacity>
+                          ) : (
+                            <Plus size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+                          )}
+                        </View>
                       </View>
-                      {hasEntries ? (
-                        slot.entries.map((entry, idx) => (
-                          <View key={entry.id} style={{ flexDirection: 'row', alignItems: 'center',
-                              paddingTop: 8, marginTop: idx > 0 ? 8 : 4,
-                              borderTopWidth: idx > 0 ? 1 : 0,
-                              borderTopColor: 'rgba(255,255,255,0.12)' }}>
-                            <TouchableOpacity onPress={() => {
-                              if (entry.food_id) {
-                                setEditEntry(entry)
-                              } else if (entry.meal_data) {
-                                router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify(entry.meal_data) }})
-                              } else {
-                                router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify({
-                                  name: entry.name, calories: entry.calories, protein: entry.protein,
-                                  carbs: entry.carbs, fat: entry.fat, ingredients: [], steps: [], image: null,
-                                })}})
-                              }
-                            }} activeOpacity={0.7} style={{ flex: 1, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <Text style={{ fontSize: 13, color: COLORS.textWhite, fontWeight: '500', flex: 1 }}>{entry.name}</Text>
-                              <Text style={{ fontSize: 12, color: COLORS.textMuted, fontWeight: '600', marginLeft: 8 }}>{entry.calories} kcal</Text>
+                      {/* Rows carry protein — a protein-first app's log showed only calories, so you
+                          could not see which entry did the work. Delete is swipe-left, the iOS idiom
+                          the Pantry rows already use; the per-row ✕ was the third way to delete
+                          (the edit screen has one too) and four of them crowded the food. */}
+                      {slot.entries.map((entry, idx) => (
+                        <Swipeable
+                          key={entry.id}
+                          renderRightActions={() => (
+                            <TouchableOpacity style={styles.entryDelete} onPress={() => deleteEntry(slot.id, entry.id)} activeOpacity={0.85}>
+                              <Text style={styles.entryDeleteText}>Delete</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity onPress={() => deleteEntry(slot.id, entry.id)} activeOpacity={0.6} style={{ paddingLeft: 12, paddingVertical: 4 }}>
-                              <X size={14} stroke="#666" strokeWidth={2} />
-                            </TouchableOpacity>
-                          </View>
-                        ))
-                      ) : (
-                        <Text style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 4 }}>Nothing logged yet</Text>
-                      )}
+                          )}
+                          friction={2}
+                          overshootRight={false}
+                        >
+                          <TouchableOpacity onPress={() => openEntry(entry)} activeOpacity={0.7} style={[styles.entryRow, idx > 0 && styles.entryRowDivider]}>
+                            <Text style={styles.entryName} numberOfLines={1}>{entry.name}</Text>
+                            <Text style={styles.entryNums}>{entry.calories} · <Text style={{ color: '#4ADE80' }}>{Math.round(entry.protein)}P</Text></Text>
+                          </TouchableOpacity>
+                        </Swipeable>
+                      ))}
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -1843,7 +1855,7 @@ export default function HomeScreen() {
 
           <TouchableOpacity style={styles.addSlotBtn} activeOpacity={0.6} onPress={() => setShowAddModal(true)}>
             <Plus size={15} stroke="#4ADE80" strokeWidth={2} />
-            <Text style={styles.addSlotText}>+ Add Meal</Text>
+            <Text style={styles.addSlotText}>Add meal</Text>
           </TouchableOpacity>
 
         </View>
@@ -2467,17 +2479,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textWhite,
   },
-  mealSlotLogBtn: {
-    backgroundColor: 'rgba(74,222,128,0.15)',
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-  },
-  mealSlotLogBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#4ADE80',
-  },
+  mealSlotCardEmpty: { paddingVertical: 10 },
+  mealSlotHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 34 },
+  mealSlotTotals: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  // Opaque, so the red action stays hidden behind the row until it is swiped open.
+  entryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, backgroundColor: COLORS.cardElevated },
+  entryRowDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)' },
+  entryName: { flex: 1, fontSize: 13, fontWeight: '500', color: COLORS.textWhite, marginRight: 8 },
+  entryNums: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  entryDelete: { backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, marginLeft: 8, borderRadius: 10 },
+  entryDeleteText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 
 
   // Timeline dots

@@ -1613,6 +1613,14 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       Hidden while a generation runs — `working` now includes `loading`, so the status line and
       sweep bar show during a redo over a set already on screen (they did not before). Tells: tap
       New picks → status row + sweep bar appear, three new rows land, the count drops by one.
+- [ ] **BUILT 2026-09-14 (Logan: "go") — the Daily meal log card, UNVERIFIED ON DEVICE.** Rows
+      read "675 · 46P" (protein was missing from a protein-first log); the header carries the
+      slot total "1,429 kcal · 63P"; delete is swipe-left (red Delete, the Pantry rows' pattern)
+      and the per-row ✕ is gone; the icon aligns with the header instead of floating mid-card;
+      empty slots are header + `+` only (no "Nothing logged yet"); one plain `+` per card, green
+      once the slot has entries; "+ + Add Meal" → "+ Add meal"; Snack's icon is a cookie, not
+      water drops. Tells: swipe a Breakfast row left → Delete slides in, tap → row gone; the
+      Breakfast header shows the total; the Lunch card is a single line.
 
 ## 6g. RAISED BY LOGAN 2026-09-14 — the food log screen (`components/FoodSearchModal.tsx`, detail step)
 
