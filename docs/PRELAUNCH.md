@@ -1621,6 +1621,20 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       once the slot has entries; "+ + Add Meal" → "+ Add meal"; Snack's icon is a cookie, not
       water drops. Tells: swipe a Breakfast row left → Delete slides in, tap → row gone; the
       Breakfast header shows the total; the Lunch card is a single line.
+- [ ] **RAISED BY LOGAN 2026-09-14 — the Pantry tab ("can look better"; the scan cards "feel
+      vibe-coded, not premium"; unsure about the category accordions; the pantry check "fills
+      space"). SMALL FIXES BUILT, DIRECTION PLANNED, awaiting go. UNVERIFIED ON DEVICE:** the
+      footer "Add an item" row is gone (the header ✚ is the one add control); "Clear pantry" is
+      quiet red text, confirmation kept; the hero banner is hidden in the affirm state; the
+      "HOLD TO REORDER" label is gone (handles stay); category icons are coloured at rest.
+      PLAN (sketched in the 2026-09-14 session): scan row = one white primary "Scan pantry" pill
+      + a dark secondary "Scan receipt", no line art, no AI badges; the pantry check becomes a
+      one-line status strip shown only for a gap, plus a second, more useful line — items
+      untouched N weeks, "still have these?" — which needs `pantry_items.created_at` (confirmed
+      to exist) plus a `last_confirmed_at`; the categories become a grouped list with section
+      headers and every item visible (tap = out of stock, swipe = delete), which retires the
+      accordion, the drag-reorder and the count badges. "Other" at 21% of items is a
+      categorisation-quality problem for the scan model, separate from layout.
 
 ## 6g. RAISED BY LOGAN 2026-09-14 — the food log screen (`components/FoodSearchModal.tsx`, detail step)
 
@@ -1839,7 +1853,7 @@ decision attached; do not re-open the decision, build it. Ordered by how directl
 Measured from the stylesheet: ~926pt of chrome above the first category row against a ~710pt
 viewport, so categories start ~215pt below the fold. Agreed fix, then parked when Logan pivoted to
 Home ("drop all of those design changes for now") — parked, NOT rejected:
-- [ ] Render NOTHING when `buildInsight` returns `tone === 'affirm'`. That state is terminal: the
+- [x] ~~Render NOTHING when `buildInsight` returns `tone === 'affirm'`.~~ DONE 2026-09-14. That state is terminal: the
       pantry can only grow (see the depletion item below), so once you have no gaps you see the
       same sentence and four checkmarks forever. The eight `gap` messages are good and stay —
       including the log-driven protein nudge at `lib/pantryProfile.ts:258`, which IS dynamic.
@@ -1853,7 +1867,7 @@ Home ("drop all of those design changes for now") — parked, NOT rejected:
 - [ ] Result: header 78 + scan 130 + search 68 + categories header 36 = 312pt, rows land at 720.
 
 **Pantry category rows carry two data points for 68pt each.**
-- [ ] Colour the icon circles at rest. `app/(tabs)/pantry.tsx:184` already has `category.iconColor`
+- [x] ~~Colour the icon circles at rest.~~ DONE 2026-09-14. `app/(tabs)/pantry.tsx:184` already has `category.iconColor`
       and only applies it when the row is EXPANDED, so all six read as identical grey. One line.
       This is also where the tab's visual identity comes from once the banner is gone.
 - [ ] Add 2-3 item names as a muted subtitle ("chicken, ground beef, salmon…"). Same height, triple

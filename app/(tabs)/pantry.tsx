@@ -174,8 +174,8 @@ function CategorySection({
           onPress={onToggle}
           activeOpacity={0.7}
         >
-          <View style={[styles.categoryIconCircle, isExpanded && { backgroundColor: `${category.iconColor}20` }]}>
-            <category.icon size={18} stroke={isExpanded ? category.iconColor : COLORS.textMuted} strokeWidth={1.8} />
+          <View style={[styles.categoryIconCircle, { backgroundColor: `${category.iconColor}20` }]}>
+            <category.icon size={18} stroke={category.iconColor} strokeWidth={1.8} />
           </View>
           <Text style={styles.categoryName}>{category.name}</Text>
           <View style={styles.categoryCountPill}>
@@ -514,10 +514,9 @@ export default function PantryScreen() {
       {/* ── Header (fixed) ── */}
       <View style={styles.header}>
         <PantryGroceryTabs active="pantry" />
-        {/* Was a solid white "Manual Entry" pill — the loudest control on the screen while not
-            being its primary action, and "Manual Entry" is our word, not the user's. Demoted to an
-            icon; the readable entry point is the "Add an item" row at the END OF THE LIST, where
-            the hand already is when you notice a gap. */}
+        {/* The one way to type an item in. Was a solid white "Manual Entry" pill — the loudest
+            control on the screen while not being its primary action — then an icon plus a second
+            "Add an item" row at the end of the list; the row went, the icon is where iOS puts add. */}
         <TouchableOpacity
           style={styles.addIconBtn}
           onPress={() => setShowAddModal(true)}
@@ -572,6 +571,10 @@ export default function PantryScreen() {
             <>
               {/* Hero banner — a personalized "what to stock next" insight (goal + diet aware),
                   replacing the old item-count "Stock Level" (see lib/pantryProfile). */}
+              {/* Only while there is a GAP to act on. The affirm state — "Dialed in", four ticks —
+                  is terminal: the pantry only grows, so once seen it is seen forever, and it was
+                  filling ~200pt above the categories with a sentence nobody acts on (§6d). */}
+              {pantryInsight.tone !== 'affirm' && (
               <View style={[styles.heroBanner, { marginHorizontal: 0 }]}>
                 <Image
                   source={{ uri: 'https://fdafjnkqqtpsjtddbfdz.supabase.co/storage/v1/object/public/ingredient-images/pantry-hero.webp?v=2' }}
@@ -580,14 +583,11 @@ export default function PantryScreen() {
                 />
                 <LinearGradient colors={['transparent', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.9)', '#000000']} locations={[0, 0.4, 0.75, 1]} style={styles.heroBannerGradient} />
                 <View style={styles.heroBannerContent}>
-                  <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'affirm' ? 'PANTRY CHECK' : pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
+                  <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
                   <Text style={styles.heroInsightHeadline} numberOfLines={2}>{pantryInsight.headline}</Text>
-                  {/* Detail is hidden in the affirm state — the coverage chips below already say
-                      "protein/produce/fats are covered", so the sentence would just duplicate them.
-                      Gap/empty states keep it: there it explains the WHY and pairs with the CTA. */}
-                  {pantryInsight.tone !== 'affirm' && (
-                    <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
-                  )}
+                  {/* Only gap/empty reach here (the guard above), where the detail explains the WHY
+                      and pairs with the CTA. */}
+                  <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
                   {/* Pantry Check strip — at-a-glance macro coverage (Step C). ✓ = stocked, ! = gap
                       for this goal. In the affirm state this IS the content; in gap states it's the
                       supporting overview under the headline+detail. */}
@@ -610,6 +610,7 @@ export default function PantryScreen() {
                   )}
                 </View>
               </View>
+              )}
 
               {/* Scan cards — each card has a compact animated illustration filling
                   the lower half so the cards aren't visually empty. Both share the
@@ -736,7 +737,6 @@ export default function PantryScreen() {
               {visibleCategories.length > 0 && (
                 <View style={styles.categoriesHeader}>
                   <Text style={styles.categoriesTitle}>Categories</Text>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1 }}>HOLD TO REORDER</Text>
                 </View>
               )}
             </>
@@ -744,14 +744,12 @@ export default function PantryScreen() {
           ListFooterComponent={
             totalItems > 0 ? (
               <View style={styles.footerWrap}>
-                <TouchableOpacity style={styles.addItemRow} onPress={() => setShowAddModal(true)} activeOpacity={0.7}>
-                  <Plus size={16} stroke={'#4ADE80'} strokeWidth={2.5} />
-                  <Text style={styles.addItemRowText}>Add an item</Text>
-                </TouchableOpacity>
-                <Text style={styles.footerCount}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''} total</Text>
-                <TouchableOpacity style={styles.clearBtn} onPress={clearPantry} activeOpacity={0.7}>
-                  <Trash2 size={15} stroke="#EF4444" strokeWidth={2} />
-                  <Text style={styles.clearBtnText}>Clear pantry</Text>
+                {/* One add control — the ✚ in the header. This row held a second door to the same
+                    sheet, six cards below the first. Clear pantry stays as quiet text: destructive
+                    and irreversible, so it keeps its confirmation and loses its red button. */}
+                <Text style={styles.footerCount}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''}</Text>
+                <TouchableOpacity onPress={clearPantry} activeOpacity={0.7} hitSlop={8}>
+                  <Text style={styles.clearLink}>Clear pantry</Text>
                 </TouchableOpacity>
               </View>
             ) : null
@@ -874,12 +872,6 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: COLORS.cardElevated,
   },
-  addItemRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    paddingVertical: 14, marginBottom: 12,
-    borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: COLORS.trackDark,
-  },
-  addItemRowText: { fontSize: 14, fontWeight: '600', color: '#4ADE80' },
   manualEntryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1242,10 +1234,9 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20, maxWidth: 280 },
 
   timestamp: { textAlign: 'center', fontSize: 13, color: COLORS.textMuted, fontWeight: '500', marginTop: 24, letterSpacing: 0.3 },
-  footerWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: 24, paddingBottom: 48 },
+  footerWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: 18, paddingBottom: 28 },
   footerCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500', letterSpacing: 0.3 },
-  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, paddingHorizontal: 16, borderRadius: 30, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
-  clearBtnText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
+  clearLink: { fontSize: 13, fontWeight: '600', color: '#EF4444' },
 
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   modalSheet: {
