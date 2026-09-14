@@ -163,6 +163,10 @@ npx expo run:ios   # build and run on iOS simulator
   one. Symptom that identifies it: chrome at `insets.top + N` renders at y=N, so a LEFT-hugging
   control still works while a CENTRED one lands under the Dynamic Island, which eats the tap. That
   is exactly how the scan camera's "More tips" was unreachable while its ✕ was fine.
+  **Enforced since 2026-09-14 by `lib/modalSafeArea.test.ts`:** the suite fails for any `<Modal>`
+  subtree that uses `SafeAreaView` or `insets.*` without its own `<SafeAreaProvider>`. Six modals
+  had the bug that day; the food log screen showed it as the whole screen shifted up by the status
+  bar, intermittently — the inset raced the modal's window and sometimes read 0.
 
 ### A brew node upgrade breaks the iOS build, silently and much later
 - `ios/.xcode.env.local` pins an ABSOLUTE node path for Xcode's script phases. It was written as a

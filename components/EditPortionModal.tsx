@@ -12,7 +12,7 @@ import {
   Image,
   Keyboard,
 } from 'react-native'
-import { SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
@@ -118,6 +118,12 @@ export default function EditPortionModal({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      {/* A <Modal> is its own window; react-native-safe-area-context cannot read that window's
+          insets from the app root, so a bare SafeAreaView in here pads by 0 and the content sits
+          under the status bar — intermittently, which is why it kept coming back. A provider scoped
+          to the modal is the documented remedy (see PantryScanModal); lib/modalSafeArea.test.ts
+          fails the suite for any Modal subtree that uses safe-area without one. */}
+      <SafeAreaProvider>
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         {/* Header */}
         <View style={styles.topBar}>
@@ -265,6 +271,7 @@ export default function EditPortionModal({
           </ScrollView>
         )}
       </SafeAreaView>
+          </SafeAreaProvider>
     </Modal>
   )
 }

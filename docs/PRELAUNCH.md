@@ -1819,6 +1819,16 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       Milk) stored 150/8/11/8 with basis 244 g / serving 18 under HIS user — the end-to-end proof
       of the 36,000-kcal fix. He entered whole-milk numbers on 2% as a test; Reset to original
       when done.
+- [ ] **RAISED BY LOGAN 2026-09-14 ("prevent this from happening again") — the food search screen
+      shifted up under the status bar, intermittently. FIXED for the CLASS, UNVERIFIED ON DEVICE.**
+      The CLAUDE.md landmine: a bare SafeAreaView inside a <Modal> pads by 0 — and it RACES the
+      modal's window, so it passed on some opens and failed on others, which is why Logan saw it
+      "multiple times". Six modals had it (FoodSearch, EditPortion, RecipeForm, ReceiptScan,
+      CreatorRecipe, AILog); each now has its own <SafeAreaProvider>, PantryScanModal's remedy.
+      Prevention: `lib/modalSafeArea.test.ts` scans every Modal subtree in app/ and components/
+      and fails the suite for safe-area use without a provider; CLAUDE.md points at it. Tell: open
+      Log from any slot ten times — "Search Food" and the ✕ sit below the status bar every time;
+      the edit screen's ✕ likewise.
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
