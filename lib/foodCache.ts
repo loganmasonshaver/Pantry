@@ -21,6 +21,11 @@ export function foodFromSearchResult(r: FoodSearchResult): FoodDetail | null {
   return { food_id: r.food_id, food_name: r.food_name, brand_name: r.brand_name, servings: r.servings }
 }
 
+/** The food if it is already in memory — synchronous, so a cached open needs no await at all. */
+export function peekFood(id: string): FoodDetail | undefined {
+  return memory.get(id)
+}
+
 export async function loadFood(id: string): Promise<FoodDetail> {
   const hit = memory.get(id)
   if (hit) return hit

@@ -34,8 +34,8 @@ import {
   FoodSearchResult,
   FoodDetail,
 } from '@/lib/fatsecret'
-import { getFoodKey, getOverride, saveOverride, type MacroOverride } from '@/hooks/useMacroOverrides'
-import { loadFood, rememberFood, foodFromSearchResult } from '@/lib/foodCache'
+import { getFoodKey, loadOverrideMap, peekOverrideMap, refreshOverrideMap, saveOverride, type MacroOverride } from '@/hooks/useMacroOverrides'
+import { loadFood, peekFood, rememberFood, foodFromSearchResult } from '@/lib/foodCache'
 import {
   availableUnits, applyOverride, calorieSplit, convertAmount, correctionPortion, dayImpact,
   fatsecretNutrients, findServing, formatAmount, legacyBasis, logFields, metricBasis, metricOf,
@@ -166,7 +166,10 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   }, [visible])
 
   useEffect(() => {
-    if (visible && user) loadRecentFoods(user.id).then(setRecentFoods)
+    if (!visible || !user) return
+    loadRecentFoods(user.id).then(setRecentFoods)
+    // Corrections are read from memory/disk on open; this keeps that copy current across devices.
+    refreshOverrideMap(user.id).catch(() => {})
   }, [visible, user?.id])
 
   // Bring the amount card above the keypad only if it is under it. keyboardDidShow, not onFocus:
@@ -196,32 +199,51 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   ) => {
     const seq = ++openSeq.current
     Keyboard.dismiss()
-    setDetail(null)
     setUnitSheet(false)
     setShowExtras(false)
     setMacroEditVisible(false)
     setStep('detail')
-    setDetailLoading(true)
-    try {
-      // The correction is fetched ALONGSIDE the food, not after it — it only needs the id — and
-      // still lands before the first paint, so the numbers never show FatSecret's and then jump.
-      const [food, row] = await Promise.all([
-        seed ? Promise.resolve(seed) : load(),
-        user ? getOverride(user.id, getFoodKey({ foodId })) : Promise.resolve(null),
-      ])
-      if (seq !== openSeq.current) return
+    const key = getFoodKey({ foodId })
+    const build = (food: FoodDetail, row: MacroOverride | null): Detail => {
       const def = pickDefaultServing(food.servings)
       const initial = start?.(food) ?? (def ? { unit: { kind: 'serving', servingId: def.serving_id } as Unit, amount: 1 } : null)
       if (!initial || !fatsecretNutrients(initial.unit, initial.amount, food.servings)) throw new Error('no serving data')
       const override = row && user ? withBasis(user.id, row, food) : null
-      setDetail({ food, unit: initial.unit, amount: initial.amount, text: formatAmount(initial.amount, initial.unit), override })
-      if (seed) {
-        getFoodById(foodId).then(full => {
-          rememberFood(full)
-          if (seq !== openSeq.current) return
-          setDetail(d => (d && d.food.food_id === full.food_id && full.servings.length > d.food.servings.length ? { ...d, food: full } : d))
-        }).catch(() => {})
-      }
+      return { food, unit: initial.unit, amount: initial.amount, text: formatAmount(initial.amount, initial.unit), override }
+    }
+    // Once a food and the user's corrections are both in memory, the screen is built in the same
+    // tick as the step change — no await, no frame with nothing to draw, no spinner. That is every
+    // open after the first, and every edit of an entry (a food already fetched to log it).
+    const refreshSeed = () => {
+      if (!seed) return
+      getFoodById(foodId).then(full => {
+        rememberFood(full)
+        if (seq !== openSeq.current) return
+        setDetail(d => (d && d.food.food_id === full.food_id && full.servings.length > d.food.servings.length ? { ...d, food: full } : d))
+      }).catch(() => {})
+    }
+    const memFood = seed ?? peekFood(foodId)
+    const memOverrides = user ? peekOverrideMap(user.id) : new Map<string, MacroOverride>()
+    if (memFood && memOverrides) {
+      try {
+        setDetail(build(memFood, memOverrides.get(key) ?? null))
+        setDetailLoading(false)
+        refreshSeed()
+        return
+      } catch {}
+    }
+    setDetail(null)
+    setDetailLoading(true)
+    try {
+      // The correction map is read alongside the food, not after it, and both land before the
+      // first paint, so the numbers never show FatSecret's and then jump to the user's own.
+      const [food, map] = await Promise.all([
+        memFood ? Promise.resolve(memFood) : load(),
+        user ? loadOverrideMap(user.id) : Promise.resolve(new Map<string, MacroOverride>()),
+      ])
+      if (seq !== openSeq.current) return
+      setDetail(build(food, map.get(key) ?? null))
+      refreshSeed()
     } catch {
       if (seq !== openSeq.current) return
       Alert.alert('Error', 'Could not load food details.')
@@ -394,8 +416,10 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
   const reloadOverride = async () => {
     if (!user || !detail) return
+    // saveOverride / deleteOverride already updated the map, so this is a memory read.
     const { food } = detail
-    const row = await getOverride(user.id, getFoodKey({ foodId: food.food_id }))
+    const map = await loadOverrideMap(user.id)
+    const row = map.get(getFoodKey({ foodId: food.food_id })) ?? null
     const override = row ? withBasis(user.id, row, food) : null
     setDetail(d => (d && d.food.food_id === food.food_id ? { ...d, override } : d))
   }

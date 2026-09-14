@@ -43,6 +43,8 @@ import { trackMealsGenerated, trackDiscoverNudgeTapped } from '../../lib/analyti
 import { trackCookTonightUsed } from '@/lib/engagement'
 import { discoverNudge } from '@/lib/discoverNudge'
 import { missingIngredients, structuralMissing } from '@/lib/mealReadiness'
+import { loadFood } from '@/lib/foodCache'
+import { loadOverrideMap } from '@/hooks/useMacroOverrides'
 import { dietExcludedStaples } from '@/constants/staples'
 import { haptic } from '../../lib/haptics'
 import AILogModal from '../../components/AILogModal'
@@ -1079,11 +1081,18 @@ export default function HomeScreen() {
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setSlots(result)
+    // Warm what a tap on an entry will need — the food record and the user's corrections — so the
+    // edit screen builds synchronously even on the first tap after a cold start. Disk reads for
+    // anything logged since the cache existed; one FatSecret call per older entry, once a session.
+    for (const row of data) if (row.food_id) loadFood(String(row.food_id)).catch(() => {})
+    if (userRef.current) loadOverrideMap(userRef.current).catch(() => {})
   }, [])
 
   // The day the network last answered for. Hydration from disk is skipped once it has, so a slow
   // disk read can never roll a fresh fetch back.
   const fetchedFor = useRef<string | null>(null)
+  const userRef = useRef<string | null>(null)
+  userRef.current = user?.id ?? null
   const fetchTodayLogs = useCallback(async () => {
     if (!user) return
     perfMark('Home logs fetch START')

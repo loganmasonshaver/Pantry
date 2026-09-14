@@ -1738,8 +1738,13 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
          in PARALLEL with the food, and a tapped search result paints from the servings the v3
          search already returned (food.get runs behind it and swaps in any serving the search
          left out). A logged entry is always a food already fetched to log it, so its edit opens
-         from disk. Tell: tap a logged entry → the screen is there with the modal slide, no
-         spinner. First open of a NEVER-fetched food still costs one round-trip.
+         from disk. Second pass (Logan: still a half-second spinner every time, after a
+         restart): that was the CORRECTION lookup, a network query on every open. The user's whole
+         correction set is now one map in memory + disk (`pantry_overrides:<uid>`), every write
+         goes through it, and when food and map are both in memory the screen is built in the same
+         tick as the step change — no await, no spinner frame. Home warms both while the day's
+         entries render. Tell: tap a logged entry → no spinner at all, including the first tap
+         after a cold restart of a day whose entries were logged since this build.
       2. **"240 g shows 144 kcal" — not a bug in the math, but the correction was NOT applied.**
          144 = FatSecret's own whole milk (60 kcal/100 g × 2.4); the corrected figure would be
          ~148. The prod row `fatsecret:794` still has basis NULL, so the app never read it as the
