@@ -150,7 +150,7 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
             // The unit list replaces the form rather than stacking a sheet on a sheet.
             <>
               <View style={styles.header}>
-                <Text style={styles.title}>Per</Text>
+                <Text style={[styles.title, { flex: 1 }]}>Per</Text>
                 <TouchableOpacity style={styles.closeBtn} onPress={() => setPicker(false)} activeOpacity={0.7}>
                   <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
                 </TouchableOpacity>
