@@ -1606,6 +1606,68 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
 
 ---
 
+## 6g. RAISED BY LOGAN 2026-09-14 — the food log screen (`components/FoodSearchModal.tsx`, detail step)
+
+One screen, five jobs: log a searched food, log a Recent, log a scanned barcode, EDIT a logged
+entry (Home → tap an entry with a `food_id`), and correct a food's macros for yourself ("Something
+off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half baked".
+
+- [ ] **FIXED, UNVERIFIED ON DEVICE — QTY editing.** (1) Keyboard only opened on the second tap: the
+      input was a ~48×19pt field centred in 16pt of padding, so most taps on the box hit padding;
+      the input now fills the box, the detail ScrollView has `keyboardShouldPersistTaps="handled"`,
+      and the search field's keyboard is dismissed before the detail step mounts. (2) Keypad covered
+      the box: `automaticallyAdjustKeyboardInsets` + scroll-to-end on `keyboardDidShow`, so QTY, the
+      meal chips and the Log button sit above the keypad. (3) No return key on `decimal-pad`: an
+      `InputAccessoryView` "Done" bar. Also: ✕ closes the keyboard first when it is up; qty commits
+      on blur (empty / "0" / "." was logged as 1 while the box still showed what was typed); a
+      comma-decimal keypad's "1,5" is read as 1.5, not 1. Tells: first tap on QTY opens the keypad;
+      the box, chips and Log button are visible above it; Done dismisses; clearing the box and
+      tapping Done shows 1. Unsure until seen: InputAccessoryView and the keyboard inset both
+      inside an RN `<Modal>` — neither is used inside a Modal anywhere else in the app.
+
+**Found by reading the code paths + prod data, NOT reproduced on device. Not fixed (Logan: plan only).**
+- [ ] **Edit mode can overwrite an entry with a DIFFERENT food.** Home → tap a logged food → ‹ back
+      (goes to search, `editLogId` still set) → open any other food → "Update Log". The update
+      writes the new food's calories/macros/serving_id/quantity onto the old row but NOT
+      `meal_name` or `food_id`, so "Cheddar Cheese" carries chicken's numbers, and its next edit
+      cannot find its serving. Fix direction: edit mode has no back-to-search at all.
+- [ ] **Edit mode ignores a meal change.** The chips are shown and tappable, but the update never
+      writes `slot` — move an entry to Lunch, tap Update, it stays in Breakfast. Silent.
+- [ ] **A macro fix is per FOOD, applied to every serving.** The override stores absolute numbers
+      taken from whichever serving was selected when saved; switch "1 cup (113g)" to "1 slice (21g)"
+      and the slice shows the cup's calories. 1 override exists in prod.
+- [ ] **Same product, two override keys.** Scanned → `barcode:<ean>`; opened from Recents or search →
+      `fatsecret:<id>`. A fix made after scanning is missing the next time it is opened from Recents.
+- [ ] **Log button does not name the day.** It logs to whatever day Home is showing; the meal detail
+      screen names a non-today day on its button for exactly this reason, this one does not.
+- [ ] **Double-tap on Log may insert twice** — guarded by `saving` STATE, which is async; the meal
+      detail screen uses a ref for the same guard. Plausible, not reproduced (rule out environment
+      first if a duplicate shows up — see CLAUDE.md).
+- [ ] **Meal chips come from Home's RENDERED slots,** which include orphan sections (a slot label only
+      present because an old entry used it). Should be `meal_slots`, like the log picker since
+      `2bc3b88`. Edit mode also passes the entry NAME as `defaultSlot` — masked today by
+      `initialSlot`, a trap for the next edit.
+- [ ] **Recents show the logged TOTAL** (2 cups = 910 cal) but open at qty 1 (455) — list and detail
+      disagree.
+- [ ] **Camera permission denied once → "Allow Camera" is dead forever.** `requestCameraPermission`
+      cannot re-prompt; there is no Settings deep link.
+- [ ] **Serving picker is an `Alert` with one button per serving,** matched by description text —
+      a food with 10+ servings is a long system alert, and two servings with the same description
+      always pick the first.
+- [ ] **Fiber shows "0g" when FatSecret has no fiber value** — unknown presented as zero, on a
+      number the app tracks nowhere else.
+
+- [ ] **DESIGN — proposed, not decided (2026-09-14 session).** The screen is a nutrition label with
+      the decision tacked on the end: ~450pt of read-only display (150pt ring, % legend, four
+      ~100pt tiles — the same three numbers encoded three times) before serving / qty / meal / Log,
+      which sit at the fold and under the keypad. Proposed order: header (name + brand) →
+      PORTION first (serving as a sheet, qty as − n + stepper with typing secondary) → RESULT (kcal
+      + P/C/F in one row, and "after this: N kcal · Ng protein left today" from Home's goals) →
+      meal chips (own slots; pre-selected is RIGHT here, unlike the log picker — the user chose the
+      slot by tapping its card) → Log pinned to the bottom, naming the day when not today. Ring,
+      legend and fiber cut; "Fix it" becomes a small "Edit nutrition". Edit mode: "Edit entry" /
+      "Save changes", no back-to-search.
+
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
 These came out of a working session and existed ONLY in that conversation until now. Each has a

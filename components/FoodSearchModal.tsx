@@ -13,6 +13,7 @@ import {
   Alert,
   Image,
   Keyboard,
+  InputAccessoryView,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
@@ -98,6 +99,21 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
   // Portion quantity
   const [quantity, setQuantity] = useState('1')
+  const qtyFocused = useRef(false)
+  const detailScrollRef = useRef<ScrollView>(null)
+  // decimal-pad has no return key on iOS, so without this there is no way to finish typing short of
+  // hunting for somewhere to tap. The accessory bar puts a Done above the keypad.
+  const QTY_ACCESSORY_ID = 'food-qty-done'
+
+  // Scroll the quantity row, the meal chips and the Log button above the keypad once it is up.
+  // keyboardDidShow rather than onFocus: the ScrollView's keyboard inset is only applied as the
+  // keyboard lands, and scrolling to the end before that scrolls to the wrong end.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      if (qtyFocused.current) detailScrollRef.current?.scrollToEnd({ animated: true })
+    })
+    return () => sub.remove()
+  }, [])
 
   // Override state
   const [scannedBarcode, setScannedBarcode] = useState<string | null>(null)
@@ -231,6 +247,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   }
 
   const openDetail = async (foodId: string) => {
+    // The search field unmounts with the browse step while it still holds focus. Dismissing first
+    // means the detail screen starts with nothing focused, so its first tap is not spent on a blur.
+    Keyboard.dismiss()
     setDetailLoading(true)
     setStep('detail')
     setScannedBarcode(null)
@@ -349,7 +368,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
               <Text style={styles.topTitle} numberOfLines={1}>
                 {selectedFood?.food_name ?? 'Loading...'}
               </Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+              {/* Keyboard up → this closes the keyboard, not the modal. It is the nearest control to
+                  the keypad's top-right, where people tap to get rid of it. */}
+              <TouchableOpacity style={styles.closeBtn} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } handleClose() }}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
             </View>
@@ -360,7 +381,18 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                 <Text style={styles.loadingText}>Loading nutrition data...</Text>
               </View>
             ) : (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+              <ScrollView
+                ref={detailScrollRef}
+                showsVerticalScrollIndicator={false}
+                style={{ flex: 1 }}
+                // Without this the default ('never') spends a tap on dismissing a keyboard — or on a
+                // text field it still believes is focused — instead of delivering it to the child.
+                keyboardShouldPersistTaps="handled"
+                // Insets the content by the keyboard's height so the bottom of the form can scroll
+                // above it; nothing else on this screen moved out of the keypad's way.
+                automaticallyAdjustKeyboardInsets
+                keyboardDismissMode="interactive"
+              >
 
                 {/* Macro display */}
                 {selectedServing && (() => {
@@ -514,13 +546,26 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                   )}
                   <View style={styles.qtyWrap}>
                     <Text style={styles.servingQtyLabel}>QTY</Text>
+                    {/* The input FILLS the box. It used to be a ~48×19pt field centred inside 16pt of
+                        padding, so a tap on the box mostly landed on padding and did nothing — the
+                        "keyboard only opens on the second tap". */}
                     <View style={styles.qtyBox}>
                       <TextInput
                         style={styles.qtyInput}
                         value={quantity}
-                        onChangeText={setQuantity}
+                        // A comma-decimal locale's keypad types "1,5", which parseFloat reads as 1.
+                        onChangeText={t => setQuantity(t.replace(',', '.'))}
                         keyboardType="decimal-pad"
                         selectTextOnFocus
+                        inputAccessoryViewID={QTY_ACCESSORY_ID}
+                        onFocus={() => { qtyFocused.current = true }}
+                        // Commit on blur: an empty, "0" or "." box was logged as 1 serving while still
+                        // showing what was typed. Show the number that will actually be logged.
+                        onBlur={() => {
+                          qtyFocused.current = false
+                          const n = parseFloat(quantity)
+                          setQuantity(String(Number.isFinite(n) && n > 0 ? Math.max(0.1, n) : 1))
+                        }}
                         placeholderTextColor={COLORS.textMuted}
                       />
                     </View>
@@ -636,6 +681,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                           style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.06)' }}
                           activeOpacity={0.7}
                           onPress={() => {
+                            Keyboard.dismiss()
                             setDetailLoading(true)
                             setStep('detail')
                             getFoodById(food.food_id)
@@ -774,6 +820,14 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
       </SafeAreaView>
       </GestureHandlerRootView>
+
+      <InputAccessoryView nativeID={QTY_ACCESSORY_ID}>
+        <View style={styles.accessoryBar}>
+          <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={10} activeOpacity={0.7}>
+            <Text style={styles.accessoryDone}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </InputAccessoryView>
 
       {/* Macro override editor */}
       {macroEditVisible && selectedFood && currentUserId && selectedServing && (() => {
@@ -1046,18 +1100,29 @@ const styles = StyleSheet.create({
   qtyBox: {
     backgroundColor: '#141414',
     borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
+    overflow: 'hidden',
   },
+  // The padding lives on the input, not the box, so the whole visible box is the tap target.
   qtyInput: {
     fontSize: 16,
     fontWeight: '700',
     color: COLORS.textWhite,
     textAlign: 'center',
-    padding: 0,
-    minWidth: 36,
+    paddingHorizontal: 8,
+    paddingVertical: 14,
+    width: '100%',
   },
+  accessoryBar: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  accessoryDone: { fontSize: 16, fontWeight: '700', color: '#4ADE80' },
 
   // Slot picker
   slotLabel: {
