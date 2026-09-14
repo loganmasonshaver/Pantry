@@ -191,6 +191,13 @@ measured, not gated). The three things he saw share ONE root:
   fields and fall back to any gap, as before.
 - [x] Step-checks' "unseasoned" now uses `isSweetDish()`, so "Yogurt and Pineapple Power Bowl" is no
   longer counted unseasoned (it was, on run 759, and it feeds the daily line's percentage).
+- **Sweep after (19 decks / 57 meals, one round):** savory 2+ axes 73% (76% before this batch,
+  57% before the flavour work); under the floor 9 of 57 (the same rate as 17 of 114), all on the
+  carb-heavy and tiny pantries whose ceiling is below the floor; uncookable-kept 0 (was 20 → 2);
+  hard issues only the name-promise and duplicate kinds — no "could have reached the floor" miss.
+  Every standard pantry shows all three meals at or over target; the 16 under-target meals are the
+  ceiling pantries plus a few 44-49 g on vegetarian / messy-names / meal-plan. Raw pricing lowers
+  every meat reading, so a 49 that used to read 55 is the honest number, and the tier ranks it.
 - [ ] **Metro died twice today with no crash record visible** (Logan's terminal showed only the auth
   login; the first restart was a manual `expo start -c`, the second I started detached via nohup on
   8082, pid in the scratchpad log). Expo prints "Your project may not work correctly until you
