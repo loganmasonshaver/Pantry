@@ -1571,6 +1571,24 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       (edit / open meal) still works inside the now-disabled outer touchable, and the `+` pill
       appears. Also the 6.1" size if one is ever around: the third row should be the cut element
       there, not Breakfast.
+- [ ] **UNVERIFIED ON DEVICE — "Log to which meal?" now lists YOUR meal slots, nothing
+      pre-selected, no "+ Custom meal"** (Logan, 2026-09-14). Was a hardcoded Breakfast / Lunch /
+      Dinner / Snack with a green time-of-day default and a free-text "+ Custom meal". Production
+      had 12 logs; **2 landed in a slot not in that user's own list** ("Midnight snacky" typed via
+      Custom, "Snack" from the hardcoded list against a profile without one) — each an orphan
+      section on Home. The picker now reads `profiles.meal_slots`, the list Home's log renders,
+      in the same order. Tell: open any meal → Log Meal → the rows match Home's "Daily meal log"
+      names and count exactly, none is green. Then in Profile change Meals Per Day, accept
+      "Update", and the picker follows. The 2 existing orphan rows are left alone — Home still
+      renders them after the user's own slots.
+- [ ] **FOUND 2026-09-14, not fixed — meal COUNT has two sources that can drift.** Generation
+      sizes each meal by `meals_per_day` (`useMealSuggestions.ts:189`), while Home's slot list,
+      the log picker and Home's "can't reach Ng of protein a meal" note use `meal_slots.length`.
+      They agree after onboarding and after Profile's "Update" prompt, but diverge when the user
+      taps Home's "+ Add Meal" or answers "Keep mine": a 4-meal user who adds "Pre-workout" has 5
+      slots, 4-meal-sized recipes, and a protein note dividing by 5. Needs a decision, not a patch:
+      does an added slot change the per-meal target, or are slots display-only and the note should
+      divide by `meals_per_day`? Logan's own profile is consistent (4 / 4) today.
 - [ ] **OPEN — Logan's eye keeps going to the centred-ring card (the "Hello Aman" Dribbble
       shot).** Read the note in the 2026-09-14 session before reopening: the number-left /
       ring-right layout was chosen on 09-04 for the fold, and a centred ring that carries the

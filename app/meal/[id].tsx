@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   View,
   Text,
@@ -7,16 +7,13 @@ import {
   StyleSheet,
   Alert,
   Modal,
-  TextInput,
   Dimensions,
   Image,
   Animated,
   Linking,
-  Keyboard,
 } from 'react-native'
 let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
-const hapticSelection = () => Haptics?.selectionAsync?.().catch?.(() => {})
 const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
@@ -31,6 +28,7 @@ import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples, stapleKey } from '@/constants/staples'
 import { escapeLike } from '@/lib/sqlLike'
 import { todayStr } from '@/lib/localDate'
+import { DEFAULT_SLOT_LABELS } from '@/lib/mealSlots'
 import { getSelectedDay } from '@/lib/selectedDay'
 import { categorizeItem } from '@/lib/categories'
 import { MealDetail } from '@/constants/mock'
@@ -93,21 +91,13 @@ export default function MealDetailScreen() {
   useSuperwallEvents({
     onSubscriptionStatusChange: (status) => { if (status?.status === 'ACTIVE') purchasedRef.current = true },
   })
-  const SLOT_OPTIONS = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
-  const ITEM_HEIGHT = 50
-  // Time-of-day default for the meal slot picker so users tapping "Log Meal"
-  // at 8am land on Breakfast, lunch lands on Lunch, etc.
-  // <11am Breakfast, <3pm Lunch, <9pm Dinner, else Snack.
-  const getDefaultSlotIndex = () => {
-    const h = new Date().getHours()
-    if (h < 11) return 0
-    if (h < 15) return 1
-    if (h < 21) return 2
-    return 3
-  }
+  // The picker offers EXACTLY the day Home's meal log shows — profiles.meal_slots, in its order,
+  // seeded from meal frequency. It was a hardcoded Breakfast/Lunch/Dinner/Snack: a 3- or 5-meal
+  // user was offered slots that are not theirs, and a pick wrote a `slot` string their log has no
+  // row for, so the entry landed in an orphan section after their own. 2 of the first 12
+  // production logs did exactly that. Fallback only until the profile lands.
+  const [slotOptions, setSlotOptions] = useState<string[]>(DEFAULT_SLOT_LABELS)
   const [showSlotPicker, setShowSlotPicker] = useState(false)
-  const [selectedSlotIndex, setSelectedSlotIndex] = useState(getDefaultSlotIndex())
-  const [customSlotName, setCustomSlotName] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [logging, setLogging] = useState(false)
@@ -160,8 +150,9 @@ export default function MealDetailScreen() {
       .then(({ data }) => setGroceryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
     // Excluded set = the user's manual opt-outs PLUS diet-conflicting basics (butter for vegan,
     // flour for gluten-free), so the "we assumed" tier never shows a basic their diet rules out.
-    supabase.from('profiles').select('staples_excluded, dietary_restrictions').eq('id', user.id).single()
+    supabase.from('profiles').select('staples_excluded, dietary_restrictions, meal_slots').eq('id', user.id).single()
       .then(({ data }) => {
+        if (Array.isArray(data?.meal_slots) && data.meal_slots.length) setSlotOptions(data.meal_slots as string[])
         const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
         manualExcludedRef.current = manual
         setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
@@ -508,20 +499,7 @@ export default function MealDetailScreen() {
   // Slot-picker state — declared before any early returns to keep hook order stable.
   // Previously these lived below `handleSave` / `logToSlot` and crashed with
   // "rendered more hooks than during the previous render" when meal loaded async.
-  const [showCustomInput, setShowCustomInput] = useState(false)
   const insets = useSafeAreaInsets()
-  const slotScrollRef = useRef<ScrollView>(null)
-  const lastHapticIndex = useRef(-1)
-  const onSlotScroll = useCallback((e: any) => {
-    const y = e.nativeEvent.contentOffset.y
-    const index = Math.round(y / ITEM_HEIGHT)
-    const clamped = Math.max(0, Math.min(index, SLOT_OPTIONS.length - 1))
-    if (clamped !== lastHapticIndex.current) {
-      lastHapticIndex.current = clamped
-      setSelectedSlotIndex(clamped)
-      hapticSelection()
-    }
-  }, [])
 
   if (!meal) {
     return (
@@ -656,13 +634,7 @@ export default function MealDetailScreen() {
       await new Promise(r => setTimeout(r, 400)) // let subscription-status event settle
       if (!purchasedRef.current) return // dismissed without subscribing
     }
-    const defaultIdx = getDefaultSlotIndex()
-    setSelectedSlotIndex(defaultIdx)
-    setShowCustomInput(false)
-    setCustomSlotName('')
-    lastHapticIndex.current = -1
     setShowSlotPicker(true)
-    setTimeout(() => slotScrollRef.current?.scrollTo({ y: defaultIdx * ITEM_HEIGHT, animated: false }), 50)
   }
 
   return (
@@ -1170,15 +1142,21 @@ export default function MealDetailScreen() {
 
       {/* ── Slot picker modal ── */}
       <Modal visible={showSlotPicker} transparent animationType="slide" onRequestClose={() => setShowSlotPicker(false)}>
-        <TouchableOpacity style={styles.slotOverlay} activeOpacity={1} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } setShowSlotPicker(false) }}>
+        <TouchableOpacity style={styles.slotOverlay} activeOpacity={1} onPress={() => setShowSlotPicker(false)}>
           <View style={styles.slotCard} onStartShouldSetResponder={() => true}>
             <Text style={styles.slotTitle}>Log to which meal?</Text>
 
+            {/* No pre-selected slot. A green time-of-day default looked like a choice already made,
+                on a sheet where every row logs on first tap — it read as "this one is picked", not
+                "this one is suggested". */}
+            {/* No "+ Custom meal" either. It wrote whatever was typed as the slot, which was not in
+                the user's structure, so it made a one-day orphan section on Home that a typo could
+                split in two. Adding a meal to the DAY lives on Home's "+ Add Meal", which persists. */}
             <View style={{ gap: 10, marginVertical: 8 }}>
-              {SLOT_OPTIONS.map(slot => (
+              {slotOptions.map(slot => (
                 <TouchableOpacity
                   key={slot}
-                  style={[styles.slotOptionBtn, selectedSlotIndex === SLOT_OPTIONS.indexOf(slot) && styles.slotOptionBtnActive]}
+                  style={styles.slotOptionBtn}
                   onPress={() => {
                     hapticImpact()
                     setShowSlotPicker(false)
@@ -1186,48 +1164,10 @@ export default function MealDetailScreen() {
                   }}
                   activeOpacity={0.8}
                 >
-                  <Text style={[styles.slotOptionText, selectedSlotIndex === SLOT_OPTIONS.indexOf(slot) && styles.slotOptionTextActive]}>{slot}</Text>
+                  <Text style={styles.slotOptionText}>{slot}</Text>
                 </TouchableOpacity>
               ))}
             </View>
-
-            {/* Custom option */}
-            {showCustomInput ? (
-              <View style={styles.slotCustomRow}>
-                <TextInput
-                  style={styles.slotCustomInput}
-                  placeholder="e.g. Post-workout"
-                  placeholderTextColor={COLORS.textMuted}
-                  value={customSlotName}
-                  onChangeText={setCustomSlotName}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={() => {
-                    if (customSlotName.trim()) {
-                      setShowSlotPicker(false)
-                      logToSlot(customSlotName.trim())
-                      setCustomSlotName('')
-                    }
-                  }}
-                />
-                <TouchableOpacity
-                  style={[styles.slotCustomBtn, !customSlotName.trim() && { opacity: 0.4 }]}
-                  disabled={!customSlotName.trim()}
-                  onPress={() => {
-                    setShowSlotPicker(false)
-                    logToSlot(customSlotName.trim())
-                    setCustomSlotName('')
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.slotCustomBtnText}>Log</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <TouchableOpacity onPress={() => setShowCustomInput(true)} activeOpacity={0.7}>
-                <Text style={styles.slotCustomLink}>+ Custom meal</Text>
-              </TouchableOpacity>
-            )}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -1866,93 +1806,16 @@ const styles = StyleSheet.create({
     color: COLORS.textWhite,
     textAlign: 'center',
   },
-  wheelHighlight: {
-    position: 'absolute',
-    top: 75,
-    left: 0,
-    right: 0,
-    height: 50,
-    backgroundColor: 'rgba(74,222,128,0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.25)',
-    zIndex: 1,
-  },
-  wheelItem: {
-    height: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  wheelItemText: {
-    fontSize: 18,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.3)',
-  },
-  wheelItemTextActive: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: COLORS.textWhite,
-  },
   slotOptionBtn: {
     paddingVertical: 14,
     borderRadius: 14,
     backgroundColor: '#111111',
     alignItems: 'center',
   },
-  slotOptionBtnActive: {
-    backgroundColor: 'rgba(74,222,128,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.3)',
-  },
   slotOptionText: {
     fontSize: 17,
     fontWeight: '600',
     color: COLORS.textWhite,
-  },
-  slotOptionTextActive: {
-    color: '#4ADE80',
-  },
-  slotCustomLink: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#4ADE80',
-    textAlign: 'center',
-  },
-  slotCustomRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  slotCustomInput: {
-    flex: 1,
-    backgroundColor: '#2A2A2A',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    color: COLORS.textWhite,
-  },
-  slotCustomBtn: {
-    backgroundColor: '#4ADE80',
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  slotCustomBtnText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#000',
-  },
-  slotConfirmBtn: {
-    backgroundColor: COLORS.textWhite,
-    borderRadius: 30,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  slotConfirmText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#000',
   },
 
   // Steps
