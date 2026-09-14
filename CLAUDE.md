@@ -164,6 +164,19 @@ npx expo run:ios   # build and run on iOS simulator
   control still works while a CENTRED one lands under the Dynamic Island, which eats the tap. That
   is exactly how the scan camera's "More tips" was unreachable while its ✕ was fine.
 
+### A brew node upgrade breaks the iOS build, silently and much later
+- `ios/.xcode.env.local` pins an ABSOLUTE node path for Xcode's script phases. It was written as a
+  versioned Cellar path (`/opt/homebrew/Cellar/node/25.6.1_1/bin/node`), and `brew upgrade supabase`
+  pulled node 25 → 26 as a dependency, deleting that directory. Unit tests kept passing (node strips
+  types either way), so the breakage stayed invisible until the next DEVICE BUILD, weeks later.
+- Symptom, buried in ~2,000 lines of xcodebuild output: `PhaseScriptExecution [CP-User] [Hermes]
+  Replace Hermes ... failed`, and above it `<path>/bin/node: No such file or directory`. The 152-target
+  dependency graph and the deployment-target warnings above it are all noise — grep the log for
+  `No such file or directory` first.
+- Fixed 2026-09-13 by pointing it at `/opt/homebrew/bin/node`, the symlink brew maintains across
+  upgrades, so a future version bump cannot repeat it. **The file is gitignored, so this fix is
+  machine-local** — a fresh clone or another Mac writes its own and may re-pin a versioned path.
+
 ### Recipe fidelity rules (trending pipeline)
 - **100% ingredient retention is a product requirement, not a tuning knob.** A recipe that keeps
   fewer ingredients than the creator's published list is rejected. Never widen the tolerance to
