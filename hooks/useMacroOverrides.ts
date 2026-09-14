@@ -9,6 +9,11 @@ export type MacroOverride = {
   protein: number
   carbs: number
   fat: number
+  // The portion the correction was made on — see lib/foodPortion.ts applyOverride. Null on rows
+  // saved before corrections carried a basis.
+  basis_amount: number | null
+  basis_unit: 'g' | 'ml' | null
+  serving_id: string | null
 }
 
 // ── Key helpers ────────────────────────────────────────────────────────────
@@ -35,27 +40,11 @@ export async function getOverride(
 ): Promise<MacroOverride | null> {
   const { data } = await supabase
     .from('macro_overrides')
-    .select('food_key, food_name, calories, protein, carbs, fat')
+    .select('food_key, food_name, calories, protein, carbs, fat, basis_amount, basis_unit, serving_id')
     .eq('user_id', userId)
     .eq('food_key', foodKey)
     .maybeSingle()
   return data ?? null
-}
-
-/**
- * Given a food's original macros and the current user, apply any saved
- * override on top. Returns the override values if one exists, otherwise
- * returns the originals unchanged.
- */
-export async function applyOverride(
-  userId: string,
-  foodKey: string,
-  original: Omit<MacroOverride, 'food_key'>
-): Promise<Omit<MacroOverride, 'food_key'>> {
-  const override = await getOverride(userId, foodKey)
-  return override
-    ? { food_name: override.food_name, calories: override.calories, protein: override.protein, carbs: override.carbs, fat: override.fat }
-    : original
 }
 
 /**

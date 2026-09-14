@@ -22,6 +22,7 @@ import { todayStr } from '@/lib/localDate'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useRouter } from 'expo-router'
 import { useAuth } from '@/context/AuthContext'
+import { recentFoodsKey } from '@/lib/recentFoods'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import { perfMark } from '@/lib/perf'
@@ -989,7 +990,7 @@ export default function ProfileScreen() {
                       // Must clear the SAME keys as Reset Onboarding, otherwise onboarding
                       // resumes mid-flow (at the last persisted onboarding_step) after the
                       // user re-signs in, which is jarring.
-                      await AsyncStorage.multiRemove(RESET_CACHE_KEYS)
+                      await AsyncStorage.multiRemove(user ? [...RESET_CACHE_KEYS, recentFoodsKey(user.id)] : RESET_CACHE_KEYS)
                       await authSignOut()
                     } catch (e: any) {
                       setDeletingAccount(false)
@@ -1041,7 +1042,7 @@ export default function ProfileScreen() {
               await supabase.from('profiles').delete().eq('id', user.id).then(() => {}, () => {})
             }
 
-            await AsyncStorage.multiRemove(RESET_CACHE_KEYS)
+            await AsyncStorage.multiRemove(user ? [...RESET_CACHE_KEYS, recentFoodsKey(user.id)] : RESET_CACHE_KEYS)
             await authSignOut()
           },
         },

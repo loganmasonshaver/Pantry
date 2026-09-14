@@ -1,5 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
-import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 import {
   View,
@@ -14,15 +13,18 @@ import {
   Image,
   Keyboard,
   InputAccessoryView,
+  KeyboardAvoidingView,
+  Linking,
 } from 'react-native'
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { CameraView, useCameraPermissions } from 'expo-camera'
-import { X, Search, ScanBarcode, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react-native'
+import { X, Search, ScanBarcode, ChevronLeft, ChevronRight, ChevronDown, Check } from 'lucide-react-native'
 import Svg, { Circle } from 'react-native-svg'
 import { COLORS } from '@/constants/colors'
 import { todayStr } from '@/lib/localDate'
 import { supabase } from '@/lib/supabase'
 import { trackMealLogged } from '@/lib/analytics'
+import { useAuth } from '@/context/AuthContext'
 import {
   searchFoods,
   getFoodById,
@@ -31,9 +33,15 @@ import {
   pickDefaultServing,
   FoodSearchResult,
   FoodDetail,
-  FoodServing,
 } from '@/lib/fatsecret'
-import { getFoodKey, getOverride, MacroOverride } from '@/hooks/useMacroOverrides'
+import { getFoodKey, getOverride, saveOverride } from '@/hooks/useMacroOverrides'
+import {
+  availableUnits, applyOverride, calorieSplit, convertAmount, correctionPortion, dayImpact,
+  fatsecretNutrients, findServing, formatAmount, legacyBasis, logFields, metricBasis, metricOf,
+  parseAmount, portionMetric, portionText, sameUnit, servingTitle, unitFromKey, unitFromLog,
+  unitKey, unitLabel, type Nutrients, type Override, type Unit,
+} from '@/lib/foodPortion'
+import { loadRecentFoods, pushRecentFood, type RecentFood } from '@/lib/recentFoods'
 import MacroEditModal from '@/components/MacroEditModal'
 
 type Tab = 'search' | 'scan'
@@ -41,17 +49,34 @@ type Step = 'browse' | 'detail'
 
 type Props = {
   visible: boolean
+  // The user's own meal structure (profiles.meal_slots), not Home's rendered sections.
   slots: string[]
   defaultSlot: string
   onClose: () => void
   onLogged: () => void
   logDate?: string
+  // Feed "TODAY AFTER THIS". Without them the section is simply not drawn.
+  goals?: { calories: number; protein: number }
+  dayTotals?: { calories: number; protein: number }
   // Edit mode — pre-load a logged entry for editing
   editLogId?: string
   initialFoodId?: string
   initialServingId?: string
   initialQuantity?: number
   initialSlot?: string
+  // The entry's current values, already inside dayTotals, so an edit replaces them instead of adding.
+  editOriginal?: { calories: number; protein: number }
+}
+
+// Everything that belongs to ONE opened food, replaced as a unit. It used to be six separate state
+// fields, and every path that opened a food reset a different subset of them — a Recent opened at the
+// previous food's quantity, and a correction could be saved under the previous product's barcode.
+type Detail = {
+  food: FoodDetail
+  unit: Unit
+  amount: number   // the last valid amount: what the numbers show and what gets logged
+  text: string     // what the amount box shows, possibly mid-typing
+  override: Override | null
 }
 
 // ── Macro description parser ─────────────────────────────────────────────
@@ -60,14 +85,40 @@ type Props = {
 function quickMacros(desc: string) {
   const cal = desc.match(/Calories:\s*([\d.]+)/)?.[1] ?? '?'
   const prot = desc.match(/Protein:\s*([\d.]+)/)?.[1] ?? '?'
-  const carb = desc.match(/Carbs:\s*([\d.]+)/)?.[1] ?? '?'
-  const fat = desc.match(/Fat:\s*([\d.]+)/)?.[1] ?? '?'
   const per = desc.match(/^(Per [^-]+)/)?.[1] ?? ''
-  return { cal, prot, carb, fat, per }
+  return { cal, prot, per }
 }
 
-export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, logDate, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot }: Props) {
-  const insets = useSafeAreaInsets()
+// A correction saved before corrections carried a basis gets one on first read: the food's default
+// serving, which is the only serving the old screen ever opened on. Persisted so it is fixed for good.
+async function loadOverride(userId: string, food: FoodDetail): Promise<Override | null> {
+  const key = getFoodKey({ foodId: food.food_id })
+  const row = await getOverride(userId, key)
+  if (!row) return null
+  if (row.basis_amount || row.serving_id) return row
+  const basis = legacyBasis(food.servings, pickDefaultServing(food.servings))
+  if (!basis) return row
+  const upgraded = { ...row, ...basis }
+  saveOverride(userId, upgraded).catch(() => {})
+  return upgraded
+}
+
+const EXTRAS: { key: 'fiber' | 'sugar' | 'saturated_fat' | 'sodium' | 'cholesterol' | 'potassium'; label: string; unit: string }[] = [
+  { key: 'fiber', label: 'Fiber', unit: 'g' },
+  { key: 'sugar', label: 'Sugar', unit: 'g' },
+  { key: 'saturated_fat', label: 'Saturated fat', unit: 'g' },
+  { key: 'sodium', label: 'Sodium', unit: 'mg' },
+  { key: 'cholesterol', label: 'Cholesterol', unit: 'mg' },
+  { key: 'potassium', label: 'Potassium', unit: 'mg' },
+]
+
+const RING = 76
+const RING_STROKE = 7
+const RING_R = (RING - RING_STROKE) / 2
+const RING_C = 2 * Math.PI * RING_R
+
+export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, onLogged, logDate, goals, dayTotals, editLogId, initialFoodId, initialServingId, initialQuantity, initialSlot, editOriginal }: Props) {
+  const { user } = useAuth()
   const [tab, setTab] = useState<Tab>('search')
   const [step, setStep] = useState<Step>('browse')
 
@@ -77,103 +128,116 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   const [searching, setSearching] = useState(false)
   const [resultMacros, setResultMacros] = useState<Record<string, { cal: number; prot: number; serving: string }>>({})
 
-
   // Scan state
   const [cameraPermission, requestCameraPermission] = useCameraPermissions()
   const [scanned, setScanned] = useState(false)
   const [scanLoading, setScanLoading] = useState(false)
-  // ref (not state) so the guard is synchronous and doesn't cause a re-render
   const scanningRef = useRef(false) // synchronous guard — state updates are async and allow duplicate fires
 
   // Detail state
-  const [selectedFood, setSelectedFood] = useState<FoodDetail | null>(null)
+  const [detail, setDetail] = useState<Detail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [selectedServing, setSelectedServing] = useState<FoodServing | null>(null)
+  // A newer open (or a back) makes an older food's late response a no-op.
+  const openSeq = useRef(0)
   const [selectedSlot, setSelectedSlot] = useState(defaultSlot)
   const [saving, setSaving] = useState(false)
+  // A ref as well as state: two taps inside one render both saw `saving` false and inserted twice.
+  const savingRef = useRef(false)
+  const [unitSheet, setUnitSheet] = useState(false)
+  const [showExtras, setShowExtras] = useState(false)
+  const [macroEditVisible, setMacroEditVisible] = useState(false)
+
+  const [recentFoods, setRecentFoods] = useState<RecentFood[]>([])
+  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Monotonic search id — lets a newer search discard a slower older one's late response.
+  const searchSeq = useRef(0)
+
+  // Keyboard: decimal-pad has no return key, so the accessory bar carries a Done.
+  const AMOUNT_ACCESSORY_ID = 'food-amount-done'
+  const amountFocused = useRef(false)
+  const detailScrollRef = useRef<ScrollView>(null)
+  const scrollY = useRef(0)
+  const viewportH = useRef(0)
+  const amountBottom = useRef(0)
 
   // Sync slot when modal opens with a new defaultSlot
   useEffect(() => {
     if (visible) setSelectedSlot(initialSlot ?? defaultSlot)
   }, [visible])
 
-  // Portion quantity
-  const [quantity, setQuantity] = useState('1')
-  const qtyFocused = useRef(false)
-  const detailScrollRef = useRef<ScrollView>(null)
-  // decimal-pad has no return key on iOS, so without this there is no way to finish typing short of
-  // hunting for somewhere to tap. The accessory bar puts a Done above the keypad.
-  const QTY_ACCESSORY_ID = 'food-qty-done'
+  useEffect(() => {
+    if (visible && user) loadRecentFoods(user.id).then(setRecentFoods)
+  }, [visible, user?.id])
 
-  // Scroll the quantity row, the meal chips and the Log button above the keypad once it is up.
-  // keyboardDidShow rather than onFocus: the ScrollView's keyboard inset is only applied as the
-  // keyboard lands, and scrolling to the end before that scrolls to the wrong end.
+  // Bring the amount card above the keypad only if it is under it. keyboardDidShow, not onFocus:
+  // the KeyboardAvoidingView has resized the scroll area by then, so the viewport height is real.
   useEffect(() => {
     const sub = Keyboard.addListener('keyboardDidShow', () => {
-      if (qtyFocused.current) detailScrollRef.current?.scrollToEnd({ animated: true })
+      if (!amountFocused.current) return
+      requestAnimationFrame(() => {
+        const target = amountBottom.current - viewportH.current + 16
+        if (target > scrollY.current) detailScrollRef.current?.scrollTo({ y: target, animated: true })
+      })
     })
     return () => sub.remove()
   }, [])
 
-  // Override state
-  const [scannedBarcode, setScannedBarcode] = useState<string | null>(null)
-  const [activeOverride, setActiveOverride] = useState<MacroOverride | null>(null)
-  const [macroEditVisible, setMacroEditVisible] = useState(false)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  // The scanner stays locked while its food is open. Every way back to the camera unlocks it — only
+  // the failure path used to, so after one successful scan the camera never scanned again.
+  const rearmScanner = () => { scanningRef.current = false; setScanned(false) }
 
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Monotonic search id — lets a newer search discard a slower older one's late response.
-  const searchSeq = useRef(0)
-
-  // Recent foods
-  type RecentFood = { food_id: string; food_name: string; brand_name?: string; cal: number; prot: number; serving: string }
-  const [recentFoods, setRecentFoods] = useState<RecentFood[]>([])
-  const RECENT_FOODS_KEY = 'pantry_recent_foods'
-
-  useEffect(() => {
-    if (visible) {
-      AsyncStorage.getItem(RECENT_FOODS_KEY).then(data => {
-        // Guard JSON.parse — a corrupt/partial value would otherwise throw and break the modal.
-        if (!data) return
-        try { setRecentFoods(JSON.parse(data)) } catch {}
-      })
+  const openFood = async (load: () => Promise<FoodDetail | null>, start?: (food: FoodDetail) => { unit: Unit; amount: number } | null) => {
+    const seq = ++openSeq.current
+    Keyboard.dismiss()
+    setDetail(null)
+    setUnitSheet(false)
+    setShowExtras(false)
+    setMacroEditVisible(false)
+    setStep('detail')
+    setDetailLoading(true)
+    try {
+      const food = await load()
+      if (seq !== openSeq.current) return
+      const def = food ? pickDefaultServing(food.servings) : null
+      const initial = food && (start?.(food) ?? (def ? { unit: { kind: 'serving', servingId: def.serving_id } as Unit, amount: 1 } : null))
+      if (!food || !initial || !fatsecretNutrients(initial.unit, initial.amount, food.servings)) throw new Error('no serving data')
+      // The correction loads BEFORE the food is shown, so the numbers never flash FatSecret's and
+      // then jump to the user's own.
+      const override = user ? await loadOverride(user.id, food) : null
+      if (seq !== openSeq.current) return
+      setDetail({ food, unit: initial.unit, amount: initial.amount, text: formatAmount(initial.amount, initial.unit), override })
+    } catch {
+      if (seq !== openSeq.current) return
+      Alert.alert('Error', 'Could not load food details.')
+      if (editLogId) handleClose()
+      else { setStep('browse'); rearmScanner() }
+    } finally {
+      if (seq === openSeq.current) setDetailLoading(false)
     }
-  }, [visible])
-
-  const addToRecents = async (food: { food_id: string; food_name: string; brand_name?: string }, cal: number, prot: number, serving: string) => {
-    const entry: RecentFood = { food_id: food.food_id, food_name: food.food_name, brand_name: food.brand_name, cal, prot, serving }
-    const existing = await AsyncStorage.getItem(RECENT_FOODS_KEY)
-    let recents: RecentFood[] = existing ? JSON.parse(existing) : []
-    // Remove duplicate if exists
-    recents = recents.filter(r => r.food_id !== food.food_id)
-    // Add to front, cap at 15
-    recents = [entry, ...recents].slice(0, 15)
-    await AsyncStorage.setItem(RECENT_FOODS_KEY, JSON.stringify(recents))
-    setRecentFoods(recents)
   }
 
-  // Pre-load food when opening in edit mode
+  // Pre-load the entry when opening in edit mode, at the unit and amount it was logged with.
   useEffect(() => {
     if (!visible || !editLogId || !initialFoodId) return
-    setDetailLoading(true)
-    setStep('detail')
     if (initialSlot) setSelectedSlot(initialSlot)
-    if (initialQuantity) setQuantity(String(initialQuantity))
-    getFoodById(initialFoodId)
-      .then(food => {
-        setSelectedFood(food)
-        const serving = initialServingId
-          ? food.servings.find(s => s.serving_id === initialServingId) ?? pickDefaultServing(food.servings)
-          : pickDefaultServing(food.servings)
-        setSelectedServing(serving ?? null)
-        loadOverride(food.food_id)
-      })
-      .catch(() => Alert.alert('Error', 'Could not load food details.'))
-      .finally(() => setDetailLoading(false))
+    openFood(
+      () => getFoodById(initialFoodId),
+      food => unitFromLog(initialServingId, initialQuantity, food.servings, pickDefaultServing(food.servings)),
+    )
   }, [visible, editLogId])
 
+  const openRecent = (r: RecentFood) => openFood(
+    () => getFoodById(r.food_id),
+    food => {
+      const unit = unitFromKey(r.unit_key, food.servings)
+      return unit && r.amount ? { unit, amount: r.amount } : null
+    },
+  )
+
   const reset = () => {
+    openSeq.current++
     scanningRef.current = false
+    savingRef.current = false
     setTab('search')
     setStep('browse')
     setQuery('')
@@ -181,20 +245,32 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     setSearching(false)
     setScanned(false)
     setScanLoading(false)
-    setSelectedFood(null)
-    setSelectedServing(null)
+    setDetail(null)
+    setDetailLoading(false)
     setSelectedSlot(defaultSlot)
     setSaving(false)
-    setQuantity('1')
-    setScannedBarcode(null)
-    setActiveOverride(null)
+    setUnitSheet(false)
+    setShowExtras(false)
     setMacroEditVisible(false)
   }
 
   const handleClose = () => { reset(); onClose() }
 
+  // Keyboard up → these close the keyboard first. They are the nearest controls to the keypad, and
+  // people tap them just to get rid of it.
+  const closeOrDismiss = () => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } handleClose() }
+  const goBack = () => {
+    if (Keyboard.isVisible()) { Keyboard.dismiss(); return }
+    openSeq.current++
+    setDetail(null)
+    setDetailLoading(false)
+    setUnitSheet(false)
+    setStep('browse')
+    rearmScanner()
+  }
+
   const doSearch = useCallback(async (q: string) => {
-    if (!q.trim()) { setResults([]); setResultMacros({}); return }
+    if (!q.trim()) { setResults([]); setResultMacros({}); setSearching(false); return }
     const seq = ++searchSeq.current
     setSearching(true)
     setResultMacros({})
@@ -204,8 +280,6 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       setResults(res)
       // Rows show the SAME serving the detail screen will open on — same picker, same servings
       // array (v3 search returns them inline, so this is still one API call, not an N+1).
-      // Previously rows parsed food_description, which is "Per 100g" for generic foods: searching
-      // milk showed 3g of protein, then tapping through showed a cup at 8g.
       // quickMacros stays as the fallback for any food v3 returns without servings.
       const macros: Record<string, { cal: number; prot: number; serving: string }> = {}
       for (const food of res) {
@@ -215,11 +289,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
           macros[food.food_id] = { cal: Math.round(m.calories), prot: Math.round(m.protein), serving: def.serving_description }
         } else {
           const q = quickMacros(food.food_description)
-          macros[food.food_id] = {
-            cal: Math.round(parseFloat(q.cal)) || 0,
-            prot: Math.round(parseFloat(q.prot)) || 0,
-            serving: q.per,
-          }
+          macros[food.food_id] = { cal: Math.round(parseFloat(q.cal)) || 0, prot: Math.round(parseFloat(q.prot)) || 0, serving: q.per }
         }
       }
       setResultMacros(macros)
@@ -232,39 +302,12 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
   const onQueryChange = (text: string) => {
     setQuery(text)
+    // Searching from the first keystroke, not from when the debounce fires — otherwise the empty
+    // state read "No results for 'chedd'" for half a second while the search had not even started.
+    setSearching(!!text.trim())
     if (searchTimeout.current) clearTimeout(searchTimeout.current)
     // debounce to avoid firing a search on every keystroke
     searchTimeout.current = setTimeout(() => doSearch(text), 500)
-  }
-
-  const loadOverride = async (foodId: string, barcode?: string) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    setCurrentUserId(user.id)
-    const key = getFoodKey(barcode ? { barcode } : { foodId })
-    const override = await getOverride(user.id, key)
-    setActiveOverride(override)
-  }
-
-  const openDetail = async (foodId: string) => {
-    // The search field unmounts with the browse step while it still holds focus. Dismissing first
-    // means the detail screen starts with nothing focused, so its first tap is not spent on a blur.
-    Keyboard.dismiss()
-    setDetailLoading(true)
-    setStep('detail')
-    setScannedBarcode(null)
-    setQuantity('1')
-    try {
-      const food = await getFoodById(foodId)
-      setSelectedFood(food)
-      setSelectedServing(pickDefaultServing(food.servings))
-      await loadOverride(food.food_id)
-    } catch {
-      Alert.alert('Error', 'Could not load food details.')
-      setStep('browse')
-    } finally {
-      setDetailLoading(false)
-    }
   }
 
   const handleBarcodeScan = async ({ data }: { data: string }) => {
@@ -276,82 +319,174 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       const food = await findFoodByBarcode(data)
       if (!food) {
         Alert.alert('Not found', 'Couldn\'t find nutrition data for this product. Try searching by name instead.', [
-          { text: 'Try Again', onPress: () => { scanningRef.current = false; setScanned(false); setScanLoading(false) } },
-          { text: 'Search by Name', onPress: () => { scanningRef.current = false; setScanned(false); setScanLoading(false); setTab('search') } },
+          { text: 'Try Again', onPress: () => { rearmScanner(); setScanLoading(false) } },
+          { text: 'Search by Name', onPress: () => { rearmScanner(); setScanLoading(false); setTab('search') } },
         ])
         return
       }
-      setSelectedFood(food)
-      setSelectedServing(pickDefaultServing(food.servings))
-      setScannedBarcode(data)
-      setStep('detail')
-      await loadOverride(food.food_id, data)
+      // Corrections are keyed by the FatSecret food, never the barcode: the same product reached by
+      // search or Recents is the same food, and used to be a different correction.
+      openFood(async () => food)
     } catch {
       Alert.alert('Scan failed', 'Could not look up this barcode.')
-      scanningRef.current = false
-      setScanned(false)
+      rearmScanner()
     } finally {
       setScanLoading(false)
     }
   }
 
+  // ── Derived numbers for the open food ──────────────────────────────────
+  const computed = useMemo(() => {
+    if (!detail) return null
+    const { food, unit, amount, override } = detail
+    const fs = fatsecretNutrients(unit, amount, food.servings)
+    if (!fs) return null
+    const { nutrients, overridden } = applyOverride(fs, override, unit, amount, food.servings)
+    const shown: Nutrients = {
+      calories: Math.round(nutrients.calories),
+      protein: Math.round(nutrients.protein),
+      carbs: Math.round(nutrients.carbs),
+      fat: Math.round(nutrients.fat),
+    }
+    return { fs, shown, overridden, split: calorieSplit(nutrients) }
+  }, [detail])
+
+  const onAmountText = (t: string) => setDetail(d => d && { ...d, text: t, amount: parseAmount(t) ?? d.amount })
+  // Commit on blur: the box shows exactly the amount that will be logged.
+  const commitAmount = () => {
+    amountFocused.current = false
+    setDetail(d => {
+      if (!d) return d
+      const amount = Number(formatAmount(d.amount, d.unit)) || d.amount
+      return { ...d, amount, text: formatAmount(amount, d.unit) }
+    })
+  }
+
+  // Switching unit keeps the portion: 1 cup shredded becomes 113 g, not 1 g.
+  const chooseUnit = (next: Unit) => {
+    setUnitSheet(false)
+    setDetail(d => {
+      if (!d || sameUnit(d.unit, next)) return d
+      const converted = Number(formatAmount(convertAmount(d.unit, d.amount, next, d.food.servings), next))
+      const amount = converted > 0 ? converted : 1
+      return { ...d, unit: next, amount, text: formatAmount(amount, next) }
+    })
+  }
+
+  const reloadOverride = async () => {
+    if (!user || !detail) return
+    const foodId = detail.food.food_id
+    const override = await loadOverride(user.id, detail.food)
+    setDetail(d => (d && d.food.food_id === foodId ? { ...d, override } : d))
+  }
+
   const saveLog = async () => {
-    if (!selectedFood || !selectedServing) return
+    if (!detail || !computed || !user || savingRef.current) return
+    savingRef.current = true
     setSaving(true)
+    const { food, unit, amount } = detail
+    const macros = computed.shown
+    const { serving_id, quantity } = logFields(unit, amount)
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser()
-      const uid = authUser?.id
-      if (!uid) { Alert.alert('Error', 'Not signed in. Please restart the app.'); return }
-      const parsed = parseMacros(selectedServing)
-      const qty = Math.max(0.1, parseFloat(quantity) || 1)
-      const base = activeOverride
-        ? { calories: activeOverride.calories, protein: activeOverride.protein, carbs: activeOverride.carbs ?? parsed.carbs, fat: activeOverride.fat ?? parsed.fat }
-        : { calories: parsed.calories, protein: parsed.protein, carbs: parsed.carbs, fat: parsed.fat }
-      const macros = {
-        calories: Math.round(base.calories * qty),
-        protein: Math.round(base.protein * qty),
-        carbs: Math.round(base.carbs * qty),
-        fat: Math.round(base.fat * qty),
-      }
-      const logDay = logDate || todayStr() // LOCAL day — see lib/localDate.ts
-      let error: any
-      if (editLogId) {
-        ;({ error } = await supabase.from('meal_logs').update({
-          calories: macros.calories,
-          protein: macros.protein,
-          carbs: macros.carbs,
-          fat: macros.fat,
-          serving_id: selectedServing.serving_id,
-          quantity: qty,
-        }).eq('id', editLogId))
-      } else {
-        ;({ error } = await supabase.from('meal_logs').insert({
-          user_id: uid,
-          meal_name: selectedFood.food_name,
-          calories: macros.calories,
-          protein: macros.protein,
-          carbs: macros.carbs,
-          fat: macros.fat,
-          slot: selectedSlot,
-          logged_at: logDay,
-          food_id: selectedFood.food_id,
-          serving_id: selectedServing.serving_id,
-          quantity: qty,
-        }))
-      }
+      const { error } = editLogId
+        // `slot` is written on edit too — the chips were tappable and the change was silently dropped.
+        ? await supabase.from('meal_logs').update({ ...macros, serving_id, quantity, slot: selectedSlot }).eq('id', editLogId)
+        : await supabase.from('meal_logs').insert({
+            user_id: user.id,
+            meal_name: food.food_name,
+            ...macros,
+            slot: selectedSlot,
+            logged_at: logDate || todayStr(), // LOCAL day — see lib/localDate.ts
+            food_id: food.food_id,
+            serving_id,
+            quantity,
+          })
       if (error) { Alert.alert('Error', error.message); return }
       if (!editLogId) {
         trackMealLogged(selectedSlot, macros.calories, macros.protein)
-        addToRecents(selectedFood, macros.calories, macros.protein, selectedServing.serving_description ?? '')
+        pushRecentFood(user.id, {
+          food_id: food.food_id,
+          food_name: food.food_name,
+          brand_name: food.brand_name,
+          unit_key: unitKey(unit),
+          amount,
+          portion: portionText(unit, amount, food.servings),
+          cal: macros.calories,
+          prot: macros.protein,
+        }).then(setRecentFoods).catch(() => {})
       }
       onLogged()
       handleClose()
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Failed to log meal')
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
+
+  // Chips are the user's own slots. The slot they came from is added only if it is not one of them —
+  // an old entry's one-off section, or the entry being edited — so it can still be kept.
+  const chipSlots = slots.includes(selectedSlot) ? slots : [...slots, selectedSlot]
+  const dayLabel = logDate && logDate !== todayStr()
+    ? new Date(logDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    : null
+  const ctaText = editLogId ? 'Save changes' : `Log to ${selectedSlot}${dayLabel ? ` · ${dayLabel}` : ''}`
+
+  const renderRing = (split: { protein: number; carbs: number; fat: number } | null, kcal: number) => {
+    const parts = split
+      ? [
+          { pct: split.protein, color: COLORS.macroProtein },
+          { pct: split.carbs, color: COLORS.macroCarbs },
+          { pct: split.fat, color: COLORS.macroFat },
+        ].filter(p => p.pct > 0)
+      : []
+    const gap = parts.length > 1 ? 3 : 0
+    const usable = RING_C - gap * parts.length
+    let cursor = 0
+    return (
+      <View style={{ width: RING, height: RING }}>
+        <Svg width={RING} height={RING} style={{ transform: [{ rotate: '-90deg' }] }}>
+          <Circle cx={RING / 2} cy={RING / 2} r={RING_R} stroke="#262626" strokeWidth={RING_STROKE} fill="none" />
+          {parts.map((p, i) => {
+            const len = (usable * p.pct) / 100
+            const offset = cursor
+            cursor += len + gap
+            return (
+              <Circle key={i} cx={RING / 2} cy={RING / 2} r={RING_R} stroke={p.color} strokeWidth={RING_STROKE} fill="none"
+                strokeDasharray={`${len} ${RING_C - len}`} strokeDashoffset={-offset} />
+            )
+          })}
+        </Svg>
+        <View style={styles.ringCenter}>
+          <Text style={styles.ringKcal}>{kcal.toLocaleString()}</Text>
+          <Text style={styles.ringUnit}>kcal</Text>
+        </View>
+      </View>
+    )
+  }
+
+  const renderImpact = (label: string, goal: number, consumed: number, adding: number, replacing: number, color: string, fade: string, unit: string) => {
+    const d = dayImpact(goal, consumed, adding, replacing)
+    const left = Math.round(d.left)
+    return (
+      <View style={{ marginTop: 8 }}>
+        <View style={styles.impactRow}>
+          <Text style={styles.impactLabel}>{label}</Text>
+          <Text style={[styles.impactLeft, left < 0 && label === 'Calories' && { color: '#EF4444' }]}>
+            {left >= 0 ? `${left.toLocaleString()}${unit} left` : `${(-left).toLocaleString()}${unit} over`}
+          </Text>
+        </View>
+        <View style={styles.impactTrack}>
+          <View style={{ width: `${d.basePct}%`, backgroundColor: color }} />
+          <View style={{ width: `${d.addPct}%`, backgroundColor: fade }} />
+        </View>
+      </View>
+    )
+  }
+
+  const units = detail ? availableUnits(detail.food.servings) : []
+  const basis = detail ? metricBasis(detail.food.servings) : null
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
@@ -360,268 +495,243 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
         {/* ── Detail view ── */}
         {step === 'detail' && (
-          <View style={styles.step}>
-            <View style={[styles.topBar, { paddingTop: insets.top - 4 }]}>
-              <TouchableOpacity style={styles.backBtn} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } setStep('browse'); setSelectedFood(null) }} activeOpacity={0.7}>
-                <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-              <Text style={styles.topTitle} numberOfLines={1}>
-                {selectedFood?.food_name ?? 'Loading...'}
-              </Text>
-              {/* Keyboard up → this closes the keyboard, not the modal. It is the nearest control to
-                  the keypad's top-right, where people tap to get rid of it. */}
-              <TouchableOpacity style={styles.closeBtn} onPress={() => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } handleClose() }}>
+          <KeyboardAvoidingView behavior="padding" style={styles.step}>
+            {/* No manual top inset here: SafeAreaView already applies it. Adding insets.top on top of
+                it put ~50pt of dead black above the title, measured against MyFitnessPal's screen. */}
+            <View style={styles.detailTop}>
+              {/* Edit mode has no way back to search. Back-then-another-food used to overwrite the
+                  entry with that food's numbers while keeping the old name. */}
+              {editLogId ? <View style={{ width: 34 }} /> : (
+                <TouchableOpacity style={styles.iconBtn} onPress={goBack} activeOpacity={0.7} hitSlop={8}>
+                  <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={styles.iconBtn} onPress={closeOrDismiss} activeOpacity={0.7} hitSlop={8}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
             </View>
 
-            {detailLoading || !selectedFood ? (
+            {detailLoading || !detail || !computed ? (
               <View style={styles.centered}>
                 <ActivityIndicator color="#4ADE80" size="large" />
                 <Text style={styles.loadingText}>Loading nutrition data...</Text>
               </View>
             ) : (
-              <ScrollView
-                ref={detailScrollRef}
-                showsVerticalScrollIndicator={false}
-                style={{ flex: 1 }}
-                // Without this the default ('never') spends a tap on dismissing a keyboard — or on a
-                // text field it still believes is focused — instead of delivering it to the child.
-                keyboardShouldPersistTaps="handled"
-                // Insets the content by the keyboard's height so the bottom of the form can scroll
-                // above it; nothing else on this screen moved out of the keypad's way.
-                automaticallyAdjustKeyboardInsets
-                keyboardDismissMode="interactive"
-              >
+              <>
+                <ScrollView
+                  ref={detailScrollRef}
+                  showsVerticalScrollIndicator={false}
+                  style={{ flex: 1 }}
+                  // 'handled' so a tap on the amount box is delivered, not spent dismissing a keyboard.
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="interactive"
+                  scrollEventThrottle={16}
+                  onScroll={e => { scrollY.current = e.nativeEvent.contentOffset.y }}
+                  onLayout={e => { viewportH.current = e.nativeEvent.layout.height }}
+                >
+                  {editLogId && <Text style={styles.eyebrow}>EDIT ENTRY</Text>}
+                  <Text style={styles.foodName}>{detail.food.food_name}</Text>
+                  {detail.food.brand_name ? <Text style={styles.brand}>{detail.food.brand_name}</Text> : null}
 
-                {/* Macro display */}
-                {selectedServing && (() => {
-                  const qty = Math.max(0.1, parseFloat(quantity) || 1)
-                  const raw = {
-                    calories: parseFloat(selectedServing.calories) || 0,
-                    protein: parseFloat(selectedServing.protein) || 0,
-                    carbs: parseFloat(selectedServing.carbohydrate) || 0,
-                    fat: parseFloat(selectedServing.fat) || 0,
-                  }
-                  const base = activeOverride
-                    ? { calories: activeOverride.calories, protein: activeOverride.protein, carbs: activeOverride.carbs, fat: activeOverride.fat }
-                    : raw
-                  const m = {
-                    calories: Math.round(base.calories * qty),
-                    protein: Math.round(base.protein * qty),
-                    carbs: Math.round(base.carbs * qty),
-                    fat: Math.round(base.fat * qty),
-                  }
-                  const ringSize = 150
-                  const strokeWidth = 10
-                  const radius = (ringSize - strokeWidth) / 2
-                  // circumference = 2πr
-                  const circumference = 2 * Math.PI * radius
-
-                  // Macro split: calories from each macro
-                  const proteinCal = m.protein * 4
-                  const carbsCal = m.carbs * 4
-                  const fatCal = m.fat * 9
-                  const totalMacroCal = proteinCal + carbsCal + fatCal || 1
-                  const proteinPct = proteinCal / totalMacroCal
-                  const carbsPct = carbsCal / totalMacroCal
-                  const fatPct = fatCal / totalMacroCal
-
-                  // Build ring segments — only include macros > 0
-                  const segments = [
-                    { pct: proteinPct, color: COLORS.macroProtein },
-                    { pct: carbsPct, color: COLORS.macroCarbs },
-                    { pct: fatPct, color: COLORS.macroFat },
-                  ].filter(s => s.pct > 0.01)
-                  // 4-degree visual gap between ring segments
-                  const gapDeg = segments.length > 1 ? 4 : 0 // 4 degree gap
-                  const totalGapDeg = gapDeg * segments.length
-                  const availableDeg = 360 - totalGapDeg
-                  let rotationCursor = 0
-                  // each segment arc length = circumference × macro fraction
-                  const ringSegments = segments.map(s => {
-                    const segDeg = availableDeg * s.pct
-                    const segLen = (segDeg / 360) * circumference
-                    const rotation = rotationCursor
-                    rotationCursor += segDeg + gapDeg
-                    return { ...s, segLen, rotation }
-                  })
-
-                  return (
-                    <>
-                      {/* Macro split ring */}
-                      <View style={styles.calorieRingWrap}>
-                        <View style={{ width: ringSize, height: ringSize }}>
-                          <Svg width={ringSize} height={ringSize} style={{ position: 'absolute' }}>
-                            <Circle cx={ringSize / 2} cy={ringSize / 2} r={radius} stroke="#1A1A1A" strokeWidth={strokeWidth} fill="none" />
-                          </Svg>
-                          {ringSegments.map((seg, i) => (
-                            <Svg key={i} width={ringSize} height={ringSize} style={{ position: 'absolute', transform: [{ rotate: `${seg.rotation - 90}deg` }] }}>
-                              <Circle cx={ringSize / 2} cy={ringSize / 2} r={radius} stroke={seg.color} strokeWidth={strokeWidth} fill="none"
-                                strokeDasharray={`${seg.segLen} ${circumference - seg.segLen}`} strokeDashoffset={0} />
-                            </Svg>
-                          ))}
-                        </View>
-                        <View style={styles.calorieRingCenter}>
-                          <Text style={styles.calorieRingValue}>{m.calories}</Text>
-                          <Text style={styles.calorieRingLabel}>KCAL</Text>
-                        </View>
-                      </View>
-
-                      {/* Macro legend */}
-                      <View style={styles.macroLegend}>
-                        {[
-                          { label: 'Protein', pct: proteinPct, color: COLORS.macroProtein },
-                          { label: 'Carbs', pct: carbsPct, color: COLORS.macroCarbs },
-                          { label: 'Fat', pct: fatPct, color: COLORS.macroFat },
-                        ].filter(l => l.pct > 0.01).map(l => (
-                          <View key={l.label} style={styles.macroLegendItem}>
-                            <View style={[styles.macroLegendDot, { backgroundColor: l.color }]} />
-                            <Text style={styles.macroLegendText}>{l.label} {Math.round(l.pct * 100)}%</Text>
+                  {/* ── Result: ring + each macro's share of calories over its grams ── */}
+                  <View style={[styles.card, { marginTop: 14 }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                      {renderRing(computed.split, computed.shown.calories)}
+                      <View style={styles.macroCols}>
+                        {/* Protein first, and % of CALORIES above grams: the % is how Logan reads a
+                            food's protein per calorie, and it does not change with the amount. */}
+                        {([
+                          ['Protein', computed.split?.protein, computed.shown.protein, COLORS.macroProtein],
+                          ['Carbs', computed.split?.carbs, computed.shown.carbs, COLORS.macroCarbs],
+                          ['Fat', computed.split?.fat, computed.shown.fat, COLORS.macroFat],
+                        ] as const).map(([label, pct, grams, color]) => (
+                          <View key={label} style={styles.macroCol}>
+                            <Text style={[styles.macroPct, { color }]}>{pct === undefined ? '—' : `${pct}%`}</Text>
+                            <Text style={styles.macroGrams}>{grams}g</Text>
+                            <Text style={styles.macroLabel}>{label}</Text>
                           </View>
                         ))}
                       </View>
+                    </View>
 
-                      {/* Macro cards */}
-                      <View style={styles.macroGrid}>
-                        {[
-                          { label: 'PROTEIN', value: m.protein, unit: 'g', color: COLORS.macroProtein },
-                          { label: 'CARBS',   value: m.carbs,   unit: 'g', color: COLORS.macroCarbs },
-                          { label: 'FAT',     value: m.fat,     unit: 'g', color: COLORS.macroFat },
-                          { label: 'FIBER',   value: Math.round(Number(selectedServing.fiber || 0) * qty), unit: 'g', color: COLORS.textMuted },
-                        ].map(macro => (
-                          <View key={macro.label} style={styles.macroCell}>
-                            <View style={[styles.macroDot, { backgroundColor: macro.color }]} />
-                            <Text style={styles.macroCellLabel}>{macro.label}</Text>
-                            <Text style={styles.macroCellValue}>{macro.value}<Text style={styles.macroCellUnit}>{macro.unit}</Text></Text>
-                          </View>
-                        ))}
+                    {goals && dayTotals && goals.calories > 0 && (
+                      <View style={styles.impact}>
+                        <Text style={styles.label}>{dayLabel ? `${dayLabel.toUpperCase()} AFTER THIS` : 'TODAY AFTER THIS'}</Text>
+                        {renderImpact('Calories', goals.calories, dayTotals.calories, computed.shown.calories, editOriginal?.calories ?? 0, '#FFFFFF', 'rgba(255,255,255,0.35)', '')}
+                        {goals.protein > 0 && renderImpact('Protein', goals.protein, dayTotals.protein, computed.shown.protein, editOriginal?.protein ?? 0, COLORS.macroProtein, 'rgba(74,222,128,0.4)', 'g')}
                       </View>
+                    )}
+                  </View>
 
+                  {/* ── Amount + meal ── */}
+                  <View style={styles.card} onLayout={e => { amountBottom.current = e.nativeEvent.layout.y + e.nativeEvent.layout.height }}>
+                    <Text style={styles.label}>AMOUNT</Text>
+                    <View style={styles.amountRow}>
+                      <View style={styles.amountBox}>
+                        <TextInput
+                          style={styles.amountInput}
+                          value={detail.text}
+                          onChangeText={onAmountText}
+                          keyboardType="decimal-pad"
+                          selectTextOnFocus
+                          inputAccessoryViewID={AMOUNT_ACCESSORY_ID}
+                          onFocus={() => { amountFocused.current = true }}
+                          onBlur={commitAmount}
+                        />
+                      </View>
                       <TouchableOpacity
-                        style={styles.fixLink}
-                        onPress={() => setMacroEditVisible(true)}
+                        style={styles.unitPill}
+                        onPress={() => { Keyboard.dismiss(); setUnitSheet(true) }}
+                        disabled={units.length <= 1}
                         activeOpacity={0.7}
                       >
-                        <Text style={styles.fixLinkText}>
-                          {activeOverride ? 'Custom values applied · Edit →' : 'Something off? Fix it →'}
-                        </Text>
+                        <Text style={styles.unitText} numberOfLines={1}>{unitLabel(detail.unit, detail.food.servings)}</Text>
+                        {units.length > 1 && <ChevronDown size={16} stroke={COLORS.textMuted} strokeWidth={2} />}
                       </TouchableOpacity>
-                    </>
-                  )
-                })()}
+                    </View>
+                    {(() => {
+                      if (detail.unit.kind === 'g' || detail.unit.kind === 'ml') return null
+                      const m = portionMetric(detail.unit, detail.amount, detail.food.servings)
+                      return m ? <Text style={styles.metricHint}>{Math.round(m.amount)} {m.unit}</Text> : null
+                    })()}
 
-                {/* Serving size + Quantity row */}
-                <View style={styles.servingQtyRow}>
-                  {selectedFood.servings.length > 1 ? (
-                    <View style={styles.servingSizeWrap}>
-                      <Text style={styles.servingQtyLabel}>SERVING SIZE</Text>
-                      <TouchableOpacity
-                        style={styles.servingDropdown}
-                        onPress={() => {
-                          const options = selectedFood!.servings.map(s => s.serving_description)
-                          Alert.alert('Serving Size', '', options.map(opt => ({
-                            text: opt,
-                            onPress: () => {
-                              const s = selectedFood!.servings.find(sv => sv.serving_description === opt)
-                              if (s) setSelectedServing(s)
-                            },
-                          })).concat([{ text: 'Cancel', style: 'cancel' } as any]))
-                        }}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.servingDropdownText} numberOfLines={1}>
-                          {selectedServing?.serving_description ?? 'Select'}
-                        </Text>
-                        <ChevronDown size={14} stroke={COLORS.textMuted} strokeWidth={2} />
-                      </TouchableOpacity>
-                    </View>
-                  ) : (
-                    <View style={styles.servingSizeWrap}>
-                      <Text style={styles.servingQtyLabel}>SERVING SIZE</Text>
-                      <View style={styles.servingDropdown}>
-                        <Text style={styles.servingDropdownText}>{selectedServing?.serving_description ?? '1 serving'}</Text>
-                      </View>
-                    </View>
-                  )}
-                  <View style={styles.qtyWrap}>
-                    <Text style={styles.servingQtyLabel}>QTY</Text>
-                    {/* The input FILLS the box. It used to be a ~48×19pt field centred inside 16pt of
-                        padding, so a tap on the box mostly landed on padding and did nothing — the
-                        "keyboard only opens on the second tap". */}
-                    <View style={styles.qtyBox}>
-                      <TextInput
-                        style={styles.qtyInput}
-                        value={quantity}
-                        // A comma-decimal locale's keypad types "1,5", which parseFloat reads as 1.
-                        onChangeText={t => setQuantity(t.replace(',', '.'))}
-                        keyboardType="decimal-pad"
-                        selectTextOnFocus
-                        inputAccessoryViewID={QTY_ACCESSORY_ID}
-                        onFocus={() => { qtyFocused.current = true }}
-                        // Commit on blur: an empty, "0" or "." box was logged as 1 serving while still
-                        // showing what was typed. Show the number that will actually be logged.
-                        onBlur={() => {
-                          qtyFocused.current = false
-                          const n = parseFloat(quantity)
-                          setQuantity(String(Number.isFinite(n) && n > 0 ? Math.max(0.1, n) : 1))
-                        }}
-                        placeholderTextColor={COLORS.textMuted}
-                      />
+                    <Text style={[styles.label, { marginTop: 16 }]}>MEAL</Text>
+                    <View style={styles.chips}>
+                      {chipSlots.map(s => (
+                        <TouchableOpacity
+                          key={s}
+                          style={[styles.chip, selectedSlot === s && styles.chipActive]}
+                          onPress={() => setSelectedSlot(s)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[styles.chipText, selectedSlot === s && styles.chipTextActive]}>{s}</Text>
+                        </TouchableOpacity>
+                      ))}
                     </View>
                   </View>
-                </View>
 
-                {/* Slot picker */}
-                <Text style={styles.slotLabel}>ADD TO MEAL</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.slotScroll}>
-                  <View style={styles.slotChips}>
-                    {slots.map(s => (
-                      <TouchableOpacity
-                        key={s}
-                        style={[styles.slotChip, selectedSlot === s && styles.slotChipActive]}
-                        onPress={() => setSelectedSlot(s)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={[styles.slotChipText, selectedSlot === s && styles.slotChipTextActive]}>{s}</Text>
-                      </TouchableOpacity>
-                    ))}
+                  {/* ── Details + correction ── */}
+                  {(() => {
+                    const extras = EXTRAS.filter(x => computed.fs[x.key] !== undefined)
+                    return (
+                      <>
+                        <View style={styles.linkRow}>
+                          {extras.length > 0 ? (
+                            <TouchableOpacity style={styles.linkBtn} onPress={() => setShowExtras(v => !v)} activeOpacity={0.7} hitSlop={8}>
+                              <Text style={styles.linkText}>Nutrition details</Text>
+                              {showExtras
+                                ? <ChevronDown size={14} stroke={COLORS.textMuted} strokeWidth={2} />
+                                : <ChevronRight size={14} stroke={COLORS.textMuted} strokeWidth={2} />}
+                            </TouchableOpacity>
+                          ) : <View />}
+                          <TouchableOpacity onPress={() => setMacroEditVisible(true)} activeOpacity={0.7} hitSlop={8}>
+                            <Text style={[styles.linkText, computed.overridden && { color: '#4ADE80' }]}>
+                              {computed.overridden ? 'Your numbers · Edit' : 'Edit nutrition'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                        {/* Only what FatSecret actually has. A missing value used to render as "0g". */}
+                        {showExtras && (
+                          <View style={styles.card}>
+                            {extras.map((x, i) => (
+                              <View key={x.key} style={[styles.extraRow, i > 0 && styles.extraDivider]}>
+                                <Text style={styles.extraLabel}>{x.label}</Text>
+                                <Text style={styles.extraValue}>{Math.round(computed.fs[x.key] ?? 0)} {x.unit}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </>
+                    )
+                  })()}
+
+                  {/* Attribution — required by FatSecret free tier */}
+                  <View style={styles.attribution}>
+                    <Image
+                      source={{ uri: 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret.png' }}
+                      style={styles.attributionLogo}
+                      resizeMode="contain"
+                    />
                   </View>
                 </ScrollView>
 
-                <TouchableOpacity
-                  style={[styles.logBtn, (!selectedServing || saving) && { opacity: 0.5 }]}
-                  onPress={saveLog}
-                  activeOpacity={0.85}
-                  disabled={!selectedServing || saving}
-                >
-                  {saving
-                    ? <ActivityIndicator color="#000000" />
-                    : <Text style={styles.logBtnText}>{editLogId ? 'Update Log' : `Log to ${selectedSlot}`}</Text>
-                  }
-                </TouchableOpacity>
-
-                {/* Attribution — required by FatSecret free tier */}
-                <View style={styles.attribution}>
-                  <Image
-                    source={{ uri: 'https://platform.fatsecret.com/api/static/images/powered_by_fatsecret.png' }}
-                    style={styles.attributionLogo}
-                    resizeMode="contain"
-                  />
+                {/* Pinned, so the one action is always on screen — and above the keypad, since the
+                    KeyboardAvoidingView lifts it with the keyboard. */}
+                <View style={styles.ctaBar}>
+                  <TouchableOpacity
+                    style={[styles.cta, saving && { opacity: 0.5 }]}
+                    onPress={saveLog}
+                    activeOpacity={0.85}
+                    disabled={saving}
+                  >
+                    {saving
+                      ? <ActivityIndicator color="#000000" />
+                      : <Text style={styles.ctaText} numberOfLines={1}>{ctaText}</Text>}
+                  </TouchableOpacity>
                 </View>
-
-                <View style={{ height: 16 }} />
-              </ScrollView>
+              </>
             )}
-          </View>
+
+            {/* ── Unit sheet ── */}
+            {unitSheet && detail && (
+              <View style={StyleSheet.absoluteFill}>
+                <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setUnitSheet(false)} />
+                <View style={styles.sheet}>
+                  <View style={styles.sheetGrip} />
+                  <Text style={styles.sheetTitle}>Unit</Text>
+                  <ScrollView style={{ maxHeight: 440 }} showsVerticalScrollIndicator={false}>
+                    {(() => {
+                      const servings = detail.food.servings
+                      // What ONE of a unit gives, correction included — the same numbers it would log.
+                      const kcalFor = (u: Unit, amount: number) => {
+                        const fs = fatsecretNutrients(u, amount, servings)
+                        return fs ? Math.round(applyOverride(fs, detail.override, u, amount, servings).nutrients.calories) : null
+                      }
+                      const row = (u: Unit, title: string, sub: string | null) => (
+                        <TouchableOpacity key={unitKey(u)} style={styles.sheetRow} onPress={() => chooseUnit(u)} activeOpacity={0.7}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.sheetRowTitle}>{title}</Text>
+                            {sub ? <Text style={styles.sheetRowSub}>{sub}</Text> : null}
+                          </View>
+                          {sameUnit(u, detail.unit) && <Check size={18} stroke="#4ADE80" strokeWidth={2.5} />}
+                        </TouchableOpacity>
+                      )
+                      const servingUnits = units.filter(u => u.kind === 'serving')
+                      const metricUnits = units.filter(u => u.kind !== 'serving')
+                      return (
+                        <>
+                          <Text style={styles.sheetSection}>SERVINGS</Text>
+                          {servingUnits.map(u => {
+                            const s = findServing(u, servings)!
+                            const m = metricOf(s)
+                            const kcal = kcalFor(u, 1)
+                            const sub = [m ? `${Math.round(m.amount)} ${m.unit}` : null, kcal !== null ? `${kcal} kcal` : null].filter(Boolean).join(' · ')
+                            return row(u, servingTitle(s), sub || null)
+                          })}
+                          {metricUnits.length > 0 && (
+                            <Text style={styles.sheetSection}>{basis?.unit === 'ml' ? 'BY VOLUME' : 'BY WEIGHT'}</Text>
+                          )}
+                          {metricUnits.map(u => {
+                            if (u.kind === 'g') return row(u, 'grams', `${kcalFor(u, 100) ?? '—'} kcal per 100 g`)
+                            if (u.kind === 'oz') return row(u, 'ounces', `${kcalFor(u, 1) ?? '—'} kcal per oz`)
+                            return row(u, 'milliliters', `${kcalFor(u, 100) ?? '—'} kcal per 100 ml`)
+                          })}
+                        </>
+                      )
+                    })()}
+                  </ScrollView>
+                </View>
+              </View>
+            )}
+          </KeyboardAvoidingView>
         )}
 
         {/* ── Browse view ── */}
         {step === 'browse' && (
           <View style={styles.step}>
-            <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+            <View style={[styles.topBar, { paddingTop: 8 }]}>
               <Text style={styles.topTitle}>Search Food</Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={handleClose}>
+              <TouchableOpacity style={styles.iconBtn} onPress={handleClose}>
                 <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
               </TouchableOpacity>
             </View>
@@ -639,9 +749,9 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
               <TouchableOpacity
                 style={[styles.tabOption, tab === 'scan' && styles.tabOptionActive]}
                 onPress={async () => {
-                  if (!cameraPermission?.granted) await requestCameraPermission()
+                  if (!cameraPermission?.granted && cameraPermission?.canAskAgain !== false) await requestCameraPermission()
                   setTab('scan')
-                  setScanned(false)
+                  rearmScanner()
                 }}
                 activeOpacity={0.8}
               >
@@ -673,31 +783,20 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                     <Text style={styles.emptyText}>No results for "{query}"</Text>
                   )}
                   {results.length === 0 && !query && recentFoods.length > 0 && (
-                    <View style={{ paddingHorizontal: 4, paddingTop: 8 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>Recently Logged</Text>
+                    <View style={{ paddingHorizontal: 20, paddingTop: 8 }}>
+                      <Text style={styles.sectionLabel}>Recently Logged</Text>
                       {recentFoods.map((food, i) => (
                         <TouchableOpacity
                           key={`recent-${food.food_id}-${i}`}
-                          style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: 'rgba(255,255,255,0.06)' }}
+                          style={[styles.recentRow, i > 0 && styles.recentDivider]}
                           activeOpacity={0.7}
-                          onPress={() => {
-                            Keyboard.dismiss()
-                            setDetailLoading(true)
-                            setStep('detail')
-                            getFoodById(food.food_id)
-                              .then(detail => {
-                                setSelectedFood(detail)
-                                setSelectedServing(pickDefaultServing(detail.servings))
-                                loadOverride(detail.food_id)
-                              })
-                              .catch(() => { setStep('browse'); Alert.alert('Error', 'Could not load food') })
-                              .finally(() => setDetailLoading(false))
-                          }}
+                          onPress={() => openRecent(food)}
                         >
                           <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 15, fontWeight: '600', color: COLORS.textWhite }}>{food.food_name}</Text>
-                            <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
-                              {food.cal} cal · {food.prot}g protein{food.brand_name ? ` · ${food.brand_name}` : ''}
+                            <Text style={styles.resultName}>{food.food_name}</Text>
+                            {/* Numbers for the portion it was logged at — which is also what it opens at. */}
+                            <Text style={styles.resultBrand}>
+                              {[`${food.cal} cal`, `${food.prot}g protein`, food.portion, food.brand_name].filter(Boolean).join(' · ')}
                             </Text>
                           </View>
                           <ChevronRight size={16} stroke={COLORS.textMuted} strokeWidth={2} />
@@ -718,40 +817,35 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                     if (matchingRecents.length === 0) return null
                     return (
                       <>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5, marginBottom: 8, marginTop: 4, textTransform: 'uppercase' }}>Previously Logged</Text>
+                        <Text style={[styles.sectionLabel, { paddingHorizontal: 20, marginTop: 4 }]}>Previously Logged</Text>
                         {matchingRecents.map((food, i) => (
                           <TouchableOpacity
                             key={`recent-match-${food.food_id}-${i}`}
                             style={styles.resultRow}
-                            onPress={() => openDetail(food.food_id)}
+                            onPress={() => openRecent(food)}
                             activeOpacity={0.75}
                           >
                             <View style={styles.resultInfo}>
                               <Text style={styles.resultName} numberOfLines={1}>{food.food_name}</Text>
-                              <Text style={styles.resultBrand}>{food.cal} cal, {food.prot}g protein</Text>
+                              <Text style={styles.resultBrand}>{[`${food.cal} cal`, `${food.prot}g protein`, food.portion].filter(Boolean).join(' · ')}</Text>
                             </View>
                             <ChevronRight size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
                           </TouchableOpacity>
                         ))}
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.5, marginBottom: 8, marginTop: 16, textTransform: 'uppercase' }}>Results</Text>
+                        <Text style={[styles.sectionLabel, { paddingHorizontal: 20, marginTop: 16 }]}>Results</Text>
                       </>
                     )
                   })()}
                   {results.map((food, i) => {
                     const rm = resultMacros[food.food_id]
                     const subtitle = rm
-                      ? [
-                          `${rm.cal} cal`,
-                          `${rm.prot}g protein`,
-                          rm.serving,
-                          food.brand_name || null,
-                        ].filter(Boolean).join(', ')
+                      ? [`${rm.cal} cal`, `${rm.prot}g protein`, rm.serving, food.brand_name || null].filter(Boolean).join(', ')
                       : food.brand_name || ''
                     return (
                       <TouchableOpacity
                         key={`${food.food_id}-${i}`}
                         style={styles.resultRow}
-                        onPress={() => openDetail(food.food_id)}
+                        onPress={() => openFood(() => getFoodById(food.food_id))}
                         activeOpacity={0.75}
                       >
                         <View style={styles.resultInfo}>
@@ -782,9 +876,17 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                 {!cameraPermission?.granted ? (
                   <View style={styles.centered}>
                     <Text style={styles.permissionText}>Camera permission required to scan barcodes</Text>
-                    <TouchableOpacity style={styles.permissionBtn} onPress={requestCameraPermission} activeOpacity={0.85}>
-                      <Text style={styles.permissionBtnText}>Allow Camera</Text>
-                    </TouchableOpacity>
+                    {/* Denied once, iOS will not show its prompt again — requesting silently did
+                        nothing and the button was dead forever. Settings is the only way back. */}
+                    {cameraPermission?.canAskAgain === false ? (
+                      <TouchableOpacity style={styles.permissionBtn} onPress={() => Linking.openSettings()} activeOpacity={0.85}>
+                        <Text style={styles.permissionBtnText}>Open Settings</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity style={styles.permissionBtn} onPress={requestCameraPermission} activeOpacity={0.85}>
+                        <Text style={styles.permissionBtnText}>Allow Camera</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 ) : scanLoading ? (
                   <View style={styles.centered}>
@@ -821,7 +923,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       </SafeAreaView>
       </GestureHandlerRootView>
 
-      <InputAccessoryView nativeID={QTY_ACCESSORY_ID}>
+      <InputAccessoryView nativeID={AMOUNT_ACCESSORY_ID}>
         <View style={styles.accessoryBar}>
           <TouchableOpacity onPress={() => Keyboard.dismiss()} hitSlop={10} activeOpacity={0.7}>
             <Text style={styles.accessoryDone}>Done</Text>
@@ -829,29 +931,26 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
         </View>
       </InputAccessoryView>
 
-      {/* Macro override editor */}
-      {macroEditVisible && selectedFood && currentUserId && selectedServing && (() => {
-        const parsed = parseMacros(selectedServing)
-        const key = getFoodKey(scannedBarcode ? { barcode: scannedBarcode } : { foodId: selectedFood.food_id })
+      {/* Correction editor — entered against one serving, 100 g, 1 oz or 100 ml of the current unit */}
+      {macroEditVisible && detail && user && (() => {
+        const servings = detail.food.servings
+        const cp = correctionPortion(detail.unit, servings)
+        const fs = fatsecretNutrients(cp.unit, cp.amount, servings)
+        if (!fs) return null
+        const applied = applyOverride(fs, detail.override, cp.unit, cp.amount, servings)
         return (
           <MacroEditModal
             visible
             onClose={() => setMacroEditVisible(false)}
-            foodKey={key}
-            foodName={selectedFood.food_name}
-            userId={currentUserId}
-            originalCalories={Math.round(parsed.calories)}
-            originalProtein={Math.round(parsed.protein)}
-            originalCarbs={Math.round(parsed.carbs)}
-            originalFat={Math.round(parsed.fat)}
-            onSaved={async (overrideActive) => {
-              if (overrideActive) {
-                const override = await getOverride(currentUserId, key)
-                setActiveOverride(override)
-              } else {
-                setActiveOverride(null)
-              }
-            }}
+            foodKey={getFoodKey({ foodId: detail.food.food_id })}
+            foodName={detail.food.food_name}
+            userId={user.id}
+            portionLabel={portionText(cp.unit, cp.amount, servings, true)}
+            original={{ calories: fs.calories, protein: fs.protein, carbs: fs.carbs, fat: fs.fat }}
+            current={applied.overridden ? applied.nutrients : null}
+            basis={cp.basis}
+            hasCorrection={!!detail.override}
+            onSaved={reloadOverride}
           />
         )
       })()}
@@ -878,15 +977,7 @@ const styles = StyleSheet.create({
     color: COLORS.textWhite,
     letterSpacing: -0.3,
   },
-  backBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#1A1A1A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeBtn: {
+  iconBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -939,6 +1030,9 @@ const styles = StyleSheet.create({
   },
 
   // Results
+  sectionLabel: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 },
+  recentRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  recentDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -950,8 +1044,7 @@ const styles = StyleSheet.create({
   },
   resultInfo: { flex: 1, gap: 3 },
   resultName: { fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
-  resultBrand: { fontSize: 12, color: COLORS.textMuted },
-  resultMacros: { fontSize: 12, color: COLORS.textMuted },
+  resultBrand: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   emptyText: { textAlign: 'center', color: COLORS.textMuted, marginTop: 40, fontSize: 14 },
   hintText: { textAlign: 'center', color: COLORS.textMuted, marginTop: 40, fontSize: 14, paddingHorizontal: 32 },
 
@@ -986,132 +1079,63 @@ const styles = StyleSheet.create({
   loadingText: { fontSize: 14, color: COLORS.textMuted },
 
   // Detail
-  brandName: { fontSize: 13, color: COLORS.textMuted, paddingHorizontal: 20, marginTop: -12, marginBottom: 0 },
+  detailTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 6 },
+  eyebrow: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2, paddingHorizontal: 20, marginTop: 4 },
+  foodName: { fontSize: 24, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5, paddingHorizontal: 20, marginTop: 2 },
+  brand: { fontSize: 13, color: COLORS.textMuted, paddingHorizontal: 20, marginTop: 3 },
+  card: { backgroundColor: '#141414', borderRadius: 16, marginHorizontal: 16, marginBottom: 10, padding: 14 },
+  label: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2 },
 
-  // Calorie ring
-  calorieRingWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-    marginBottom: 16,
-  },
-  calorieRingCenter: {
-    position: 'absolute',
-    alignItems: 'center',
-  },
-  calorieRingValue: {
-    fontSize: 36,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    letterSpacing: -1,
-  },
-  calorieRingLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    letterSpacing: 2,
-    marginTop: -2,
-  },
+  ringCenter: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  ringKcal: { fontSize: 19, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
+  ringUnit: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, marginTop: -2 },
+  macroCols: { flex: 1, flexDirection: 'row', justifyContent: 'space-between' },
+  macroCol: { alignItems: 'center', minWidth: 60 },
+  macroPct: { fontSize: 13, fontWeight: '700' },
+  macroGrams: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3, marginTop: 2 },
+  macroLabel: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, marginTop: 1 },
 
-  // Macro legend
-  macroLegend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 20,
-    marginBottom: 24,
-  },
-  macroLegendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  macroLegendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  macroLegendText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textMuted,
-  },
+  impact: { borderTopWidth: 1, borderTopColor: '#262626', marginTop: 14, paddingTop: 12 },
+  impactRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  impactLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textWhite },
+  impactLeft: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  impactTrack: { height: 6, borderRadius: 3, backgroundColor: '#262626', flexDirection: 'row', overflow: 'hidden', marginTop: 6 },
 
-  // Macro grid
-  macroDot: { width: 8, height: 8, borderRadius: 4, marginBottom: 2 },
-  macroGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    paddingHorizontal: 20,
-    marginBottom: 16,
-  },
-  macroCell: {
-    width: '47%',
-    backgroundColor: '#141414',
-    borderRadius: 16,
-    padding: 16,
-    gap: 6,
-  },
-  macroCellLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    letterSpacing: 1.5,
-  },
-  macroCellValue: { fontSize: 28, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5 },
-  macroCellUnit: { fontSize: 14, color: COLORS.textMuted, fontWeight: '500' },
+  amountRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  // The input fills its box, so every point of the visible box focuses it.
+  amountBox: { width: 76, backgroundColor: COLORS.cardElevated, borderRadius: 12, overflow: 'hidden' },
+  amountInput: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite, textAlign: 'center', paddingVertical: 12, paddingHorizontal: 6, width: '100%' },
+  unitPill: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.cardElevated, borderRadius: 12, paddingHorizontal: 14, gap: 8 },
+  unitText: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
+  metricHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 6 },
 
-  // Serving + Qty row (Stitch style)
-  servingQtyRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    gap: 12,
-    marginBottom: 24,
-  },
-  servingSizeWrap: {
-    flex: 1,
-    gap: 8,
-  },
-  servingQtyLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    letterSpacing: 1.5,
-  },
-  servingDropdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#141414',
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  servingDropdownText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.textWhite,
-    flex: 1,
-  },
-  qtyWrap: {
-    width: 80,
-    gap: 8,
-  },
-  qtyBox: {
-    backgroundColor: '#141414',
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  // The padding lives on the input, not the box, so the whole visible box is the tap target.
-  qtyInput: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textWhite,
-    textAlign: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 14,
-    width: '100%',
-  },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  chip: { backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingHorizontal: 16, paddingVertical: 9 },
+  chipActive: { backgroundColor: '#4ADE80' },
+  chipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  chipTextActive: { color: '#000000' },
+
+  linkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 8 },
+  linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  linkText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  extraRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 9 },
+  extraDivider: { borderTopWidth: 1, borderTopColor: '#222222' },
+  extraLabel: { fontSize: 14, color: COLORS.textWhite },
+  extraValue: { fontSize: 14, color: COLORS.textMuted },
+
+  ctaBar: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8, backgroundColor: '#000000', borderTopWidth: 1, borderTopColor: '#1A1A1A' },
+  cta: { backgroundColor: COLORS.textWhite, borderRadius: 30, paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
+  ctaText: { fontSize: 16, fontWeight: '700', color: '#000000' },
+
+  sheetBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.6)' },
+  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: '#141414', borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 20, paddingTop: 10, paddingBottom: 12 },
+  sheetGrip: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#333333', alignSelf: 'center', marginBottom: 12 },
+  sheetTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite, marginBottom: 4 },
+  sheetSection: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2, marginTop: 14, marginBottom: 2 },
+  sheetRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#222222', gap: 12 },
+  sheetRowTitle: { fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
+  sheetRowSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+
   accessoryBar: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
@@ -1124,59 +1148,9 @@ const styles = StyleSheet.create({
   },
   accessoryDone: { fontSize: 16, fontWeight: '700', color: '#4ADE80' },
 
-  // Slot picker
-  slotLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-    letterSpacing: 1.5,
-    paddingHorizontal: 20,
-    marginBottom: 10,
-  },
-  slotScroll: { marginBottom: 24 },
-  slotChips: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingBottom: 4 },
-  slotChip: {
-    backgroundColor: '#141414',
-    borderRadius: 30,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-  },
-  slotChipActive: { backgroundColor: '#4ADE80' },
-  slotChipText: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
-  slotChipTextActive: { color: '#000000' },
-
   // Attribution (subtle)
-  attribution: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 16,
-    marginBottom: 12,
-    opacity: 0.4,
-  },
+  attribution: { alignItems: 'center', justifyContent: 'center', marginTop: 14, marginBottom: 16, opacity: 0.4 },
   attributionLogo: { width: 120, height: 16 },
   attributionSmall: { alignItems: 'center', paddingVertical: 16 },
   attributionLogoSmall: { width: 90, height: 18, opacity: 0.4 },
-
-  // Fix link
-  fixLink: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    marginBottom: 8,
-  },
-  fixLinkText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    textDecorationLine: 'underline',
-  },
-
-  // Log button
-  logBtn: {
-    backgroundColor: COLORS.textWhite,
-    borderRadius: 30,
-    paddingVertical: 18,
-    marginHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logBtnText: { fontSize: 16, fontWeight: '700', color: '#000000' },
 })

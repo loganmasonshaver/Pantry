@@ -11,6 +11,12 @@ export type FoodServing = {
   carbohydrate: string
   fat: string
   fiber?: string
+  // Present only when FatSecret has the value — an absent field is unknown, not zero.
+  sugar?: string
+  saturated_fat?: string
+  sodium?: string
+  cholesterol?: string
+  potassium?: string
   metric_serving_amount?: string
   metric_serving_unit?: string
   is_default?: string // "1" on the serving FatSecret considers default (v3 + flag_default_serving)

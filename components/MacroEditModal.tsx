@@ -14,7 +14,8 @@ import {
 } from 'react-native'
 import { X } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
-import { getOverride, saveOverride, deleteOverride } from '@/hooks/useMacroOverrides'
+import { saveOverride, deleteOverride } from '@/hooks/useMacroOverrides'
+import type { Nutrients, Override } from '@/lib/foodPortion'
 
 type Props = {
   visible: boolean
@@ -22,50 +23,45 @@ type Props = {
   foodKey: string
   foodName: string
   userId: string
-  originalCalories: number
-  originalProtein: number
-  originalCarbs: number
-  originalFat: number
-  onSaved: (overrideActive: boolean) => void
+  // The portion these numbers describe — a serving, 100 g, 1 oz or 100 ml — and the basis saved
+  // with the correction so it can be scaled onto any other portion (lib/foodPortion.ts).
+  portionLabel: string
+  original: Nutrients
+  current: Nutrients | null
+  basis: Pick<Override, 'basis_amount' | 'basis_unit' | 'serving_id'>
+  hasCorrection: boolean
+  onSaved: () => void
 }
+
+// Prefill values: whole calories, macros to one decimal — FatSecret's precision, not float noise.
+const kcalText = (n: number) => String(Math.round(n))
+const gramText = (n: number) => String(Math.round(n * 10) / 10)
 
 export default function MacroEditModal({
   visible, onClose, foodKey, foodName, userId,
-  originalCalories, originalProtein, originalCarbs, originalFat,
+  portionLabel, original, current, basis, hasCorrection,
   onSaved,
 }: Props) {
   // Keyboard up → this closes the KEYBOARD, not the form (people tap the nearest ✕/Cancel
   // just to dismiss it, and that used to discard everything typed). Second tap closes.
   const closeOrDismiss = () => { if (Keyboard.isVisible()) { Keyboard.dismiss(); return } onClose() }
-  const [calories, setCalories] = useState(String(originalCalories))
-  const [protein, setProtein] = useState(String(originalProtein))
-  const [carbs, setCarbs] = useState(String(originalCarbs))
-  const [fat, setFat] = useState(String(originalFat))
-  const [hasOverride, setHasOverride] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const start = current ?? original
+  const [calories, setCalories] = useState(kcalText(start.calories))
+  const [protein, setProtein] = useState(gramText(start.protein))
+  const [carbs, setCarbs] = useState(gramText(start.carbs))
+  const [fat, setFat] = useState(gramText(start.fat))
   const [saving, setSaving] = useState(false)
 
-  // On open, check for an existing override for this (user, foodKey) pair. If one exists, prefill
-  // with overridden values so the user can refine; otherwise prefill with FatSecret originals.
+  // Prefill from the correction scaled to THIS portion when one applies, else FatSecret's numbers.
+  // The caller computes both, so the form can never show a correction in a different portion's terms.
   useEffect(() => {
     if (!visible) return
-    setLoading(true)
-    getOverride(userId, foodKey).then(existing => {
-      if (existing) {
-        setCalories(String(existing.calories))
-        setProtein(String(existing.protein))
-        setCarbs(String(existing.carbs))
-        setFat(String(existing.fat))
-        setHasOverride(true)
-      } else {
-        setCalories(String(originalCalories))
-        setProtein(String(originalProtein))
-        setCarbs(String(originalCarbs))
-        setFat(String(originalFat))
-        setHasOverride(false)
-      }
-    }).finally(() => setLoading(false))
-  }, [visible, foodKey])
+    const v = current ?? original
+    setCalories(kcalText(v.calories))
+    setProtein(gramText(v.protein))
+    setCarbs(gramText(v.carbs))
+    setFat(gramText(v.fat))
+  }, [visible, foodKey, portionLabel])
 
   const handleSave = async () => {
     const cal = parseInt(calories)
@@ -90,10 +86,11 @@ export default function MacroEditModal({
       protein: prot,
       carbs: carb,
       fat: f,
+      ...basis,
     })
     setSaving(false)
     if (error) { Alert.alert('Save failed', error); return }
-    onSaved(true)
+    onSaved()
     onClose()
   }
 
@@ -102,7 +99,7 @@ export default function MacroEditModal({
     const { error } = await deleteOverride(userId, foodKey)
     setSaving(false)
     if (error) { Alert.alert('Reset failed', error); return }
-    onSaved(false)
+    onSaved()
     onClose()
   }
 
@@ -123,20 +120,17 @@ export default function MacroEditModal({
           {/* Header */}
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Fix Nutrition Data</Text>
-              <Text style={styles.subtitle} numberOfLines={1}>{foodName}</Text>
+              <Text style={styles.title}>Edit nutrition</Text>
+              <Text style={styles.subtitle} numberOfLines={1}>{foodName} · per {portionLabel}</Text>
             </View>
             <TouchableOpacity style={styles.closeBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
               <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
           </View>
 
-          {loading ? (
-            <ActivityIndicator color="#4ADE80" style={{ marginVertical: 32 }} />
-          ) : (
-            <>
+          <>
               <Text style={styles.hint}>
-                Your corrections apply only to your account and override FatSecret values when you log this food.
+                For your account only. Enter what {portionLabel} contains — the app scales it to whatever amount you log.
               </Text>
 
               {/* Macro inputs */}
@@ -174,7 +168,7 @@ export default function MacroEditModal({
               </TouchableOpacity>
 
               {/* Reset — only if an override exists */}
-              {hasOverride && (
+              {hasCorrection && (
                 <TouchableOpacity
                   style={[styles.resetBtn, saving && { opacity: 0.5 }]}
                   onPress={handleReset}
@@ -188,8 +182,7 @@ export default function MacroEditModal({
               <TouchableOpacity style={styles.cancelBtn} onPress={closeOrDismiss} activeOpacity={0.7}>
                 <Text style={styles.cancelBtnText}>Cancel</Text>
               </TouchableOpacity>
-            </>
-          )}
+          </>
         </View>
       </KeyboardAvoidingView>
     </Modal>

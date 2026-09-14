@@ -1926,28 +1926,37 @@ export default function HomeScreen() {
       )}
 
       {/* ── Food Search Modal (FatSecret) ── */}
+      {/* slots = the user's own structure (meal_slots), not the rendered sections — those include
+          one-off labels only an old entry still uses. goals + dayTotals feed "TODAY AFTER THIS". */}
       <FoodSearchModal
         visible={showFoodSearchModal}
-        slots={slots.map(s => s.label)}
+        slots={mealSlots}
         defaultSlot={foodSearchSlot}
         onClose={() => setShowFoodSearchModal(false)}
         onLogged={fetchTodayLogs}
         logDate={selectedDate}
+        goals={{ calories: calorieGoal, protein: proteinGoal }}
+        dayTotals={{ calories: totalCal, protein: totalPro }}
       />
 
       {/* ── Edit portion — reuse FoodSearchModal in edit mode ── */}
       {editEntry && editEntry.food_id && (
         <FoodSearchModal
           visible={!!editEntry}
-          slots={slots.map(s => s.label)}
-          defaultSlot={editEntry.name}
+          slots={mealSlots}
+          // The entry's own slot. This was the entry's NAME, harmless only because initialSlot won.
+          defaultSlot={slots.find(s => s.entries.some(e => e.id === editEntry.id))?.label ?? mealSlots[0]}
           onClose={() => { setEditEntry(null); fetchTodayLogs() }}
           onLogged={() => { setEditEntry(null); fetchTodayLogs() }}
+          logDate={selectedDate}
+          goals={{ calories: calorieGoal, protein: proteinGoal }}
+          dayTotals={{ calories: totalCal, protein: totalPro }}
           editLogId={editEntry.id}
           initialFoodId={editEntry.food_id ?? undefined}
           initialServingId={editEntry.serving_id ?? undefined}
           initialQuantity={editEntry.quantity}
           initialSlot={slots.find(s => s.entries.some(e => e.id === editEntry.id))?.label}
+          editOriginal={{ calories: editEntry.calories, protein: editEntry.protein }}
         />
       )}
       {/* Fallback for AI-logged entries (no food_id) */}

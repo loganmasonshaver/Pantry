@@ -59,6 +59,11 @@ function normalizeServings(rawServings: any): FoodServing[] {
       carbohydrate: s.carbohydrate,
       fat: s.fat,
       fiber: s.fiber,
+      sugar: s.sugar,
+      saturated_fat: s.saturated_fat,
+      sodium: s.sodium,
+      cholesterol: s.cholesterol,
+      potassium: s.potassium,
       metric_serving_amount: s.metric_serving_amount,
       metric_serving_unit: s.metric_serving_unit,
       is_default: s.is_default,
@@ -113,43 +118,10 @@ export async function getFoodById(foodId: string): Promise<FoodDetail> {
   const food = data.food
   const servingsArr: FoodServing[] = normalizeServings(food.servings?.serving)
 
-  // Add synthetic "100g" and "1g" options if metric data is available and no gram serving exists.
-  // Users frequently want to log by gram weight (kitchen scale workflow) but FatSecret only
-  // returns "1 cup" / "1 slice" / etc. — synthesizing gram servings lets the UI offer a scale-friendly path.
-  const hasGramServing = servingsArr.some(s =>
-    s.serving_description.match(/^\d+\s*g$/) || s.serving_description === '100 g'
-  )
-  if (!hasGramServing && servingsArr.length > 0) {
-    const ref = servingsArr[0]
-    const metricG = parseFloat(ref.metric_serving_amount ?? '0')
-    if (metricG > 0 && (ref.metric_serving_unit === 'g' || ref.metric_serving_unit === 'ml')) {
-      const scale100 = 100 / metricG // scale nutrients proportionally from this serving size to 100g
-      const scale1 = 1 / metricG
-      servingsArr.push({
-        serving_id: '__100g', // __ prefix distinguishes synthetic IDs from real FatSecret serving IDs
-        serving_description: '100 g',
-        calories: String(Math.round(parseFloat(ref.calories) * scale100)),
-        protein: String(Math.round(parseFloat(ref.protein) * scale100 * 10) / 10),
-        carbohydrate: String(Math.round(parseFloat(ref.carbohydrate) * scale100 * 10) / 10),
-        fat: String(Math.round(parseFloat(ref.fat) * scale100 * 10) / 10),
-        fiber: ref.fiber ? String(Math.round(parseFloat(ref.fiber) * scale100 * 10) / 10) : undefined,
-        metric_serving_amount: '100',
-        metric_serving_unit: 'g',
-      })
-      servingsArr.push({
-        serving_id: '__1g',
-        serving_description: '1 g',
-        calories: String(parseFloat(ref.calories) * scale1),
-        protein: String(parseFloat(ref.protein) * scale1),
-        carbohydrate: String(parseFloat(ref.carbohydrate) * scale1),
-        fat: String(parseFloat(ref.fat) * scale1),
-        fiber: ref.fiber ? String(parseFloat(ref.fiber) * scale1) : undefined,
-        metric_serving_amount: '1',
-        metric_serving_unit: 'g',
-      })
-    }
-  }
-
+  // No synthetic "100 g" / "1 g" servings any more. The food log screen offers grams, ounces and
+  // millilitres as UNITS derived from the food's own metric data (lib/foodPortion.ts), labelled
+  // with the unit that data is actually in. The synthetic servings accepted an ml reference and
+  // still called it "100 g", which is ~40% off for honey or oil.
   return {
     food_id: food.food_id,
     food_name: food.food_name,

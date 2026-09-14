@@ -1612,7 +1612,7 @@ One screen, five jobs: log a searched food, log a Recent, log a scanned barcode,
 entry (Home → tap an entry with a `food_id`), and correct a food's macros for yourself ("Something
 off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half baked".
 
-- [ ] **FIXED, UNVERIFIED ON DEVICE — QTY editing.** (1) Keyboard only opened on the second tap: the
+- [x] **SUPERSEDED by the rebuild below — QTY editing.** (1) Keyboard only opened on the second tap: the
       input was a ~48×19pt field centred in 16pt of padding, so most taps on the box hit padding;
       the input now fills the box, the detail ScrollView has `keyboardShouldPersistTaps="handled"`,
       and the search field's keyboard is dismissed before the detail step mounts. (2) Keypad covered
@@ -1625,15 +1625,15 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       tapping Done shows 1. Unsure until seen: InputAccessoryView and the keyboard inset both
       inside an RN `<Modal>` — neither is used inside a Modal anywhere else in the app.
 
-**Found by reading the code paths + prod data, NOT reproduced on device. Not fixed (Logan: plan only).**
-- [ ] **Edit mode can overwrite an entry with a DIFFERENT food.** Home → tap a logged food → ‹ back
+**Found by reading the code paths + prod data. ALL FIXED 2026-09-14 (Logan: "make all changes you recommended") — UNVERIFIED ON DEVICE, tells in the BUILT item at the end of this section.**
+- [x] **Edit mode can overwrite an entry with a DIFFERENT food.** Home → tap a logged food → ‹ back
       (goes to search, `editLogId` still set) → open any other food → "Update Log". The update
       writes the new food's calories/macros/serving_id/quantity onto the old row but NOT
       `meal_name` or `food_id`, so "Cheddar Cheese" carries chicken's numbers, and its next edit
       cannot find its serving. Fix direction: edit mode has no back-to-search at all.
-- [ ] **Edit mode ignores a meal change.** The chips are shown and tappable, but the update never
+- [x] **Edit mode ignores a meal change.** The chips are shown and tappable, but the update never
       writes `slot` — move an entry to Lunch, tap Update, it stays in Breakfast. Silent.
-- [ ] **A macro fix is per FOOD, applied to every serving — and on the gram path it multiplies.**
+- [x] **A macro fix is per FOOD, applied to every serving — and on the gram path it multiplies.**
       The override stores absolute numbers taken from whichever serving was selected when saved,
       and both the display and `saveLog` use them as the PER-SERVING base for any serving. Switch
       "1 cup (113g)" to "1 slice (21g)" and the slice shows the cup's calories. Worse, pick the
@@ -1642,51 +1642,51 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       values. Fix direction: migration adds the serving's gram basis (`per_grams`) to
       `macro_overrides`, backfill 794 from its cup serving, scale on apply; a serving with no gram
       data applies the fix only when it is the serving the fix was made on.
-- [ ] **Barcode scanner dies after one successful scan.** `scanningRef` is only reset on failure, and
+- [x] **Barcode scanner dies after one successful scan.** `scanningRef` is only reset on failure, and
       ‹ back from the detail step resets neither it nor `scanned` — the camera shows but never
       scans again until the modal is closed. Re-tapping the Scan tab does not help (it resets
       `scanned`, not the ref).
-- [ ] **Per-food state leaks into the next food.** `openDetail` resets qty and barcode; the Recents
+- [x] **Per-food state leaks into the next food.** `openDetail` resets qty and barcode; the Recents
       tap and the scan path do not, and ‹ back resets nothing but the food. Set qty 3 on one food,
       back, tap a Recent → it opens at 3. Scan product X, back, open a Recent Y, tap "Fix it" →
       the correction is saved under X's BARCODE key. The previous food's override also stays
       applied until the next lookup resolves (and forever if it fails). Fix direction: one
       `openFood()` that resets every per-food field, used by search, Recents, scan and edit.
-- [ ] **Recents are per DEVICE, not per account, and survive sign-out.** `pantry_recent_foods` is not
+- [x] **Recents are per DEVICE, not per account, and survive sign-out.** `pantry_recent_foods` is not
       user-stamped and is not in AuthContext's sign-out `multiRemove` list (Profile's reset does
       clear it). The App Review demo account signed in on Logan's phone would open on his Recents.
-- [ ] **The synthetic "100 g" / "1 g" options are built from an ml serving and labelled grams.**
+- [x] **The synthetic "100 g" / "1 g" options are built from an ml serving and labelled grams.**
       `getFoodById` accepts `metric_serving_unit === 'ml'` for the reference — for milk, near enough;
       for honey or oil, "100 g" is 100 ml, ~40% off. Label it ml when the source is ml.
-- [ ] **"No results for 'chedd'" flashes while typing** (browse step): the empty state checks
+- [x] **"No results for 'chedd'" flashes while typing** (browse step): the empty state checks
       `!searching`, and `searching` only turns on when the 500 ms debounce fires.
-- [ ] **~58pt of dead space above the title.** Measured from Logan's screenshot against MFP's on the
+- [x] **~58pt of dead space above the title.** Measured from Logan's screenshot against MFP's on the
       same phone: our header sits ~50pt lower. The detail header adds `insets.top - 4` inside a
       `SafeAreaView edges={['top']}` that evidently already applies the inset here (the browse step
       does the same with `+ 8`). Contradicts the CLAUDE.md note that SafeAreaView reads 0 inside a
       Modal — so verify on device, not by reasoning, when fixing.
-- [ ] **Same product, two override keys.** Scanned → `barcode:<ean>`; opened from Recents or search →
+- [x] **Same product, two override keys.** Scanned → `barcode:<ean>`; opened from Recents or search →
       `fatsecret:<id>`. A fix made after scanning is missing the next time it is opened from Recents.
-- [ ] **Log button does not name the day.** It logs to whatever day Home is showing; the meal detail
+- [x] **Log button does not name the day.** It logs to whatever day Home is showing; the meal detail
       screen names a non-today day on its button for exactly this reason, this one does not.
-- [ ] **Double-tap on Log may insert twice** — guarded by `saving` STATE, which is async; the meal
+- [x] **Double-tap on Log may insert twice** — guarded by `saving` STATE, which is async; the meal
       detail screen uses a ref for the same guard. Plausible, not reproduced (rule out environment
       first if a duplicate shows up — see CLAUDE.md).
-- [ ] **Meal chips come from Home's RENDERED slots,** which include orphan sections (a slot label only
+- [x] **Meal chips come from Home's RENDERED slots,** which include orphan sections (a slot label only
       present because an old entry used it). Should be `meal_slots`, like the log picker since
       `2bc3b88`. Edit mode also passes the entry NAME as `defaultSlot` — masked today by
       `initialSlot`, a trap for the next edit.
-- [ ] **Recents show the logged TOTAL** (2 cups = 910 cal) but open at qty 1 (455) — list and detail
+- [x] **Recents show the logged TOTAL** (2 cups = 910 cal) but open at qty 1 (455) — list and detail
       disagree.
-- [ ] **Camera permission denied once → "Allow Camera" is dead forever.** `requestCameraPermission`
+- [x] **Camera permission denied once → "Allow Camera" is dead forever.** `requestCameraPermission`
       cannot re-prompt; there is no Settings deep link.
-- [ ] **Serving picker is an `Alert` with one button per serving,** matched by description text —
+- [x] **Serving picker is an `Alert` with one button per serving,** matched by description text —
       a food with 10+ servings is a long system alert, and two servings with the same description
       always pick the first.
-- [ ] **Fiber shows "0g" when FatSecret has no fiber value** — unknown presented as zero, on a
+- [x] **Fiber shows "0g" when FatSecret has no fiber value** — unknown presented as zero, on a
       number the app tracks nowhere else.
 
-- [ ] **DESIGN — mock v2 shown 2026-09-14, awaiting Logan's "go".** Logan AGREED: meal chip
+- [x] **DESIGN — mock v2 shown 2026-09-14, awaiting Logan's "go".** Logan AGREED: meal chip
       pre-selected (he chose the slot by tapping its card), Log pinned to the bottom naming the day
       when not today. He likes MFP's "% of calories per macro" row most — it is how he judges a
       food's protein-to-calorie ratio. Mock v2, top-down: ✕ (and ‹ only when not editing) → name →
@@ -1706,6 +1706,30 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       or calorie number — POST-LAUNCH idea, not in v2. No app verified shows a protein-per-100-kcal
       number; the % of calories already carries that fact (25% protein = 6 g per 100 kcal), so it
       is not added as a second number.
+- [ ] **BUILT 2026-09-14 — mock v2 + all 17 findings. UNVERIFIED ON DEVICE.** Pure portion math in
+      `lib/foodPortion.ts` (19 tests) is now the only source of every number the screen shows and
+      logs; migration `20260914072207_macro_override_basis` adds `basis_amount` / `basis_unit` /
+      `serving_id` to `macro_overrides`, and the prod Whole Milk row gets its default-serving basis
+      on first read. Synthetic "100 g" / "1 g" servings are gone — grams / ounces / millilitres are
+      units derived from the food's own metric data. Recents are per account
+      (`pantry_recent_foods:<userId>`) and reopen at the logged portion. Tells, in order of what
+      would hurt most:
+      1. Whole Milk → unit grams → 240 → the ring reads ~148 kcal (with the correction), NOT 36,000.
+      2. Log a food, tap it on Home → no ‹ button, "EDIT ENTRY", change meal to Lunch → Save → it
+         moves to Lunch.
+      3. Scan a barcode → ‹ back → scan a second product → it opens (the camera re-arms).
+      4. Open a food, set 3, ‹ back, open a Recent → it opens at its OWN logged portion, not 3.
+      5. Cheddar → 1 cup → tap the unit → grams → the amount becomes 113 and kcal is unchanged.
+      6. The first tap on the amount box opens the keypad; Done closes it; the pinned Log button
+         rides above the keypad.
+      7. On a past day, the button reads "Log to Breakfast · Sat, Sep 12".
+      8. The title sits just under the status bar — no ~50pt gap. (This removed a manual top inset
+         on the belief SafeAreaView applies it inside this Modal; if the title now hides under the
+         Dynamic Island, that belief was wrong — put the inset back on the header, not both.)
+      9. "Nutrition details" lists only values FatSecret has; Cheddar shows no "Fiber 0g" line
+         unless FatSecret reports fiber.
+      10. Camera denied → the scan tab says "Open Settings" and opens iOS Settings.
+
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
