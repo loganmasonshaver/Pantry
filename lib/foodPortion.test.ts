@@ -50,10 +50,15 @@ test('a correction with no weight applies only to the serving it was made on', (
   const override: Override = { calories: 250, protein: 25, carbs: 20, fat: 8, basis_amount: null, basis_unit: null, serving_id: 'n1' }
   const bar: Unit = { kind: 'serving', servingId: 'n1' }
   assert.equal(applyOverride(fatsecretNutrients(bar, 2, noMetric)!, override, bar, 2, noMetric).nutrients.calories, 500)
-  // cheddar's half-cup has no weight either — a different serving never picks the fix up
+  // cheddar's half-cup has no weight — a cup correction reaches it by RATIO to FatSecret's cup
   const half: Unit = { kind: 'serving', servingId: 'c3' }
-  const other: Override = { ...override, serving_id: 'c1' }
-  assert.equal(applyOverride(fatsecretNutrients(half, 1, cheddar)!, other, half, 1, cheddar).overridden, false)
+  const cupFix: Override = { ...override, serving_id: 'c1' }
+  const viaRatio = applyOverride(fatsecretNutrients(half, 1, cheddar)!, cupFix, half, 1, cheddar)
+  assert.equal(viaRatio.overridden, true)
+  assert.equal(Math.round(viaRatio.nutrients.calories), Math.round(228 * 250 / 455))
+  // a correction whose serving no longer exists on the food cannot be scaled at all
+  const orphan: Override = { ...override, serving_id: 'zzz' }
+  assert.equal(applyOverride(fatsecretNutrients(half, 1, cheddar)!, orphan, half, 1, cheddar).overridden, false)
 })
 
 test('a gram correction never applies to a millilitre portion', () => {
@@ -159,4 +164,27 @@ test('portion text', () => {
   assert.equal(portionText(cup, 1, cheddar, true), '1 cup shredded (113 g)')
   assert.equal(portionText({ kind: 'serving', servingId: 'c3' }, 2, cheddar), '2 × 0.5 cup')
   assert.equal(portionText(grams, 150, cheddar), '150 g')
+})
+
+test('a correction on a millilitre cup still applies when logging grams, by ratio to FatSecret', () => {
+  // FatSecret whole milk: the cup is a volume, the gram basis is a separate 100 g serving.
+  const milkMl = [
+    srv('cup', '1 cup', 146, 7.9, 11.4, 7.9, 244, 'ml'),
+    srv('hg', '100 g', 60, 3.2, 4.7, 3.3, 100, 'g'),
+  ]
+  const override: Override = { calories: 150, protein: 8, carbs: 11, fat: 8, ...legacyBasis(milkMl, milkMl[0])! }
+  assert.equal(override.basis_unit, 'ml')
+  const base = fatsecretNutrients(grams, 240, milkMl)!
+  assert.equal(base.calories, 144)
+  const { nutrients, overridden } = applyOverride(base, override, grams, 240, milkMl)
+  assert.equal(overridden, true)
+  assert.equal(Math.round(nutrients.calories), Math.round(144 * 150 / 146))
+})
+
+test('the ratio tier leaves a macro FatSecret reports as 0 at 0', () => {
+  const food = [srv('a', '1 bar', 200, 0, 30, 8, 50, 'ml'), srv('b', '100 g', 400, 0, 60, 16, 100, 'g')]
+  const override: Override = { calories: 200, protein: 10, carbs: 30, fat: 8, basis_amount: 50, basis_unit: 'ml', serving_id: 'a' }
+  const { nutrients } = applyOverride(fatsecretNutrients(grams, 50, food)!, override, grams, 50, food)
+  assert.equal(nutrients.protein, 0)
+  assert.equal(nutrients.calories, 200)
 })

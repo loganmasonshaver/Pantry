@@ -126,6 +126,20 @@ export function applyOverride(base: Nutrients, override: Override | null, unit: 
   if (override.serving_id && unit.kind === 'serving' && unit.servingId === override.serving_id) {
     return { nutrients: scale(pickNutrients(override), amount), overridden: true }
   }
+  // Units that no weight can bridge — FatSecret gives milk's cup in millilitres and the user is
+  // logging grams. Scale FatSecret's own numbers for this portion by how far the correction moved
+  // them on the serving it was made on. A macro FatSecret has as 0 has no ratio and stays 0.
+  if (override.serving_id) {
+    const ref = servings.find(s => s.serving_id === override.serving_id)
+    if (ref) {
+      const fsRef = servingValues(ref)
+      const k = (key: keyof Nutrients) => (fsRef[key] > 0 ? override[key] / fsRef[key] : 1)
+      return {
+        nutrients: { calories: base.calories * k('calories'), protein: base.protein * k('protein'), carbs: base.carbs * k('carbs'), fat: base.fat * k('fat') },
+        overridden: true,
+      }
+    }
+  }
   return { nutrients: base, overridden: false }
 }
 

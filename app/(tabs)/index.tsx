@@ -77,6 +77,13 @@ const { width } = Dimensions.get('window')
 // Calorie/macro goals mirrored to disk. See the goal state in the component: without this the
 // first paint of a cold start shows the placeholder constants, not the user's own targets.
 const GOALS_CACHE_KEY = 'pantry_goals_cache'
+// Today's rows and the week's totals, mirrored to disk like the goals are. A cold start read both
+// from the network, so for the ~1s the two queries took the card said "Nothing logged yet" over a
+// day with three meals in it and the week's circles were empty, then everything jumped. The mirror
+// paints first; the network result replaces it and rewrites the mirror. User-stamped, so a second
+// account on the device never paints the first one's day.
+const dayLogsKey = (uid: string, date: string) => `pantry_day_logs:${uid}:${date}`
+const weekLogsKey = (uid: string, week: string) => `pantry_week_logs:${uid}:${week}`
 
 const ENABLE_AI_PHOTO_LOG = false
 
@@ -928,20 +935,31 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!user) return
     let cancelled = false
+    let fromNetwork = false
+    const apply = (rows: any[]) => {
+      const m = new Map<string, { cal: number; slots: Set<string> }>()
+      for (const r of rows) {
+        const d = String(r.logged_at)
+        const e = m.get(d) ?? { cal: 0, slots: new Set<string>() }
+        e.cal += Number(r.calories) || 0
+        if (r.slot) e.slots.add(String(r.slot))
+        m.set(d, e)
+      }
+      setWeekStats(m)
+      setLoggedDays(new Set(m.keys()))
+    }
+    // The mirror paints first, unless the network has already answered for this week.
+    AsyncStorage.getItem(weekLogsKey(user.id, weekStart)).then(raw => {
+      if (cancelled || fromNetwork || !raw) return
+      try { apply(JSON.parse(raw)) } catch {}
+    }).catch(() => {})
     supabase.from('meal_logs').select('logged_at, calories, slot')
       .eq('user_id', user.id).gte('logged_at', weekStart).lte('logged_at', weekOf(weekStart)[6])
       .then(({ data }) => {
         if (cancelled) return
-        const m = new Map<string, { cal: number; slots: Set<string> }>()
-        for (const r of (data ?? []) as any[]) {
-          const d = String(r.logged_at)
-          const e = m.get(d) ?? { cal: 0, slots: new Set<string>() }
-          e.cal += Number(r.calories) || 0
-          if (r.slot) e.slots.add(String(r.slot))
-          m.set(d, e)
-        }
-        setWeekStats(m)
-        setLoggedDays(new Set(m.keys()))
+        fromNetwork = true
+        apply((data ?? []) as any[])
+        AsyncStorage.setItem(weekLogsKey(user.id, weekStart), JSON.stringify(data ?? [])).catch(() => {})
       })
     return () => { cancelled = true }
   }, [user?.id, weekStart])
@@ -1011,18 +1029,9 @@ export default function HomeScreen() {
     setSelectedDate(todayStr(d))
   }
 
-  const fetchTodayLogs = useCallback(async () => {
-    if (!user) return
-    perfMark('Home logs fetch START')
-    const { data } = await supabase
-      .from('meal_logs')
-      .select('id, meal_name, calories, protein, carbs, fat, slot, created_at, food_id, serving_id, quantity, meal_data')
-      .eq('user_id', user.id)
-      .eq('logged_at', selectedDate)
-      .order('created_at', { ascending: true })
-    perfMark('Home logs fetch DONE')
-    if (!data) return
-
+  // Builds the day from rows — the network's or the disk mirror's. The milestone haptic fires only
+  // on a network result: a cold start hydrating a day already past the goal must not tick.
+  const applyLogRows = useCallback((data: any[], fromCache: boolean) => {
     const slotMap = new Map<string, LogEntry[]>()
     ;['Breakfast', 'Lunch', 'Dinner'].forEach(s => slotMap.set(s, []))
 
@@ -1065,12 +1074,42 @@ export default function HomeScreen() {
     const prevTotalCal = calorieMilestoneRef.current
     calorieMilestoneRef.current = newTotalCal
     const goal = calorieGoalRef.current
-    if (prevTotalCal !== null && goal > 0 && prevTotalCal < goal && newTotalCal >= goal) {
+    if (!fromCache && prevTotalCal !== null && goal > 0 && prevTotalCal < goal && newTotalCal >= goal) {
       haptic.success()
     }
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setSlots(result)
-  }, [user?.id, selectedDate])
+  }, [])
+
+  // The day the network last answered for. Hydration from disk is skipped once it has, so a slow
+  // disk read can never roll a fresh fetch back.
+  const fetchedFor = useRef<string | null>(null)
+  const fetchTodayLogs = useCallback(async () => {
+    if (!user) return
+    perfMark('Home logs fetch START')
+    const { data } = await supabase
+      .from('meal_logs')
+      .select('id, meal_name, calories, protein, carbs, fat, slot, created_at, food_id, serving_id, quantity, meal_data')
+      .eq('user_id', user.id)
+      .eq('logged_at', selectedDate)
+      .order('created_at', { ascending: true })
+    perfMark('Home logs fetch DONE')
+    if (!data) return
+    fetchedFor.current = selectedDate
+    AsyncStorage.setItem(dayLogsKey(user.id, selectedDate), JSON.stringify(data)).catch(() => {})
+    applyLogRows(data, false)
+  }, [user?.id, selectedDate, applyLogRows])
+
+  useEffect(() => {
+    if (!user) return
+    const date = selectedDate
+    let cancelled = false
+    AsyncStorage.getItem(dayLogsKey(user.id, date)).then(raw => {
+      if (cancelled || !raw || fetchedFor.current === date) return
+      try { applyLogRows(JSON.parse(raw), true) } catch {}
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [user?.id, selectedDate, applyLogRows])
 
   // Pull-to-refresh and foreground/focus refetch all hit the same path now that
   // Home is tracking-only — just today's logs. Trending lives on Discover.

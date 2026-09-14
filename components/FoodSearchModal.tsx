@@ -34,7 +34,8 @@ import {
   FoodSearchResult,
   FoodDetail,
 } from '@/lib/fatsecret'
-import { getFoodKey, getOverride, saveOverride } from '@/hooks/useMacroOverrides'
+import { getFoodKey, getOverride, saveOverride, type MacroOverride } from '@/hooks/useMacroOverrides'
+import { loadFood, rememberFood, foodFromSearchResult } from '@/lib/foodCache'
 import {
   availableUnits, applyOverride, calorieSplit, convertAmount, correctionPortion, dayImpact,
   fatsecretNutrients, findServing, formatAmount, legacyBasis, logFields, metricBasis, metricOf,
@@ -91,15 +92,14 @@ function quickMacros(desc: string) {
 
 // A correction saved before corrections carried a basis gets one on first read: the food's default
 // serving, which is the only serving the old screen ever opened on. Persisted so it is fixed for good.
-async function loadOverride(userId: string, food: FoodDetail): Promise<Override | null> {
-  const key = getFoodKey({ foodId: food.food_id })
-  const row = await getOverride(userId, key)
-  if (!row) return null
+// The write's error is logged, not swallowed — a refused upgrade would otherwise be invisible and the
+// row would stay basis-less forever.
+function withBasis(userId: string, row: MacroOverride, food: FoodDetail): Override {
   if (row.basis_amount || row.serving_id) return row
   const basis = legacyBasis(food.servings, pickDefaultServing(food.servings))
   if (!basis) return row
   const upgraded = { ...row, ...basis }
-  saveOverride(userId, upgraded).catch(() => {})
+  saveOverride(userId, upgraded).then(({ error }) => { if (error) console.log('[food] correction basis upgrade refused:', error) })
   return upgraded
 }
 
@@ -186,7 +186,14 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
   // the failure path used to, so after one successful scan the camera never scanned again.
   const rearmScanner = () => { scanningRef.current = false; setScanned(false) }
 
-  const openFood = async (load: () => Promise<FoodDetail | null>, start?: (food: FoodDetail) => { unit: Unit; amount: number } | null) => {
+  const openFood = async (
+    foodId: string,
+    load: () => Promise<FoodDetail>,
+    start?: (food: FoodDetail) => { unit: Unit; amount: number } | null,
+    // A search result already carries the food's servings, so the screen paints from it at once;
+    // food.get then runs behind it to pick up any serving the search response left out.
+    seed?: FoodDetail,
+  ) => {
     const seq = ++openSeq.current
     Keyboard.dismiss()
     setDetail(null)
@@ -196,16 +203,25 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     setStep('detail')
     setDetailLoading(true)
     try {
-      const food = await load()
+      // The correction is fetched ALONGSIDE the food, not after it — it only needs the id — and
+      // still lands before the first paint, so the numbers never show FatSecret's and then jump.
+      const [food, row] = await Promise.all([
+        seed ? Promise.resolve(seed) : load(),
+        user ? getOverride(user.id, getFoodKey({ foodId })) : Promise.resolve(null),
+      ])
       if (seq !== openSeq.current) return
-      const def = food ? pickDefaultServing(food.servings) : null
-      const initial = food && (start?.(food) ?? (def ? { unit: { kind: 'serving', servingId: def.serving_id } as Unit, amount: 1 } : null))
-      if (!food || !initial || !fatsecretNutrients(initial.unit, initial.amount, food.servings)) throw new Error('no serving data')
-      // The correction loads BEFORE the food is shown, so the numbers never flash FatSecret's and
-      // then jump to the user's own.
-      const override = user ? await loadOverride(user.id, food) : null
-      if (seq !== openSeq.current) return
+      const def = pickDefaultServing(food.servings)
+      const initial = start?.(food) ?? (def ? { unit: { kind: 'serving', servingId: def.serving_id } as Unit, amount: 1 } : null)
+      if (!initial || !fatsecretNutrients(initial.unit, initial.amount, food.servings)) throw new Error('no serving data')
+      const override = row && user ? withBasis(user.id, row, food) : null
       setDetail({ food, unit: initial.unit, amount: initial.amount, text: formatAmount(initial.amount, initial.unit), override })
+      if (seed) {
+        getFoodById(foodId).then(full => {
+          rememberFood(full)
+          if (seq !== openSeq.current) return
+          setDetail(d => (d && d.food.food_id === full.food_id && full.servings.length > d.food.servings.length ? { ...d, food: full } : d))
+        }).catch(() => {})
+      }
     } catch {
       if (seq !== openSeq.current) return
       Alert.alert('Error', 'Could not load food details.')
@@ -221,13 +237,15 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
     if (!visible || !editLogId || !initialFoodId) return
     if (initialSlot) setSelectedSlot(initialSlot)
     openFood(
-      () => getFoodById(initialFoodId),
+      initialFoodId,
+      () => loadFood(initialFoodId),
       food => unitFromLog(initialServingId, initialQuantity, food.servings, pickDefaultServing(food.servings)),
     )
   }, [visible, editLogId])
 
   const openRecent = (r: RecentFood) => openFood(
-    () => getFoodById(r.food_id),
+    r.food_id,
+    () => loadFood(r.food_id),
     food => {
       const unit = unitFromKey(r.unit_key, food.servings)
       return unit && r.amount ? { unit, amount: r.amount } : null
@@ -326,7 +344,8 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
       }
       // Corrections are keyed by the FatSecret food, never the barcode: the same product reached by
       // search or Recents is the same food, and used to be a different correction.
-      openFood(async () => food)
+      rememberFood(food)
+      openFood(food.food_id, async () => food)
     } catch {
       Alert.alert('Scan failed', 'Could not look up this barcode.')
       rearmScanner()
@@ -375,9 +394,10 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
 
   const reloadOverride = async () => {
     if (!user || !detail) return
-    const foodId = detail.food.food_id
-    const override = await loadOverride(user.id, detail.food)
-    setDetail(d => (d && d.food.food_id === foodId ? { ...d, override } : d))
+    const { food } = detail
+    const row = await getOverride(user.id, getFoodKey({ foodId: food.food_id }))
+    const override = row ? withBasis(user.id, row, food) : null
+    setDetail(d => (d && d.food.food_id === food.food_id ? { ...d, override } : d))
   }
 
   const saveLog = async () => {
@@ -845,7 +865,7 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
                       <TouchableOpacity
                         key={`${food.food_id}-${i}`}
                         style={styles.resultRow}
-                        onPress={() => openFood(() => getFoodById(food.food_id))}
+                        onPress={() => openFood(food.food_id, () => loadFood(food.food_id), undefined, foodFromSearchResult(food) ?? undefined)}
                         activeOpacity={0.75}
                       >
                         <View style={styles.resultInfo}>

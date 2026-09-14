@@ -1730,6 +1730,35 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
          unless FatSecret reports fiber.
       10. Camera denied → the scan tab says "Open Settings" and opens iOS Settings.
 
+- [ ] **RAISED BY LOGAN 2026-09-14 02:32 after seeing the rebuild on device ("very good start") —
+      three follow-ups, all built, UNVERIFIED ON DEVICE.**
+      1. **~1s from tapping a Home entry to the screen.** Two sequential network calls: food.get
+         through the edge function to FatSecret, then the correction row. Now: `lib/foodCache.ts`
+         keeps every fetched food in memory + disk (`pantry_food:<id>`), the correction is fetched
+         in PARALLEL with the food, and a tapped search result paints from the servings the v3
+         search already returned (food.get runs behind it and swaps in any serving the search
+         left out). A logged entry is always a food already fetched to log it, so its edit opens
+         from disk. Tell: tap a logged entry → the screen is there with the modal slide, no
+         spinner. First open of a NEVER-fetched food still costs one round-trip.
+      2. **"240 g shows 144 kcal" — not a bug in the math, but the correction was NOT applied.**
+         144 = FatSecret's own whole milk (60 kcal/100 g × 2.4); the corrected figure would be
+         ~148. The prod row `fatsecret:794` still has basis NULL, so the app never read it as the
+         food that was open: either the "Whole Milk" opened was a different FatSecret entry than
+         the one corrected in March (search returns many), or the correction's cup is in
+         MILLILITRES and grams could not be bridged. The second case is now handled: a third tier
+         in `applyOverride` scales FatSecret's numbers for the portion by the correction's ratio on
+         the serving it was made on (test: ml cup + 100 g serving → 148). Tell: open the food →
+         the link under the card reads "Your numbers · Edit" when the correction is applied,
+         "Edit nutrition" when it is not; if the latter on food 794, the basis-upgrade write is
+         being refused and the console now logs why.
+      3. **Home painted 0 / "Nothing logged yet" / empty circles for ~1s on launch, then jumped.**
+         The goals were disk-cached (GOALS_CACHE_KEY); today's rows and the week's were not. Both
+         are mirrored now (`pantry_day_logs:<uid>:<date>`, `pantry_week_logs:<uid>:<week>`),
+         hydrated before the network answers and never over a network result that already landed.
+         The goal-crossed haptic is suppressed on hydration. Tell: kill the app with meals logged,
+         relaunch → the card and the check mark are right on the first frame.
+      Also seen in both screenshots: "Open debugger to view warnings" — the warning text was not
+      captured (Metro is not in the desktop terminal pane). Tap the toast and paste the warning.
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
