@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
+import { pickFatSecretMatch, wantsRawMatch } from '../_shared/fatsecret-match.ts'
 import { isCompleteMeal, isZeroCalorie, pantryCarbs, savoryCarbs, pantryProteins, carbRequired, savoryClash } from '../_shared/meal-completeness.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
@@ -9,7 +10,7 @@ import { sanitizeList } from '../_shared/sanitize.ts'
 import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-match.ts'
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, detectBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE } from '../_shared/macro-estimate.ts'
-import { scaleToTarget, topUpProtein, clampPortions } from '../_shared/scale-recipe.ts'
+import { scaleToTarget, topUpProtein, clampPortions, roundIngredientGrams, fundProtein } from '../_shared/scale-recipe.ts'
 import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
 import { flavourAxes, flavourShelf, isSweetDish } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
@@ -64,11 +65,14 @@ async function fsSignedUrl(params: Record<string, string>): Promise<string> {
 
 async function lookupMacros(name: string, grams: number): Promise<{ cal: number; p: number; c: number; f: number; matched: string; per100: number } | null> {
   try {
-    const searchUrl = await fsSignedUrl({ method: "foods.search", search_expression: name, max_results: "1" })
+    // A raw protein fetches a page and takes the RAW entry; anything else keeps the top hit. See
+    // _shared/fatsecret-match.ts for why — the cooked entry was inflating meat by 40-80%.
+    const raw = wantsRawMatch(name)
+    const searchUrl = await fsSignedUrl({ method: "foods.search", search_expression: name, max_results: raw ? "10" : "1" })
     const searchRes = await fetch(searchUrl)
     const searchData = await searchRes.json()
     const food = searchData?.foods?.food
-    const item = Array.isArray(food) ? food[0] : food
+    const item = pickFatSecretMatch(name, Array.isArray(food) ? food : food ? [food] : [])
     if (!item?.food_id) return null
 
     const detailUrl = await fsSignedUrl({ method: "food.get.v4", food_id: String(item.food_id) })
@@ -829,18 +833,50 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           }
         }
         const res = scaleToTarget(m?.ingredients, Number(m?.calories), batchCalorieTarget, { servings })
-        if (res.macroFactor === 1) return m
-        scaledToTargetCount++
-        console.log(`[scale] "${m?.name}" ${res.reason}`)
-        // Per-macro factors: dense food is cut first, so protein falls less than calories do.
-        return {
-          ...m,
-          ingredients: res.ingredients,
-          calories: Math.round(Number(m.calories) * res.factors.kcal),
-          protein: Math.round(Number(m.protein) * res.factors.protein),
-          carbs: Math.round(Number(m.carbs) * res.factors.carbs),
-          fat: Math.round(Number(m.fat) * res.factors.fat),
+        if (res.macroFactor !== 1) {
+          scaledToTargetCount++
+          console.log(`[scale] "${m?.name}" ${res.reason}`)
+          // Per-macro factors: dense food is cut first, so protein falls less than calories do.
+          m = {
+            ...m,
+            ingredients: res.ingredients,
+            calories: Math.round(Number(m.calories) * res.factors.kcal),
+            protein: Math.round(Number(m.protein) * res.factors.protein),
+            carbs: Math.round(Number(m.carbs) * res.factors.carbs),
+            fat: Math.round(Number(m.fat) * res.factors.fat),
+          }
         }
+        // SECOND protein pass, after the resize. The resize cuts lean food to the band's edge when
+        // the dense food cannot give any more — a "2 medium" potato count is fixed, so the beef took
+        // the whole cut on run 759 and 39 g was left of a 40 g target with the first pass long done.
+        // Ceiling is the calorie band's top, not the drop threshold: a few calories over for the
+        // protein is the trade the user asked for; 40% over is not.
+        // Tolerance near zero here, not the first pass's 5%: "within 5%" is exactly the 38-of-40
+        // the user notices, and the anchor rounds UP afterwards, so aiming at the target itself is
+        // what makes the card read 40, not 39.
+        const again = fundProtein(m?.ingredients, Number(m?.protein), batchProteinTarget, Number(m?.calories), batchCalorieMax, { servings, tolerance: 0.01 })
+        if (again.added.protein > 0) {
+          toppedUpCount++
+          topUps.push(`${String(m?.name ?? '')}: after resize, ${again.reason}`)
+          console.log(`[protein] "${m?.name}" after resize: ${again.reason}`)
+          m = {
+            ...m, ingredients: again.ingredients,
+            protein: Math.round(Number(m.protein) + again.added.protein), calories: Math.round(Number(m.calories) + again.added.kcal),
+            carbs: Math.round(Number(m.carbs) + again.added.carbs), fat: Math.round(Number(m.fat) + again.added.fat),
+          }
+        }
+        // Round every gram the arithmetic produced: 147 g of beef is not a number a cook uses. A
+        // protein anchor rounds UP so the card never loses protein to rounding; the macros follow
+        // the anchor's change so 40 g stays 40 g.
+        const rounded = roundIngredientGrams(m?.ingredients)
+        if (rounded.changed) {
+          m = {
+            ...m, ingredients: rounded.ingredients,
+            protein: Math.round(Number(m.protein) + rounded.delta.protein), calories: Math.round(Number(m.calories) + rounded.delta.kcal),
+            carbs: Math.round(Number(m.carbs) + rounded.delta.carbs), fat: Math.round(Number(m.fat) + rounded.delta.fat),
+          }
+        }
+        return m
       })
       if (scaledToTargetCount > 0) console.log(`Scaled ${scaledToTargetCount}/${meals.length} meals toward ${batchCalorieTarget} kcal`)
       funnel.scaledToTarget = scaledToTargetCount
@@ -910,7 +946,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       meals = meals.map((m: any) => {
         const miss = findMissing(m?.ingredients, ingredients, ASSUMED)
         if (miss.structural.length > 0) structuralGaps.push(...miss.structural)
-        return { ...m, missing_ingredients: [...miss.structural, ...miss.garnish], _notCookable: miss.structural.length > 0 }
+        // The client's "N ready now · M to shop for" counted ANY gap as shopping, so a missing
+        // garnish (cilantro on run 759's beef and lime rice) read as a dish the user could not make.
+        // The split is the server's to make — the client only has a substring matcher.
+        return { ...m, missing_ingredients: [...miss.structural, ...miss.garnish], structural_missing: miss.structural, garnish_missing: miss.garnish, _notCookable: miss.structural.length > 0 }
       })
       // The NAMES that disqualified a meal, not merely how many. This gate is the single largest
       // source of candidate loss in Cook Now — four of ten on run 26 — and the count alone cannot
@@ -1274,6 +1313,11 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           // completeness — Pan-Fried Eggs with Potatoes shipped at 24g against 40g, and the
           // completeness ordering alone would favour exactly that kind of dish.
           const proteinOk = proteinTarget <= 0 || Number(m.protein) >= PROTEIN_FLOOR * proteinTarget
+          // AT TARGET costs a tier point of its own, on top of the floor. The floor keeps a thin
+          // pantry from an empty deck; it must not make 38 g rank level with 43 g against a 40 g
+          // target — a user eating three "almost" meals ends the day short, and nothing on the card
+          // says so. One point per shortfall, so a complete dish under the floor sits two down.
+          const atTarget = proteinTarget <= 0 || Number(m.protein) >= proteinTarget
           // Protein powder or a sweet-flavoured product in a savory dish — see savoryClash.
           const clash = savoryClash(m)
           // PROTEIN IS ONE-SIDED AND WEIGHTED, like fat but in the other direction. Symmetric was
@@ -1289,7 +1333,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
           // rank higher without punishing a naturally-lean dish. Off for keto/low-carb.
           const fExcess = highFatDiet ? 0 : Math.max(0, (Number(m.fat) - fatTarget) / Math.max(fatTarget, 1))
           const fitScore = 2 * pShort * pShort + cDelta * cDelta + fExcess * fExcess
-          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1), _clash: clash, _proteinOk: proteinOk }
+          return { ...m, _fitScore: fitScore, _complete: complete, _tier: (complete ? 0 : 1) + (proteinOk ? 0 : 1) + (atTarget ? 0 : 1), _clash: clash, _proteinOk: proteinOk }
         })
 
       // EVERY INPUT THE SORT BELOW USES, recorded before it runs. proteinCandidates alone could not
@@ -1325,6 +1369,8 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       funnel.proteinShown = meals.map((m: any) => Number(m?.protein) || 0)
       funnel.incompleteShown = carbPossible ? meals.filter((m: any) => !isCompleteMeal(m, dietaryRestrictions)).length : 0
       funnel.belowProteinFloorShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) < PROTEIN_FLOOR * proteinTarget).length
+      // Over the floor but under the target — the 39-of-40 case the user notices, which the floor hides.
+      funnel.underTargetShown = meals.filter((m: any) => proteinTarget > 0 && Number(m?.protein) >= PROTEIN_FLOOR * proteinTarget && Number(m?.protein) < proteinTarget).length
       funnel.savoryClash = scored.filter((m: any) => m._clash).map((m: any) => String(m?.name ?? ''))
       funnel.savoryClashShown = meals.filter((m: any) => savoryClash(m)).length
       // MEASURED, NOT RANKED: the prompt asks for 2 of 4 flavour axes and nothing checks it. See

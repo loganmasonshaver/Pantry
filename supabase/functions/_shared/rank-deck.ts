@@ -1,8 +1,9 @@
 // Which of the surviving Cook Tonight candidates reach the screen, and in what order.
 //
-// Order: a savory clash sorts below everything; then TIER (complete AND over the protein floor);
-// then FLAVOUR (two or more axes, then one, then none — sweet dishes exempt); then fresh before
-// repeat; then macro fit. Tier moved ahead of freshness on Logan's call after
+// Order: a savory clash sorts below everything; then TIER (one point each for incomplete, under
+// the protein floor, under the protein target — 0 is complete AND at target); then FLAVOUR (two
+// or more axes, then one, then none — sweet dishes exempt); then fresh before repeat; then macro
+// fit. Tier moved ahead of freshness on Logan's call after
 // run 48, where seven of ten candidates were repeats: freshness-first had no choice left to make,
 // so the three fresh dishes shipped whatever they were — one at 24g against a 40g target, over
 // seven dishes that met the floor. On a finite pantry the "fresh" dishes are the model's oddest

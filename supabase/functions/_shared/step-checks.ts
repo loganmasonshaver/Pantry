@@ -1,4 +1,4 @@
-import { SWEET_DISH } from './flavour-axes.ts'
+import { isSweetDish } from './flavour-axes.ts'
 // Can the recipe actually be FOLLOWED in a kitchen? Four things Cook Tonight run 51 got wrong that
 // nothing in the pipeline looks at:
 //
@@ -75,7 +75,7 @@ export function stepIssues(meal: { name?: unknown; ingredients?: unknown; steps?
   const steps = textOf(meal?.steps)
   const all = `${ingredients} \n ${steps}`
   return {
-    unseasoned: !SWEET_DISH.test(String(meal?.name ?? '')) && !SEASONING.test(all),
+    unseasoned: !isSweetDish(meal?.name) && !SEASONING.test(all),
     noPreheat: USES_OVEN.test(steps) && !PREHEAT_STEP.test(steps),
     untimedCook: stepDetails(meal?.steps).filter(d => COOK_VERB.test(d) && !DURATION.test(d)).length,
     coldCarb: PRECOOKED_COLD.test(ingredients) && !REHEATS.test(steps),

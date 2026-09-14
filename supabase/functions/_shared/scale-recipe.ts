@@ -363,3 +363,131 @@ export function clampPortions(ingredients: ScalableIngredient[] | undefined, ser
   for (const k of ['kcal', 'protein', 'carbs', 'fat'] as const) factors[k] = before[k] > 0 ? after[k] / before[k] : 1
   return { ingredients: out, factors, clamped }
 }
+
+// ── Rounding ────────────────────────────────────────────────────────────────────────────────────
+//
+// The arithmetic above produces 147 g of beef and 109 g of pineapple — numbers no cook weighs to.
+// Grams round to the nearest 10 from 100 g up, to 5 between 20 and 99, and to 1 below (a spice).
+// A protein anchor rounds UP: the top-up sized it to reach the target exactly, and rounding it
+// down would hand back the very grams that got it there. The macros follow the anchor's change
+// through the local table, so the card's protein moves with the beef. A visual that is only the
+// gram figure ("147g") is rewritten to match; a measure ("¾ cup") is left alone.
+const BARE_GRAMS = /^\s*\d+(?:\.\d+)?\s*(?:g|ml)\s*$/i
+
+export function roundGrams(g: number, mode: 'nearest' | 'up' = 'nearest'): number {
+  if (!Number.isFinite(g) || g <= 0) return g
+  const step = g >= 100 ? 10 : g >= 20 ? 5 : 1
+  const r = mode === 'up' ? Math.ceil(g / step - 1e-9) * step : Math.round(g / step) * step
+  return Math.max(1, r)
+}
+
+/** Is this ingredient a protein anchor the top-up would grow? Same tests topUpProtein applies. */
+function isProteinAnchor(ing: ScalableIngredient, g: number): boolean {
+  if (NOT_AN_ANCHOR.test(String(ing?.name ?? ''))) return false
+  const e = estimateMacros([ing] as never)
+  return e.kcal > 0 && (e.protein * 4) / e.kcal >= LEAN_SHARE && (e.protein / g) * 100 >= ANCHOR_MIN_DENSITY
+}
+
+export type RoundResult<T> = { ingredients: T[]; changed: boolean; delta: { protein: number; kcal: number; carbs: number; fat: number } }
+
+export function roundIngredientGrams<T extends ScalableIngredient>(ingredients: T[] | undefined): RoundResult<T> {
+  const ings = Array.isArray(ingredients) ? ingredients : []
+  const delta = { protein: 0, kcal: 0, carbs: 0, fat: 0 }
+  let changed = false
+  const out = ings.map(ing => {
+    const raw = String(ing?.grams ?? '')
+    const g = parseFloat(raw.replace(/[^0-9.]/g, ''))
+    if (!Number.isFinite(g) || g <= 0) return ing
+    const unit = raw.replace(/[0-9.\s]/g, '') || 'g'
+    const anchor = isProteinAnchor(ing, g)
+    const r = roundGrams(g, anchor ? 'up' : 'nearest')
+    if (r === g) return ing
+    changed = true
+    if (anchor) {
+      const e = estimateMacros([ing] as never)
+      const per = (n: number) => (n / g) * (r - g)
+      delta.protein += per(e.protein); delta.kcal += per(e.kcal); delta.carbs += per(e.carbs); delta.fat += per(e.fat)
+    }
+    const visual = String(ing?.visual ?? '')
+    return { ...ing, grams: `${r}${unit}`, visual: BARE_GRAMS.test(visual) ? `${r}${unit}` : ing?.visual }
+  })
+  return { ingredients: out, changed, delta }
+}
+
+// ── Funding protein from dense food ─────────────────────────────────────────────────────────────
+//
+// The top-up stops at the calorie ceiling, and after the resize a dish sits AT the ceiling with
+// its carbs untouched: run 759's beef and rice bowl held 190 g of beef at 38 g against a 40 g
+// target and 90 g of rice, and nothing would shrink so the beef could grow. The user's priority is
+// explicit — under on protein is the failure, a little less rice is not — so take the calories
+// the anchor needs from the dense food first, in the order and to the floor scaleToTarget uses,
+// then let the top-up run inside the ceiling it was given. Never touches a counted item (a "2
+// medium" potato is fixed), never a condiment, never below DENSE_MIN of the original. Dense food
+// is by definition not an anchor (its protein share is under LEAN_SHARE), so the anchor is safe.
+//
+// Iterates, because a cut of rice removes rice's own protein too: one round of "the calories the
+// anchor needs" leaves the anchor a gram or two short. Three rounds cover it; if the dense food
+// runs out, the dish lands as close as its food allows and the tier ranks it honestly.
+export type FundResult = TopUpResult & { cut: string[] }
+
+export function fundProtein(
+  ingredients: ScalableIngredient[] | undefined,
+  currentProtein: number,
+  proteinTarget: number,
+  currentKcal: number,
+  calorieCeiling: number,
+  { servings = 1, denseMin = DENSE_MIN, tolerance = 0.05 } = {},
+): FundResult {
+  const ings = Array.isArray(ingredients) ? ingredients : []
+  const zero = { protein: 0, kcal: 0, carbs: 0, fat: 0 }
+  if (ings.length === 0 || !(proteinTarget > 0)) return { ingredients: ings, added: zero, reason: 'nothing to size', cut: [] }
+  const grams = (ing: ScalableIngredient) => parseFloat(String(ing?.grams ?? '').replace(/[^0-9.]/g, ''))
+
+  let out = [...ings]
+  let protein = Number(currentProtein) || 0
+  let kcal = Number(currentKcal) || 0
+  const cutTotal = { protein: 0, kcal: 0, carbs: 0, fat: 0 }
+  const cut: string[] = []
+  // Original grams per index, so the DENSE_MIN floor is measured against the recipe, not the last cut.
+  const original = ings.map(grams)
+
+  for (let round = 0; round < 3; round++) {
+    // What the anchor would need with no ceiling at all. Ceiling 0 is "unbounded" to topUpProtein.
+    const free = topUpProtein(out, protein, proteinTarget, kcal, 0, { servings, tolerance })
+    if (free.added.protein <= 0) break
+    const over = kcal + free.added.kcal - calorieCeiling
+    if (!(calorieCeiling > 0) || over <= 0) break
+    const dense = out.map((ing, i) => ({ i, ing, g: grams(ing), e: estimateMacros([ing] as never) }))
+      .filter(c => isScalable(c.ing) && Number.isFinite(c.g) && c.g > 0 && c.e.kcal > 0
+        && (c.e.protein * 4) / c.e.kcal < LEAN_SHARE && !NOT_AN_ANCHOR.test(String(c.ing.name ?? '')))
+      .sort((a, b) => b.e.kcal - a.e.kcal)
+    let need = over
+    let cutAny = false
+    for (const c of dense) {
+      if (need <= 0) break
+      const kPerG = c.e.kcal / c.g
+      const floorG = original[c.i] * denseMin
+      const maxCutG = Math.max(0, c.g - floorG)
+      const cutG = Math.min(maxCutG, need / kPerG)
+      if (cutG * kPerG < 5) continue               // not worth a line on the card
+      const scaled = scaleIngredient(c.ing, (c.g - cutG) / c.g)
+      const newG = grams(scaled)
+      const realFactor = Number.isFinite(newG) && c.g > 0 ? newG / c.g : (c.g - cutG) / c.g
+      const per = (n: number) => n * (1 - realFactor)
+      out[c.i] = scaled
+      protein -= per(c.e.protein); kcal -= per(c.e.kcal)
+      cutTotal.protein += per(c.e.protein); cutTotal.kcal += per(c.e.kcal); cutTotal.carbs += per(c.e.carbs); cutTotal.fat += per(c.e.fat)
+      need -= per(c.e.kcal)
+      cutAny = true
+      cut.push(`${String(c.ing.name)} ${Math.round(c.g)}g → ${Math.round(newG)}g (−${Math.round(per(c.e.kcal))} kcal)`)
+    }
+    if (!cutAny) break
+  }
+  const after = topUpProtein(out, protein, proteinTarget, kcal, calorieCeiling, { servings, tolerance })
+  return {
+    ingredients: after.ingredients,
+    added: { protein: after.added.protein - cutTotal.protein, kcal: after.added.kcal - cutTotal.kcal, carbs: after.added.carbs - cutTotal.carbs, fat: after.added.fat - cutTotal.fat },
+    reason: cut.length ? `${cut.join(', ')}; ${after.reason}` : after.reason,
+    cut,
+  }
+}

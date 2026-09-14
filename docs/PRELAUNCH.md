@@ -153,6 +153,50 @@ rice and greens 2 min." Photo matches it exactly: cubed chicken, rice and wilted
   next sweep (RUNS=3) settles it. The daily line's own red threshold (>20% under floor) guards
   production meanwhile.
 
+## 0c. RAISED BY LOGAN 2026-09-13 (evening) — 147 g of beef, "1 to shop for", a 696 kcal / 39 g plate  *(BUILT + DEPLOYED)*
+Runs 758 and 759 (20:57, 20:58 UTC), his two generations after the flavour work. Old fixes confirmed on
+both: the shelf line ran, `savoryZeroAxesShown` 0, every photo under a fingerprinted key, `unpreppedForms`
+counting (1 per meal on "chopped cilantro / pineapple", "minced garlic" — the rule is only partly obeyed;
+measured, not gated). The three things he saw share ONE root:
+- [x] **FOUND: FatSecret priced raw meat as cooked.** `lookupMacros` took the top search hit; for "ground
+  beef" that is "Ground Beef (Cooked)" at 276 kcal/100 g, for "chicken breast" a roasted entry at 195.
+  A recipe lists raw weights, so meat carried 40-80% too many calories AND too much protein (140 g raw
+  breast read as 273 kcal / 47 g; it is ~168 / 32). The cascade on run 759: the resize saw 924 kcal,
+  cut the beef to its 0.7 floor because the "2 medium" potatoes are count-locked, the protein fell to
+  39, and the card read 696 kcal — wrong in both directions. Fixed: `_shared/fatsecret-match.ts`
+  fetches a page for a raw protein and takes the raw entry (then the first with no cooked-state
+  word, then the top hit; generic over brand); an ingredient that names its cooked state keeps the
+  top hit. Tested. Confirmed by the numbers on Logan's pantry (190 g beef → 38 g, chicken 140 g →
+  ~30 g); the trace label appears on the next real generation's `macros` (dry runs do not store it).
+- [x] **Protein now reaches the target where the food allows.** A SECOND pass after the calorie
+  resize (`fundProtein`): when the plain top-up is stopped by the calorie ceiling, it cuts dense
+  food first (rice, potatoes, oil — never a condiment, never a counted item, never below half) and
+  grows the anchor, iterating because cut rice loses its own protein; tolerance 0.01 so 39 becomes
+  40. Tier gains an "at target" point (0 = complete AND ≥ target; a complete 38 g dish now sits one
+  tier down, not level). Funnel: `underTargetShown`. **Dry runs on Logan's pantry after: proteinShown
+  [48,52,49], [48,52,46], [46,45,49]; 0 under target; calories 525-571.** Beef dishes reach 41 by
+  funding ("diced red potatoes 110 g → 72 g; ground beef 177 → 197 g"). Physics, not a bug: 85/15
+  ground beef needs ~215 g for 40 g of protein, ~460 kcal on its own, so a beef plate at 525 is
+  beef-dominant and the ranker now prefers the chicken, egg-white and cottage-cheese dishes that
+  reach the target with room to spare. A hard cut at 100% was rejected — on the vegan/carb-heavy
+  sweep pantries it empties the deck; the tier ranks, the floor still shows something.
+- [x] **Grams round to what a cook weighs** (`roundIngredientGrams`): ≥ 100 g to the nearest 10,
+  20-99 to 5, below to 1; a protein anchor rounds UP and the macros follow it; a bare-gram visual
+  ("147g") is rewritten to match, a measure ("¾ cup") is not. 147 g → 150 g.
+- [x] **"2 ready now · 1 to shop for" over a dish short only of cilantro.** The client counted ANY
+  gap. The server now sends `structural_missing` / `garnish_missing` (the split `findMissing` already
+  made); `readySummary` counts structural gaps re-checked against the live pantry; the card reads
+  "Need: X" for a structural gap and "Better with: X" for a garnish. **UNVERIFIED on device** — needs
+  a Metro reload (JS only) and a generation carrying a garnish gap. Older cached meals lack the
+  fields and fall back to any gap, as before.
+- [x] Step-checks' "unseasoned" now uses `isSweetDish()`, so "Yogurt and Pineapple Power Bowl" is no
+  longer counted unseasoned (it was, on run 759, and it feeds the daily line's percentage).
+- [ ] **Metro died twice today with no crash record visible** (Logan's terminal showed only the auth
+  login; the first restart was a manual `expo start -c`, the second I started detached via nohup on
+  8082, pid in the scratchpad log). Expo prints "Your project may not work correctly until you
+  install the expected versions of the packages" on start — a pre-existing version mismatch worth a
+  `npx expo install --check` before the next build.
+
 ## 1. Verify App Store Connect products  *(do first — external lead time)*
 - [x] **Products exist and are correctly configured** — checked in App Store Connect 2026-09-04.
       Real product IDs are `com.kobalabs.pantry.monthly` (1 month) and `com.kobalabs.pantry.annual`

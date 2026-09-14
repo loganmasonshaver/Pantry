@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { scaleToTarget, scaleVisualText, isScalable, topUpProtein, anchorCap, clampPortions, scaleIngredient, SCALE_MIN, SCALE_MAX, DENSE_MIN } from './scale-recipe.ts'
+import { scaleToTarget, scaleVisualText, isScalable, topUpProtein, anchorCap, clampPortions, scaleIngredient, SCALE_MIN, SCALE_MAX, DENSE_MIN, roundGrams, roundIngredientGrams, fundProtein } from './scale-recipe.ts'
 
 // The real over-shooting recipe this was written for: 806 kcal against a 525 target.
 const PESTO_BOWL = [
@@ -311,4 +311,71 @@ test('a scaled count keeps its grams honest', () => {
   const eggs = scaleIngredient({ name: 'eggs', visual: '4 large', grams: '200g' }, 1.395)
   assert.equal(eggs.visual, '6 large')
   assert.equal(eggs.grams, '300g', 'six eggs weigh 300g, not 279g')
+})
+
+test('grams round to a number a cook weighs to; a protein anchor only ever rounds up', () => {
+  assert.equal(roundGrams(147), 150)
+  assert.equal(roundGrams(143), 140)
+  assert.equal(roundGrams(143, 'up'), 150)
+  assert.equal(roundGrams(109), 110)
+  assert.equal(roundGrams(49), 50)
+  assert.equal(roundGrams(42), 40)
+  assert.equal(roundGrams(42, 'up'), 45)
+  assert.equal(roundGrams(7), 7)
+  assert.equal(roundGrams(1), 1)
+  assert.equal(roundGrams(100), 100)
+  assert.equal(roundGrams(100, 'up'), 100, 'already on the step')
+})
+
+// Run 759: 147 g of ground beef at 39 g protein against a 40 g target.
+test('run 759: the beef rounds up to 150 g, the card gains the protein, a bare-gram visual follows', () => {
+  const r = roundIngredientGrams([
+    { name: 'ground beef', grams: '147g', visual: '147g' },
+    { name: 'cooked rice', grams: '100g', visual: '½ cup' },
+    { name: 'pineapple', grams: '109g', visual: '¾ cup' },
+    { name: 'pecans', grams: '7g', visual: '¾ tbsp' },
+    { name: 'oat milk', grams: '168ml', visual: '¾ cup' },
+  ])
+  assert.equal(r.changed, true)
+  assert.deepEqual(r.ingredients.map(i => i.grams), ['150g', '100g', '110g', '7g', '170ml'])
+  assert.equal(r.ingredients[0].visual, '150g', 'a visual that is only the figure is rewritten')
+  assert.equal(r.ingredients[2].visual, '¾ cup', 'a measure is left alone')
+  assert.ok(r.delta.protein > 0 && r.delta.protein < 1, `beef +3 g is about half a gram of protein: ${r.delta.protein}`)
+})
+
+test('rounding is a no-op on numbers already round, and never touches a count-only item', () => {
+  const r = roundIngredientGrams([{ name: 'eggs', grams: '150g', visual: '3 large' }, { name: 'salt', grams: '2g', visual: 'to taste' }, { name: 'garlic', visual: '2 cloves' }])
+  assert.equal(r.changed, false)
+  assert.deepEqual(r.delta, { protein: 0, kcal: 0, carbs: 0, fat: 0 })
+})
+
+// Run 759's beef and rice bowl after the resize: at the calorie ceiling with the beef short. The
+// plain top-up can add nothing; funding takes the calories from the rice first.
+test('fundProtein cuts the rice to grow the beef when the ceiling stops the plain top-up', () => {
+  const ings = [
+    { name: 'ground beef', grams: '160g', visual: '160g' }, { name: 'cooked rice', grams: '120g', visual: '¾ cup' },
+    { name: 'barbecue sauce', grams: '15g', visual: '1 tbsp' }, { name: 'yellow onion', grams: '40g', visual: '1/4 medium' },
+    { name: 'cooking oil', grams: '8ml', visual: '½ tbsp' }, { name: 'salt', grams: '2g', visual: 'to taste' },
+  ]
+  const target = 40, ceiling = 604, protein = 33, kcal = 600
+  const plain = topUpProtein(ings, protein, target, kcal, ceiling)
+  assert.ok(plain.added.protein < 1, `the plain top-up is ceiling-bound: ${plain.reason}`)
+  const fund = fundProtein(ings, protein, target, kcal, ceiling)
+  const g = (name: string) => parseFloat(String(fund.ingredients.find(i => i.name === name)?.grams))
+  assert.ok(g('cooked rice') < 120, `rice was cut: ${fund.reason}`)
+  assert.ok(g('cooked rice') >= 60, 'never below half of the original')
+  assert.ok(g('ground beef') > 160, `beef grew: ${fund.reason}`)
+  assert.ok(protein + fund.added.protein >= target - 0.5, `protein reaches the target: ${protein + fund.added.protein}`)
+  assert.ok(kcal + fund.added.kcal <= ceiling + 1, `calories stay inside the ceiling: ${kcal + fund.added.kcal}`)
+  assert.ok(fund.cut.length >= 1, `rice, and the oil if the rice alone was not enough: ${fund.cut.join(' | ')}`)
+  assert.equal(g('barbecue sauce'), 15, 'a condiment is never the thing that gets cut')
+})
+
+test('fundProtein is the plain top-up when the anchor fits without a cut, and a no-op at target', () => {
+  // '120g', not '1 breast': a counted item is fixed by design and the top-up refuses to grow it.
+  const ings = [{ name: 'chicken breast', grams: '120g', visual: '120g' }, { name: 'cooked rice', grams: '150g', visual: '1 cup' }]
+  const fits = fundProtein(ings, 30, 40, 400, 700)
+  assert.deepEqual(fits.cut, [])
+  assert.ok(fits.added.protein > 9, fits.reason)
+  assert.equal(fundProtein(ings, 41, 40, 500, 604).added.protein, 0)
 })

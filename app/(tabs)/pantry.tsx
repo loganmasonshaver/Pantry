@@ -380,9 +380,18 @@ export default function PantryScreen() {
   // "Ready to cook now" count — the exciting, personalized signal for the Cook Tonight subtitle:
   // how many of today's meals need zero shopping. Uses the same missingFor as the per-meal rows,
   // so the count and the rows never disagree. Recomputes when the pantry or meals change.
+  // A meal is "to shop for" only when a STRUCTURAL ingredient is missing — the server splits the
+  // gaps (structural_missing / garnish_missing) because only it knows which is which; the client
+  // then re-checks each against the live pantry. A missing garnish is "Better with", not a trip to
+  // the store: run 759 read "2 ready now · 1 to shop for" over a dish short only of cilantro.
+  // Meals cached before the split carry no list and fall back to any gap, as before.
+  const structuralMissingFor = (meal: any): string[] => {
+    const s = meal?.structural_missing
+    return Array.isArray(s) ? missingFor(s.map((name: string) => ({ name }))) : missingFor(meal?.ingredients)
+  }
   const readySummary = useMemo(() => {
     if (!meals?.length) return null
-    const ready = meals.filter(m => missingFor(m.ingredients).length === 0).length
+    const ready = meals.filter(m => structuralMissingFor(m).length === 0).length
     return { ready, total: meals.length }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meals, pantryNameSet, excludedStaples])
@@ -918,6 +927,7 @@ export default function PantryScreen() {
                         // showed every ingredient missing. `missingFor` skips staples + does two-way
                         // substring, so a genuinely stocked pantry still reads "Got everything".
                         const missing = missingFor(meal.ingredients)
+                        const structural = structuralMissingFor(meal)
                         return (
                           <TouchableOpacity
                             key={`${meal.id}-${idx}`}
@@ -962,7 +972,9 @@ export default function PantryScreen() {
                                 // the cheese in a cheesy dish). So this reads as an upgrade, not a
                                 // blocker: "Need:" made a cookable meal look impossible.
                                 <Text style={styles.cookTonightNeedText} numberOfLines={1}>
-                                  Better with: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}
+                                  {structural.length > 0
+                                    ? <>Need: {structural.slice(0, 3).join(', ')}{structural.length > 3 ? ` +${structural.length - 3}` : ''}</>
+                                    : <>Better with: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}</>}
                                 </Text>
                               )}
                             </View>
