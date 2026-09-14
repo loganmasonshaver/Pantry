@@ -39,7 +39,11 @@ import { useAuth } from '../../context/AuthContext'
 import { usePremium } from '../../context/SuperwallContext'
 import { useAIConsent } from '../../context/AIConsentContext'
 import { useSuperwall } from 'expo-superwall'
-import { trackMealsGenerated } from '../../lib/analytics'
+import { trackMealsGenerated, trackDiscoverNudgeTapped } from '../../lib/analytics'
+import { trackCookTonightUsed } from '@/lib/engagement'
+import { discoverNudge } from '@/lib/discoverNudge'
+import { missingIngredients, structuralMissing } from '@/lib/mealReadiness'
+import { dietExcludedStaples } from '@/constants/staples'
 import { haptic } from '../../lib/haptics'
 import AILogModal from '../../components/AILogModal'
 import { Shimmer } from '../../components/Shimmer'
@@ -62,9 +66,6 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true)
 }
 
-// Touchable that accepts an animated height, so the hero meal card can glide its size in sync
-// with the macros accordion (both reflow together under LayoutAnimation).
-
 const { width } = Dimensions.get('window')
 
 // FEATURE FLAGS
@@ -79,39 +80,14 @@ const GOALS_CACHE_KEY = 'pantry_goals_cache'
 
 const ENABLE_AI_PHOTO_LOG = false
 
+// Height of the resting "Get tonight's meals" card — the failure/empty state of the meals section.
+const HERO_COMPACT_H = 172
+// One Cook Tonight row: 88pt photo plus 10pt padding each side. The skeleton rows use the same
+// number so the three shimmering placeholders are exactly the height of the cards that replace them.
+const PANTRY_ROW_H = 108
+
 // Narrates the daily meal generation instead of a static "Finding a meal…". Honest to what the
 // backend is actually doing, in order, so the wait reads as work rather than lag.
-// Height of the meal card before there is a real meal in it — used by BOTH the resting card and
-// the loading skeleton so tapping one to reach the other doesn't shift the page.
-// Manual `text-wrap: balance`. CSS has it, React Native does not, so the break is computed here
-// instead of being left to the layout engine's greedy fill.
-//
-// Greedy wrapping packs line 1 to capacity and dumps whatever is left on line 2, which is how
-// "Cottage Cheese and Pineapple Protein / Bowl" happens — a full line above one orphaned word.
-// Balancing splits at the word boundary that makes the two lines closest in length instead.
-//
-// Character count is a proxy for rendered width (an "M" is wider than an "i"), which is fine for
-// dish names and costs no measurement pass or extra render. HERO_ONE_LINE_MAX is tuned for the
-// hero: ~317pt of usable width at 18px/800 weight is roughly 33 characters.
-const HERO_ONE_LINE_MAX = 33
-
-function balanceTitle(name: string, oneLineMax = HERO_ONE_LINE_MAX): string {
-  const t = (name ?? '').trim()
-  // Fits on one line, or is a single unbreakable word — nothing to balance.
-  if (t.length <= oneLineMax || !t.includes(' ')) return t
-  const words = t.split(/\s+/)
-  let best = { diff: Infinity, at: 1 }
-  // Every split point EXCEPT the ends, so balancing can never itself create an orphan.
-  for (let i = 1; i < words.length; i++) {
-    const a = words.slice(0, i).join(' ').length
-    const b = words.slice(i).join(' ').length
-    const diff = Math.abs(a - b)
-    if (diff < best.diff) best = { diff, at: i }
-  }
-  return `${words.slice(0, best.at).join(' ')}\n${words.slice(best.at).join(' ')}`
-}
-
-const HERO_COMPACT_H = 172
 
 // Width of the travelling segment in the indeterminate sweep. ~38% of the track: long enough to
 // read as a bar rather than a dot, short enough that its motion is obvious across the full width.
@@ -225,15 +201,19 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
 // row is ~54pt where the old protein bar plus the carbs/fat accordion plus its toggle was ~110pt,
 // AND it shows all three without a tap. The accordion is retired with it — a control whose only
 // job was hiding two numbers that now fit.
+//
+// Label ABOVE the number, bar directly UNDER it. The label used to sit between them, so the bar was
+// two rows away from the figure it measures and the three tiles read as a stack of unrelated
+// lines. Read top-down it is now name -> value -> progress, the order every tracker uses.
 function MacroTileInner({ label, consumed, goal, color }: { label: string; consumed: number; goal: number; color: string }) {
   const pct = goal > 0 ? Math.min(consumed / goal, 1) : 0
   return (
     <View style={{ flex: 1, gap: 5 }}>
+      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
         <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textWhite }}>{Math.round(consumed)}</Text>
         <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>/{Math.round(goal)}g</Text>
       </View>
-      <Text style={{ fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.8 }}>{label}</Text>
       <View style={{ height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
         <View style={{ width: `${pct * 100}%`, height: '100%', backgroundColor: color, borderRadius: 2 }} />
       </View>
@@ -315,93 +295,68 @@ function MealCardResting({ pantryCount, onPress, error, errorCode }: { pantryCou
   )
 }
 
-function ShimmerBox({ style }: { style: any }) {
-  const shimmer = useRef(new RNAnimated.Value(0)).current
-  useEffect(() => {
-    RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(shimmer, { toValue: 1, duration: 1000, useNativeDriver: true }),
-        RNAnimated.timing(shimmer, { toValue: 0, duration: 1000, useNativeDriver: true }),
-      ])
-    ).start()
-  }, [])
+// One Cook Tonight pick as a row: square photo, name, the pills the detail screen leads with, and
+// the readiness line. Three of these stack where one hero used to auto-rotate — the three are
+// CANDIDATES for one decision, and choosing needs them side by side. Discover keeps the single big
+// photo; that is what makes the two tabs look different.
+//
+// The photo slot is SQUARE on purpose. Generation renders 512x512, so this is the first place on
+// Home that shows the whole image — the old 3:2 hero cropped a third off every one.
+function PantryMealRow({ meal, missing, structural, onPress }: { meal: GeneratedMeal; missing: string[]; structural: string[]; onPress: () => void }) {
+  // Cap the list at three names — the line is one row, and the detail screen has the full list.
+  const list = (xs: string[]) => `${xs.slice(0, 3).join(', ')}${xs.length > 3 ? ` +${xs.length - 3}` : ''}`
   return (
-    <RNAnimated.View style={[style, { opacity: shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.3, 0.7] }) }]} />
-  )
-}
-
-function MealCard({
-  meal,
-  rating,
-  onRate,
-}: {
-  meal: GeneratedMeal
-  rating: 1 | -1 | null
-  onRate: (r: 1 | -1) => void
-}) {
-  const router = useRouter()
-  return (
-    <TouchableOpacity
-      style={styles.mealCard}
-      activeOpacity={0.75}
-      onPress={() => router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })}
-    >
+    <TouchableOpacity style={styles.pantryRow} activeOpacity={0.75} onPress={onPress}>
       {meal.image && meal.image.startsWith('http') ? (
-        <MealImage uri={meal.image} style={styles.mealImageReal} recyclingKey={String(meal.id)} transition={0} />
-      ) : meal.imageUnavailable ? (
-        // SETTLED, not loading. A shimmer here ran forever once the daily image cap was hit —
-        // the meal is perfectly cookable, only the photo is missing, and an endless loading
-        // animation says "broken" instead.
-        <View style={styles.mealImagePlaceholder}>
-          <Utensils size={22} stroke="#6A6A6A" strokeWidth={1.6} />
-        </View>
+        <MealImage uri={meal.image} style={styles.pantryRowPhoto} recyclingKey={String(meal.id)} transition={200} />
       ) : (
-        <ShimmerBox style={styles.mealImagePlaceholder} />
+        <View style={[styles.pantryRowPhoto, styles.pantryRowPhotoEmpty]}>
+          {/* Only shimmer while a photo is still COMING. Once fetching has settled with nothing
+              (the daily image cap is the usual reason) the animation is a lie — it ran forever and
+              read as the app being stuck rather than the dish simply having no picture. */}
+          {!meal.imageUnavailable && <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />}
+          <Utensils size={22} stroke="#5A5A5A" strokeWidth={1.4} />
+        </View>
       )}
-      <View style={styles.mealInfo}>
-        <Text style={styles.mealName}>{meal.name}</Text>
-        <View style={styles.mealMeta}>
-          <Clock size={13} stroke={COLORS.textMuted} strokeWidth={1.8} />
-          {/* Prep + cook, because both are time the cook is stuck here. Hands-off REST is the
-              difference between "dinner tonight" and "start it now, eat it tomorrow" — hiding it
-              is what let a recipe claim 5 minutes for an overnight soak. */}
-          <Text style={styles.mealMetaText}>{formatTimeLine(meal.prepTime, meal.cookTime, meal.restTime)}</Text>
-          {/* Sits with prep time, not with the macros: the macros below are one portion and must
-              stay unqualified, while "makes 2" is a fact about the COOKING, same as the clock. */}
+      <View style={{ flex: 1, gap: 6 }}>
+        <Text style={styles.pantryRowName} numberOfLines={2}>{meal.name}</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 5 }}>
+          {/* One time pill. The wait used to get its own, showing a duration nobody acts on — 6 hr
+              and 8 hr are the same decision. */}
+          {activeMinutes(meal.prepTime, meal.cookTime) > 0 && (
+            <View style={[styles.mealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
+              <Text style={[styles.mealPillText, { color: '#F59E0B' }]}>{formatTimeLine(meal.prepTime, meal.cookTime, meal.restTime).toUpperCase()}</Text>
+            </View>
+          )}
+          <View style={[styles.mealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
+            <Text style={styles.mealPillText}>{meal.calories} CAL</Text>
+          </View>
+          {meal.protein > 0 && (
+            <View style={[styles.mealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
+              <Text style={[styles.mealPillText, { color: '#4ADE80' }]}>{meal.protein}P</Text>
+            </View>
+          )}
+          {/* The CAL and P pills are ONE PORTION — what they will eat and what logging writes. This
+              is the only thing saying the recipe cooks more than that, so without it the ingredient
+              list on the detail screen reads as double the food the card promised. */}
           {(meal.servings ?? 1) > 1 && (
-            <>
-              <View style={styles.macroDot} />
-              <Text style={styles.mealMetaText}>makes {meal.servings}</Text>
-            </>
+            <View style={[styles.mealPill, { backgroundColor: 'rgba(0,212,170,0.15)', borderColor: 'rgba(0,212,170,0.25)' }]}>
+              <Text style={[styles.mealPillText, { color: COLORS.accent }]}>MAKES {meal.servings}</Text>
+            </View>
           )}
         </View>
-        <View style={styles.mealMacros}>
-          <Text style={styles.mealMacroText}>
-            <Text style={styles.mealMacroBold}>{meal.calories} kcal</Text>
-          </Text>
-          <View style={styles.macroDot} />
-          <Text style={styles.mealMacroText}>
-            <Text style={styles.mealMacroBold}>{meal.protein}g</Text> Protein
-          </Text>
-        </View>
-      </View>
-      <View style={styles.ratingBtns}>
-        <TouchableOpacity
-          style={[styles.ratingBtn, rating === 1 && styles.ratingBtnUp]}
-          onPress={(e) => { e.stopPropagation(); onRate(1) }}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 4 }}
-        >
-          <ThumbsUp size={15} stroke={rating === 1 ? '#4ADE80' : COLORS.textMuted} strokeWidth={2} fill={rating === 1 ? 'rgba(74,222,128,0.15)' : 'none'} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.ratingBtn, rating === -1 && styles.ratingBtnDown]}
-          onPress={(e) => { e.stopPropagation(); onRate(-1) }}
-          activeOpacity={0.7}
-          hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-        >
-          <ThumbsDown size={15} stroke={rating === -1 ? '#EF4444' : COLORS.textMuted} strokeWidth={2} fill={rating === -1 ? 'rgba(239,68,68,0.15)' : 'none'} />
-        </TouchableOpacity>
+        {/* Only a STRUCTURAL gap is a trip to the store; a missing garnish is "Better with", not a
+            blocker — "Need:" over a dish short only of cilantro made a cookable meal look impossible. */}
+        {structural.length > 0 ? (
+          <Text style={styles.pantryRowNeed} numberOfLines={1}>Need: {list(structural)}</Text>
+        ) : missing.length > 0 ? (
+          <Text style={styles.pantryRowBetter} numberOfLines={1}>Better with: {list(missing)}</Text>
+        ) : (
+          <View style={styles.pantryRowReady}>
+            <Check size={11} stroke="#4ADE80" strokeWidth={3} />
+            <Text style={styles.pantryRowReadyText}>Ready to cook</Text>
+          </View>
+        )}
       </View>
     </TouchableOpacity>
   )
@@ -537,10 +492,14 @@ export default function HomeScreen() {
   const { registerPlacement } = useSuperwall()
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
   const [pantryFetched, setPantryFetched] = useState(false)
-  // Home shows the full Cook Tonight set as an auto-cycling hero carousel (Apple TV style).
-  // Every HERO_CYCLE_MS the hero crossfades to the next meal so all 3 are surfaced over time
-  // without duplicating the Pantry tab's compact list. Pantry tab still owns the
-  // "Got everything / Need: X" detail view.
+  // Staples the user has opted out of assuming, from the profile fetch below. Feeds the readiness
+  // line on each row: an excluded staple counts as missing, same as on the meal detail.
+  const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
+  // Home shows the three Cook Tonight picks as a stacked list, all visible at once. It was a hero
+  // carousel auto-rotating through them one at a time — the wrong container for a choice between
+  // three (choosing needs them side by side), and the same visual move Discover opens with, so
+  // neither tab had an identity. The 5x page loop, the recentring, Ken Burns and the fit-to-fold
+  // measurement all existed to serve that one card and went with it.
   // Generation no longer auto-fires. A cached day still paints on its own (the hook reads disk
   // regardless of `enabled`), so this only gates the ~6s GPT call on a genuine miss — i.e. the
   // first open of a new day. Six seconds you asked for reads completely differently from six
@@ -563,60 +522,16 @@ export default function HomeScreen() {
   // gate, sharing the 'cookNow' cache — so anyone who opened Pantry first (which is where you add
   // ingredients) got auto-generation anyway. The behaviour depended on which tab you happened to
   // open first, which is an accident, not a decision.
-  const { meals, loading, stale, cacheChecked, retry, error: mealsError, errorCode: mealsErrorCode } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
-  // The section used to render NOTHING — not even its heading — until Home's own pantry query
-  // came back, because the block below was gated on `pantryFetched`. That is the 2-3s of blank
-  // space before the shimmer: the hook cannot report `loading` yet, since it is not enabled until
-  // the pantry lands. Treat "we do not know yet" as pending rather than as absent, so the section
-  // holds its place and shimmers from first paint instead of appearing late and pushing the page.
-  // `&& meals.length === 0` is what makes the carryover worth having: once yesterday's meals are
-  // on screen the skeleton must not come back over them while today's generate underneath. The
-  // skeleton is for having NOTHING to show, not for being busy.
-  // HOLD THE SKELETON UNTIL THE HERO PHOTO PAINTS.
-  //
-  // meals.length > 0 used to end the shimmer on its own, so the card appeared with its title and
-  // pills over MealImage's flat #1A1A1A while the photo was still downloading — a dark rectangle
-  // for 1-2s where a moment earlier something was visibly happening. The sweep bar made that worse
-  // by contrast: the screen goes from "working" to "finished but empty".
-  //
-  // Only waits when there IS a URL to wait for, and never past HERO_PAINT_MAX_MS, so a missing or
-  // failed image degrades to the old behaviour instead of shimmering forever.
-  const HERO_PAINT_MAX_MS = 2500
-  const [heroPainted, setHeroPainted] = useState(false)
-  const heroImageUri = meals[0]?.image
-  useEffect(() => {
-    setHeroPainted(false)
-    if (!heroImageUri) return
-    // Backstop: expo-image fires no onLoad for a cached-but-identical source in some cases, and a
-    // shimmer that never resolves is worse than the blank it replaced.
-    const t = setTimeout(() => setHeroPainted(true), HERO_PAINT_MAX_MS)
-    return () => clearTimeout(t)
-  }, [heroImageUri])
-
-  // ARM THE HERO HOLD ONLY FOR A GENERATION. `loading` is never true for a cached day — the hook
-  // serves disk cache with no loading state, and that path paints in ~40ms. The hold above was
-  // written for the sweep-bar path, where the card genuinely appeared with a dark rectangle while
-  // the photo downloaded. Applying it to a cached open charged every single app launch a second of
-  // "Checking what's in your pantry…" for a photo that was already on disk.
-  const [heroGateArmed, setHeroGateArmed] = useState(false)
-  useEffect(() => { if (loading) setHeroGateArmed(true) }, [loading])
-
-  const pendingBase = ((!pantryFetched || !cacheChecked || loading) && meals.length === 0)
-    || (heroGateArmed && meals.length > 0 && !!heroImageUri && !heroPainted)
-
-  // ONE-WAY LATCH. The skeleton is for having NOTHING to show, so once something HAS been shown it
-  // must never come back — and it was coming back. Any change to meals[0].image re-runs the effect
-  // above, resets heroPainted to false, and pendingBase flips true again, drawing the shimmer OVER
-  // cards already on screen: Home, then the loading card, then Home again. A refresh returning a
-  // freshly versioned `?v=` URL, the daily swap and carryover -> fresh all trigger it.
-  // Reset when meals empty out, so a genuinely empty day can still shimmer.
-  const [mealsEverShown, setMealsEverShown] = useState(false)
-  useEffect(() => {
-    if (meals.length === 0) { setMealsEverShown(false); return }
-    if (!pendingBase) setMealsEverShown(true)
-  }, [meals.length, pendingBase])
-
-  const mealsPending = pendingBase && !mealsEverShown
+  const { meals, loading, stale, cacheChecked, retry, regenerate, canRegenerate, genUsedToday, genCapPerDay, error: mealsError, errorCode: mealsErrorCode } = useMealSuggestions(user?.id, isPremium, 'cookNow', pantryFetched && pantryNames.size > 0)
+  // The section holds its place and shimmers from first paint: the hook cannot report `loading`
+  // until the pantry lands, so "we do not know yet" is pending rather than absent — gating on
+  // `pantryFetched` alone was 2-3s of blank space before the shimmer.
+  // Only while there is NOTHING to show. Once meals exist a photo still on its way shimmers in its
+  // own slot, so the skeleton can never come back over cards already on screen, and yesterday's
+  // carried-over meals stay up while today's generate underneath.
+  const mealsPending = (!pantryFetched || !cacheChecked || loading) && meals.length === 0
+  // Drives the pulse dot and the sweep bar: generating with nothing up yet, or holding yesterday's.
+  const working = stale || mealsPending
 
   // Rotating status while today's batch generates — narrating real steps beats a static line,
   // and beats a bare spinner by a mile.
@@ -638,7 +553,7 @@ export default function HomeScreen() {
   // meals are held up, so nothing animates once today's have landed.
   const livePulse = useRef(new RNAnimated.Value(0.35)).current
   useEffect(() => {
-    if (!stale) return
+    if (!working) return
     const loop = RNAnimated.loop(
       RNAnimated.sequence([
         RNAnimated.timing(livePulse, { toValue: 1, duration: 1400, useNativeDriver: true }),
@@ -647,7 +562,7 @@ export default function HomeScreen() {
     )
     loop.start()
     return () => loop.stop()
-  }, [stale, livePulse])
+  }, [working, livePulse])
 
   // Indeterminate sweep under the section header. The 6pt breathing dot was the only signal that
   // work was happening, and at 6pt beside 12pt text it reads as punctuation, not activity — with
@@ -657,7 +572,7 @@ export default function HomeScreen() {
   // and a fake filling bar that stalls at 90% is worse than an honest loop.
   const sweep = useRef(new RNAnimated.Value(0)).current
   useEffect(() => {
-    if (!stale) return
+    if (!working) return
     // resetBeforeIteration (default) snaps back to 0 between passes, so the segment re-enters from
     // the left rather than ping-ponging — direction stays constant, which reads as progress.
     const loop = RNAnimated.loop(
@@ -665,161 +580,19 @@ export default function HomeScreen() {
     )
     loop.start()
     return () => loop.stop()
-  }, [stale, sweep])
+  }, [working, sweep])
 
-  // 5000 -> 6250: a 25% slower dwell. 5s read as a slideshow rushing past rather than a hero
-  // presenting a dish. Also drives the Ken Burns duration, so the zoom slows with it and the two
-  // stay in step.
-  const HERO_CYCLE_MS = 6250
-  // How long the carousel stays hands-off after ANY interaction — swiping it or tapping through
-  // to a meal. 8s was too eager: it resumed while you were still deciding, which is the failure
-  // mode that makes an auto-advancing carousel feel like it is fighting you.
-  const HERO_RESUME_MS = 60000
-  const [heroIdx, setHeroIdx] = useState(0)
-  // Ken Burns slow-zoom — image scales from 1.0 to 1.12 over the full slide duration,
-  // resets on idx change. Gives constant motion even when crossfade is idle.
-  const heroScale = useRef(new RNAnimated.Value(1)).current
-  // Only cycle the hero through meals whose AI image has finished generating —
-  // otherwise the carousel flips through image-less placeholder cards while the FAL
-  // images are still rendering. We start on the first ready meal, and by the time it
-  // cycles (5s) the next image has usually landed.
-  // ALL of today's meals, not just the ones whose photo has landed. The old set filtered on
-  // `image`, which was invisible with a crossfade but is wrong for a pager: the page count would
-  // grow 1 -> 2 -> 3 as photos arrived and the swipe target would move under your finger. A
-  // photo-less page renders the "Plating your dish…" placeholder that already exists below.
-  const carouselMeals = meals.slice(0, 3)
-  // Rendered FIVE times over, not three. A paged ScrollView has hard ends, so wrapping means
-  // physically having pages to travel into, and settling too close to an end teleports you back to
-  // the identical page nearer the middle.
-  //
-  // Three copies gave only ~3 pages of runway, so the teleport fired every third swipe — which is
-  // exactly the cadence of the glitch it caused. Five copies gives ~6, so it fires half as often,
-  // and combined with the drag guard below it should not be visible at all.
-  const LOOP_COPIES = 5
-  const loopMeals = carouselMeals.length > 1
-    ? Array.from({ length: LOOP_COPIES }, () => carouselMeals).flat()
-    : carouselMeals
-  // Start in the middle copy, so there is a full run of pages in BOTH directions before any
-  // recentring is needed.
-  const loopOffset = carouselMeals.length > 1 ? carouselMeals.length * 2 : 0
-  // True between onScrollBeginDrag and the momentum settling. Recentring during a live gesture is
-  // what actually produced the visible jump: an unanimated scrollTo issued while the user's finger
-  // (or its momentum) still owns the scroll position fights the gesture instead of replacing it.
-  const heroDragging = useRef(false)
-  const heroScrollRef = useRef<ScrollView>(null)
-  // Position in the TRIPLED list, which is what auto-advance scrolls against. heroIdx stays the
-  // real 0..n-1 index for the dots and Ken Burns.
-  const heroRawIdx = useRef(0)
-  // Ref mirror so the settle handler reads the live length without a stale closure.
-  const carouselLenRef = useRef(0)
-  useEffect(() => { carouselLenRef.current = carouselMeals.length }, [carouselMeals.length])
-  useEffect(() => { heroRawIdx.current = loopOffset }, [loopOffset])
-  // Timestamp after which auto-advance may resume. Touching the carousel pushes it forward, so
-  // the timer can never yank the card out from under a finger mid-browse.
-  const heroResumeAt = useRef(0)
+  // Readiness against the LIVE pantry, then ready-to-cook first: a meal you cannot cook tonight
+  // should not be the first thing on Home. The sort is stable, so within a tier the server's own
+  // order (protein tier, then flavour) still decides. The Pantry tab's time-of-day sort went with
+  // that tab — the generator already spreads the three across occasions.
+  const pantryMeals = useMemo(() => meals.slice(0, 3).map(meal => ({
+    meal,
+    missing: missingIngredients(meal.ingredients, pantryNames, excludedStaples),
+    structural: structuralMissing(meal, pantryNames, excludedStaples),
+  })).sort((a, b) => a.structural.length - b.structural.length), [meals, pantryNames, excludedStaples])
 
-  // Expo Router keeps tab screens MOUNTED when you navigate away, so without this the carousel
-  // keeps advancing on a screen nobody is looking at: every HERO_CYCLE_MS it scrolls, which fires
-  // onMomentumScrollEnd, which sets state, which re-renders Home and restarts the Ken Burns
-  // animation. That work lands on the same JS thread that has to mount the tab you just switched
-  // TO — which is how a background carousel turns into a black frame on Discover or Saved.
-  // MUST start false, not true. Home is the initial tab route, so React Navigation MOUNTS it even
-  // when the app opens on another tab — and useFocusEffect then never fires, so a `true` default
-  // was never corrected. Home sat unfocused with its carousel interval running, re-rendering the
-  // whole screen every ~8.9s forever, on the same JS thread every other tab has to transition on.
-  // Caught in a capture showing `Home MOUNT` with no following `Home FOCUS` and eleven renders at
-  // 8753/8824/8895/8898/8896/8908/8884/8932/8884/8931ms.
-  //
-  // false is safe for the normal case too: when Home IS the landing tab, useFocusEffect fires on
-  // mount and flips it true before the interval's first tick.
-  const [homeFocused, setHomeFocused] = useState(false)
-  useFocusEffect(useCallback(() => {
-    setHomeFocused(true)
-    return () => {
-      setHomeFocused(false)
-      // Freeze any zoom mid-flight as well; an Animated.timing left running is the same problem in
-      // miniature — it drives frames for a screen that is no longer visible.
-      heroScale.stopAnimation()
-    }
-  }, [heroScale]))
-
-  useEffect(() => {
-    if (!homeFocused || loading || carouselMeals.length <= 1) return
-    const interval = setInterval(() => {
-      if (Date.now() < heroResumeAt.current) return // user is driving; stay out of the way
-      // No modulo — always step forward through the tripled list and let the recentring in
-      // onHeroSettle handle the wrap. That is what makes it loop instead of snapping back.
-      heroScrollRef.current?.scrollTo({ x: (heroRawIdx.current + 1) * width, animated: true })
-    }, HERO_CYCLE_MS)
-    return () => clearInterval(interval)
-  }, [homeFocused, loading, carouselMeals.length])
-
-
-  // Settled page is the single source of truth — it fires for a finger swipe and for the
-  // programmatic scrollTo alike, so both paths update the index and restart Ken Burns identically.
-  const onHeroSettle = useCallback((e: any) => {
-    const len = carouselLenRef.current
-    if (len === 0) return
-    // Momentum has ended, so whatever gesture started this is over.
-    heroDragging.current = false
-    const raw = Math.round(e.nativeEvent.contentOffset.x / width)
-    // Modulo is written the long way because a negative raw (rubber-banding past the left edge)
-    // makes plain % return a negative index.
-    const real = ((raw % len) + len) % len
-    heroRawIdx.current = raw
-    setHeroIdx(prev => (prev === real ? prev : real))
-
-    // Only recentre once within one copy of an end — with 5 copies that is ~6 swipes of runway
-    // instead of 3, so the teleport happens half as often. No bookkeeping needed for a skipped
-    // one: if we don't move, the next settle sees the same nearEnd condition and retries.
-    if (len <= 1 || !(raw < len || raw >= len * (LOOP_COPIES - 1))) return
-
-    // requestAnimationFrame so the unanimated scroll lands on the frame AFTER momentum has fully
-    // released. Issuing it inline is what let the pre-jump position show for a frame — which is
-    // the glitch, and why it appeared on a fixed cadence rather than at random.
-    const recentred = len * 2 + real
-    requestAnimationFrame(() => {
-      // A new swipe started in the meantime — teleporting now would fight a live gesture, which
-      // is the worse failure. Skip; the next settle will still be near an end and retry.
-      if (heroDragging.current) return
-      heroRawIdx.current = recentred
-      heroScrollRef.current?.scrollTo({ x: recentred * width, animated: false })
-    })
-  }, [])
-  // Any hands-on interaction defers auto-advance, not just swiping — tapping through to a meal
-  // counts too, since coming back to a card that has moved on is the same annoyance.
-  const deferHeroAutoplay = useCallback(() => {
-    heroDragging.current = true
-    heroResumeAt.current = Date.now() + HERO_RESUME_MS
-    // Freeze the zoom where it is rather than snapping back to 1 — a reset mid-drag would be a
-    // visible pop. The next automatic advance resets it anyway.
-    heroScale.stopAnimation()
-  }, [HERO_RESUME_MS, heroScale])
-  const onHeroDragStart = deferHeroAutoplay
-  // Ken Burns zoom — linear easing for steady drift, restarted whenever the settled page changes.
-  //
-  // Only runs while the carousel is advancing ITSELF. Ken Burns is a presentation gesture: it
-  // belongs to the slideshow, not to browsing. A photo creeping in scale under your own finger
-  // reads as drift or instability rather than polish, and it fights the horizontal motion you are
-  // making. While you are driving, the photo holds still.
-  useEffect(() => {
-    heroScale.setValue(1)
-    if (!homeFocused) return
-    if (Date.now() < heroResumeAt.current) return
-    RNAnimated.timing(heroScale, {
-      toValue: 1.12,
-      duration: HERO_CYCLE_MS,
-      easing: Easing.linear,
-      useNativeDriver: true,
-    }).start()
-  }, [heroIdx, heroScale, homeFocused])
-  // Wrapped so a shrinking set never points at an empty slot and leaves the hero blank.
-  const safeHeroIdx = carouselMeals.length > 0 ? heroIdx % carouselMeals.length : 0
-  const heroMeal = carouselMeals[safeHeroIdx]
-
-  // Prefetch the hero images up front. Otherwise the first carousel cycles show the
-  // new title instantly (text re-render) while the uncached network image loads a
-  // beat later, so they look desynced until every image has been cached once.
+  // Prefetch the three photos so the rows fill together rather than one beat apart.
   useEffect(() => {
     meals.slice(0, 3).forEach(m => {
       if (m.image && m.image.startsWith('http')) Image.prefetch(m.image)
@@ -837,51 +610,11 @@ export default function HomeScreen() {
   // The stored 'pantry_macros_expanded' key is simply left behind; reading it would resurrect a
   // control that no longer exists.
 
-  // Hero meal card height, glided from the same value: 286 collapsed → 210 expanded (the expanded
-  // macros card eats ~76px, so the photo + title + pills stay framed above the tab bar either way).
-  // Meal-hero height is MEASURED, not hand-tuned: it's whatever vertical space is left between
-  // the card's top edge and the bottom of the viewport, so the whole card lands above the fold on
-  // any screen size and regardless of what's above it (the plan-ready banner comes and goes).
-  // A fixed value can only ever be right on one device.
-  //
-  // Capped at the card's own width because Flux renders square — past that we'd be pillarboxing
-  // instead of cropping, and there's no image left to reveal.
-  const [viewportH, setViewportH] = useState(0)
-  const [heroSectionY, setHeroSectionY] = useState(0)
-  const [heroHeaderH, setHeroHeaderH] = useState(0)
-  const HERO_MIN = 190
-  const HERO_MAX = width - 40 // square: matches the card's width at marginHorizontal 20
-  // Reserved for the Daily Meal Log so it clears the fold. Without this the hero took the WHOLE
-  // remainder (`viewportH - cardTop - 12`), pinning its bottom edge 12pt above the tab bar no matter
-  // what sat above it — so every point trimmed upstream was handed straight back to the photo and
-  // the log stayed permanently below the fold. Three earlier trims in this file were spent that way.
-  // 128 -> 190. Raised WITH the calorie-card compaction above, not instead of it: the card gave
-  // back ~100pt and the photo would have absorbed every point of it, which is what happened to the
-  // three earlier trims this comment already warns about. At 190 the log clears Lunch and reaches
-  // Dinner's header, and the photo still gains a little rather than shrinking.
-  const LOG_PEEK = 190
-  const heroFit = useMemo(() => {
-    if (!viewportH || !heroSectionY) return 288 // pre-measure default; replaced on first layout
-    const cardTop = heroSectionY + heroHeaderH
-    return Math.max(HERO_MIN, Math.min(HERO_MAX, viewportH - cardTop - 12 - LOG_PEEK))
-  }, [viewportH, heroSectionY, heroHeaderH])
-  // Expanding the macros accordion grows the card above, so the hero gives back the same 76pt.
-  // Both of these run on the UI thread now. As RN Animated with useNativeDriver:false every frame
-  // was computed in JS and shipped over the bridge — on Home, which auto-generates meals on focus,
-  // those frames queued behind whatever JS was already running and the glide stuttered.
-  // Full height when the macros card is compact; gives back 76pt when it expands, so the photo,
-  // title and pills stay framed above the tab bar in both states. This was frozen at the smaller
-  // size during the choppiness investigation because gliding it via an animated `height` stepped
-  // at ~20fps. LinearTransition on the container animates the change natively, so it can come back.
-  // The macros accordion is retired, so the calorie card no longer changes height and the hero has
-  // nothing to give back. heroExpandedH (heroFit - 76, the space the expanded accordion used to
-  // take) went with it — nothing read it any more.
-  const heroHeight = heroFit
 
 
   // Fetch pantry names and compute missing staples. Extracted so it can be re-run
   // after a scan adds items — otherwise pantryNames stays empty and Home keeps
-  // showing the "Unlock recipes" card instead of flipping to the meal carousel.
+  // showing the "Unlock recipes" card instead of flipping to the meal rows.
   const loadPantryNames = useCallback(async () => {
     if (!user) return
     perfMark('pantry fetch start')
@@ -1022,7 +755,7 @@ export default function HomeScreen() {
     perfMark('Home profile fetch START')
     supabase
       .from('profiles')
-      .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal, meal_slots')
+      .select('food_prefs_banner_dismissed, calorie_goal, protein_goal, carbs_goal, fat_goal, meal_slots, staples_excluded, dietary_restrictions')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
@@ -1036,6 +769,11 @@ export default function HomeScreen() {
         mealSlotsRef.current = fetched
         setMealSlots(fetched)
         if (!data?.food_prefs_banner_dismissed) setShowPrefBanner(true)
+        // Staples the user has opted out of assuming — their "I don't keep this" taps PLUS
+        // diet-conflicting basics (butter for vegan, flour for GF). Mirrors the meal detail so an
+        // exclusion made there flips the same ingredient into NEED on the Home rows.
+        const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
+        setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
         if (data?.calorie_goal) setCalorieGoal(data.calorie_goal)
         if (data?.protein_goal) setProteinGoal(data.protein_goal)
         if (data?.carbs_goal) setCarbsGoal(data.carbs_goal)
@@ -1122,18 +860,8 @@ export default function HomeScreen() {
     ]).start(() => setShowRatingToast_(false))
   }
 
-  const [mealsExpanded, setMealsExpanded] = useState(false)
-  const chevronAnim = useRef(new RNAnimated.Value(0)).current
   const scrollRef = useRef<ScrollView>(null)
   useScrollToTop(scrollRef)
-
-  const toggleMeals = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    RNAnimated.timing(chevronAnim, { toValue: mealsExpanded ? 0 : 1, duration: 250, useNativeDriver: true }).start()
-    setMealsExpanded(prev => !prev)
-  }
-
-  const chevronRotation = chevronAnim.interpolate({ inputRange: [0, 1], outputRange: ['180deg', '0deg'] })
 
   const [slots, setSlots] = useState<MealSlot[]>(INITIAL_SLOTS)
   const [mealSlots, setMealSlots] = useState<string[]>(DEFAULT_SLOT_LABELS)
@@ -1495,9 +1223,6 @@ export default function HomeScreen() {
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
-        // Viewport height excludes the tab bar (it's laid out, not overlaid), so this is exactly
-        // the space the hero has to fit inside.
-        onLayout={e => { const h = e.nativeEvent.layout.height; if (Math.abs(h - viewportH) > 0.5) setViewportH(h) }}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor="#4ADE80" colors={['#4ADE80']} />}
@@ -1678,10 +1403,9 @@ export default function HomeScreen() {
               rows for four numbers, ~250pt. This is two rows, ~150pt, and it shows MORE: carbs and
               fat are visible without a tap.
 
-              The reclaimed height does NOT come out of the meal photo. LOG_PEEK reserves a fixed
-              slice for the log and the hero photo takes the entire remainder, so anything trimmed
-              here is handed to the photo unless LOG_PEEK rises with it — which is exactly what
-              swallowed the last three trims in this file. It is raised below. */}
+              Nothing below is fit to the fold any more: the three meal rows are fixed height and
+              the page stacks naturally, so a point trimmed here is a point of the meal log that
+              rises into view — no reserve to keep in step. */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
             <View style={{ flex: 1 }}>
               <Text style={styles.kcalBig}>
@@ -1693,7 +1417,8 @@ export default function HomeScreen() {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 }}>
                 <Flame size={12} stroke="#4ADE80" strokeWidth={2} fill="rgba(74,222,128,0.25)" />
                 <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>
-                  {totalCal > 0 ? `${totalCal.toLocaleString()} consumed of ${calorieGoal.toLocaleString()}` : 'Keep logging!'}
+                  {/* "Keep logging!" at 0 implied you had started. Same words as the empty slots below. */}
+                  {totalCal > 0 ? `${totalCal.toLocaleString()} consumed of ${calorieGoal.toLocaleString()}` : 'Nothing logged yet'}
                 </Text>
               </View>
             </View>
@@ -1873,51 +1598,47 @@ export default function HomeScreen() {
           </PressableScale>
         )}
 
-        {/* ── Compact "Cook from your pantry" tease — Phase 2a of the IA refactor.
-            Full suggested-meal browse will live in the Pantry tab (Phase 2b). For now we
-            show just the top pick on Home as a low-noise nudge with "See all →" hint. ── */}
-        {/* The whole section shifts when the macros card grows. Without a layout animation here the
-            header and "See all" snapped into place while everything else glided. */}
+        {/* ── Cook from your pantry — three picks, all visible, ready-to-cook first ── */}
         {(!pantryFetched || pantryNames.size > 0) && (
-          <Reanimated.View layout={LinearTransition.duration(420)}
-            style={{ marginBottom: 14 }}
-            onLayout={e => { const y = e.nativeEvent.layout.y; if (Math.abs(y - heroSectionY) > 0.5) setHeroSectionY(y) }}
-          >
-            {/* Header height feeds the hero fit calculation — the card starts where this ends. The
-                carryover line MUST be measured with it: it sat outside this view and the header
-                under-reported its own height by exactly that line, so the hero card overflowed and
-                clipped the photo along the bottom. Anything added here goes inside this wrapper. */}
-            <View
-              onLayout={e => { const h = e.nativeEvent.layout.height + 12; if (Math.abs(h - heroHeaderH) > 0.5) setHeroHeaderH(h) }}
-              style={{ marginHorizontal: 20, marginBottom: 12 }}
-            >
+          <View style={{ marginBottom: 14 }}>
+            <View style={{ marginHorizontal: 20, marginBottom: 12 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={styles.sectionTitle}>Cook from your pantry</Text>
-                {/* navigate, NOT push — pushing a tab route stacks a second copy of the tab
-                    navigator on top of itself and renders a black screen. navigate switches tabs. */}
-                <TouchableOpacity onPress={() => router.navigate({ pathname: '/(tabs)/pantry' })} hitSlop={10} activeOpacity={0.7}>
-                  <Text style={{ color: '#4ADE80', fontSize: 13, fontWeight: '600' }}>See all →</Text>
-                </TouchableOpacity>
+                {/* ↻ came over from the Pantry tab with the list, replacing "See all →" — which led
+                    to the same three meals. Greyed at the daily cap rather than hidden, so the
+                    control stays where the finger learned it. */}
+                {!mealsPending && pantryMeals.length > 0 && (
+                  <TouchableOpacity
+                    onPress={regenerate}
+                    hitSlop={10}
+                    activeOpacity={0.7}
+                    disabled={!canRegenerate}
+                    style={[styles.regenBtn, !canRegenerate && { opacity: 0.35 }]}
+                  >
+                    <RefreshCw size={14} stroke={canRegenerate ? '#4ADE80' : '#888'} strokeWidth={2.2} />
+                  </TouchableOpacity>
+                )}
               </View>
 
               {/* Says what these are, so holding yesterday's meals up is honest rather than a stale
-                  cache pretending to be fresh. Drops the moment today's land.
-                  The DOT and the rotating line are the point: showing yesterday's meals removed the
-                  skeleton, which was the only thing on screen conveying that work was happening —
-                  so a static sentence replaced a progressing one and the section read as finished.
-                  DAILY_STATUS is the same narration the skeleton uses, so the two states now say
-                  the same thing rather than one of them going quiet. */}
-              {stale && (
+                  cache pretending to be fresh. The DOT and the rotating line are the point: a static
+                  sentence over yesterday's meals read as finished. DAILY_STATUS is the same narration
+                  the skeleton path uses, so the two states say the same thing. */}
+              {working && (
                 <View style={styles.carryoverRow}>
-                  <Text style={styles.carryoverNote}>Yesterday&rsquo;s picks</Text>
-                  <View style={styles.carryoverSep} />
+                  {stale && (
+                    <>
+                      <Text style={styles.carryoverNote}>Yesterday&rsquo;s picks</Text>
+                      <View style={styles.carryoverSep} />
+                    </>
+                  )}
                   <RNAnimated.View style={[styles.livePulse, { opacity: livePulse }]} />
                   <Text style={styles.carryoverStatus} numberOfLines={1}>{DAILY_STATUS[dailyStatusIdx]}</Text>
                 </View>
               )}
-              {/* Inside the measured wrapper on purpose — heroHeaderH feeds the hero fit, so a bar
-                  added outside it would push the photo past the fold. */}
-              {stale && (
+              {/* Indeterminate on purpose: generation has no measurable percentage, and a fake filling
+                  bar that stalls at 90% is worse than an honest loop. */}
+              {working && (
                 <View style={styles.sweepTrack}>
                   <RNAnimated.View style={[styles.sweepFill, {
                     transform: [{ translateX: sweep.interpolate({ inputRange: [0, 1], outputRange: [-SWEEP_W, width - 40] }) }],
@@ -1928,9 +1649,7 @@ export default function HomeScreen() {
                   Measured across 10 pantries: a shelf of peanut butter, milk, sliced cheese and
                   canned beans tops out near 33g a meal against a 38g floor, and no prompt reaches it
                   without a dish nobody would cook. The app used to show the best it could and say
-                  nothing, so a shortfall read as the app being bad at its job. No button: "See all →"
-                  above already goes to the pantry, and a second CTA in the same header competes
-                  with it. */}
+                  nothing, so a shortfall read as the app being bad at its job. */}
               {pantryProteinShort && (
                 <View style={styles.carryoverRow}>
                   <Text style={styles.pantryLimitNote} numberOfLines={2}>
@@ -1941,147 +1660,68 @@ export default function HomeScreen() {
             </View>
 
             {mealsPending ? (
-              // Card-shaped skeleton, not a bare spinner: a populated placeholder reads as "almost
-              // ready" while a spinner on an empty card reads as stuck. The status line narrates
-              // real work so the ~6s of generation feels like effort on the user's behalf.
-              // Compact, not full-height. The shimmering block used to be the LARGEST element on
-              // the screen at the exact moment it had the least to say. It now matches the resting
-              // card's height, so tapping "Get tonight's meals" doesn't jump the layout — the card
-              // expands once, when there is finally a photo to expand into.
-              <RNAnimated.View style={[styles.heroMealCard, { marginHorizontal: 20, height: HERO_COMPACT_H, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }]}>
-                <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
-                <Text style={styles.heroMealSkeletonStatus}>{DAILY_STATUS[dailyStatusIdx]}</Text>
-                <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 10 }}>
-                  {[54, 62, 40].map((w, i) => (
-                    <View key={i} style={[styles.heroMealPill, styles.heroMealPillSkeleton, { width: w }]} />
-                  ))}
-                </View>
-              </RNAnimated.View>
-            ) : heroMeal ? (
-              // Height gives back 76pt when the macros expand so the card stays above the fold.
-              // Driven by state and animated by LinearTransition — NOT by an animated height value,
-              // which committed at ~20fps and was the original cause of the choppiness.
-              <Reanimated.View layout={LinearTransition.duration(420)} style={{ height: heroHeight }}>
-                <ScrollView
-                  ref={heroScrollRef}
-                  horizontal
-                  pagingEnabled
-                  showsHorizontalScrollIndicator={false}
-                  // Touching pauses auto-advance; the settled page is what updates the index, and
-                  // it fires for a finger swipe and the programmatic scrollTo alike — so both
-                  // paths stay in sync through one code path.
-                  onScrollBeginDrag={onHeroDragStart}
-                  onMomentumScrollEnd={onHeroSettle}
-                  scrollEventThrottle={16}
-                  // Start in the middle copy so the very first swipe can go either way.
-                  contentOffset={{ x: loopOffset * width, y: 0 }}
-                  // Remount if the page count ever changes, so contentOffset is re-applied
-                  // against the right list length instead of pointing into the old geometry.
-                  key={`hero-${carouselMeals.length}`}
-                >
-                  {loopMeals.map((m, i) => (
-                    <TouchableOpacity
-                      key={`${m.id ?? 'hero'}-${i}`}
-                      style={{ width, height: '100%' }}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        deferHeroAutoplay()
-                        // Guard against missing id (GPT sometimes omits it) — fall back
-                        // to a synthetic id so the URL is well-formed. mealData carries
-                        // the full meal so meal/[id].tsx renders from URL params either way.
-                        const safeId = m.id || `gen-${Date.now()}`
-                        router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(m) } })
-                      }}
-                    >
-                      <View style={[styles.heroMealCard, { marginHorizontal: 20, flex: 1 }]}>
-                        {/* Image layer — slow zoom (Ken Burns), applied ONLY to the settled page.
-                            Animating an offscreen page is wasted work, and it would be mid-drift
-                            when you swiped back to it instead of starting clean. */}
-                        <RNAnimated.View
-                          style={[StyleSheet.absoluteFillObject, (i % Math.max(carouselMeals.length, 1)) === safeHeroIdx ? { transform: [{ scale: heroScale }] } : null]}
-                        >
-                          {m.image && m.image.startsWith('http') ? (
-                            <MealImage uri={m.image} style={styles.heroMealImage} priority={i === loopOffset ? 'high' : 'normal'} transition={300} onLoad={m.image === heroImageUri ? () => setHeroPainted(true) : undefined} />
-                          ) : (
-                            // A photo-less page is why the pager can hold a stable 3 pages from the
-                            // first frame: it narrates instead of going blank, so the page count
-                            // never changes under a finger mid-swipe.
-                            <View style={styles.heroMealImage}>
-                              {/* Only shimmer while a photo is still COMING. Once fetching has
-                                  settled with nothing (the daily image cap is the usual reason),
-                                  the animation is a lie — it kept running forever and read as the
-                                  app being stuck rather than the dish simply having no picture. */}
-                              {!m.imageUnavailable && <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />}
-                              <View style={styles.heroMealPlating}>
-                                <Utensils size={26} stroke="#5A5A5A" strokeWidth={1.4} />
-                                <Text style={styles.heroMealPlatingText}>
-                                  {m.imageUnavailable ? 'No photo for this one' : 'Plating your dish…'}
-                                </Text>
-                              </View>
-                            </View>
-                          )}
-                        </RNAnimated.View>
-                        <LinearGradient
-                          colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
-                          locations={[0.3, 0.6, 1]}
-                          style={styles.heroMealGradient}
-                        />
-                        <View style={styles.heroMealContent}>
-                          <Text style={styles.heroMealName} numberOfLines={2}>{balanceTitle(m.name)}</Text>
-                          <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 5, marginTop: 8 }}>
-                            {/* One pill. The wait used to get its own, showing a duration nobody
-                                acts on — 6 hr and 8 hr are the same decision. */}
-                            {activeMinutes(m.prepTime, m.cookTime) > 0 && (
-                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(245,158,11,0.15)', borderColor: 'rgba(245,158,11,0.25)' }]}>
-                                <Text style={[styles.heroMealPillText, { color: '#F59E0B' }]}>{formatTimeLine(m.prepTime, m.cookTime, m.restTime).toUpperCase()}</Text>
-                              </View>
-                            )}
-                            <View style={[styles.heroMealPill, { backgroundColor: 'rgba(255,255,255,0.08)', borderColor: 'rgba(255,255,255,0.15)' }]}>
-                              <Text style={styles.heroMealPillText}>{m.calories} CAL</Text>
-                            </View>
-                            {m.protein > 0 && (
-                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(74,222,128,0.15)', borderColor: 'rgba(74,222,128,0.25)' }]}>
-                                <Text style={[styles.heroMealPillText, { color: '#4ADE80' }]}>{m.protein}P</Text>
-                              </View>
-                            )}
-                            {/* The CAL and P pills are ONE PORTION — that is what they will eat and
-                                what logging writes. This pill is the only thing telling them the
-                                recipe cooks more than that, so without it the ingredient list on
-                                the detail screen reads as double the food the card promised. */}
-                            {(m.servings ?? 1) > 1 && (
-                              <View style={[styles.heroMealPill, { backgroundColor: 'rgba(0,212,170,0.15)', borderColor: 'rgba(0,212,170,0.25)' }]}>
-                                <Text style={[styles.heroMealPillText, { color: COLORS.accent }]}>MAKES {m.servings}</Text>
-                              </View>
-                            )}
-                          </View>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-                {/* Dots sit at the TOP of the card on purpose — the bottom already holds the dish
-                    name and macro pills, and overlaying them there would collide. Absolutely
-                    positioned so adding them costs no layout height (heroHeight feeds the
-                    above-the-tab-bar fit maths and must not move). */}
-                {carouselMeals.length > 1 && (
-                  <View style={styles.heroDots} pointerEvents="none">
-                    {carouselMeals.map((_, i) => (
-                      <View key={`dot-${i}`} style={[styles.heroDot, i === safeHeroIdx && styles.heroDotActive]} />
-                    ))}
+              // Three row-shaped placeholders, the exact height of the cards that replace them, so
+              // the page does not jump when the meals land. The status line above narrates the ~6s
+              // of generation as work on the user's behalf; a bare spinner reads as stuck.
+              <View style={{ marginHorizontal: 20, gap: 8 }}>
+                {[0, 1, 2].map(i => (
+                  <View key={i} style={[styles.pantryRow, { height: PANTRY_ROW_H, overflow: 'hidden' }]}>
+                    <Shimmer style={StyleSheet.absoluteFill} durationMs={1600} />
                   </View>
-                )}
-              </Reanimated.View>
+                ))}
+              </View>
+            ) : pantryMeals.length > 0 ? (
+              <View style={{ marginHorizontal: 20, gap: 8 }}>
+                {pantryMeals.map(({ meal, missing, structural }) => (
+                  <PantryMealRow
+                    key={meal.id || meal.name}
+                    meal={meal}
+                    missing={missing}
+                    structural={structural}
+                    onPress={() => {
+                      // Opening a pick IS the feature being used — this counter feeds Loops.
+                      if (user) trackCookTonightUsed(user.id)
+                      // Guard against a missing id (the model sometimes omits it) so the URL is
+                      // well-formed; mealData carries the whole meal either way.
+                      const safeId = meal.id || `gen-${Date.now()}`
+                      router.push({ pathname: '/meal/[id]', params: { id: safeId, mealData: JSON.stringify(meal) } })
+                    }}
+                  />
+                ))}
+                {/* REPEAT REFRESHERS -> DISCOVER. A quiet text line, not a button: the ↻ above stays
+                    the primary action until the cap. At the cap the ↻ greys out and this becomes the
+                    one thing left to tap, so it becomes the SECONDARY pill — not the white primary,
+                    which would outshout food the user can cook tonight. */}
+                {(() => {
+                  const nudge = discoverNudge(genUsedToday, genCapPerDay)
+                  if (nudge === 'none') return null
+                  // navigate, NOT push — pushing a tab route stacks a second copy of the tab
+                  // navigator on top of itself and renders a black screen.
+                  const goDiscover = () => { trackDiscoverNudgeTapped(nudge, genUsedToday ?? 0); router.navigate({ pathname: '/(tabs)/discover' }) }
+                  if (nudge === 'capped') {
+                    return (
+                      <View style={styles.discoverCapWrap}>
+                        <Text style={styles.discoverNudgeText}>That&rsquo;s today&rsquo;s refreshes.</Text>
+                        <TouchableOpacity onPress={goDiscover} activeOpacity={0.8} style={styles.discoverCapButton}>
+                          <Text style={styles.discoverCapButtonText}>Browse Discover</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )
+                  }
+                  return (
+                    <TouchableOpacity onPress={goDiscover} activeOpacity={0.7} hitSlop={8} style={styles.discoverNudge}>
+                      <Text style={styles.discoverNudgeText}>Still not feeling it? <Text style={styles.discoverNudgeLink}>Browse Discover →</Text></Text>
+                    </TouchableOpacity>
+                  )
+                })()}
+              </View>
             ) : cacheChecked ? (
-              // Nothing cached for today. Ask instead of auto-firing. Gated on cacheChecked so this
-              // never flashes during the ~100ms disk read on a day that DOES have meals — showing
-              // the resting card and then yanking it away reads worse than showing nothing.
-              // Now the FAILURE state, not the opening state. With generation automatic, reaching
-              // here means the cache was checked, no meals exist and nothing is loading — i.e. a
-              // generation that failed or was capped. Tapping retries. The empty-pantry case never
-              // gets here; it is handled by its own block above, gated on pantryNames.size === 0.
+              // The FAILURE state, not the opening state: the cache was checked, no meals exist and
+              // nothing is loading — a generation that failed or was capped. Tapping retries. The
+              // empty-pantry case never gets here; its own block above is gated on size === 0.
               <MealCardResting pantryCount={pantryNames.size} onPress={retry} error={mealsError} errorCode={mealsErrorCode} />
             ) : null}
-          </Reanimated.View>
+          </View>
         )}
 
         {/* The old persistent "Missing kitchen basics?" home card was removed —
@@ -2098,8 +1738,13 @@ export default function HomeScreen() {
               const hasEntries = slot.entries.length > 0
               const slotCal = slot.entries.reduce((s, e) => s + e.calories, 0)
               const SlotIcon = iconForSlot(slot.label)
+              const openLog = () => { setFoodSearchSlot(slot.label); setShowFoodSearchModal(true) }
               return (
-                <View key={slot.id} style={styles.mealSlotCard}>
+                // An EMPTY slot is one tap target — the whole card. Three "Log" pills under three
+                // meal cards was six calls to action above the fold; the row itself is the action
+                // now, and the pill only appears once there is something in the slot to add to.
+                // `disabled` once it has entries, so the entry rows inside keep their own taps.
+                <TouchableOpacity key={slot.id} style={styles.mealSlotCard} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                     <View style={styles.mealSlotIcon}>
                       <SlotIcon size={18} stroke={hasEntries ? '#4ADE80' : COLORS.textMuted} strokeWidth={1.8} />
@@ -2107,13 +1752,13 @@ export default function HomeScreen() {
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Text style={styles.mealSlotLabel}>{slot.label}</Text>
-                        <TouchableOpacity
-                          style={styles.mealSlotLogBtn}
-                          onPress={() => { setFoodSearchSlot(slot.label); setShowFoodSearchModal(true) }}
-                          activeOpacity={0.8}
-                        >
-                          <Text style={styles.mealSlotLogBtnText}>{hasEntries ? '+' : 'Log'}</Text>
-                        </TouchableOpacity>
+                        {hasEntries ? (
+                          <TouchableOpacity style={styles.mealSlotLogBtn} onPress={openLog} activeOpacity={0.8}>
+                            <Text style={styles.mealSlotLogBtnText}>+</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <Plus size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+                        )}
                       </View>
                       {hasEntries ? (
                         slot.entries.map((entry, idx) => (
@@ -2146,7 +1791,7 @@ export default function HomeScreen() {
                       )}
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               )
             })}
           </View>
@@ -2328,7 +1973,7 @@ export default function HomeScreen() {
         onItemsAdded={async () => {
           setShowPantryScanFromHome(false)
           // Refresh pantry so Home flips from the "Unlock recipes" card to the meal
-          // carousel now that the scan added items — the initial fetch only runs on load.
+          // rows now that the scan added items — the initial fetch only runs on load.
           // (The staples ask now lives inside the scan review flow, not a post-scan popup.)
           await loadPantryNames()
         }}
@@ -2487,19 +2132,11 @@ const styles = StyleSheet.create({
   sweepFill: { width: SWEEP_W, height: '100%', borderRadius: 2, backgroundColor: '#4ADE80' },
   carryoverStatus: { fontSize: 13, color: '#4ADE80', fontWeight: '700', flexShrink: 1 },
   // Promoted from a 12px uppercase muted eyebrow. This is the app's core feature and it was
-  // styled like a caption — quieter than the greeting above it and than "See all" beside it.
+  // styled like a caption — quieter than the greeting that used to sit above it.
   // Sentence case at heading scale puts it in the same typographic system as "Good evening, Logan".
   sectionTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
   mealsCollapsedSub: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
   mealList: { gap: 14, marginBottom: 28 },
-  mealCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 16, borderWidth: 1, borderColor: COLORS.trackDark, backgroundColor: COLORS.cardElevated, padding: 16, gap: 16 },
-  mealImageReal: { width: 72, height: 72, borderRadius: 12 },
-  mealImagePlaceholder: { width: 72, height: 72, borderRadius: 12, backgroundColor: '#3A3A3A', alignItems: 'center', justifyContent: 'center' },
-  mealInfo: { flex: 1, gap: 6 },
-  ratingBtns: { flexDirection: 'column', gap: 8, alignItems: 'center' },
-  ratingBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center' },
-  ratingBtnUp: { backgroundColor: 'rgba(74,222,128,0.12)' },
-  ratingBtnDown: { backgroundColor: 'rgba(239,68,68,0.12)' },
   ratingToast: {
     position: 'absolute',
     top: 60,
@@ -2511,13 +2148,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   ratingToastText: { color: '#4ADE80', fontSize: 14, fontWeight: '600' },
-  mealName: { fontSize: 16, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
-  mealMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  mealMetaText: { fontSize: 13, color: COLORS.textMuted, fontWeight: '400' },
-  mealMacros: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  mealMacroText: { fontSize: 13, color: COLORS.textDim, fontWeight: '400' },
-  mealMacroBold: { fontWeight: '700', color: COLORS.textWhite },
-  macroDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: COLORS.textMuted },
   staplesCard: {
     marginHorizontal: 20,
     marginTop: 20,
@@ -2643,7 +2273,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 20,
-    // paddingVertical 8 -> 5 -> 3. See LOG_PEEK: trims up here now reach the meal log, not the photo.
+    // paddingVertical 8 -> 5 -> 3: trims up here reach the meal log below.
     paddingVertical: 3,
     marginHorizontal: 20,
     marginBottom: 0,
@@ -2660,9 +2290,7 @@ const styles = StyleSheet.create({
 
   heroCard: {
     marginHorizontal: 20,
-    // 24 -> 14: the reclaimed 10pt is handed to heroHeight below rather than shortening the page,
-    // so the meal photo gets it back. Flux renders square (1:1) and the hero box is ~1.24:1 even
-    // after this, so `cover` still crops vertically — this reduces it, it doesn't remove it.
+    // 24 -> 14, so the meal rows below start 10pt sooner.
     marginBottom: 12,
     backgroundColor: '#0F0F0F',
     borderRadius: 24,
@@ -2679,73 +2307,57 @@ const styles = StyleSheet.create({
     shadowRadius: 30,
   },
 
-  // Hero meal cards (horizontal scroll)
-  heroMealCard: {
-    // Full-width hero (Netflix/Spotify style). Width is implicit via parent (ScrollView
-    // gives full screen width); the marginHorizontal applied at the usage site pads
-    // it in from the screen edges. 300 (was 360) so the title + pills clear the tab
-    // bar instead of getting cut off at the fold.
-    height: 300,
-    borderRadius: 28,
-    overflow: 'hidden',
-    position: 'relative',
-    backgroundColor: '#1A1A1A',
+  // Cook Tonight rows. The photo is an 88pt SQUARE: generation renders square, so `cover` here
+  // crops nothing — the old 3:2 hero lost a third of every image.
+  pantryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 10,
+    borderRadius: 16,
+    backgroundColor: COLORS.cardElevated,
+    borderWidth: 1,
+    borderColor: COLORS.trackDark,
   },
-  heroMealPlating: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  heroMealPlatingText: { fontSize: 13, fontWeight: '600', color: '#7A7A7A' },
-  heroMealImage: {
-    width: '100%',
-    height: '100%',
-    position: 'absolute',
-    borderRadius: 28,
+  pantryRowPhoto: { width: 88, height: 88, borderRadius: 12 },
+  pantryRowPhotoEmpty: { backgroundColor: '#1A1A1A', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  pantryRowName: { fontSize: 15, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.1, lineHeight: 19 },
+  // Green check + text, no pill: the pill row above already carries up to four chips and a fifth
+  // reads as noise. Amber for a store trip; muted for a garnish, which is not a blocker.
+  pantryRowReady: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  pantryRowReadyText: { fontSize: 11, color: '#4ADE80', fontWeight: '700' },
+  pantryRowNeed: { fontSize: 11, color: '#F59E0B', fontWeight: '600' },
+  pantryRowBetter: { fontSize: 11, color: COLORS.textMuted, fontWeight: '600' },
+  regenBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(74,222,128,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.2)',
   },
-  heroMealGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 200,
-    borderBottomLeftRadius: 28,
-    borderBottomRightRadius: 28,
+  discoverNudge: { marginTop: 4, alignSelf: 'center' },
+  discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
+  discoverNudgeLink: { color: '#4ADE80', fontWeight: '700' },
+  discoverCapWrap: { marginTop: 6, alignItems: 'center', gap: 10, alignSelf: 'stretch' },
+  // Mirrors saveButton on the meal detail screen — the app's established SECONDARY pill.
+  discoverCapButton: {
+    alignSelf: 'stretch', backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingVertical: 14,
+    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORS.trackDark, marginTop: 4,
   },
-  heroMealContent: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 18,
-  },
-  heroMealPill: {
+  discoverCapButtonText: { color: COLORS.textWhite, fontSize: 15, fontWeight: '700' },
+  // Every use sets its own colours, so the base carries only the shape.
+  mealPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.4)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 20,
     paddingHorizontal: 8,
     paddingVertical: 4,
   },
-  heroDots: {
-    position: 'absolute',
-    top: 12, left: 0, right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  heroDot: {
-    width: 6, height: 6, borderRadius: 3,
-    // 0.35 -> 0.55 plus a drop shadow. The dots sit at the top of the card where the gradient has
-    // not started yet, so on a bright photo (white cottage cheese, a pale bowl) the inactive dots
-    // were effectively invisible — and they are the only thing advertising that the card swipes.
-    // A shadow rather than a scrim pill: it survives any photo without adding chrome to the card.
-    backgroundColor: 'rgba(255,255,255,0.55)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.55,
-    shadowRadius: 2.5,
-  },
-  heroDotActive: { backgroundColor: '#FFFFFF', width: 16 },
   restingCard: {
     marginHorizontal: 20,
     height: HERO_COMPACT_H,
@@ -2774,26 +2386,13 @@ const styles = StyleSheet.create({
     borderRadius: 30,
   },
   restingCTAText: { fontSize: 14, fontWeight: '700', color: '#000000', letterSpacing: -0.1 },
-  heroMealSkeletonStatus: { fontSize: 15, fontWeight: '700', color: 'rgba(255,255,255,0.85)', textAlign: 'center' },
-  heroMealPillSkeleton: { height: 22, backgroundColor: 'rgba(255,255,255,0.10)', borderColor: 'rgba(255,255,255,0.14)' },
-  heroMealPillText: {
-    // Was 9 — the smallest pill text in the app, on its single largest card. Discover's rail
-    // cards run 10 at less than half this width, so the hero read as shrunken next to them.
+  mealPillText: {
+    // 11, not 9 — Discover's rail cards run 10 at less than half this width.
     fontSize: 11,
     fontWeight: '800',
     color: COLORS.textWhite,
     textTransform: 'uppercase',
     letterSpacing: 1,
-  },
-  heroMealName: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    lineHeight: 22,
-    // Centred to match the pills below. This only works BECAUSE the wrap is balanced — a centred
-    // title whose last line is one word floats in the middle and looks worse than a left-hung one.
-    // Two even lines over a centred pill row is the poster treatment the hero is asking for.
-    textAlign: 'center',
   },
 
   // Meal slot cards (MyFitnessPal style)

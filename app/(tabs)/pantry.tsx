@@ -11,7 +11,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
-  ActivityIndicator,
   Animated as RNAnimated,
   Easing,
   Alert,
@@ -21,32 +20,24 @@ import {
 import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
-import { discoverNudge } from '@/lib/discoverNudge'
-import { trackDiscoverNudgeTapped } from '@/lib/analytics'
 import { perfMark } from '@/lib/perf'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, RefreshCw, Trash2 } from 'lucide-react-native'
+import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, Trash2 } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
-import { formatTimeLine } from '@/lib/ingredientDisplay'
-import { isAssumedStaple, dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import { haptic } from '@/lib/haptics'
-import { trackCookTonightUsed } from '@/lib/engagement'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
-import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
-import Reanimated, { FadeIn } from 'react-native-reanimated'
 import PantryGroceryTabs from '@/components/PantryGroceryTabs'
-import { Shimmer } from '@/components/Shimmer'
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -113,7 +104,6 @@ const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
 
 const CATEGORY_ORDER_KEY = 'pantry_category_order' // device-local saved drag order of categories
 const INSIGHT_ROTATION_KEY = 'pantry_insight_rotation' // visit counter → rotates the insight headline (Step D)
-const MEAL_FRESH_DATE_KEY = 'cook_tonight_fresh_date' // last local date the user saw today's meals → drives the "Fresh today" pop on day-change
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
@@ -271,42 +261,16 @@ export default function PantryScreen() {
   const [disambigChoices, setDisambigChoices] = useState<string[]>([])
   const searchRef = useRef<TextInput>(null)
 
-  // Cook Tonight — moved from Home tab in Phase 2b of the IA refactor. Lives here
-  // because "what to cook from my pantry" is a kitchen task, not a tracking task.
-  // Visually distinct from the Discover tab (cinematic horizontal browse): compact
-  // action-rows with missing-ingredient surfacing, anchored to actual pantry contents.
-  // Generation fires once per day (daily cache). Manual refresh button is capped at
-  // 1/day per user to bound image-gen cost — see MAX_DAILY_REGENS in useMealSuggestions.
-  const hasPantryItems = categories.some(c => c.ingredients.length > 0)
-  const { meals, loading: mealsLoading, error: mealsError, errorCode: mealsErrorCode, regenerate, retry, canRegenerate, genUsedToday, genCapPerDay } = useMealSuggestions(
-    user?.id, isPremium, 'cookNow', hasPantryItems
-  )
 
-  // Lower-cased pantry names for fuzzy substring matching against meal ingredients.
-  // Only IN-STOCK items count — an "Out" item isn't on hand, so the Cook Tonight card must
-  // treat it as missing (matches the meal-detail screen, which queries in_stock=true). Without
-  // this filter the card said "have rice" for an out-of-stock item while the detail said "need".
-  const pantryNameSet = useMemo(() => {
-    return new Set(
-      categories.flatMap(c => c.ingredients.filter(i => i.inStock).map(i => i.name.toLowerCase()))
-    )
-  }, [categories])
 
-  // Staples the user has opted out of assuming — their manual "I don't keep this" taps
-  // (staples_excluded) PLUS diet-conflicting basics (butter for vegan, flour for GF).
-  // Mirrors meal-detail so an exclusion made there is honored in the Cook Tonight NEED
-  // list here — otherwise the two surfaces disagree on what counts as a basic.
-  const [excludedStaples, setExcludedStaples] = useState<Set<string>>(new Set())
   // Goal/diet fields for the personalized pantry insight (see lib/pantryProfile + PLAN.md).
   const [insightProfile, setInsightProfile] = useState<{ goal: FitnessGoal | null; diet: DietType | null; restrictions: string[]; dislikes: string[]; cuisines: string[]; cookingSkill: string | null; maxPrep: number | null } | null>(null)
   // Weekly meal-log rollup for the protein-intake nudge (Step E). null = no data / not loaded yet.
   const [logStats, setLogStats] = useState<LogStats | null>(null)
   useEffect(() => {
     if (!user) return
-    supabase.from('profiles').select('staples_excluded, dietary_restrictions, fitness_goal, diet_type, food_dislikes, cuisine_preferences, cooking_skill, max_prep_minutes, protein_goal').eq('id', user.id).single()
+    supabase.from('profiles').select('dietary_restrictions, fitness_goal, diet_type, food_dislikes, cuisine_preferences, cooking_skill, max_prep_minutes, protein_goal').eq('id', user.id).single()
       .then(({ data }) => {
-        const manual = (data?.staples_excluded ?? []).map((s: string) => s.toLowerCase())
-        setExcludedStaples(new Set([...manual, ...dietExcludedStaples(data?.dietary_restrictions ?? [])]))
         setInsightProfile({
           goal: (data?.fitness_goal as FitnessGoal) ?? null,
           diet: (data?.diet_type as DietType) ?? null,
@@ -356,66 +320,6 @@ export default function PantryScreen() {
   }
   useEffect(() => { setInsightAdded(false) }, [pantryInsight.headline]) // reset the CTA when the insight changes
 
-  const missingFor = (mealIngs: { name: string }[] | undefined): string[] => {
-    if (!mealIngs) return []
-    const missing: string[] = []
-    for (const ing of mealIngs) {
-      const n = ing.name.toLowerCase()
-      // Canonical staple check (constants/staples) — keeps "Need: …" honest by not
-      // flagging salt/oil/etc. Single source of truth; the old local list drifted and
-      // missed aliases like "cooking oil", which then leaked into NEED. Excluded set
-      // makes a user's "I don't keep this" opt-out flip the basic back into NEED.
-      if (isAssumedStaple(ing.name, excludedStaples)) continue
-      // Two-way substring match — pantry "chicken breast" covers meal "chicken",
-      // and pantry "chicken" covers meal "chicken breast".
-      let have = false
-      for (const p of pantryNameSet) {
-        if (p === n || p.includes(n) || n.includes(p)) { have = true; break }
-      }
-      if (!have) missing.push(ing.name)
-    }
-    return missing
-  }
-
-  // "Ready to cook now" count — the exciting, personalized signal for the Cook Tonight subtitle:
-  // how many of today's meals need zero shopping. Uses the same missingFor as the per-meal rows,
-  // so the count and the rows never disagree. Recomputes when the pantry or meals change.
-  // A meal is "to shop for" only when a STRUCTURAL ingredient is missing — the server splits the
-  // gaps (structural_missing / garnish_missing) because only it knows which is which; the client
-  // then re-checks each against the live pantry. A missing garnish is "Better with", not a trip to
-  // the store: run 759 read "2 ready now · 1 to shop for" over a dish short only of cilantro.
-  // Meals cached before the split carry no list and fall back to any gap, as before.
-  const structuralMissingFor = (meal: any): string[] => {
-    const s = meal?.structural_missing
-    return Array.isArray(s) ? missingFor(s.map((name: string) => ({ name }))) : missingFor(meal?.ingredients)
-  }
-  const readySummary = useMemo(() => {
-    if (!meals?.length) return null
-    const ready = meals.filter(m => structuralMissingFor(m).length === 0).length
-    return { ready, total: meals.length }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [meals, pantryNameSet, excludedStaples])
-
-  // "Fresh today" marker for Cook Tonight — reassures the user these are TODAY's picks, not
-  // yesterday's, and reinforces the daily rotation ("New tomorrow"). 'new' = first view of a new
-  // day → the pill pops in; 'seen' = already viewed today → static pill; null = no meals, hidden.
-  const [freshState, setFreshState] = useState<'new' | 'seen' | null>(null)
-  useEffect(() => {
-    if (mealsLoading || mealsError || meals.length === 0) { setFreshState(null); return }
-    let cancelled = false
-    ;(async () => {
-      const today = todayStr() // same local-date helper the daily cache keys on (lib/localDate.ts)
-      const last = await AsyncStorage.getItem(MEAL_FRESH_DATE_KEY)
-      if (cancelled) return
-      setFreshState(last === today ? 'seen' : 'new')
-      if (last !== today) AsyncStorage.setItem(MEAL_FRESH_DATE_KEY, today).catch(() => {})
-    })()
-    return () => { cancelled = true }
-  }, [meals.length, mealsLoading, mealsError])
-
-  // Manual refresh removed — Cook Tonight regenerates automatically when (a) a new day
-  // starts (daily cache) or (b) pantry changes by 3+ items since last gen (handled in
-  // useMealSuggestions). Killing the button bounds image-gen cost at scale.
 
   const fetchItems = useCallback(async () => {
     if (!user) return
@@ -603,33 +507,6 @@ export default function PantryScreen() {
 
   const totalItems = categories.reduce((s, c) => s + c.ingredients.length, 0)
 
-  // A thin pantry still returns 3 meals — the generator just reuses the same protein and reaches
-  // for simpler dishes, so quality quietly degrades with nothing telling the user why. Client-side
-  // heuristic (an LLM can't reliably self-report "I couldn't do better"): flag when there's no
-  // in-stock protein at all, or very little to work with.
-  const hasInStockProtein = categories.some(c =>
-    /protein|meat|fish|egg/i.test(c.name) && c.ingredients.some(i => i.inStock)
-  )
-  const inStockCount = categories.reduce((s, c) => s + c.ingredients.filter(i => i.inStock).length, 0)
-  const pantryIsThin = inStockCount > 0 && (!hasInStockProtein || inStockCount < 8)
-
-  // Meals are generated ONCE a day and shown all day, so the time-of-day decision belongs HERE, at
-  // display, not at generation — generating "breakfast" because the user opened the app at 8am
-  // would strand them with oats at dinner. The generator spreads meals across occasions; this just
-  // floats the ones that fit right now.
-  const currentSlot = (() => {
-    const h = new Date().getHours()
-    if (h < 11) return 'breakfast'
-    if (h < 16) return 'lunch'
-    return 'dinner'
-  })()
-  // 0 = matches now, 1 = anytime dish (or a meal cached before `slot` existed), 2 = wrong occasion.
-  // Lunch and dinner stand in for each other (0.5): the server guarantees one of the two, and at 6pm
-  // a chicken plate tagged "lunch" must not sink level with a parfait.
-  const slotScore = (m: { slot?: string }) =>
-    m.slot === currentSlot ? 0
-    : currentSlot !== 'breakfast' && (m.slot === 'lunch' || m.slot === 'dinner') ? 0.5
-    : (!m.slot || m.slot === 'any') ? 1 : 2
 
   perfMark('Pantry RENDER')
   return (
@@ -843,194 +720,6 @@ export default function PantryScreen() {
                   </View>
                 </TouchableOpacity>
               </View>
-
-              {/* ── Cook Tonight — utility-framed action list (NOT the cinematic browse
-                  experience that lives in the Discover tab). Compact rows surface
-                  what's missing per meal so the section is unmistakably pantry-anchored. ── */}
-              {hasPantryItems && (
-                <View style={{ marginBottom: 24 }}>
-                  <View style={styles.cookTonightHeader}>
-                    <View>
-                      <View style={styles.cookTonightTitleRow}>
-                        <Text style={styles.cookTonightTitle}>Cook tonight</Text>
-                        {/* "Fresh today" — these are today's picks, not yesterday's. Pops in on the
-                            first view of a new day (freshState 'new'); static once seen today. */}
-                        {freshState && (
-                          <Reanimated.View entering={freshState === 'new' ? FadeIn.duration(500) : undefined} style={styles.freshPill}>
-                            <View style={styles.freshDot} />
-                            <Text style={styles.freshPillText}>Fresh today</Text>
-                          </Reanimated.View>
-                        )}
-                      </View>
-                      <Text style={styles.cookTonightSub}>
-                        {/* Personalized ready-count — rewards a stocked pantry ("cook these NOW, no
-                            shopping"). Excitement is carried by the GREEN accent on the ready count,
-                            not an emoji. Falls back to the neutral line while regen is offered or if
-                            nothing is fully ready. */}
-                        {canRegenerate ? 'From what you have'
-                          : readySummary && readySummary.ready > 0
-                            ? (readySummary.ready === readySummary.total
-                                ? <Text style={styles.cookTonightReadyAccent}>All {readySummary.total} ready to cook now</Text>
-                                : <><Text style={styles.cookTonightReadyAccent}>{readySummary.ready} ready now</Text>{` · ${readySummary.total - readySummary.ready} to shop for`}</>)
-                            : 'Refreshed today · New tomorrow'}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={regenerate}
-                      hitSlop={10}
-                      activeOpacity={0.7}
-                      disabled={!canRegenerate}
-                      style={[styles.cookTonightRegen, !canRegenerate && { opacity: 0.35 }]}
-                    >
-                      <RefreshCw size={14} stroke={canRegenerate ? '#4ADE80' : '#888'} strokeWidth={2.2} />
-                    </TouchableOpacity>
-                  </View>
-
-                  {mealsLoading ? (
-                    <View style={styles.cookTonightLoading}>
-                      <ActivityIndicator color="#4ADE80" />
-                      <Text style={styles.cookTonightLoadingText}>Finding meals from your pantry…</Text>
-                    </View>
-                  ) : mealsError ? (
-                    <View style={styles.cookTonightLoading}>
-                      {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
-                      <Text style={styles.cookTonightErrorText}>{mealsError}</Text>
-                      {/* Retry is pointless once the daily cap is hit — hide it in that case. */}
-                      {mealsErrorCode !== 'meal_cap_reached' ? (
-                        <TouchableOpacity onPress={retry} activeOpacity={0.7}>
-                          <Text style={styles.cookTonightRetryText}>Try again →</Text>
-                        </TouchableOpacity>
-                      ) : (
-                        // At the cap Retry is pointless and was simply hidden, leaving a dead end.
-                        // Discover is free to serve, so it is the one action worth offering here.
-                        <TouchableOpacity
-                          onPress={() => { trackDiscoverNudgeTapped('capped', genUsedToday ?? genCapPerDay); router.push('/(tabs)/discover') }}
-                          activeOpacity={0.8}
-                          style={styles.discoverCapButton}
-                        >
-                          <Text style={styles.discoverCapButtonText}>Browse Discover</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  ) : meals.length > 0 ? (
-                    <Reanimated.View entering={FadeIn.duration(300)} style={{ gap: 10 }}>
-                      {/* Ready-to-cook meals first (fewest missing items) so the list leads with what
-                          the user can make right now — matches the "N ready now" subtitle top-down. */}
-                      {[...meals].sort((a, b) =>
-                        (missingFor(a.ingredients).length - missingFor(b.ingredients).length) ||
-                        (slotScore(a) - slotScore(b)) // ready-to-cook still wins; time-of-day breaks the tie
-                      ).slice(0, 3).map((meal, idx) => {
-                        // Compute against the LIVE pantry (the same check the meal-detail screen uses)
-                        // so the card and the detail always agree. The old code trusted the server's
-                        // self-reported missing_ingredients, but GPT returns [] even when the pantry is
-                        // near-empty → a false "Got everything" on the card while the detail correctly
-                        // showed every ingredient missing. `missingFor` skips staples + does two-way
-                        // substring, so a genuinely stocked pantry still reads "Got everything".
-                        const missing = missingFor(meal.ingredients)
-                        const structural = structuralMissingFor(meal)
-                        return (
-                          <TouchableOpacity
-                            key={`${meal.id}-${idx}`}
-                            style={styles.cookTonightRow}
-                            activeOpacity={0.7}
-                            onPress={() => {
-                              // Opening a Cook Tonight pick IS the feature being used. This counter
-                              // and its Loops event were never fired, so cook_tonight_used_count was
-                              // 0 for every user despite 12 meal logs in the table.
-                              if (user) trackCookTonightUsed(user.id)
-                              router.push({ pathname: '/meal/[id]', params: { id: meal.id, mealData: JSON.stringify(meal) } })
-                            }}
-                          >
-                            {meal.image && meal.image.startsWith('http') ? (
-                              <Image source={{ uri: meal.image }} style={styles.cookTonightThumb} resizeMode="cover" />
-                            ) : (
-                              <Shimmer style={styles.cookTonightThumb} />
-                            )}
-                            <View style={{ flex: 1, gap: 4 }}>
-                              <Text style={styles.cookTonightName} numberOfLines={2}>{meal.name}</Text>
-                              <Text style={styles.cookTonightMeta} numberOfLines={1}>
-                                {meal.prepTime > 0
-                                  ? formatTimeLine(meal.prepTime, (meal as any).cookTime, (meal as any).restTime)
-                                  : null}
-                                {meal.prepTime > 0 ? '  ·  ' : ''}
-                                {meal.calories} cal
-                                {/* Protein — the app's north-star macro — gets a green weight so every
-                                    meal ties visibly to the user's protein goal. */}
-                                {meal.protein > 0 ? '  ·  ' : ''}
-                                {meal.protein > 0 ? <Text style={styles.cookTonightProtein}>{meal.protein}g protein</Text> : null}
-                              </Text>
-                              {missing.length === 0 ? (
-                                // "Ready to cook" reward pill — an earned, tappable-looking badge (vs
-                                // plain text) that makes the zero-shopping moment feel like a win.
-                                <View style={styles.cookTonightReadyPill}>
-                                  <Check size={10} stroke="#4ADE80" strokeWidth={3} />
-                                  <Text style={styles.cookTonightHaveText}>Ready to cook</Text>
-                                </View>
-                              ) : (
-                                // Anything still listed here is now an OPTIONAL finishing item — the
-                                // generator can't leave out a defining ingredient (protein, main carb,
-                                // the cheese in a cheesy dish). So this reads as an upgrade, not a
-                                // blocker: "Need:" made a cookable meal look impossible.
-                                <Text style={styles.cookTonightNeedText} numberOfLines={1}>
-                                  {structural.length > 0
-                                    ? <>Need: {structural.slice(0, 3).join(', ')}{structural.length > 3 ? ` +${structural.length - 3}` : ''}</>
-                                    : <>Better with: {missing.slice(0, 3).join(', ')}{missing.length > 3 ? ` +${missing.length - 3}` : ''}</>}
-                                </Text>
-                              )}
-                            </View>
-                          </TouchableOpacity>
-                        )
-                      })}
-                    </Reanimated.View>
-                  ) : null}
-                  {/* REPEAT REFRESHERS → DISCOVER. Deliberately a quiet text line, not a button: the
-                      ↻ above stays the primary action until the cap, so this reads as an option
-                      rather than a second CTA competing for the same moment. At the cap the ↻
-                      greys out and this becomes the only thing left to tap. */}
-                  {!mealsLoading && !mealsError && meals.length > 0 && (() => {
-                    const nudge = discoverNudge(genUsedToday, genCapPerDay)
-                    if (nudge === 'none') return null
-                    const goDiscover = () => { trackDiscoverNudgeTapped(nudge, genUsedToday ?? 0); router.push('/(tabs)/discover') }
-                    // AT THE CAP IT BECOMES A BUTTON. The ↻ is greyed out, so this is the one action
-                    // left in the section — a text link there undersells the only way forward. It
-                    // uses the SECONDARY pill (the "Save" style), not the white primary: the three
-                    // meal cards above are still the section's content, and a white pill would
-                    // outshout food the user can cook tonight.
-                    if (nudge === 'capped') {
-                      return (
-                        <View style={styles.discoverCapWrap}>
-                          <Text style={styles.discoverNudgeText}>That's today's refreshes.</Text>
-                          <TouchableOpacity onPress={goDiscover} activeOpacity={0.8} style={styles.discoverCapButton}>
-                            <Text style={styles.discoverCapButtonText}>Browse Discover</Text>
-                          </TouchableOpacity>
-                        </View>
-                      )
-                    }
-                    return (
-                      <TouchableOpacity onPress={goDiscover} activeOpacity={0.7} hitSlop={8} style={styles.discoverNudge}>
-                        <Text style={styles.discoverNudgeText}>
-                          Still not feeling it? <Text style={styles.cookTonightRetryText}>Browse Discover →</Text>
-                        </Text>
-                      </TouchableOpacity>
-                    )
-                  })()}
-                  {/* Meals came back, but from a thin pantry — say what would unlock better ones
-                      instead of letting quality degrade silently. */}
-                  {!mealsLoading && !mealsError && meals.length > 0 && pantryIsThin && (
-                    <Text style={styles.cookTonightThinHint}>
-                      {hasInStockProtein
-                        ? 'Scan your freezer or pantry — more ingredients means better meals.'
-                        : 'Add a protein and we can suggest a lot more.'}
-                    </Text>
-                  )}
-                  {!mealsLoading && !mealsError && meals.length === 0 && (
-                    // Zero meals came back (pantry too sparse) — nudge instead of rendering nothing.
-                    <View style={styles.cookTonightLoading}>
-                      <Text style={styles.cookTonightLoadingText}>Scan a few more items and we'll suggest meals you can make right now.</Text>
-                    </View>
-                  )}
-                </View>
-              )}
 
               {/* Search bar */}
               <View style={[styles.searchBar, { marginHorizontal: 0 }]}>
@@ -1630,122 +1319,4 @@ const styles = StyleSheet.create({
   },
   addBtnText: { color: '#000000', fontSize: 15, fontWeight: '700' },
 
-  // Cook Tonight — compact action-row list (Phase 2b). Visually distinct from the
-  // Discover tab's cinematic browse so users feel the difference between "what to
-  // make right now" and "what to explore."
-  cookTonightHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 14,
-  },
-  cookTonightTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cookTonightTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    letterSpacing: -0.3,
-  },
-  // "Fresh today" pill — quiet green marker that these are the day's new picks.
-  freshPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(74,222,128,0.14)', borderRadius: 30, paddingVertical: 3, paddingHorizontal: 8 },
-  freshDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#4ADE80' },
-  freshPillText: { fontSize: 10.5, fontWeight: '700', color: '#4ADE80', letterSpacing: 0.3 },
-  cookTonightSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  cookTonightRegen: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(74,222,128,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.2)',
-  },
-  cookTonightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#141414',
-    borderRadius: 14,
-    padding: 12, // slightly roomier now that we reclaimed vertical space above
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
-  cookTonightThumb: {
-    width: 84, // bigger, photo-forward (was 64) — food shots drive appetite/excitement
-    height: 84,
-    borderRadius: 12,
-  },
-  cookTonightThumbPlaceholder: {
-    backgroundColor: '#2A2A2A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cookTonightName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.textWhite,
-    letterSpacing: -0.1,
-    lineHeight: 19, // 2-line names wrap cleanly instead of truncating mid-word
-  },
-  // Green accent on the ready-count in the Cook Tonight subtitle — carries excitement via color.
-  cookTonightReadyAccent: {
-    color: '#4ADE80',
-    fontWeight: '700',
-  },
-  cookTonightMeta: {
-    fontSize: 11,
-    color: COLORS.textMuted,
-    fontWeight: '500',
-  },
-  // Green weight on the protein number — reinforces the app's core metric on every meal row.
-  cookTonightProtein: {
-    color: '#4ADE80',
-    fontWeight: '700',
-  },
-  // "Ready to cook" reward pill: subtle green fill + self-start so it hugs its text.
-  cookTonightReadyPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(74,222,128,0.12)',
-    borderRadius: 30,
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    marginTop: 1,
-  },
-  cookTonightHaveText: {
-    fontSize: 11,
-    color: '#4ADE80',
-    fontWeight: '700',
-  },
-  cookTonightNeedText: {
-    fontSize: 11,
-    color: '#F59E0B',
-    fontWeight: '600',
-  },
-  cookTonightLoading: {
-    alignItems: 'center',
-    paddingVertical: 28,
-    gap: 10,
-  },
-  cookTonightThinHint: { fontSize: 12, color: '#888888', textAlign: 'center', paddingHorizontal: 20, paddingTop: 12, lineHeight: 17 },
-  cookTonightLoadingText: { fontSize: 13, color: COLORS.textMuted },
-  cookTonightErrorText: { fontSize: 13, color: '#EF4444' },
-  cookTonightRetryText: { fontSize: 13, color: '#4ADE80', fontWeight: '700' },
-  discoverNudge: { marginTop: 12, alignSelf: 'center' },
-  discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
-  discoverCapWrap: { marginTop: 14, alignItems: 'center', gap: 10, alignSelf: 'stretch' },
-  // Mirrors saveButton on the meal detail screen — the app's established SECONDARY pill.
-  discoverCapButton: {
-    alignSelf: 'stretch', backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingVertical: 14,
-    alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: COLORS.trackDark, marginTop: 4,
-  },
-  discoverCapButtonText: { color: COLORS.textWhite, fontSize: 15, fontWeight: '700' },
 })

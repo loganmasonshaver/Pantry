@@ -1541,18 +1541,36 @@ possible in the component you are looking at before fixing anything in it.
 
 Not a bug list. The layout of these two tabs is unresolved and item 7 films them.
 
-- [ ] **Decide how Home presents the three meals.** Today it is a hero carousel auto-rotating every
-      6250ms, so meals arrive one at a time even on an idle device. Logan's objection: the old
-      Pantry "Cook Tonight" list showed all three AT ONCE and was better for choosing. The code
-      admits the tradeoff at `app/(tabs)/index.tsx:519` — "so all 3 are surfaced over time". The
-      rotation is compensation for a layout with room for one meal, and ~44 references of
-      loop/recentring machinery exist to serve it.
-- [ ] **Constraint that killed the obvious fix:** Discover already opens on a big photo hero. Give
-      Home one too and both tabs lead with the same visual move, so neither has an identity. Any
-      proposal has to say what makes Home look different from Discover.
-- [ ] **Decide whether the Pantry tab shows meals at all.** It currently does (Cook Tonight,
-      restored). Measured cost: ~700pt of an 852pt screen before a single ingredient is visible, on
-      the tab called "My Pantry".
+- [x] **DECIDED + BUILT 2026-09-14 (Logan: "like it, do everything") — Home shows the three meals
+      as a stacked list, all visible, no rotation.** Each row: 88pt SQUARE photo (generation
+      renders 512×512, so this is the first slot on Home that shows the whole image — the 3:2
+      hero cropped a third off every one), name, the TIME / CAL / P / MAKES pills, and the
+      readiness line ("Ready to cook" / "Need: …" / "Better with: …") that came over from the
+      Pantry tab, computed against the live pantry via the new `lib/mealReadiness.ts` (6 tests).
+      Ready-to-cook first, stable, so the server's protein/flavour order still decides within a
+      tier. The ↻ regenerate, the daily-cap Discover nudge and the `trackCookTonightUsed` counter
+      came over too. Deleted: the 5× page loop, recentring, Ken Burns, the hero-paint gate, and
+      the fit-to-fold maths (`heroFit`, `LOG_PEEK`, two `onLayout` measurements) — ~400 lines.
+      The page now stacks naturally; on a Pro-size phone the "Daily meal log" header and the top
+      of Breakfast peek at the fold, which IS the scroll affordance (a cut element; a header alone
+      reads as a footer). Not ported, on purpose: the "Fresh today" pill (the "Yesterday's picks"
+      row already covers the honest case), the ready-count subtitle (the rows say it), the
+      time-of-day sort (the generator already spreads occasions) and the thin-pantry hint (Home's
+      own protein-ceiling note covers the case that matters).
+- [x] **Identity constraint answered:** Home = three medium rows, Discover = one big hero.
+- [x] **The Pantry tab no longer shows meals.** Cook Tonight, its hook call (the cold-day
+      double-generation race with Home), `missingFor`, the fresh-date key and ~120 lines of
+      styles are gone; the tab is ingredients + scan. Home's "See all →" went with it (it led to
+      the same three meals).
+- [ ] **UNVERIFIED ON DEVICE — the whole Home change above.** Tells: (1) three rows above the
+      fold with the log header + top of Breakfast cut at the fold on Logan's phone, and no
+      horizontal scroll left anywhere on Home; (2) a meal with a garnish gap reads "Better with:",
+      a structural gap "Need:", a full match a green "Ready to cook" check — compare against the
+      same meal's detail screen; (3) tapping an EMPTY slot card opens the food search for that
+      slot (it is the whole card now, no "Log" pill; the `+` pill only appears once a slot has an
+      entry); (4) the macro tiles read label / number / bar top-down; (5) at 0 logged the calorie
+      card says "Nothing logged yet", not "Keep logging!". Also check a 6.1" size if one is around:
+      the third row should be the cut element there instead of Breakfast.
 - [ ] **Scan-card placement.** Probably state-gated rather than fixed — an empty pantry has nothing
       else to show and scan IS the content; a stocked one should not be pitched a feature it has
       already adopted. Logan pushed back on demoting scan and that pushback is recorded.
@@ -1576,9 +1594,9 @@ Home ("drop all of those design changes for now") — parked, NOT rejected:
       same sentence and four checkmarks forever. The eight `gap` messages are good and stay —
       including the log-driven protein nudge at `lib/pantryProfile.ts:258`, which IS dynamic.
       Banner then survives exactly where the trailer films it (a fresh pantry has gaps).
-- [ ] Cut "Cook tonight" from the Pantry tab. It duplicates Home's three meals from the same hook,
-      and Home's "See all →" points AT it, so "See all" currently leads to less. Home's "See all"
-      goes with it. Frees ~426pt and removes the cold-day double-generation race.
+- [x] ~~Cut "Cook tonight" from the Pantry tab.~~ DONE 2026-09-14 with the Home rebuild (§6c).
+      Its readiness line moved to Home rather than being lost. Frees ~426pt on Pantry and removes
+      the cold-day double-generation race.
 - [ ] Scan cards stay exactly as they are, full size, second on the screen. Logan pushed back on
       demoting scan TWICE and he is right — scan is the acquisition hook. It is also not needed:
       banner + Cook tonight alone are 614 of the 926pt.
@@ -1602,12 +1620,15 @@ Home ("drop all of those design changes for now") — parked, NOT rejected:
       Blocked on confirming `pantry_items.created_at` exists — the table is not in any migration.
 
 **Home layout — knobs left unspent after the 2026-09-04 compression.**
-Shipped: LOG_PEEK reserve, ring 170→124, header crunch, slot rows slimmed. Still available:
-- [ ] `LOG_PEEK` 128 → 170 shows most of Lunch, costs ~42pt of photo. One constant.
-- [ ] Move the day nav inside the calorie card (~20pt).
-- [ ] Drop "Let's start tracking today" (~18pt, loses a dynamic line).
-- [ ] Calorie card → number-left / ring-right, macros as a 3-tile row (~60pt, and it retires the
-      "Show carbs & fat ▾" disclosure). Biggest win; the Cal AI move Logan shared.
+Shipped: ring 170→124, header crunch, slot rows slimmed. The LOG_PEEK reserve is GONE as of
+2026-09-14 — nothing on Home is fit to the fold any more (§6c), so every point trimmed above the
+rows now lifts the meal log into view directly. Still available:
+- [ ] Move the day nav inside the calorie card (~20pt). Worth ~20pt more of Breakfast at the fold.
+- [x] ~~Drop "Let's start tracking today"~~ — the line is now "Nothing logged yet" at 0 and the
+      consumed-of-goal figure otherwise; "Keep logging!" implied you had started.
+- [x] Calorie card → number-left / ring-right, macros as a 3-tile row — shipped earlier; on
+      2026-09-14 the tiles were reordered to label / number / bar top-down (the bar used to sit two
+      rows away from the figure it measured, which is what read as "stacked weirdly").
 
 **Smaller, all confirmed by reading the code or the screenshots:**
 - [ ] Pantry tab icon is `UtensilsCrossed` (`app/(tabs)/_layout.tsx:96`) — a MEAL icon on the
