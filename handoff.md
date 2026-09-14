@@ -1,102 +1,101 @@
-# Handoff — 2026-09-13 (afternoon)
+# Handoff — 2026-09-14 (00:46 CDT / 05:46 UTC)
 
-Replaces the 2026-09-10 handoff. `git log 61b9c06..HEAD` carries the reasoning for every commit since.
-**The to-do list is `docs/PRELAUNCH.md`, and only PRELAUNCH.** This file holds order, decisions not to
-reopen, and mechanisms. Logan switched chats mid-issue; start where §1 says.
+Replaces the 2026-09-13 handoff. `git log 39eb197..HEAD` carries the reasoning for all 12 commits.
+**The to-do list is `docs/PRELAUNCH.md`, and only PRELAUNCH.** This file holds order, mechanisms, and
+decisions not to reopen. Start at §1.
 
-**State:** everything committed and pushed; `generate-meals` deployed at the tip; migration
-`20260912061834_cook_tonight_report_line` applied. **TS baseline 135 / 16 app-code. 567 tests**
-(`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`). The 9 untracked Higgsfield skill dirs
-are another session's — leave them. Metro: Logan's runs on **8082** (the Sep 7 one on 8081 was killed);
-if the phone cannot connect, Ctrl+C and `npx expo start` from `/Users/loganshaver/pantry`.
+**State:** everything pushed (the only uncommitted file is `skills-lock.json` + the 9 Higgsfield skill
+dirs, both another session's — leave them). **Tests 611** (`node --test lib/*.test.ts
+supabase/functions/_shared/*.test.ts`), **tsc 135 / 16 app-code**. Metro runs on **8082** in Logan's
+own terminal; the app is built and working on device. Deployed at the tip: `generate-meals`,
+`generate-trending-meals`, `generate-meal-image`, `audit-ingredient-lines`. Migration
+`20260913204647_cook_tonight_zero_axes` applied.
 
 **Pre-launch, no users.** Logan is the only person who has used the app.
 
 ---
 
-## 0. UPDATE 2026-09-13 evening — read this before §1
-§1 items 2 and 3 are DONE (image cache keyed on name + ingredient fingerprint, `bef4170`; knife work
-named on the ingredient line, `f8baf8b`); item 1 was left as is by Logan. PRELAUNCH §0 (Discover) has
-its root causes found and deployed — the retention count collapsed split lines, attempts are now
-unioned and rotated — with PASS pending two scheduled runs ≥ 12 (Sep 14, 15). A forced real run at
-20:35 UTC stored 12 with 12 photos. The funnel row was found to be silently lost on rich days (lone
-surrogate → jsonb refusal) and fixed the same evening; `pipeline_runs` before 20:24 UTC Sep 13 is
-incomplete. The one-serving-batch item was built and the 9 rows repaired. PRELAUNCH §0 now opens with Logan's audit-rerun item, and §0b holds the Chicken and Rice Soup analysis — all four flavour levers were then BUILT and deployed (flavour ranks inside a tier, shelf line in the prompt, bans never take cheese/peanut butter, report red on zero-axis savory); sweep 2+ axes 57% → 76%, one watch item on protein-floor misses. Then §0c: FatSecret was pricing raw meat as cooked (the root of a 696 kcal / 39 g plate) — raw-first match, a funding pass so protein reaches the target, an at-target tier point, gram rounding, and the client's structural-vs-garnish ready count (UNVERIFIED on device).
-Tests 591. YouTube quota 7/7 used on Sep 13 — do not run the pipeline again before 07:00 UTC Sep 14.
-Everything below §0 is the state as it was at the chat switch.
+## 1. FIRST — the two scheduled Discover runs are the open question
 
-## 1. FIRST — Logan's words: "this issue needs to be addressed first" *(items 2-3 done, see §0)*
+`PRELAUNCH §0`. The 08:00 UTC cron had **not yet fired** when this session ended (05:46 UTC); today's
+`trending_meals` count was 0 and yesterday's forced run left 12. **PASS = a SCHEDULED run stores ≥ 12,
+two days running (Sep 14 + Sep 15).** A manual fire does not count and burns quota the scheduled run
+needs, which is why one was not fired at the end of this session.
 
-The **Egg White and Vegetable Scramble** on his phone (pipeline_runs 601, 13:26 today). Three things, in
-the order he raised them:
+Read the result with:
+```sql
+select generated_at, count(*) from trending_meals
+where trend_source='YouTube trending' group by 1 order by 1 desc limit 3;
+select id, created_at, stored, funnel->'llmRaw', funnel->'llmYields',
+       funnel->'llm_Google'->'rejected', funnel->'llm_Google'->'servingsInferred'
+from pipeline_runs where provider='Google' order by created_at desc limit 2;
+```
+If a thin day recurs, compare **KINDS, not counts** (they swing ±4): low `llmRaw` on every attempt is
+the model; a high `rejected.dropped` is the parser. **Never widen the retention tolerance.**
 
-1. **Does the portion fix undershoot his 40g?** He first read the card as wrong; it was not — 504g (2 cups)
-   of egg whites IS 57g. The fix (`4be9c7c`) clamps egg whites to 350g (1½ cups) = 38g, which is 95% of
-   target and above the ranker's 85% floor, and the calorie up-resize now grows rice/butter instead of
-   protein. His worry: "cutting to one cup would put it under 40g." Answer to give with numbers: the cap
-   is 1½ cups, not one; 38g qualifies; for any dish with a real anchor (chicken, beef) `topUpProtein` still
-   drives protein TO the target; an egg-white-only scramble at 350g lands ~390 kcal, under the 394 kcal
-   floor, so it is REPLACED by a better candidate rather than inflated. If he still wants 2 cups allowed,
-   `anchorCap` in `_shared/scale-recipe.ts` is one constant (egg whites 350, eggs 250, meat 250, powder
-   60). Do not change it without the sweep + depth (`scripts/cook-tonight-sweep/`).
-2. **The photo does not match the recipe** — paprika visible, no greens, onion not diced. Confirmed from
-   `image_cache`: the image was generated **2026-09-02 14:49 for a DIFFERENT recipe with the same name**
-   (egg whites, onion, cauliflower, cheese, potatoes, paprika). Today's recipe reused it because the cache
-   key is the MEAL NAME only — PRELAUNCH §2l, now confirmed a third time. This needs a DECISION, not just a
-   fix: keying on name + a fingerprint of the main ingredients raises cache misses and therefore image
-   cost (CLAUDE.md: image generation is globally cached; do not change it casually). Options in PRELAUNCH.
-3. **Onions "diced"** — step 1 says "add diced onions" but no step dices them and the visual says "¼ medium".
-   Small prompt/step-format point; note it, do not chase it before 1 and 2.
+Also unmeasured: the raw-meat table change lowers computed calories on Discover recipes with
+chicken/steak/pork. Projected offline as a clear win (23 of 47 affected rows GAIN `computed` macros,
+0 lose) but not yet seen on a real cron — check `macrosSource` against the 2026-09-13 baseline
+(creator 3 / model 5 / computed 4).
 
-Then **PRELAUNCH §0 — the Discover pipeline** (yield 13 → 9 → 5 → 2): Logan asked for it at the very top of
-the checklist, for a Fable 5.1 session. The lead is written down there (multi-section recipes fail the
-retention COUNT because one food is listed at two quantities). Do not widen retention tolerance.
+## 2. What is verified vs not
 
-## 2. What is verified vs not (Cook Tonight)
+**Verified on device or in production:** the garnish-vs-structural split ("Need:" vs "Better with:",
+Logan confirmed); gram rounding; protein funding; `underTarget` 0 across five runs; the image cache
+keyed on name + ingredient fingerprint; raw meat pricing (run 786 trace reads
+`chicken (raw, local table)@120/100g`); the funnel row surviving (row 679 after the lone-surrogate fix).
 
-Verified: the production path end to end (row 503: `dry_run=false`, history, images); a week of real
-history on Logan's pantry 7/7 clean days; two consecutive sweeps after the portion fix, 29/38 and 32/38,
-failing only in the accepted kinds; the pantry-limit line SEEN on device (then its trigger corrected);
-the daily-report line live (Logan can verify tomorrow's 9:05 email).
-Not verified: the next real generation on the current code (`portionsClamped`, `proteinTopUps` in the
-funnel say what moved); the pantry-limit line in its corrected form (needs a genuinely thin pantry).
+**Not verified:** the two scheduled Discover runs (§1); the daily report going red on a zero-axis
+savory meal (never had cause to fire); the image fingerprint's device tell, which needs a repeat of a
+meal NAME carrying different mains; the 4 hard protein misses flagged in the flavour sweep.
 
 ## 3. DECISIONS ALREADY MADE — do not reopen without new evidence
 
-- **The floored cookability gate stays.** ~3% of meals on a thin pantry need one item the user lacks;
-  the card says "Better with: X". A short deck was judged worse.
-- **The "light on protein" line tests the CAUSE**: deck short AND target ≤ 70g/meal AND the pantry's own
-  sources cannot reach it (`lib/proteinCeiling.ts`). Few sources is not the test; whether they can carry
-  a meal is. Logan caught the first version blaming the pantry when he raised the goal.
-- **Ranker: clash → not-cookable → tier (complete AND ≥ 85% protein) → fresh → fit**, then slot coverage
-  that may not promote a dish under the protein floor. PROTEIN_FLOOR lives in `_shared/rank-deck.ts`.
-- **Dietary restrictions are enforced in code and never floored**; the pantry is filtered by the
-  restriction before the prompt. `diet_type` is now sent by the client (it never was).
-- **Protein is sized deterministically** (`topUpProtein`, then `scaleToTarget` dense-first both ways);
-  condiments are never an anchor (the first draft grew soy sauce to 7¾ tbsp).
-- **Home hero rotates all three equally** — Pantry-tab slot order is not worth verifying.
+- **Raw is the default for meat** (Logan, 2026-09-14). A recipe's grams are what the cook puts on the
+  scale, and a cook weighs raw. Cooked figures live only on rows that NAME the state.
+- **Raw meat prices from the local table, not FatSecret.** That service's top hit for a bare meat name
+  is its cooked entry and nothing in the name or description says so, so no result-ranking can fix it.
+- **Flavour ranks inside a tier, above freshness.** On a finite pantry the "fresh" candidates are the
+  model's oddest recombinations; a seasoned repeat beats a dish built on water.
+- **A ban never takes cheese or peanut butter.** They are the pantry's flavour carriers. The old rule
+  said banning them "costs the deck nothing" and it cost run 678 its umami.
+- **No hard protein cut at 100% of target.** It empties the deck on the vegan and carb-heavy sweep
+  pantries. The tier ranks; the floor still shows something.
+- **100% ingredient retention in Discover is a product requirement**, never a tuning knob.
 - Never paste `CRON_SECRET` into chat, never rotate it.
 
-## 4. MECHANISMS
+## 4. MECHANISMS — the exact tells
 
-- **Dry-run the generator for any pantry:** `?dryRun=true` with the `sb_secret_` key as bearer (fetched
-  from `npx supabase projects api-keys --reveal`; never on disk). `asUser=<uuid>` reads that user's
-  history. Returns `{ meals, funnel }`. The app's anon key is rejected.
-- **Sweep / depth / rescore:** `scripts/cook-tonight-sweep/run.mjs` (17+ cases × N), `depth.mjs <pantry>
-  <profile> 7` (a week with real history under a synthetic user, cleaned up after), `rescore.mjs
-  results/<dir>` (re-grade offline). ~14s and ~$0.03 a generation. Deck-clean counts swing ±4 between
-  identical runs — compare failure KINDS, not the count.
-- **Funnel per generation** (`pipeline_runs`, provider `generate-meals-funnel`, `dry_run=false` for real):
-  `rankCandidates` (p/c/f/tier/repeat/notCookable/slot), `proteinTopUps`, `portionsClamped`,
-  `dietViolations`/`droppedByDiet`, `pantryHiddenByDiet`, `stepIssuesShown`, `flavourAxesShown`,
-  `slotPromoted`, `duplicateBackfill`, `dryStapleOverload`, `nameGapDetail`, `macros` (FatSecret trace —
-  the MATCH label, not the recipe's ingredient). A failed generation writes `failed: true`.
-- **Daily email** reads `ops_report_data()`; the Cook Tonight line is red on: any failure, any savory
-  clash shown, unseasoned > 30%, uncookable-shown > 10%, protein-floor misses > 20%.
-- **Eye-test digest**: the scratchpad file was sent to Logan; regenerate from any sweep's `raw.json`.
+- **The macro trace is in the DB row, NOT the response.** A dry run's returned `funnel` has no
+  `macros` key; `pipeline_runs` does, for dry runs too. Reading the response instead of the row is
+  what let a half-finished FatSecret fix look complete for a day. Always:
+  ```sql
+  select m->>'name', it from pipeline_runs p,
+    jsonb_array_elements(p.funnel->'macros') m, jsonb_array_elements_text(m->'items') it
+  where p.provider='generate-meals-funnel' order by p.created_at desc limit 20;
+  ```
+- **Dry-run Cook Tonight:** POST `generate-meals?dryRun=true&asUser=<uuid>` with the `sb_secret_` key
+  as bearer (`npx supabase projects api-keys --reveal`, never on disk). The legacy service_role JWT is
+  **NOT** accepted as internal by these functions — it reads as anonymous.
+- **Dry-run Discover:** `generate-trending-meals?refresh=true&dryRun=true`, same key. ~85s a run.
+- **YouTube quota resets at MIDNIGHT PACIFIC**, not UTC. 7 runs a day, dry runs cost the same. The
+  cron at 08:00 UTC is deliberately 1 hour after the reset. This session spent all 7 of Sep 13's.
+- **Sweep:** `RUNS=2 node scripts/cook-tonight-sweep/run.mjs`; results land gitignored under
+  `scripts/cook-tonight-sweep/results/<timestamp>/`. Deck-clean counts swing ±4 — compare kinds.
+- **iOS build:** `ios/.xcode.env.local` pins node's absolute path and is gitignored. A brew upgrade
+  that moves node breaks the build with a Hermes script-phase failure ~2,000 lines into the log; grep
+  it for `No such file or directory`. Now pinned to `/opt/homebrew/bin/node`, the stable symlink.
 
-**Mistakes this session worth not repeating:** claimed a stale bundle from `index.bundle` (not the Expo
-Router entry — check `node_modules/expo-router/entry.bundle`); built a warning on the symptom instead of
-the cause; let a calorie up-resize inflate a protein to 2 cups; let "combine all ingredients" strip a
-smoothie to one scoop. Each was caught by replaying real rows through the code, or by Logan's eyes —
-never by "it should work".
+## 5. Mistakes this session worth not repeating
+
+- **Proved a server healthy and shipped Logan something his phone could not reach.** Metro was started
+  detached with `nohup`; every check passed (process alive, status endpoint, a 19 MB bundle in 2s) and
+  the phone had never once connected, because a detached process never does the device handshake. A
+  green server is not a green path.
+- **Contradicted Logan's own sentence.** He wrote "my phone wasn't plugged in so it says no script URL"
+  and got told the cable does not carry the bundle. It does. The fix was in his message.
+- **Reported a fix verified by the wrong artifact** (FatSecret raw matching, above).
+- **Fixed the one instance instead of the class.** "beef gelatin" was 1 of 8 ingredients priced as the
+  wrong animal; the scan took a minute and found bouillon priced as raw chicken breast.
+- Each real finding this session came from replaying actual rows through the code, never from
+  reasoning about what the code should do.
