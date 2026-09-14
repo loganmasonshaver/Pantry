@@ -123,6 +123,18 @@ const TABLE: Row[] = [
   { re: /\bprotein powder|whey\b/i, kcal: 375, p: 75, c: 10, f: 5 },
 
   // ── meat, fish, plant protein
+  // ── A MEAT WORD INSIDE SOMETHING THAT IS NOT THAT MEAT ──────────────────────────────────────
+  // These MUST precede the meat rows below, or the first-match rule prices them as the animal.
+  // Found 2026-09-14 by scanning every ingredient in both pools; 8 real rows hit this and not one
+  // of them is the meat named. "unflavored beef gelatin" was reading as beef — 21 g protein per
+  // 100 g against gelatin's 86, which quartered the protein of the one recipe built on it (the
+  // note further down this file had already worked out the right figure and nobody applied it).
+  // "chicken bouillon powder" was reading as raw chicken breast, a whole-food price for a cube of
+  // salt. Liquid broth and stock are already handled correctly further up.
+  { re: /\bgelatin[e]?\b/i, kcal: 335, p: 86, c: 0, f: 0 },
+  { re: /\bbouillon\b/i, kcal: 240, p: 10, c: 20, f: 13 },
+  { re: /\bchicken (sausages?|links?)\b/i, kcal: 172, p: 17, c: 2, f: 11 },
+  { re: /\bsausages?\b/i, kcal: 301, p: 14, c: 2, f: 27 },
   { re: /\bchicken (breast|thigh|tenderloin)s?\b/i, kcal: 120, p: 22.5, c: 0, f: 2.6 },
   { re: /\b(rotisserie|shredded|cooked) chicken\b/i, kcal: 165, p: 31, c: 0, f: 3.6 },
   { re: /\bchicken salad\b/i, kcal: 190, p: 14, c: 3, f: 13 },

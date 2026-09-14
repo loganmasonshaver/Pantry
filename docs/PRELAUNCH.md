@@ -248,9 +248,22 @@ correctly all along).
   SERVINGS repair, not the meat change — with servings finally right, the per-serving division
   agrees. Method: `scripts/` equivalents are in the session scratchpad; the query is a REST pull of
   `trending_meals` fed through `computePerServingMacros` + `COMPUTED_AGREEMENT_BAND`.
-- [ ] **Small pre-existing table-matching quirk, low priority:** the `\b(steak|sirloin|beef)\b` row
-  matches "beef gelatin", which is not beef. It affects one known row (Protein Jello). Worth an
-  exclusion next time that file is open; not worth a deploy on its own.
+- [x] **FIXED 2026-09-14 (Logan: "fix this now") — a meat word inside something that is not that
+  meat.** Scanning every ingredient in both pools turned up 8 real rows, not the 1 first noticed:
+  `unflavored beef gelatin` / `beef gelatin` / `gelatin` / `unflavored gelatin` priced as BEEF
+  (21 g protein per 100 g against gelatin's 86), and `chicken bouillon powder` / `beef bouillon
+  cube` / `bouillon powder` priced as raw chicken breast — a whole-food price for a cube of salt.
+  Two sausage rows (`hot italian sausage`, `jones chicken sausage links`) were priced as the raw
+  animal too. Four rows added ABOVE the meat rows, which is the table's own documented ordering:
+  gelatin 335/86, bouillon 240/10, chicken sausage 172/17, generic sausage 301/14. Liquid broth and
+  stock were already correct and are untouched.
+  **Result: Protein Jello now recomputes to 101 kcal against a stored 107 and KEEPS its 'computed'
+  label** (it fell to 60 kcal before, which is what would have demoted it). The file's own note had
+  already worked out that 120 g of beef gelatin is ~26 g protein per serving; the code now agrees
+  with it exactly. Whole-pool projection after: of the 47 affected recipes, **23 gain 'computed'
+  and 0 lose it** (was 23 gain / 1 lose). Tests 610 → 611, tsc 135/16. Both functions redeployed.
+  One oddity recorded in the tests rather than fixed: `zero salt chicken stock cube` lands on the
+  SALT row and prices at 0 — right answer, wrong reason, harmless for a stock cube.
 - [ ] **Logan's already-generated history carries the old inflated numbers.** `generated_meals` rows
   written before 2026-09-14 05:30 UTC overstate protein on meat meals by ~10-13 g. He is the only
   user; nothing is being recomputed. If he logged any of those meals, the day totals are overstated.

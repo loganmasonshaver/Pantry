@@ -163,6 +163,10 @@ const CANONICAL: Array<[string, number]> = [
   ['chicken breast', 22.5], ['rotisserie chicken', 31], ['chicken salad', 14], ['chicken', 22.5],
   ['ground beef', 18.6], ['steak', 21], ['ground turkey', 19.7], ['turkey', 22],
   ['bacon', 37], ['salmon', 20.4], ['tuna', 25.5], ['shrimp', 20.1], ['tofu', 17.3],
+  // A meat word inside something that is not that meat — these must not fall through to the
+  // animal's row. Every one of them occurs in the live pools.
+  ['gelatin', 86], ['beef gelatin', 86], ['bouillon', 10], ['chicken bouillon powder', 10],
+  ['chicken sausage', 17], ['italian sausage', 14],
   // starches
   ['cooked rice', 2.7], ['quinoa', 4.4], ['rolled oats', 16.9], ['granola', 10.1],
   ['bread', 9], ['tortillas', 8], ['sweet potato', 1.6], ['red potatoes', 2],
@@ -457,4 +461,30 @@ test('tableReference answers per 100g for what the table knows, and null for wha
   assert.equal(tableReference('durian'), null)
   assert.equal(tableReference(''), null)
   assert.equal(tableReference(undefined), null)
+})
+
+test('a meat word inside a non-meat product does not price as the animal', () => {
+  const per100 = (n: string) => estimateMacros([{ name: n, grams: '100g' }])
+  // Every spelling that occurs in the live pools.
+  for (const n of ['gelatin', 'unflavored gelatin', 'unflavored beef gelatin']) {
+    assert.equal(per100(n).protein, 86, n)
+    assert.equal(per100(n).kcal, 335, n)
+  }
+  for (const n of ['bouillon powder', 'chicken bouillon powder', 'beef bouillon cube']) {
+    assert.equal(per100(n).protein, 10, n)
+  }
+  assert.equal(per100('jones chicken sausage links').protein, 17)
+  assert.equal(per100('hot italian sausage').protein, 14)
+  // The real meat rows are untouched.
+  assert.equal(per100('chicken').protein, 22.5)
+  assert.equal(per100('chicken breast').protein, 22.5)
+  assert.equal(per100('steak').protein, 21)
+  assert.equal(per100('ground beef').protein, 18.6)
+  // Liquid broth and stock were already right and stay right.
+  assert.equal(per100('chicken broth').kcal, 6)
+  assert.equal(per100('beef broth').kcal, 6)
+  // "zero salt chicken stock cube" lands on the SALT row (seasonings are matched first) and prices
+  // at 0. Right answer, wrong reason, and harmless for a stock cube — recorded so the next reader
+  // does not take it as evidence the stock row caught it.
+  assert.equal(per100('zero salt chicken stock cube').kcal, 0)
 })
