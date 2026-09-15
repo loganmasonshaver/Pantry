@@ -1785,15 +1785,33 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       no-packaging/no-label/no-text prompt (~$0.003/image, global cache). Serve thumbnails at a
       small size — the bucket files are 1024² webp, 50–136 KB each. Tiles-with-photos remains an
       option but would make Pantry the most image-dense screen in the app.
-- [ ] **DEFERRED, GATED ON LOGAN'S "GO" (2026-09-15) — screen transitions + a small animation and
-      haptic on every user action.** Logan: "there might be a chance that adding these transitions
-      and haptics will slow down the app and make it feel laggy. I did try this in the past with
-      Opus and ultimately the app became too slow." So: perf first. Baseline with `perfMark`
-      before touching anything; Reanimated on the UI thread only (never `Animated` with
-      `useNativeDriver: false`, never `LayoutAnimation` on long lists); no animation on the tab
-      bar (`animation: 'none'` is the black-screen fix — CLAUDE.md); haptics only on state changes,
-      never on scroll or every tap; measure on the device after each screen, and revert any screen
-      that drops a frame on the meal list or the pantry SectionList.
+      **ALL PANTRY TAB REDESIGN PROPOSALS DROPPED 2026-09-15 (Logan: "let's scrap any plans for
+      changes to this screen. It looks fine how it is now.").** Tiles, emoji, photo thumbnails,
+      the count line and the long-press menu are off the table. Research and mock kept for the
+      record (field study + https://claude.ai/artifact/WLBKjCY9eXpcTuYKP1LT8L). Do not reopen
+      without Logan raising it.
+- [ ] **PLANNED, GATED ON LOGAN'S "GO" (2026-09-15) — screen transitions + a small animation and
+      haptic on every user action. Plan: `docs/PLAN-motion.md`.** Logan: "I did try this in the
+      past and ultimately the app became too slow." Git says the earlier slowness was never the
+      NUMBER of animations: the July tab transition caused the black screen, the Aug 29 macros
+      animation caused 8 renders per tap and stepped by animating height, the tilt ran on the
+      sensor clock, the splash animated on the JS thread during boot. Budget: transform/opacity
+      only, UI thread only, zero renders from motion, navigators untouched, nothing at cold start,
+      haptics on commits only, no new library. Measured in a RELEASE build with Instruments'
+      Animation Hitches (< 5 ms/s), one commit per screen, revert any that fails.
+  - [ ] Phase 0 — baseline: Release build on device, fixed walkthrough, Instruments trace, numbers into the plan
+  - [ ] Phase 1 — fix what is broken: replace the 10 dead `LayoutAnimation` calls; opacity transition on Pantry/Grocery toggles; Home calorie ring off the JS thread; pause Home loops on blur
+  - [ ] Phase 2 — action → feedback audit table for Logan's OK, then fill the gaps with PressableScale + `lib/haptics.ts`
+  - [ ] Phase 3 — legacy `Swipeable` → `ReanimatedSwipeable` on Home log rows and Pantry rows
+  - [ ] Phase 4 — screen transitions: consistency audit only; tabs stay instant
+  - [ ] Phase 5 — onboarding animations, only if Phase 0 shows hitches there
+- [ ] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
+      today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
+      Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
+      2026-08-29 (`1eab76b`) and then forgotten. The 10 calls in Home, Pantry, Grocery and Saved
+      snap. That includes `ccb57f7`'s "sinks to the bottom of its card with an animated slide":
+      the row moves, but in one frame. Tell: tap a Pantry item → it JUMPS to the bottom of its
+      card rather than sliding. Fix is Phase 1a above. CLAUDE.md landmine added.
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was

@@ -155,6 +155,15 @@ npx expo run:ios   # build and run on iOS simulator
   accepted anonymous DELETE until 2026-08-12 — the anon key ships in the app bundle, so
   anyone could have wiped Discover. When adding a table, verify anon can only SELECT.
 
+### `LayoutAnimation` does nothing in this app
+- Reanimated disables React Native's LayoutAnimation on the New Architecture
+  (software-mansion/react-native-reanimated#6751, still open 2026-09-15). `configureNext` is a silent
+  no-op, so any reflow "animated" with it snaps in one frame. Seen on device 2026-08-29 (`1eab76b`),
+  forgotten by 2026-09-15, when a new call was written and reported as an animation.
+- Use Reanimated layout animations instead: `entering` / `exiting` on the element that appears or
+  leaves, `layout={LinearTransition}` on each element whose own box moves (they are per-component —
+  a parent's transition does not cover its children). Rules for any motion: `docs/PLAN-motion.md` §2.
+
 ### There is no SafeAreaProvider in this app
 - `useSafeAreaInsets()` returns **0 everywhere**. `SafeAreaView` still works because it's a
   self-measuring native view, so nothing looks broken — but any layout maths using insets is
