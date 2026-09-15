@@ -1,6 +1,6 @@
 # PLAN — motion and haptics, performance first
 
-**Status: PLAN. Nothing built. Gated on Logan's "go"** (asked 2026-09-15: transitions between
+**Status 2026-09-15: Phase 0 measured, Phase 1 built and measured, Phase 2 proposed and awaiting Logan's OK.** (Asked 2026-09-15: transitions between
 screens and a small animation for every action, without making the app laggy — "I did try this
 in the past and ultimately the app became too slow"). Open items live in `docs/PRELAUNCH.md` §6c;
 this file is the reasoning and the method.
@@ -62,14 +62,12 @@ Haptics are a native call and cost effectively nothing. Their risk is noise, not
 
 **Phase 0 — Baseline. No product code.** Release build, walkthrough, Instruments trace, numbers
 written into §7 of this file. ~1 h, mostly the build.
-*Status 2026-09-15: tooling built (`f2de9e8`). The Release build of `4eceabd` — the code before any
-Phase 1 change — is installed on the phone. The walkthrough needs Logan's hands:*
-`bash scripts/motion-compare.sh baseline phase1` *traces that build, builds + installs the current
-code, traces again, compares, and reinstalls the dev build.*
+*Status 2026-09-15: MEASURED — 0.99 ms/s (§7). Tooling `f2de9e8`. Rerun any phase with*
+`bash scripts/motion-compare.sh <before> <after>` *with the before-build installed as Release.*
 
 **Phase 1 — Fix what is already broken.** Expected to make the app lighter, not heavier.
-*Status 2026-09-15: BUILT (`e0a0e41` Home, `462f6b0` Pantry, `15310d6` Grocery, `2e3e063` Saved),
-unmeasured and unseen on device.*
+*Status 2026-09-15: BUILT (`e0a0e41` Home, `462f6b0` Pantry, `15310d6` Grocery, `2e3e063` Saved) and
+MEASURED — 1.24 ms/s, no frame cost (§7). Device tells in PRELAUNCH §6c still unchecked.*
 - a. Replace the 10 dead `LayoutAnimation` calls. **Done:** Home's log (cards, rows, Add meal),
   Grocery (aisles, cards, rows, Add Item) and Saved's grid carry `LIST_LAYOUT` / `ROW_EXIT` from
   `lib/motion.ts`. Two of the ten were in code nothing rendered (`SlotCard`, `toggleSlot`) and were
