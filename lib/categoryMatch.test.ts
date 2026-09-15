@@ -111,3 +111,50 @@ test('normalizeCategory never returns something outside the canonical list', () 
     assert.ok(STORE_CATEGORIES.includes(normalizeCategory(raw, name)), `"${raw}"/"${name}" escaped the list`)
   }
 })
+
+test('REGRESSION: the model\'s "Other" never survives a name the table can read', () => {
+  assert.equal(normalizeCategory('Other', 'Brown Sugar'), 'Baking')
+  assert.equal(normalizeCategory('Other', 'Pecans'), 'Nuts & Seeds')
+  assert.equal(normalizeCategory('Other', 'Orange Juice'), 'Beverages')
+  assert.equal(normalizeCategory('Other', 'Plantain Chips'), 'Snacks')
+  assert.equal(normalizeCategory('Other', 'Milk Chocolate Ice Cream Bars'), 'Frozen')
+  assert.equal(normalizeCategory('Other', 'avocado'), 'Produce')
+  assert.equal(normalizeCategory('Other', 'salt'), 'Spices & Seasonings')
+})
+
+test('a valid category the name contradicts loses to the name; one the name allows is kept', () => {
+  assert.equal(normalizeCategory('Meat & Fish', 'Eggs'), 'Dairy & Eggs')
+  assert.equal(normalizeCategory('Meat & Fish', 'Liquid Egg Whites'), 'Dairy & Eggs')
+  assert.equal(normalizeCategory('Grains & Pasta', 'Cookies'), 'Snacks')
+  assert.equal(normalizeCategory('Spices & Seasonings', 'olive oil'), 'Oils & Vinegars')
+  assert.equal(normalizeCategory('Sauces & Condiments', 'onion'), 'Produce')
+  // the name allows both Frozen and Meat & Fish; the model saw the freezer, so Frozen stands
+  assert.equal(normalizeCategory('Frozen', 'Frozen Chicken Nuggets'), 'Frozen')
+  // Dairy & Eggs is among what "Coffee Creamer" allows, so the model's answer is kept
+  assert.equal(normalizeCategory('Dairy & Eggs', 'Coffee Creamer'), 'Dairy & Eggs')
+})
+
+test('a name the table cannot read still takes the model\'s valid category, then the alias, then Other', () => {
+  assert.equal(normalizeCategory('Snacks', 'Zxqv'), 'Snacks')
+  assert.equal(normalizeCategory('Protein', 'Zxqv'), 'Meat & Fish')
+  assert.equal(normalizeCategory('Other', 'Zxqv'), 'Other')
+})
+
+test('the keywords the production rows were missing', () => {
+  assert.equal(autoCategoryMatches('Coffee Beans')[0], 'Beverages')
+  assert.equal(autoCategoryMatches('Cinnamon Granola Butter')[0], 'Canned & Jarred')
+  assert.equal(autoCategoryMatches('Ground Pepper')[0], 'Spices & Seasonings')
+  assert.equal(autoCategoryMatches('Coffee Creamer')[0], 'Dairy & Eggs')
+  assert.equal(autoCategoryMatches('Cheese Snacks')[0], 'Snacks')
+  assert.equal(autoCategoryMatches('Sweet Relish')[0], 'Sauces & Condiments')
+  assert.equal(autoCategoryMatches('Pad Thai Sauce')[0], 'Sauces & Condiments')
+  assert.equal(autoCategoryMatches('Peanut Butter')[0], 'Canned & Jarred')
+})
+
+test('a bare "pepper" is the spice; the vegetable needs its qualifier', () => {
+  assert.equal(autoCategoryMatches('pepper')[0], 'Spices & Seasonings')
+  assert.equal(autoCategoryMatches('Ground Pepper')[0], 'Spices & Seasonings')
+  assert.equal(autoCategoryMatches('bell pepper')[0], 'Produce')
+  assert.equal(autoCategoryMatches('Red Peppers')[0], 'Produce')
+  assert.equal(autoCategoryMatches('red pepper flakes')[0], 'Spices & Seasonings')
+})

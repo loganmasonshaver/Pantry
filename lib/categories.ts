@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { STORE_CATEGORIES, autoCategoryMatches } from './categoryMatch'
+import { STORE_CATEGORIES, autoCategoryMatches, normalizeCategory } from './categoryMatch'
 
 export { STORE_CATEGORIES, autoCategoryMatches }
 
@@ -19,7 +19,8 @@ export async function categorizeItem(name: string): Promise<string> {
       body: { name, categories: STORE_CATEGORIES },
     })
     if (error || !data?.category) return 'Other'
-    return STORE_CATEGORIES.includes(data.category) ? data.category : 'Other'
+    // Same rule as every other write: the name decides where it can; the model fills the rest.
+    return normalizeCategory(data.category, name)
   } catch {
     return 'Other'
   }

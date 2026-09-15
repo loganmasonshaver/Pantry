@@ -1641,8 +1641,24 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       back; (3) swipe → Delete; (4) with items older than 3 weeks the grey strip appears; tap →
       the sheet; "Used up" removes it from the sheet and marks the row Out; (5) ages on the right
       read like "3w", not "today" for everything (the backfill worked: verified in SQL).
-      Still open from the plan: "Other" at 21% of items is a categorisation problem for the scan
-      model, separate from layout; the Pantry tab icon (UtensilsCrossed) still reads as a meal.
+      Still open from the plan: the Pantry tab icon (UtensilsCrossed) still reads as a meal.
+- [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
+      scan model.** `normalizeCategory` accepted ANY category that exists in the list before
+      looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was
+      written as-is while the keyword table said Baking, and a model that filed "Eggs" under Meat
+      & Fish and "salt" under Sauces was believed everywhere. Measured across all users: 158
+      rows, 30 in Other, ~74 in an aisle the name contradicts. Rule now: THE NAME DECIDES whenever
+      the table can read it; the model's category is kept only when it is one of the aisles the
+      name allows (a tiebreaker — "Frozen Chicken Nuggets" stays Frozen), and is the answer only
+      for a name the table cannot read. The LLM path (`categorizeItem`) goes through the same
+      rule. Keywords the rows were missing: creamer, egg white, granola/cookie/seed butter, coffee
+      bean, ground pepper, relish, chutney, sauce, snack; a bare "pepper" is now the spice
+      (Produce lists only the qualified vegetable). 5 new tests. Backfill: the rule replayed over
+      every row via SQL — 74 of 158 moved, Other 30 → 1 (a "Cat Food" row, which should never
+      have been scanned in). Judgement calls the table makes that Logan may want to revisit:
+      Salsa, Pickles, Peanut/Almond Butter → Canned & Jarred (not Sauces); Maple Syrup → Baking;
+      Protein Powder → Beverages (no Supplements aisle exists). Tell: Pantry tab → no "Other"
+      section; Brown Sugar under BAKING, Pecans under NUTS & SEEDS, Eggs under DAIRY & EGGS.
 
 ## 6g. RAISED BY LOGAN 2026-09-14 — the food log screen (`components/FoodSearchModal.tsx`, detail step)
 
