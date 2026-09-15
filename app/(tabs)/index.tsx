@@ -1597,8 +1597,9 @@ export default function HomeScreen() {
                   />
                 ))}
                 {/* The redo lives UNDER the three, not in the header: the decision to redo comes
-                    after reading them, and a row can say what the cap is ("4 left today") where the
-                    greyed ↻ icon said nothing. Quiet text, not a button — the cards are the content.
+                    after reading them. No remaining-picks count — Logan's call: the cap is a server
+                    cost guard, not something to make users count down. Quiet text, not a button —
+                    the cards are the content.
                     At the cap, Discover (free to serve) is the one action left and becomes the
                     SECONDARY pill, not the white primary, which would outshout food the user can
                     cook tonight. Hidden while a generation runs; the status row above carries that. */}
@@ -1617,12 +1618,10 @@ export default function HomeScreen() {
                       </View>
                     )
                   }
-                  const left = genUsedToday === null ? null : Math.max(0, genCapPerDay - genUsedToday)
                   return (
                     <Text style={[styles.discoverNudgeText, styles.discoverNudge]}>
                       Not feeling these?{' '}
                       <Text style={styles.discoverNudgeLink} onPress={regenerate}>New picks</Text>
-                      {left !== null ? ` · ${left} left today` : ''}
                       {nudge === 'redo' ? <> · <Text style={styles.discoverNudgeLink} onPress={goDiscover}>Browse Discover</Text></> : null}
                     </Text>
                   )

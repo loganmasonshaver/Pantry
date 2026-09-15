@@ -1636,6 +1636,11 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       Hidden while a generation runs — `working` now includes `loading`, so the status line and
       sweep bar show during a redo over a set already on screen (they did not before). Tells: tap
       New picks → status row + sweep bar appear, three new rows land, the count drops by one.
+      **2026-09-15, Logan: "get rid of specifically the number of how many generations left for
+      users to see" → the "· N left today" count is REMOVED.** The row reads "Not feeling these?
+      New picks", plus "· Browse Discover" after the third generation; the cap row is unchanged.
+      Home was the only surface showing it (Discover's "left today" is calories; the creator
+      modal's is behind a disabled flag). Tell: no number anywhere in that row.
 - [ ] **BUILT 2026-09-14 (Logan: "go") — the Daily meal log card, UNVERIFIED ON DEVICE.** Rows
       read "675 · 46P" (protein was missing from a protein-first log); the header carries the
       slot total "1,429 kcal · 63P"; delete is swipe-left (red Delete, the Pantry rows' pattern)
