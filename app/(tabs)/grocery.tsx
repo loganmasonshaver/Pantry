@@ -12,7 +12,7 @@ import {
   Keyboard,
 } from 'react-native'
 import Reanimated from 'react-native-reanimated'
-import { LIST_LAYOUT, ROW_EXIT, STATE_FADE } from '@/lib/motion'
+import { LIST_LAYOUT, ROW_ENTER, ROW_EXIT, STATE_FADE } from '@/lib/motion'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
 import { Trash2, Check, Plus, Clock, ShoppingCart } from 'lucide-react-native'
@@ -306,6 +306,8 @@ export default function GroceryScreen() {
   const rename = async (id: string, newName: string) => {
     const trimmed = newName.trim()
     if (!trimmed) return
+    // Blur commits the edit even when nothing was typed; only a real rename is a commit worth a tick.
+    if (items.find(i => i.id === id)?.name !== trimmed) haptic.selection()
     setItems(prev => prev.map(i => i.id === id ? { ...i, name: trimmed } : i))
     await supabase.from('grocery_items').update({ name: trimmed }).eq('id', id)
   }
@@ -314,6 +316,7 @@ export default function GroceryScreen() {
     const item = items.find(i => i.id === id)
     if (!item) return
     const next = !item.checked
+    haptic.selection() // a two-state flip, like the Pantry toggle
     setItems(prev => prev.map(i => i.id === id ? { ...i, checked: next } : i))
     await supabase.from('grocery_items').update({ checked: next }).eq('id', id)
   }
@@ -399,6 +402,10 @@ export default function GroceryScreen() {
     // autoFocus on the TextInput handles initial focus
   }
 
+  // Rows the user added this session. Read once, when a row mounts, to decide its entering fade —
+  // rows from a load never get one.
+  const justAddedIdsRef = useRef<Set<string>>(new Set())
+
   // The actual insert — shared by the normal path and the "Add anyway" confirmation.
   const addGroceryItem = async (name: string, category: string) => {
     if (!user) return
@@ -414,6 +421,8 @@ export default function GroceryScreen() {
       .select('id, name, meal, category, checked')
       .single()
     if (!error && data) {
+      haptic.light() // after the insert, so a failed add never ticks
+      justAddedIdsRef.current.add(data.id) // this row, and only this row, fades in
       setItems(prev => [...prev, data])
       setInlineName('')
       // Keep focus + scroll the inline input back into view so user can see what
@@ -673,7 +682,7 @@ export default function GroceryScreen() {
                   <Text style={styles.groupLabel}>{group.category}</Text>
                   <Reanimated.View style={styles.groupCard} layout={LIST_LAYOUT}>
                     {group.items.map((item, i) => (
-                      <Reanimated.View key={item.id} layout={LIST_LAYOUT} exiting={ROW_EXIT}>
+                      <Reanimated.View key={item.id} layout={LIST_LAYOUT} exiting={ROW_EXIT} entering={justAddedIdsRef.current.has(item.id) ? ROW_ENTER : undefined}>
                         {i > 0 && <View style={styles.divider} />}
                         <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} onRename={(name) => rename(item.id, name)} highlighted={item.id === dupeHighlightId} />
                       </Reanimated.View>
