@@ -1,6 +1,6 @@
 # PLAN — motion and haptics, performance first
 
-**Status 2026-09-15: Phase 0 measured, Phase 1 built and measured, Phase 2 proposed and awaiting Logan's OK.** (Asked 2026-09-15: transitions between
+**Status 2026-09-15: Phase 0 measured, Phase 1 built and measured, Phase 2 BUILT (approved by Logan: "move to phase 2"), unmeasured.** (Asked 2026-09-15: transitions between
 screens and a small animation for every action, without making the app laggy — "I did try this
 in the past and ultimately the app became too slow"). Open items live in `docs/PRELAUNCH.md` §6c;
 this file is the reasoning and the method.
@@ -92,7 +92,15 @@ PressableScale, 245 TouchableOpacity (those already dim on press natively and st
 Pantry toggle, add item, review Keep / Used up, grocery check, Log food / Save changes, New picks,
 add to grocery, unsave, Discover save. Filled with PressableScale and `lib/haptics.ts` only.
 
-### Phase 2 audit — PROPOSAL, awaiting Logan's OK (2026-09-15)
+### Phase 2 audit — APPROVED and BUILT 2026-09-15
+
+*Built as proposed in ten commits, `b02670f`…`5932d3f` (Home, Pantry, Grocery, Saved, Discover, meal
+detail, logging modals, scan modals, settings saves, cook reveal). The tab-bar tick stays — Logan did
+not ask to remove it. Two additions the proposal implied: `lib/logSignal.ts` (+2 tests) carries "a log
+just happened" from the logging screens to Home's goal tick; `saveDietType` now reads its write error,
+since a tick for a refused save would be a lie. The scan flow's "Add all" ticks `light`, not `success`,
+when the cook reveal follows, because the reveal's own Success peak lands a moment later. Also on
+2026-09-15, separately: Home's "· N left today" count was removed at Logan's request (`9742a2f`).*
 
 Every state-changing action in `app/` and `components/` was inventoried with its current feedback;
 three findings were re-read in code before this proposal relied on them. The pattern: haptics are
