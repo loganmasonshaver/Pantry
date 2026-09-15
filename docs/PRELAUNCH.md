@@ -1752,6 +1752,33 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       & FISH, struck through, with an "Out" tag; tap it there → it slides back up. If strike + 35%
       + tag + position is STILL not enough on device, the next lever is a leading glyph on every
       row, not a relocation.
+      **VERIFIED ON DEVICE 2026-09-15 13:43 (Logan: "I can verify last changes made are working",
+      with a screenshot):** MEAT & FISH first, no ages on rows, "23 perishables from 3+ weeks ago
+      · Review" (down from 54), fridge tab icon, notice line and search field as designed. Then:
+      "I'm not super excited about the state it visually looks currently" → **research pass
+      DONE 2026-09-15: https://claude.ai/artifact/Q1ST18qHJAm47zS6DTVtcp** ("Pantry Tab Field
+      Study" — 8 apps, 65 store screenshots read, 13 shown: Bring!, AnyList, SuperCook, Cooklist,
+      NoWaste, Paprika, KitchenPal, Pantry Check). Finding: every app that feels like an inventory
+      gives each item a shape and a picture; a text list (Paprika's pantry = ours today) never
+      does. **Proposed, awaiting Logan's pick — NOT built:** three-across TILES inside the same
+      aisle sections (one emoji + one name each; 54 items = 18 rows), state in the tile (filled =
+      in stock; hollow dashed + greyed glyph + struck name + OUT tag = out; amber dot = perishable
+      to review), a count line under search ("54 items · 3 out · 23 to review") in place of the
+      notice card, long-press menu (Used up · Delete · Add to grocery) since a grid has no swipe.
+      Emoji, NOT the 298 Flux photos still in the `ingredient-images` bucket: the meal screen
+      dropped them on 2026-05-28 (0a01b97) for a 5–10% wrong-food rate, and on a tile the picture
+      IS the item. Keeps: scan row, search-as-add, Meat & Fish first, no move on tap, the
+      perishable/restock logic. Risk is taste (emoji on black); fallback is one lucide icon per
+      AISLE. Est. half a day, $0, no network.
+- [ ] **DEFERRED, GATED ON LOGAN'S "GO" (2026-09-15) — screen transitions + a small animation and
+      haptic on every user action.** Logan: "there might be a chance that adding these transitions
+      and haptics will slow down the app and make it feel laggy. I did try this in the past with
+      Opus and ultimately the app became too slow." So: perf first. Baseline with `perfMark`
+      before touching anything; Reanimated on the UI thread only (never `Animated` with
+      `useNativeDriver: false`, never `LayoutAnimation` on long lists); no animation on the tab
+      bar (`animation: 'none'` is the black-screen fix — CLAUDE.md); haptics only on state changes,
+      never on scroll or every tap; measure on the device after each screen, and revert any screen
+      that drops a frame on the meal list or the pantry SectionList.
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was
