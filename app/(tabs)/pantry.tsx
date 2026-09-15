@@ -11,9 +11,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  LayoutAnimation,
   Keyboard,
 } from 'react-native'
+import Reanimated from 'react-native-reanimated'
+import { STATE_FADE } from '@/lib/motion'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { perfMark } from '@/lib/perf'
@@ -54,8 +55,8 @@ type Category = {
   ingredients: Ingredient[]
 }
 
-// What the list renders: each aisle with its in-stock rows first and its out-of-stock rows sunk
-// to the bottom of the same card. catId keeps toggle and delete pointed at the category.
+// What the list renders: each aisle's rows, Out rows last as of the last load. catId keeps toggle
+// and delete pointed at the category.
 type PantryRowData = Ingredient & { catId: string }
 type PantrySection = { id: string; name: string; data: PantryRowData[] }
 
@@ -118,10 +119,10 @@ const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id, 
 //
 // Every item is visible under its section header — the accordions hid the list behind a tap and
 // a count badge, on the tab whose whole job is "what do I have". Tap = in/out of stock, swipe =
-// delete. An out-of-stock row stays in its aisle — crossed off, faded, tagged "Out", and sunk to
-// the bottom of the card. It must NOT leave the card: a separate OUT OF STOCK section at the end
-// of the list was tried, and Logan's call was that a row vanishing on tap, beside swipe-to-delete
-// on the same row, reads as a delete — and the destination is off-screen on any real pantry.
+// delete. An out-of-stock row stays in its aisle — crossed off, faded, tagged "Out" — and sinks to
+// the bottom of the card on the next load. It must NOT leave the card: a separate OUT OF STOCK
+// section at the end of the list was tried, and Logan's call was that a row vanishing on tap,
+// beside swipe-to-delete on the same row, reads as a delete.
 function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
   ingredient: Ingredient
   first: boolean
@@ -143,11 +144,21 @@ function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
       <TouchableOpacity style={[styles.row, first && styles.rowFirst, last && styles.rowLast]} onPress={onToggle} activeOpacity={0.7}>
         {/* Inset hairline, the iOS grouped-list divider: starts at the text, not the card edge. */}
         {!first && <View style={styles.rowHairline} pointerEvents="none" />}
-        <Text style={[styles.rowName, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Text>
+        {/* Faded with opacity, not a dimmer colour, so the change can be a CSS transition: the
+            render that flips inStock already happens, and the fade adds nothing to it. */}
+        <Reanimated.Text style={[styles.rowName, STATE_FADE, { opacity: ingredient.inStock ? 1 : 0.35 }, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Reanimated.Text>
         {/* No age on the right — a batch scan stamps one date on every line, so it read "7w"
             fifty times; the notice line carries the count and the review sheet the per-item age.
-            The "Out" tag is the one legible thing on a faded row, which is the point of it. */}
-        {!ingredient.inStock && <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
+            The "Out" tag is the one legible thing on a faded row, which is the point of it. It is
+            always mounted and fades with the name; pinned over the row's right edge so showing it
+            never reflows the name. */}
+        <Reanimated.View
+          pointerEvents="none"
+          accessibilityElementsHidden={ingredient.inStock}
+          style={[styles.outPillPin, STATE_FADE, { opacity: ingredient.inStock ? 0 : 1 }]}
+        >
+          <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>
+        </Reanimated.View>
       </TouchableOpacity>
     </Swipeable>
   )
@@ -273,6 +284,11 @@ export default function PantryScreen() {
       if (!grouped.has(catName)) grouped.set(catName, [])
       grouped.get(catName)!.push({ id: row.id, name: row.name, inStock: row.in_stock, since: row.last_confirmed_at ?? row.created_at })
     }
+    // Out rows sink to the bottom of their aisle HERE, when the tab loads — never on the tap that
+    // marks them Out. A tap-time move cannot be animated in this list: Reanimated's layout
+    // transitions do not reach SectionList cells, and the sticky headers would snap while rows
+    // glided. A row that stays put and fades is calmer than one that jumps under the finger.
+    for (const list of grouped.values()) list.sort((a, b) => Number(b.inStock) - Number(a.inStock))
 
     // Build ordered category list: config order first, then any unknown
     const result: Category[] = []
@@ -311,10 +327,8 @@ export default function PantryScreen() {
   // the shelf today, so the age resets and the stale nudge lets the item go.
   const setStock = async (categoryId: string, ingredientId: string, inStock: boolean) => {
     const now = new Date().toISOString()
-    // The row sinks to the bottom of its card (or rises back), animated and in view — feedback
-    // that it changed state, not that it went anywhere. Update-only, like deleteIngredient — a
-    // create/delete config fights gesture-handler's swipe transform.
-    LayoutAnimation.configureNext({ duration: 250, update: { type: LayoutAnimation.Types.easeInEaseOut } })
+    // The row stays where it is and fades to its new state (STATE_FADE in PantryRow). It sinks to
+    // the bottom of its aisle on the next load — see fetchItems.
     setCategories(prev =>
       prev.map(c =>
         c.id === categoryId
@@ -341,12 +355,8 @@ export default function PantryScreen() {
 
   const deleteIngredient = async (categoryId: string, ingredientId: string) => {
     haptic.medium() // stronger tick than a routine tap — this removes something
-    // Only animate the surrounding rows/categories closing the gap. The swiped row's transform
-    // is still held by gesture-handler, so a `delete` config here would fight it and glitch.
-    LayoutAnimation.configureNext({
-      duration: 250,
-      update: { type: LayoutAnimation.Types.easeInEaseOut },
-    })
+    // The gap closes in one frame. Reanimated's layout transitions do not reach SectionList cells,
+    // and a LayoutAnimation here was a silent no-op (CLAUDE.md), so there is nothing to configure.
     setCategories(prev =>
       prev
         .map(c =>
@@ -371,7 +381,6 @@ export default function PantryScreen() {
         {
           text: 'Clear', style: 'destructive', onPress: async () => {
             haptic.warning() // heavier notification for a bulk, irreversible wipe
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
             setCategories([])
             const { error } = await supabase.from('pantry_items').delete().eq('user_id', user.id)
             if (error) { Alert.alert("Couldn't clear pantry", error.message); fetchItems() }
@@ -443,15 +452,14 @@ export default function PantryScreen() {
   const q = searchQuery.trim().toLowerCase()
   const sections: PantrySection[] = []
   for (const c of categories) {
+    // In stored order: fetchItems already put Out rows last. Re-splitting here would move a row the
+    // moment it is tapped.
     const rows: PantryRowData[] = []
-    const out: PantryRowData[] = []
     for (const i of c.ingredients) {
       if (q && !i.name.toLowerCase().includes(q)) continue
-      const row = { ...i, catId: c.id }
-      if (i.inStock) rows.push(row)
-      else out.push(row)
+      rows.push({ ...i, catId: c.id })
     }
-    if (rows.length + out.length > 0) sections.push({ id: c.id, name: c.name, data: [...rows, ...out] })
+    if (rows.length > 0) sections.push({ id: c.id, name: c.name, data: rows })
   }
 
   const totalItems = categories.reduce((s, c) => s + c.ingredients.length, 0)
@@ -751,10 +759,12 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   rowHairline: { position: 'absolute', top: 0, left: 14, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
   rowName: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
-  // Crossed off and faded well under textMuted — Grocery's treatment for a checked item. With the
-  // tag and the sink to the bottom of the card, three signals that the row is here, not in stock.
-  rowNameOut: { color: 'rgba(255,255,255,0.35)', textDecorationLine: 'line-through' },
+  // Crossed off — Grocery's treatment for a checked item. The fade is opacity on the row (see
+  // PantryRow); marginRight clears the pinned Out tag so a long name truncates before it.
+  rowNameOut: { textDecorationLine: 'line-through', marginRight: 46 },
   rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
+  // Pinned to the row's right edge, vertically centred, so the tag's fade never reflows the name.
+  outPillPin: { position: 'absolute', right: 14, top: 0, bottom: 0, justifyContent: 'center' },
   // Legible on purpose: the tag is what a faded, struck-through row still says clearly.
   outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   outPillText: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted },
