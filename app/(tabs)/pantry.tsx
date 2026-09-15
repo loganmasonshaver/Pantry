@@ -29,7 +29,7 @@ import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
-import { ageLabel, isStale } from '@/lib/pantryAge'
+import { ageLabelLong, isStale } from '@/lib/pantryAge'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
@@ -113,8 +113,8 @@ const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id, 
 //
 // Every item is visible under its section header — the accordions hid the list behind a tap and
 // a count badge, on the tab whose whole job is "what do I have". Tap = in/out of stock, swipe =
-// delete; a STALE row carries its grey age on the right, and an out-of-stock row dims with an
-// "Out" tag.
+// delete. An out-of-stock row is crossed off, faded and tagged "Out" — the crossed-off treatment
+// Grocery gives a checked item, so "gone" looks the same on both tabs.
 function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
   ingredient: Ingredient
   first: boolean
@@ -137,11 +137,10 @@ function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
         {/* Inset hairline, the iOS grouped-list divider: starts at the text, not the card edge. */}
         {!first && <View style={styles.rowHairline} pointerEvents="none" />}
         <Text style={[styles.rowName, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Text>
-        {/* The age shows only once it matters. One scan stamps one date on every row, so a fresh
-            pantry read "7w" fifty times and said nothing; Keep on the review sheet clears it. */}
-        {ingredient.inStock
-          ? (isStale(ingredient.since, ingredient.inStock) ? <Text style={styles.rowAge}>{ageLabel(ingredient.since)}</Text> : null)
-          : <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
+        {/* No age on the row. A batch scan stamps one date on every line, so it read "7w" fifty
+            times; the notice line carries the count and the review sheet the per-item age, which
+            is the one place it decides something. */}
+        {!ingredient.inStock && <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
       </TouchableOpacity>
     </Swipeable>
   )
@@ -694,7 +693,7 @@ export default function PantryScreen() {
                 <View key={i.id} style={styles.reviewRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.rowName} numberOfLines={1}>{i.name}</Text>
-                    <Text style={styles.rowAge}>{ageLabel(i.since)}</Text>
+                    <Text style={styles.rowAge}>{ageLabelLong(i.since)}</Text>
                   </View>
                   <TouchableOpacity style={styles.reviewBtn} onPress={() => setStock(i.catId, i.id, false)} activeOpacity={0.7}>
                     <Text style={styles.reviewBtnText}>Used up</Text>
@@ -740,15 +739,17 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   rowHairline: { position: 'absolute', top: 0, left: 14, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
   rowName: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
-  // Dimmed, not struck through: strikethrough is "done" on iOS, and the Out tag already says it.
-  rowNameOut: { color: COLORS.textMuted },
-  rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  // Crossed off AND faded well under textMuted. Grey alone on #141414 was "very little visual
+  // difference" on device; Grocery crosses off a checked item, so "gone" reads the same here.
+  rowNameOut: { color: 'rgba(255,255,255,0.35)', textDecorationLine: 'line-through' },
+  rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
   // The typed name as the row it would become, under the search results.
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#141414', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginTop: 12 },
   addRowText: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
   noMatches: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', paddingTop: 28 },
-  outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-  outPillText: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted },
+  // Faded with the name, so the whole row recedes; the strikethrough carries the state.
+  outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  outPillText: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.35)' },
   deleteActionLast: { borderBottomRightRadius: 14 },
 
   // Review sheet

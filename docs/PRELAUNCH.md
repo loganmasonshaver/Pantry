@@ -1707,6 +1707,15 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       (`PANTRY_ORDER`), Grocery keeps store order.** Tell: MEAT & FISH is the first section.
       Not asked, worth a look: Dairy & Eggs second — eggs, Greek yogurt and cottage cheese are the
       app's other protein aisle and sit fourth today.
+      **Then Logan: "not a fan of the week count" and "very little visual difference between out
+      and in stock" → BUILT, UNVERIFIED ON DEVICE.** No age on any row now: the notice line
+      carries the count and the review sheet shows "7 weeks ago" under each item
+      (`ageLabelLong`), the one place the number decides something. Out rows are crossed off
+      again AND faded to 35% white, tag faded to match — Grocery crosses off a checked item the
+      same way, so "gone" reads the same on both tabs. The morning's strikethrough removal was a
+      semantic argument ("done" on iOS) losing to the contrast it had been providing. Tells: no
+      "7w" anywhere in the list; Chicken Salad is struck through and plainly dimmer than Chicken
+      above it; Review → each item reads "7 weeks ago", not "7w".
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was

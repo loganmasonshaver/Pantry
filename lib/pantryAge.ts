@@ -12,13 +12,28 @@ export function daysSince(sinceIso: string | null | undefined, now = Date.now())
   return Math.max(0, Math.floor((now - t) / DAY))
 }
 
-// "2d", "1w", "5w", "3mo" — the grey number beside a row. Under a day reads as "today".
+// Bucket an age into the unit that reads naturally: days under a week, weeks under two months,
+// months after. Under a day is "today". Shared by both label forms so they never disagree.
+function ageParts(d: number): { n: number; unit: 'day' | 'week' | 'month' } | null {
+  if (d < 1) return null
+  if (d < 7) return { n: d, unit: 'day' }
+  if (d < 60) return { n: Math.floor(d / 7), unit: 'week' }
+  return { n: Math.floor(d / 30), unit: 'month' }
+}
+
+// "2d", "1w", "5w", "3mo" — the compact form, for anywhere a column is narrow.
 export function ageLabel(sinceIso: string | null | undefined, now = Date.now()): string {
-  const d = daysSince(sinceIso, now)
-  if (d < 1) return 'today'
-  if (d < 7) return `${d}d`
-  if (d < 60) return `${Math.floor(d / 7)}w`
-  return `${Math.floor(d / 30)}mo`
+  const p = ageParts(daysSince(sinceIso, now))
+  if (!p) return 'today'
+  return `${p.n}${p.unit === 'month' ? 'mo' : p.unit[0]}`
+}
+
+// "2 days ago", "1 week ago", "7 weeks ago" — the review sheet, where the age is what the
+// user weighs before Keep / Used up, so it gets the room to read as a sentence.
+export function ageLabelLong(sinceIso: string | null | undefined, now = Date.now()): string {
+  const p = ageParts(daysSince(sinceIso, now))
+  if (!p) return 'today'
+  return `${p.n} ${p.unit}${p.n === 1 ? '' : 's'} ago`
 }
 
 // Untouched for three weeks and still marked in stock: worth a question, not a deletion.

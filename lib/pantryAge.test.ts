@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ageLabel, daysSince, isStale, STALE_AFTER_DAYS } from './pantryAge.ts'
+import { ageLabel, ageLabelLong, daysSince, isStale, STALE_AFTER_DAYS } from './pantryAge.ts'
 
 const NOW = Date.parse('2026-09-15T12:00:00Z')
 const ago = (days: number) => new Date(NOW - days * 86_400_000).toISOString()
@@ -14,6 +14,18 @@ test('age labels: today, days, weeks, months', () => {
   assert.equal(ageLabel(ago(35), NOW), '5w')
   assert.equal(ageLabel(ago(60), NOW), '2mo')
   assert.equal(ageLabel(ago(100), NOW), '3mo')
+})
+
+test('long labels read as a sentence, pluralise, and bucket exactly like the short form', () => {
+  assert.equal(ageLabelLong(ago(0), NOW), 'today')
+  assert.equal(ageLabelLong(ago(1), NOW), '1 day ago')
+  assert.equal(ageLabelLong(ago(2), NOW), '2 days ago')
+  assert.equal(ageLabelLong(ago(7), NOW), '1 week ago')
+  assert.equal(ageLabelLong(ago(49), NOW), '7 weeks ago')
+  assert.equal(ageLabelLong(ago(60), NOW), '2 months ago')
+  assert.equal(ageLabelLong(ago(100), NOW), '3 months ago')
+  assert.equal(ageLabelLong(undefined, NOW), 'today')
+  assert.equal(ageLabelLong(ago(-3), NOW), 'today')
 })
 
 test('stale is 21+ days AND still in stock; out-of-stock items are never nagged about', () => {
