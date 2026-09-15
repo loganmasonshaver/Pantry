@@ -196,8 +196,18 @@ library · converting the 245 TouchableOpacity.
 | Run | Build | Recording | Hitches | Hitch time | Ratio | Worst |
 |---|---|---|---|---|---|---|
 | self-test, idle launch, no walkthrough | Release `4eceabd` | 21.1 s | 2 | 41.7 ms | 1.97 ms/s | 33.3 ms |
-| baseline walkthrough | Release `4eceabd` | *pending Logan* | | | | |
-| phase1 walkthrough | Release, Phase 1 | *pending Logan* | | | | |
+| baseline walkthrough | Release `4eceabd` | 151.1 s | 12 | 150.0 ms | 0.99 ms/s | 25.0 ms |
+| phase1 walkthrough, first attempt | Release `2e3e063` | 23.1 s | — | — | — | — |
+| phase1 walkthrough, redo | Release `2e3e063` | 151.3 s | 10 | 187.5 ms | 1.24 ms/s | 37.5 ms |
 
 The self-test only proves the pipeline; both of its hitches were app launch. Compare the two
 walkthrough rows, never a walkthrough against the self-test.
+
+**Reading, 2026-09-15.** Both walkthroughs sit far inside Apple's good band (< 5 ms/s), and
+the 0.25 ms/s difference is inside what two hand-paced walkthroughs vary by — one extra hitch of
+37.5 ms accounts for it. Phase 1 neither made frame delivery worse nor measurably better, which is
+what it should show: its real saving is JS-thread renders (the ring's ~100 per load), and hitches
+do not measure the JS thread. The first phase1 attempt stuck on the splash on the first launch
+after install and was stopped at 23 s (PRELAUNCH §6c, "a launch can stick on the splash").
+The recurring "offscreen passes" hitches (13–22 passes) appear in BOTH builds — shadows or
+rounded masks being re-rendered, most likely on Discover's scroll. A lead, not a Phase 1 effect.
