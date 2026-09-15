@@ -11,11 +11,11 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  LayoutAnimation,
   Keyboard,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Reanimated, { FadeIn } from 'react-native-reanimated'
+import { LIST_LAYOUT } from '@/lib/motion'
 import PressableScale from '../../components/PressableScale'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
@@ -340,11 +340,10 @@ export default function SavedScreen() {
   const unsave = async (id: string) => {
     // Optimistic: pull the card immediately so it feels instant instead of waiting on the
     // DB round-trip — the 4s undo toast already covers a mistaken tap, and we restore below
-    // if the delete actually fails. LayoutAnimation eases the grid gap closed.
+    // if the delete actually fails. The cards after it glide into the gap (LIST_LAYOUT on the grid).
     const index = meals.findIndex(m => m.id === id)
     if (index === -1) return
     const meal = meals[index]
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setRemoved({ meal, index })
     setMeals(prev => prev.filter(m => m.id !== id))
     showToast()
@@ -400,6 +399,7 @@ export default function SavedScreen() {
     const matchesSearch = m.name.toLowerCase().includes(searchQuery.toLowerCase())
     return matchesFilter && matchesSearch
   })
+  const isFiltering = activeFilter !== 'All' || searchQuery.length > 0
 
   const isEmpty = !loading && filtered.length === 0
 
@@ -479,8 +479,12 @@ export default function SavedScreen() {
             contentContainerStyle={styles.grid}
             showsVerticalScrollIndicator={false}
           >
+            {/* Unsave and undo glide the other cards into place. Not while a filter or search is
+                on: every keystroke would send the whole grid sliding, which is motion for nothing. */}
             {filtered.map(meal => (
-              <MealCard key={meal.id} meal={meal} onUnsave={() => unsave(meal.id)} onEdit={() => { setEditingMeal(meal); setShowRecipeForm(true) }} />
+              <Reanimated.View key={meal.id} layout={isFiltering ? undefined : LIST_LAYOUT}>
+                <MealCard meal={meal} onUnsave={() => unsave(meal.id)} onEdit={() => { setEditingMeal(meal); setShowRecipeForm(true) }} />
+              </Reanimated.View>
             ))}
             {filtered.length % 2 !== 0 && <View style={{ width: CARD_WIDTH }} />}
           </ScrollView>
