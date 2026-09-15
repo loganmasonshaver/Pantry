@@ -1810,6 +1810,21 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
   - [ ] Phase 3 — legacy `Swipeable` → `ReanimatedSwipeable` on Home log rows and Pantry rows
   - [ ] Phase 4 — screen transitions: consistency audit only; tabs stay instant
   - [ ] Phase 5 — onboarding animations, only if Phase 0 shows hitches there
+- [ ] **RAISED BY LOGAN 2026-09-15 — Discover does not start loading until its tab is tapped, and the
+      skeleton "looks glitchy/bad" until it does. ASSESSED, FIX PROPOSED, AWAITING "GO".** Cause: the
+      DATA is already warm — the tab layout's `prefetchDiscover` writes today's feed to disk at launch
+      — but the SCREEN is a lazy tab, so nothing mounts until the tap. Then, on the tap: two
+      sequential disk reads (personalisation, then the ~400 KB feed), JSON parse, shelving the whole
+      pool, and the photos, all behind the skeleton. Proposed: `router.prefetch` the Discover tab in
+      the background once `prefetchDiscover` has resolved and Home has gone idle (a few seconds after
+      launch). Verified in node_modules, not assumed: expo-router 55's `prefetch` sends React
+      Navigation's PRELOAD, and bottom-tabs 7.15 renders a preloaded route (`preloadedRouteKeys`);
+      with `animation: 'none'` it sits detached like any visited tab. Side effects checked: meal
+      impressions fire only on scroll (safe); the daily hero pick is recorded on PAINT, so a
+      background mount would mark a hero "served" on days Discover is never opened — record it only
+      while focused. Costs to measure: Discover's mount work and its first photos move to every
+      launch, a few seconds in, on a phone that logs memory pressure. Tell after the fix: open the app,
+      wait ~5 s on Home, tap Discover → the finished page, no skeleton.
 - [ ] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
       Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
       frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI
