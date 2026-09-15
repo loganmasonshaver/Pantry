@@ -1009,8 +1009,19 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // signatures) live outside the loop so a later attempt cannot re-add a dish an earlier one kept,
     // and only SURVIVORS are registered, so a dish an earlier attempt rejected for an incomplete
     // list can still be accepted complete from a later one. The `>= 12` early break still makes a
-    // healthy first pass cost nothing; a whole cron run takes ~70s, so five attempts fit easily.
+    // healthy first pass cost nothing.
+    //
+    // WALL BUDGET. This used to end "a whole cron run takes ~70s, so five attempts fit easily", and
+    // on 2026-09-14 and 2026-09-15 the scheduled runs — and a manual dry run — all died at the
+    // gateway's 150 s idle limit (HTTP 504 IDLE_TIMEOUT) with nothing stored and no funnel row:
+    // five attempts at that day's Gemini latency did not fit, and a run that never returns is
+    // zero. An attempt is only STARTED while there is time for it to finish and still leave the
+    // tail (ranking, macros, images, the insert — ~40-60 s on a 12-recipe day) its share, and a
+    // call's own timeout is clamped to what is left. Fewer attempts is a thinner union; the union
+    // was built so that a thin day still stores what it has.
     const LLM_RETRIES = 4
+    const ATTEMPT_START_DEADLINE_MS = 50_000   // no new attempt begins after this
+    const LLM_LOOP_END_MS = 85_000             // no call may run past this
     const attempts = [...selected, ...Array.from({ length: LLM_RETRIES }, () => selected[0]).filter(Boolean)]
     // Cross-attempt state. Names and word sets guard the same-dish-twice case; ingredient
     // signatures guard same-recipe-different-label. All three are only ever written for a recipe
@@ -1032,6 +1043,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // so nothing downstream knows the prompt was rotated.
     const rotationStep = Math.ceil(uniqueVideos.length / Math.max(1, attempts.length))
     for (const [attemptNo, provider] of attempts.entries()) {
+      const elapsed = Date.now() - fnStart
+      if (attemptNo > 0 && elapsed > ATTEMPT_START_DEADLINE_MS) {
+        stageLog(`attempt ${attemptNo + 1} skipped: ${elapsed}ms elapsed, start deadline ${ATTEMPT_START_DEADLINE_MS}ms`)
+        funnel.attemptsSkippedForTime = attempts.length - attemptNo
+        break
+      }
       const offset = uniqueVideos.length ? (attemptNo * rotationStep) % uniqueVideos.length : 0
       const order = uniqueVideos.map((_, i) => (i + offset) % uniqueVideos.length)
       const attemptPrompt = attemptNo === 0 ? prompt : buildPrompt(renderVideoList(order.map(i => uniqueVideos[i])))
@@ -1043,7 +1060,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         // gives Gemini room to handle the larger prompt with variety rules + 60-video
         // candidate pool while still leaving 60s for FatSecret + image generation.
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 90000)
+        // Clamped to the loop's end so a stalled provider cannot spend the tail's time; the 15 s
+        // floor keeps a late attempt from being aborted before the model has produced anything.
+        const timeoutId = setTimeout(() => controller.abort(), Math.max(15_000, Math.min(90_000, LLM_LOOP_END_MS - (Date.now() - fnStart))))
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
