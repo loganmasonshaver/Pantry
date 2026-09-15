@@ -9,7 +9,8 @@ Ordered by what should be done first. Later items depend on earlier ones.
 ---
 
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
-- [ ] **AUDIT RERUN — Logan 2026-09-13, top of the list:** once the Sep 14 and Sep 15 crons have run,
+- [x] **AUDIT RERUN — Logan 2026-09-13, top of the list:** once the Sep 14 and Sep 15 crons have run,
+      *(CLOSED 2026-09-15 as stale — Logan.)*
   do a full pass on Fable 5.1 over both stored batches and their `pipeline_runs` rows (they persist
   now): every fix below verified in production output, every failure kind in `rejected` explained,
   and NO new failure kinds. Methods in `docs/TRENDING-OPEN.md`. Quota is 7 runs/day; the audit
@@ -57,7 +58,8 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   error by design. Fixed (u flag + `_shared/json-safe.ts` at every jsonb insert, including the
   meals batch, where one such string would have refused a whole day). Verified: row 679. **Read
   `pipeline_runs` before 2026-09-13 20:24 as an incomplete record.**
-- [ ] **FAILED 2026-09-14 AND 2026-09-15: both scheduled runs stored 0 and wrote no `pipeline_runs`
+- [x] **FAILED 2026-09-14 AND 2026-09-15: both scheduled runs stored 0 and wrote no `pipeline_runs`
+      *(CLOSED 2026-09-15 as stale — Logan.)*
   row.** Found 2026-09-15 17:40 UTC. `cron.job_run_details` said "succeeded" (= request queued);
   `net._http_response` for Sep 15: `timed_out` at pg_net's default 5 s; the health check read 0
   (Sep 15) and a gateway timeout (Sep 14). A manual dry run on the same code at 17:47 UTC:
@@ -80,7 +82,8 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   carries OpenAI as the second entry, and a second attempt at 17 s fits where one at 50 s does
   not — measure `t+ms` in the function logs (dashboard; this session had no logs tool) before
   touching the budget constants. **Never widen the retention tolerance.**
-- [ ] **PASS = a scheduled 08:00 UTC run stores ≥ 12, two days running (now Sep 16 + Sep 17)**, and the
+- [x] **PASS = a scheduled 08:00 UTC run stores ≥ 12, two days running (now Sep 16 + Sep 17)**, and the
+      *(CLOSED 2026-09-15 as stale — Logan.)*
   daily line reads "Discover: N new recipes, all have photos" in grey. Read `pipeline_runs`
   (`dry_run=false`): `llmRaw`/`llmYields` per attempt, `rejected.dropped`, `ingredientsRecovered`.
   If a thin day recurs, compare KINDS: low `llmRaw` on every attempt is the model, high `dropped`
@@ -1448,39 +1451,46 @@ Four changes shipped 2026-09-02 that only reveal themselves on the FIRST OPEN OF
 are invisible today because today's cache already exists, so none of this can be signed off in the
 session that wrote it.
 
-- [ ] **"Yesterday's picks · fresh ones cooking"** appears above the Cook-from-pantry carousel on
+- [x] **"Yesterday's picks · fresh ones cooking"** appears above the Cook-from-pantry carousel on
       the first open of a new day, with yesterday's three meals shown while today's generate
       underneath — instead of a 6-8s skeleton. Label disappears when today's land. (`43d7055`)
-- [ ] **No blank gap.** The section holds its place and shimmers from first paint; it must never be
+      *(CLOSED 2026-09-15 as stale — Logan.)*
+- [x] **No blank gap.** The section holds its place and shimmers from first paint; it must never be
       absent for 2-3s and then push the page down when it appears. (`9237e47` — this part IS
       testable same-day.)
-- [ ] **Discover hero is a dish not served before**, and does not change again once the page has
+      *(CLOSED 2026-09-15 as stale — Logan.)*
+- [x] **Discover hero is a dish not served before**, and does not change again once the page has
       settled. (`a14c9b4`)
+      *(CLOSED 2026-09-15 as stale — Logan.)*
 - [x] **SUPERSEDED — `37b9ba1` never worked, and the reason is worth keeping.** It rotated which of
       the THREE personalised shelves leads, but the other two are structurally empty for most users:
       `fits` needs something logged TODAY, `because` needs a last-cooked meal whose name hits
       `DISCOVER_PROTEIN_KEYWORDS`. Checked against Logan's live profile — 0 logs today, last cooked
       "Whole Milk" (not a protein keyword) — so the empty-section filter left exactly one shelf and
       it led every day. Rotating three items where two cannot populate is a no-op.
-- [ ] **VERIFY: a DIFFERENT section sits under the hero each day.** Display order is now decoupled
+- [x] **VERIFY: a DIFFERENT section sits under the hero each day.** Display order is now decoupled
       from claim order and rotates across all shelves; "Everything else" stays pinned last. Claim
       order is unchanged, so `nearly` still gets first pick and keeps its contents. Simulated over 8
       days: the leader cycles all 4 sections and `nearly` leads 2 of 8 instead of 8 of 8.
-- [ ] **VERIFY: "Almost in your kitchen" shows DIFFERENT MEALS day to day, not just reordered ones.**
+      *(CLOSED 2026-09-15 as stale — Logan.)*
+- [x] **VERIFY: "Almost in your kitchen" shows DIFFERENT MEALS day to day, not just reordered ones.**
       This is the half `37b9ba1` never addressed and the actual source of the stale feel — a pantry
       that does not change produced the same 8 dishes daily, reordered. It now takes a 24-meal window
       of the ranked list and advances it a full shelf per day: 3 distinct sets before repeating,
       confirmed by simulation. Every member is still verified + low-missing, and the shelf is
       re-sorted best-first for display.
-- [ ] **HOW TO VERIFY WITHOUT WAITING DAYS:** `DEV_DAY_OFFSET` at the top of
+      *(CLOSED 2026-09-15 as stale — Logan.)*
+- [x] **HOW TO VERIFY WITHOUT WAITING DAYS:** `DEV_DAY_OFFSET` at the top of
       `app/(tabs)/discover.tsx` — bump it by 1, let Fast Refresh reload, and the page renders as
       tomorrow. `__DEV__`-guarded, so a release build ignores it. **It must be 0 in committed code.**
       Step 0 -> 1 -> 2 -> 3 and confirm both bullets above, then set it back.
+      *(CLOSED 2026-09-15 as stale — Logan.)*
 
-- [ ] **Photo-gated meal swap.** When a generation lands while meals are on screen, the old meals
+- [x] **Photo-gated meal swap.** When a generation lands while meals are on screen, the old meals
       hold until the NEW hero's photo is ready, then cross-fade in (300ms). The tell is the ABSENCE
       of a shimmer beat between old and new. Testable same-day with the refresh button — it does not
       need a day rollover. (`08771ab`)
+      *(CLOSED 2026-09-15 as stale — Logan.)*
 - [x] **Category icons and colours.** Every pantry category should now have a real icon, not a grey
       box, and the three overlapping condiment rows should be one. Testable on any reload; the
       backfill is already applied and verified at zero off-list rows. (`750f4d6`)
@@ -1488,36 +1498,41 @@ session that wrote it.
 - [x] **Pantry "Add an item".** Header pill is now a `+` icon; a dashed "Add an item" row sits at the
       end of the category list. Testable on any reload. (`129fe3c`)
       *(SUPERSEDED 2026-09-15: no ✚ and no "Add an item" row — search doubles as add, `dbc6512`, seen on device.)*
-- [ ] **⚠️ COLD-START DEFECTS — Logan could not verify these, they need a NEW DAY's first open.**
+- [x] **⚠️ COLD-START DEFECTS — Logan could not verify these, they need a NEW DAY's first open.**
       Both were found from the 11:21 screenshots on 2026-09-04 and both are fixed blind.
       - [x] **Calorie/protein goals must NOT flash the wrong numbers.** VERIFIED ON DEVICE 2026-09-04. The ring used to animate to
             a hardcoded 2,400 kcal / 180g before the profile landed, then re-animate to the real
             2,100 / 160g. Goals now hydrate from AsyncStorage on mount. **This part is testable
             TODAY** — force-quit and reopen: the ring should animate exactly once, to your numbers.
-      - [ ] **No shimmer between yesterday's meals and today's.** `HERO_IMAGE_WAIT_MS` was 8000,
+      - [x] **No shimmer between yesterday's meals and today's.** `HERO_IMAGE_WAIT_MS` was 8000,
             calibrated against the cached-image path (~50ms); a dish nobody has generated before
             needs a ~10s Flux render, so the gate always timed out and swapped in the shimmer
             anyway. Raised to 22000. **Needs a day rollover.** Tell: yesterday's photo holds until
             today's photo replaces it, with no shimmer beat between them.
+            *(CLOSED 2026-09-15 as stale — Logan.)*
       - [x] **The sweep bar reads as activity — VERIFIED ON DEVICE 2026-09-05.** Logan: "it
             behaved as it should, looked like something was cooking in the background."
-      - [ ] **NEW 2026-09-05, UNVERIFIED: no dark gap between the shimmer and the photo.**
+      - [x] **NEW 2026-09-05, UNVERIFIED: no dark gap between the shimmer and the photo.**
             Ending the skeleton at `meals.length > 0` ended it when the TEXT arrived, so the card
             sat over MealImage's flat #1A1A1A for 1-2s while the photo downloaded — visible
             precisely because the sweep bar had just made the screen look busy. Home now holds the
             skeleton until the hero photo PAINTS (`onLoad`), capped at 2500ms, and only when there
             is a URL to wait for. Sequence should be sweep bar -> shimmer -> photo, with no dark
             beat. (`bf41c61`)
-      - [ ] **NEW 2026-09-05, UNVERIFIED: regenerated photos actually reach the device.**
+            *(CLOSED 2026-09-15 as stale — Logan.)*
+      - [x] **NEW 2026-09-05, UNVERIFIED: regenerated photos actually reach the device.**
             Storage uploads with upsert, so a regenerated image overwrites the same path and every
             client keeps serving its cached copy forever — three corrections to the Protein Jello
             photo were invisible on device for this reason. URLs now carry `?v=<timestamp>`.
             (`34707fe`)
+            *(CLOSED 2026-09-15 as stale — Logan.)*
+      *(CLOSED 2026-09-15 as stale — Logan.)*
 
-- [ ] **Repeat/variety fixes need DAYS, not a reload.** The base-food ban, the deduped 30-dish
+- [x] **Repeat/variety fixes need DAYS, not a reload.** The base-food ban, the deduped 30-dish
       window and the protein-family guard only prove themselves across several generations. Watch
       for: no cottage-cheese/potato run, and no two meals that are the same dish reworded.
       (`8de4e00`, `ef1c4b4`, `a38a9b9`)
+      *(CLOSED 2026-09-15 as stale — Logan.)*
 
 **How to test without waiting:** these all read the DEVICE clock (`dayOfYearNow`, `todayStr`), not
 the database — no SQL can simulate a new day. Either wait for tomorrow, or set the iPhone forward a
@@ -1552,8 +1567,9 @@ on launch Home paints, gives way to a loading card, then returns.
       Cal AI and MyFitnessPal. Load TIME was never the difference; MyFitnessPal takes ~2s too.
       Parent holds the mount until the animation reports finished. **320ms is the tunable** — 240 if
       it drags, 400 if it still blinks.
-- [ ] **VERIFY: a real generation still holds the skeleton until the hero photo paints** — that is
+- [x] **VERIFY: a real generation still holds the skeleton until the hero photo paints** — that is
       `bf41c61`'s fix and the one thing here not yet re-confirmed. Needs a day with no cache.
+      *(CLOSED 2026-09-15 as stale — Logan.)*
 - [ ] **Splash has `pointerEvents="none"`** — taps during the 2s hold pass through to Home controls
       that are invisible at the time. Known, unfixed, deliberately not bundled.
 
@@ -1596,7 +1612,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       (edit / open meal) still works inside the now-disabled outer touchable, and the `+` pill
       appears. Also the 6.1" size if one is ever around: the third row should be the cut element
       there, not Breakfast.
-- [ ] **UNVERIFIED ON DEVICE — "Log to which meal?" now lists YOUR meal slots, nothing
+- [x] **UNVERIFIED ON DEVICE — "Log to which meal?" now lists YOUR meal slots, nothing
       pre-selected, no "+ Custom meal"** (Logan, 2026-09-14). Was a hardcoded Breakfast / Lunch /
       Dinner / Snack with a green time-of-day default and a free-text "+ Custom meal". Production
       had 12 logs; **2 landed in a slot not in that user's own list** ("Midnight snacky" typed via
@@ -1606,6 +1622,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       names and count exactly, none is green. Then in Profile change Meals Per Day, accept
       "Update", and the picker follows. The 2 existing orphan rows are left alone — Home still
       renders them after the user's own slots.
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
 - [ ] **FOUND 2026-09-14, not fixed — meal COUNT has two sources that can drift.** Generation
       sizes each meal by `meals_per_day` (`useMealSuggestions.ts:189`), while Home's slot list,
       the log picker and Home's "can't reach Ng of protein a meal" note use `meal_slots.length`.
@@ -1630,7 +1647,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       it — line art asked to carry meaning at a size where it reads as abstract shapes.)
 
 ---
-- [ ] **BUILT 2026-09-14 (Logan: "do your rec for the redo button") — ↻ moved out of the header,
+- [x] **BUILT 2026-09-14 (Logan: "do your rec for the redo button") — ↻ moved out of the header,
       UNVERIFIED ON DEVICE.** The header is just the title now. Under the third card: "Not feeling
       these? New picks · 4 left today" (the link regenerates; the count is cap − used, omitted
       while the count is unknown); after the third generation of the day "· Browse Discover" is
@@ -1643,7 +1660,8 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       New picks", plus "· Browse Discover" after the third generation; the cap row is unchanged.
       Home was the only surface showing it (Discover's "left today" is calories; the creator
       modal's is behind a disabled flag). Tell: no number anywhere in that row.
-- [ ] **BUILT 2026-09-14 (Logan: "go") — the Daily meal log card, UNVERIFIED ON DEVICE.** Rows
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
+- [x] **BUILT 2026-09-14 (Logan: "go") — the Daily meal log card, UNVERIFIED ON DEVICE.** Rows
       read "675 · 46P" (protein was missing from a protein-first log); the header carries the
       slot total "1,429 kcal · 63P"; delete is swipe-left (red Delete, the Pantry rows' pattern)
       and the per-row ✕ is gone; the icon aligns with the header instead of floating mid-card;
@@ -1651,6 +1669,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       once the slot has entries; "+ + Add Meal" → "+ Add meal"; Snack's icon is a cookie, not
       water drops. Tells: swipe a Breakfast row left → Delete slides in, tap → row gone; the
       Breakfast header shows the total; the Lunch card is a single line.
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
 - [x] **BUILT 2026-09-15 (Logan: "go") — the Pantry tab rebuilt to the sketch. UNVERIFIED ON
       DEVICE.** Scan row = white "Scan pantry" primary + dark "Scan receipt" secondary, no line
       art, no AI badges. The photo banner is gone; a one-line STATUS STRIP shows only for a gap
@@ -1809,8 +1828,10 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       haptics on commits only, no new library. Measured in a RELEASE build with Instruments'
       Animation Hitches (< 5 ms/s), one commit per screen, revert any that fails.
   - [x] Phase 0 — baseline. **MEASURED 2026-09-15:** pre-Phase-1 Release build, 0.99 ms/s hitch time, 12 hitches, worst 25 ms. Tooling `f2de9e8`; numbers in PLAN-motion §7.
-  - [ ] Phase 1 — **BUILT + MEASURED, TELLS UNCHECKED (`e0a0e41` `462f6b0` `15310d6` `2e3e063`).** Release walkthrough 1.24 ms/s vs baseline 0.99 — both good, the gap is walkthrough noise (one 37.5 ms hitch); frames neither worse nor better, as expected, since the saving is JS renders.** All 10 dead `LayoutAnimation` calls gone (2 were in dead code, deleted); Reanimated gap-close on Home's log, Grocery and Saved; CSS opacity fade on Pantry and Grocery toggles; calorie ring on the UI thread (it was re-rendering ~100×/load for a value shown nowhere). Loop-pausing dropped: native-driver loops on detached tabs cost nothing. **Behaviour change:** a Pantry toggle now stays in place and fades; the Out row sinks on the next load, not on the tap (the tap-time "slide" was a one-frame jump). Tells: (1) swipe-delete a logged food on Home → the row fades and the rows/cards below glide up, the card's background shrinks with them, no snap; (2) swipe the day → the log is simply replaced, nothing slides from the old day; (3) the calorie ring still sweeps from empty on open; (4) Pantry: tap an item → it dims, strikes and shows "Out" over ~0.2 s without moving; leave the tab and come back → it is at the bottom of its aisle; (5) Grocery: check two items → names dim smoothly; Clear checked → they fade and the rest close up; swipe-delete two rows quickly → the second swipe works; (6) Saved: unsave a card → the rest slide into place; Undo → it returns and they slide back; typing in search → cards do NOT slide.
-  - [ ] Phase 2 — **BUILT + MEASURED 2026-09-15 (`b02670f`…`5932d3f`): 1.52 ms/s, good; the gap to Phase 1 is one 66.7 ms launch hitch (1.08 without it). Device tells below still unchecked.** Haptics added to ~20 commits that had none, moved to after the result on Save and Extract Recipe, removed from openers and no-touch events; New picks answers the tap; inline-added Grocery rows and new meal slots fade in. Tab-bar tick kept. Measure: the Phase 2 Release build is being installed; `bash scripts/motion-trace.sh phase2` and compare with phase1-redo (1.24 ms/s). Tells: (1) log a food → one success tap as the modal closes; (2) Pantry: tap an item → a light tick as it fades; Review → Keep all → success; (3) Grocery: check → tick; type a new item + return → tick and the row fades in; (4) meal screen: Log Meal → NO tick until you pick a slot, then one success as it says Logged ✓; Save as a subscriber → success only when it says Saved; (5) Scan pantry / Scan receipt buttons → no tick on open; (6) Home: tap Today while already on today → no tick; New picks dims when tapped; add a meal slot → the card fades in; (7) leave the cook reveal alone → cards change with a glow but no buzz; swipe it → a tick; (8) cross your calorie goal by logging → success; open the app later already past goal → nothing.
+  - [x] Phase 1 — **BUILT + MEASURED, TELLS UNCHECKED (`e0a0e41` `462f6b0` `15310d6` `2e3e063`).** Release walkthrough 1.24 ms/s vs baseline 0.99 — both good, the gap is walkthrough noise (one 37.5 ms hitch); frames neither worse nor better, as expected, since the saving is JS renders.** All 10 dead `LayoutAnimation` calls gone (2 were in dead code, deleted); Reanimated gap-close on Home's log, Grocery and Saved; CSS opacity fade on Pantry and Grocery toggles; calorie ring on the UI thread (it was re-rendering ~100×/load for a value shown nowhere). Loop-pausing dropped: native-driver loops on detached tabs cost nothing. **Behaviour change:** a Pantry toggle now stays in place and fades; the Out row sinks on the next load, not on the tap (the tap-time "slide" was a one-frame jump). Tells: (1) swipe-delete a logged food on Home → the row fades and the rows/cards below glide up, the card's background shrinks with them, no snap; (2) swipe the day → the log is simply replaced, nothing slides from the old day; (3) the calorie ring still sweeps from empty on open; (4) Pantry: tap an item → it dims, strikes and shows "Out" over ~0.2 s without moving; leave the tab and come back → it is at the bottom of its aisle; (5) Grocery: check two items → names dim smoothly; Clear checked → they fade and the rest close up; swipe-delete two rows quickly → the second swipe works; (6) Saved: unsave a card → the rest slide into place; Undo → it returns and they slide back; typing in search → cards do NOT slide.
+        *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
+  - [x] Phase 2 — **BUILT + MEASURED 2026-09-15 (`b02670f`…`5932d3f`): 1.52 ms/s, good; the gap to Phase 1 is one 66.7 ms launch hitch (1.08 without it). Device tells below still unchecked.** Haptics added to ~20 commits that had none, moved to after the result on Save and Extract Recipe, removed from openers and no-touch events; New picks answers the tap; inline-added Grocery rows and new meal slots fade in. Tab-bar tick kept. Measure: the Phase 2 Release build is being installed; `bash scripts/motion-trace.sh phase2` and compare with phase1-redo (1.24 ms/s). Tells: (1) log a food → one success tap as the modal closes; (2) Pantry: tap an item → a light tick as it fades; Review → Keep all → success; (3) Grocery: check → tick; type a new item + return → tick and the row fades in; (4) meal screen: Log Meal → NO tick until you pick a slot, then one success as it says Logged ✓; Save as a subscriber → success only when it says Saved; (5) Scan pantry / Scan receipt buttons → no tick on open; (6) Home: tap Today while already on today → no tick; New picks dims when tapped; add a meal slot → the card fades in; (7) leave the cook reveal alone → cards change with a glow but no buzz; swipe it → a tick; (8) cross your calorie goal by logging → success; open the app later already past goal → nothing.
+        *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
   - [ ] Phase 3 — legacy `Swipeable` → `ReanimatedSwipeable` on Home log rows and Pantry rows
   - [ ] Phase 4 — screen transitions: consistency audit only; tabs stay instant
   - [ ] Phase 5 — onboarding animations, only if Phase 0 shows hitches there
@@ -1829,7 +1850,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       while focused. Costs to measure: Discover's mount work and its first photos move to every
       launch, a few seconds in, on a phone that logs memory pressure. Tell after the fix: open the app,
       wait ~5 s on Home, tap Discover → the finished page, no skeleton.
-- [ ] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
+- [x] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
       Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
       frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI
       commits, the last at 1.92 s, then nothing until he left the app — the splash never dissolved.
@@ -1869,6 +1890,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       trace runs.** Loads normally → an artifact of remote launching, drop to post-launch. Sticks → a
       real first-launch bug; then the same check on a TestFlight install before submission. Evidence in
       the session scratchpad (hang1 healthy / hang2 stuck os_log exports), not in the repo.
+      *(CLOSED 2026-09-15 — Logan verified the app launches normally when he opens it himself; every stuck launch was started remotely by xctrace. Not proven on a first launch after a new install, so it is re-checked on the TestFlight install, §11.)*
 - [x] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
       today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
       Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
@@ -2055,7 +2077,7 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
          relaunch → the card and the check mark are right on the first frame.
       Also seen in both screenshots: "Open debugger to view warnings" — the warning text was not
       captured (Metro is not in the desktop terminal pane). Tap the toast and paste the warning.
-- [ ] **BUILT 2026-09-14 (Logan: "go") — Edit nutrition has a "Per" row. UNVERIFIED ON DEVICE.**
+- [x] **BUILT 2026-09-14 (Logan: "go") — Edit nutrition has a "Per" row. UNVERIFIED ON DEVICE.**
       Logan: the sheet said "per 100 g" when logging grams, and a label is per serving size — a
       calculator job. The sheet now opens on the LABEL serving (the household default; the
       correction's own serving if one exists), never the logging unit, with an amount box + unit
@@ -2068,7 +2090,8 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       Per 1 cup, type 150 / 8 / 11 / 8, Save → the link reads "Your numbers · Edit", 240 g reads
       ~148, and the DB row under Logan's user has basis_amount 244, basis_unit g, serving_id =
       the cup's id; (4) Done dismisses the keypad inside the sheet.
-- [ ] **BUILT 2026-09-14 (Logan: "do all changes you recommended") — the finish pass on the food
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
+- [x] **BUILT 2026-09-14 (Logan: "do all changes you recommended") — the finish pass on the food
       screen + Edit nutrition, UNVERIFIED ON DEVICE.** (1) A metric-only FatSecret serving
       ("100 g") no longer sits in a unit list beside the grams unit it duplicates — both pickers,
       `pickerUnits`, kept only while selected; a "100 ml" serving on a gram-basis food stays (the
@@ -2083,7 +2106,8 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       nutrition → Per picker shows one "grams", no "100 g" serving; fields read 122 / 8 / 11 / 5;
       Save is dim until a field changes; tap outside closes; the main screen shows a NUTRITION
       DETAILS card with no chevron; "Delete entry" removes the entry from Home.
-- [ ] **BUILT 2026-09-14 (Logan: "make sure I can't type macros that don't add up") — a 4/4/9
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
+- [x] **BUILT 2026-09-14 (Logan: "make sure I can't type macros that don't add up") — a 4/4/9
       WARNING, not a block, UNVERIFIED ON DEVICE.** Labels do not add up themselves (milk 150 vs
       148 computed; peanut butter 190 vs 200) and a hard rule rejects real foods — beer computes
       to 56 of 150 (alcohol), sugar-free candy, high-fiber bars. Margin 15% or 20 kcal, whichever
@@ -2094,7 +2118,8 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       Milk) stored 150/8/11/8 with basis 244 g / serving 18 under HIS user — the end-to-end proof
       of the 36,000-kcal fix. He entered whole-milk numbers on 2% as a test; Reset to original
       when done.
-- [ ] **RAISED BY LOGAN 2026-09-14 ("prevent this from happening again") — the food search screen
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
+- [x] **RAISED BY LOGAN 2026-09-14 ("prevent this from happening again") — the food search screen
       shifted up under the status bar, intermittently. FIXED for the CLASS, UNVERIFIED ON DEVICE.**
       The CLAUDE.md landmine: a bare SafeAreaView inside a <Modal> pads by 0 — and it RACES the
       modal's window, so it passed on some opens and failed on others, which is why Logan saw it
@@ -2104,6 +2129,7 @@ off? Fix it" → `macro_overrides`). Logan: "feels very incomplete and half bake
       and fails the suite for safe-area use without a provider; CLAUDE.md points at it. Tell: open
       Log from any slot ten times — "Search Food" and the ✕ sit below the status bar every time;
       the edit screen's ✕ likewise.
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan.)*
 
 ## 6d. RAISED BY LOGAN 2026-09-04 — decided, not built  *(work these before anything below)*
 
@@ -2274,6 +2300,7 @@ service-role, OpenAI, FAL or FatSecret secret is in history. Real hygiene, not a
 
 ## 11. TestFlight beta
 - [ ] Everything above must be in the build.
+- [ ] **First launch after installing the TestFlight build: open Pantry by tapping the icon and confirm it gets past the splash.** The remote-launch splash hang (§6c, closed) never reproduced by hand, but was never tried on a fresh install either.
 - [ ] **Prove the email system end to end here, not at launch.** It had NEVER worked before
       2026-08-30 (`4c016c2`) — loops-sync selected `email`/`full_name` from `profiles`, which have
       never been columns there, so every call failed on the unknown column and no contact or event
