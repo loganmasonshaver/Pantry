@@ -9,9 +9,10 @@ import {
   TextInput,
   PanResponder,
   Alert,
-  LayoutAnimation,
   Keyboard,
 } from 'react-native'
+import Reanimated from 'react-native-reanimated'
+import { LIST_LAYOUT, ROW_EXIT, STATE_FADE } from '@/lib/motion'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router, useFocusEffect } from 'expo-router'
 import { Trash2, Check, Plus, Clock, ShoppingCart } from 'lucide-react-native'
@@ -177,9 +178,11 @@ function GroceryRow({
               />
             ) : (
               <TouchableOpacity onPress={startEdit} activeOpacity={0.6}>
-                <Text style={[styles.itemName, item.checked && styles.itemNameChecked]}>
+                {/* Checked fades by opacity so the change is a CSS transition on the render that
+                    already happens; 0.55 is textMuted's weight on this card. */}
+                <Reanimated.Text style={[styles.itemName, STATE_FADE, { opacity: item.checked ? 0.55 : 1 }, item.checked && styles.itemNameChecked]}>
                   {item.name.replace(/\s*\*\s*$/, '')}
-                </Text>
+                </Reanimated.Text>
                 {item.meal ? <Text style={styles.itemMeal}>{item.meal}</Text> : null}
               </TouchableOpacity>
             )}
@@ -319,17 +322,17 @@ export default function GroceryScreen() {
     const ids = items.filter(i => i.checked).map(i => i.id)
     if (!ids.length) return
     haptic.medium()
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut) // rows collapse together instead of blinking out
+    // Rows fade and collapse together via the ROW_EXIT / LIST_LAYOUT wrappers in the list.
     setItems(prev => prev.filter(i => !i.checked))
     await supabase.from('grocery_items').delete().in('id', ids)
   }
 
   const deleteItem = async (id: string) => {
     haptic.medium()
-    // NO LayoutAnimation here on purpose. The row already animates itself off-screen via the
-    // swipe, and forcing a layout pass right after the delete was stealing the NEXT swipe
-    // gesture — which stranded rows half-open. The bulk paths below still animate; only the
-    // swipe path stays untouched.
+    // The row has already slid itself off-screen; the rows below glide up via LIST_LAYOUT. A
+    // LayoutAnimation here once looked like it stole the NEXT swipe and stranded rows half-open —
+    // LayoutAnimation is a no-op in this app (CLAUDE.md), so that cause was never proven. If a
+    // quick second swipe misbehaves now, the glide is the suspect.
     setItems(prev => prev.filter(i => i.id !== id))
     await supabase.from('grocery_items').delete().eq('id', id)
   }
@@ -344,7 +347,6 @@ export default function GroceryScreen() {
     if (!checked.length) return
     const count = checked.length
     haptic.success() // completed task: these are moving into the pantry
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setItems(prev => prev.filter(i => !i.checked))
 
     // Check which items already exist in pantry
@@ -662,18 +664,22 @@ export default function GroceryScreen() {
             {/* ── Grouped items ── */}
             {(() => {
               /* Always grouped by category */
+              // Gap-close: a row or an emptied aisle fades out (ROW_EXIT), and every box that moves
+              // or resizes glides (LIST_LAYOUT) — the aisle, its card (its background changes
+              // height), each row. Reanimated layout animations are per component; one missing
+              // wrapper is one element snapping while its neighbours glide.
               return grouped.map(group => (
-                <View key={group.category} style={styles.group}>
+                <Reanimated.View key={group.category} style={styles.group} layout={LIST_LAYOUT} exiting={ROW_EXIT}>
                   <Text style={styles.groupLabel}>{group.category}</Text>
-                  <View style={styles.groupCard}>
+                  <Reanimated.View style={styles.groupCard} layout={LIST_LAYOUT}>
                     {group.items.map((item, i) => (
-                      <View key={item.id}>
+                      <Reanimated.View key={item.id} layout={LIST_LAYOUT} exiting={ROW_EXIT}>
                         {i > 0 && <View style={styles.divider} />}
                         <GroceryRow item={item} onToggle={() => toggle(item.id)} onDelete={() => deleteItem(item.id)} onRename={(name) => rename(item.id, name)} highlighted={item.id === dupeHighlightId} />
-                      </View>
+                      </Reanimated.View>
                     ))}
-                  </View>
-                </View>
+                  </Reanimated.View>
+                </Reanimated.View>
               ))
             })()}
 
@@ -681,6 +687,8 @@ export default function GroceryScreen() {
                 into an inline editable row (circle + TextInput) when tapped.
                 Submit-on-return saves the item + clears input + keeps focus so
                 user can rapid-add multiple. "Done" in header exits inline mode. */}
+            {/* Moves with the aisles above it, or it would jump while they glide. */}
+            <Reanimated.View layout={LIST_LAYOUT}>
             {inlineAdding ? (
               <View style={styles.inlineEditRow}>
                 <View style={styles.inlineEditCircle} />
@@ -707,6 +715,7 @@ export default function GroceryScreen() {
                 <Text style={styles.addItemRowText}>Add Item</Text>
               </TouchableOpacity>
             )}
+            </Reanimated.View>
           </ScrollView>
         </>
       )}
@@ -826,7 +835,7 @@ const styles = StyleSheet.create({
   checkboxChecked: { backgroundColor: '#4ADE80', borderColor: '#4ADE80' },
   rowContent: { flex: 1, gap: 3 },
   itemName: { fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
-  itemNameChecked: { textDecorationLine: 'line-through', color: COLORS.textMuted },
+  itemNameChecked: { textDecorationLine: 'line-through' }, // the dimming is opacity, in GroceryRow
   itemMeal: { fontSize: 12, color: COLORS.textMuted, fontWeight: '400' },
 
   bottomBar: {
