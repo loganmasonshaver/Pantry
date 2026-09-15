@@ -94,7 +94,11 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
   'Other': Package,
 }
 
-const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
+// The pantry reads in COOK order, the grocery list in STORE order — the same sixteen aisles. The
+// protein source leads here because it is what a meal is built around and the first thing Cook
+// Tonight checks; in a store it is at the back, which is where Grocery keeps it.
+const PANTRY_ORDER = ['Meat & Fish', ...STORE_CATEGORIES.filter(c => c !== 'Meat & Fish')]
+const CATEGORY_CONFIG = PANTRY_ORDER.map(name => ({
   id: name.toLowerCase().replace(/[^a-z]/g, ''),
   name,
   icon: CATEGORY_ICONS[name] ?? Package,
@@ -283,9 +287,9 @@ export default function PantryScreen() {
       }
     }
 
-    // Section order is the store order the grocery list already uses. The drag-reorder that
-    // used to live here went with the accordions; a device-local order nobody set was one more
-    // way for two screens to disagree.
+    // Section order is PANTRY_ORDER, fixed in code. The drag-reorder that used to live here went
+    // with the accordions; a device-local order nobody set was one more way for two screens to
+    // disagree.
     setCategories(result)
     setLoaded(true)
   }, [user?.id])

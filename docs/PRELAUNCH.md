@@ -1699,6 +1699,14 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       leaves it in place; (5) the Pantry tab shows a fridge; (6) the "Out" name is grey, not
       struck through. Judge on device: a right column that is empty on every fresh row — if it
       feels too blank, the fallback is the age at 11pt in a dimmer grey, not removal.
+      **Seen on device 2026-09-15 13:10 (Logan's screenshot): the layout landed as designed** —
+      header, scan, search, notice line, PRODUCE; fresh "Chicken" shows no age; "Chicken Salad"
+      (Out) at the bottom of its section, grey, no strikethrough; fridge icon. Every other row
+      still reads "7w" because all 54 of his items ARE stale — that clears when he taps Review →
+      Keep all. Then Logan: "put meat and fish first" → **Meat & Fish leads the Pantry tab
+      (`PANTRY_ORDER`), Grocery keeps store order.** Tell: MEAT & FISH is the first section.
+      Not asked, worth a look: Dairy & Eggs second — eggs, Greek yogurt and cottage cheese are the
+      app's other protein aisle and sit fourth today.
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was
