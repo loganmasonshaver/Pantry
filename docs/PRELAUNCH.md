@@ -1805,6 +1805,19 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
   - [ ] Phase 3 — legacy `Swipeable` → `ReanimatedSwipeable` on Home log rows and Pantry rows
   - [ ] Phase 4 — screen transitions: consistency audit only; tabs stay instant
   - [ ] Phase 5 — onboarding animations, only if Phase 0 shows hitches there
+- [ ] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
+      Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
+      frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI
+      commits, the last at 1.92 s, then nothing until he left the app — the splash never dissolved.
+      That was the FIRST launch after installing the build. 12 later launches of the same build under
+      xctrace all dissolved the splash at 2.3–2.4 s; a 13th recorded no data and its trace was
+      deleted before it was read. The pre-Phase-1 build launched cleanly 2 of 2 — too few to compare.
+      The splash hides on `checking` (auth + onboarding-flag resolution in `app/_layout.tsx`) AND
+      `MIN_SPLASH_MS`, so the two candidates are the auth chain never resolving (network, token
+      refresh) and the JS thread stalling while Home mounts. Tell: the wordmark stays up past ~5 s.
+      Next: a Release-visible marker (os_signpost or a timestamp written to AsyncStorage) at auth
+      resolved / Home mounted / splash hidden, then 10 first-launches-after-install per build.
+      Evidence kept: `~/pantry-traces/phase1-20260915-151815.trace`.
 - [ ] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
       today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
       Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
