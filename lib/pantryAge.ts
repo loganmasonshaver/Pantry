@@ -36,7 +36,17 @@ export function ageLabelLong(sinceIso: string | null | undefined, now = Date.now
   return `${p.n} ${p.unit}${p.n === 1 ? '' : 's'} ago`
 }
 
-// Untouched for three weeks and still marked in stock: worth a question, not a deletion.
+// Three weeks with no evidence and still marked in stock: worth a question, not a deletion.
+// "Evidence" is any write that touches the row — a scan or receipt that sees it again, a grocery
+// check-off, a tap. Callers scope this to perishables (isPerishable) — see there for why.
 export function isStale(sinceIso: string | null | undefined, inStock: boolean, now = Date.now()): boolean {
   return inStock && daysSince(sinceIso, now) >= STALE_AFTER_DAYS
+}
+
+// Aisles where three weeks without evidence plausibly means "gone". Everything else is a staple
+// that gets used and rebought without the app hearing of it — "untouched" says nothing about a
+// jar of cumin — so those are never asked about. Frozen keeps for months and is out too.
+export const PERISHABLE_CATEGORIES = ['Produce', 'Meat & Fish', 'Dairy & Eggs', 'Bakery'] as const
+export function isPerishable(category: string): boolean {
+  return (PERISHABLE_CATEGORIES as readonly string[]).includes(category)
 }

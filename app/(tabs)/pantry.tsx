@@ -29,7 +29,7 @@ import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
-import { ageLabelLong, isStale } from '@/lib/pantryAge'
+import { ageLabelLong, isPerishable, isStale } from '@/lib/pantryAge'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
@@ -53,6 +53,12 @@ type Category = {
   name: string
   ingredients: Ingredient[]
 }
+
+// What the list renders: in-stock rows under their aisle, and every out-of-stock row in one
+// section at the bottom. catId keeps toggle and delete pointed at the row's real category.
+type PantryRowData = Ingredient & { catId: string }
+type PantrySection = { id: string; name: string; data: PantryRowData[] }
+const OUT_SECTION_ID = 'out-of-stock'
 
 // ── Category config ────────────────────────────────────────────────────
 
@@ -113,8 +119,9 @@ const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id, 
 //
 // Every item is visible under its section header — the accordions hid the list behind a tap and
 // a count badge, on the tab whose whole job is "what do I have". Tap = in/out of stock, swipe =
-// delete. An out-of-stock row is crossed off, faded and tagged "Out" — the crossed-off treatment
-// Grocery gives a checked item, so "gone" looks the same on both tabs.
+// delete. An out-of-stock row leaves its aisle for the OUT OF STOCK section at the bottom, crossed
+// off and faded (the treatment Grocery gives a checked item). Grey-in-place was tried twice and
+// read as "very little visual difference" on device; position is what a user notices.
 function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
   ingredient: Ingredient
   first: boolean
@@ -137,10 +144,9 @@ function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
         {/* Inset hairline, the iOS grouped-list divider: starts at the text, not the card edge. */}
         {!first && <View style={styles.rowHairline} pointerEvents="none" />}
         <Text style={[styles.rowName, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Text>
-        {/* No age on the row. A batch scan stamps one date on every line, so it read "7w" fifty
-            times; the notice line carries the count and the review sheet the per-item age, which
-            is the one place it decides something. */}
-        {!ingredient.inStock && <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
+        {/* Nothing on the right. No age (a batch scan stamps one date on every line, so it read
+            "7w" fifty times; the notice line carries the count and the review sheet the per-item
+            age) and no "Out" tag (the section header says it). */}
       </TouchableOpacity>
     </Swipeable>
   )
@@ -267,10 +273,6 @@ export default function PantryScreen() {
       grouped.get(catName)!.push({ id: row.id, name: row.name, inStock: row.in_stock, since: row.last_confirmed_at ?? row.created_at })
     }
 
-    // Out rows sink to the bottom of their section here, at load, never on the tap that marks
-    // them Out — a row that jumps under the finger is worse than one that waits for the next visit.
-    for (const list of grouped.values()) list.sort((a, b) => Number(b.inStock) - Number(a.inStock))
-
     // Build ordered category list: config order first, then any unknown
     const result: Category[] = []
     for (const cfg of CATEGORY_CONFIG) {
@@ -308,6 +310,10 @@ export default function PantryScreen() {
   // the shelf today, so the age resets and the stale nudge lets the item go.
   const setStock = async (categoryId: string, ingredientId: string, inStock: boolean) => {
     const now = new Date().toISOString()
+    // The row changes section (aisle ↔ OUT OF STOCK), so the gap closes and opens with it: the
+    // move IS the feedback, the way a ticked item drops to the bottom in Bring!. Update-only,
+    // like deleteIngredient — a create/delete config fights gesture-handler's swipe transform.
+    LayoutAnimation.configureNext({ duration: 250, update: { type: LayoutAnimation.Types.easeInEaseOut } })
     setCategories(prev =>
       prev.map(c =>
         c.id === categoryId
@@ -431,23 +437,29 @@ export default function PantryScreen() {
     setDisambigChoices([])
     setShowAddModal(true)
   }
-  const visibleCategories = isSearching
-    ? categories
-        .map(cat => ({
-          ...cat,
-          ingredients: cat.ingredients.filter(i =>
-            // trim() the query — iOS leaves a trailing space after a word, and "rice " would
-            // never substring-match "cooked rice", showing a false "No matches".
-            i.name.toLowerCase().includes(searchQuery.trim().toLowerCase())
-          ),
-        }))
-        .filter(cat => cat.ingredients.length > 0)
-    : categories
+  // The query is trimmed — iOS leaves a trailing space after a word, and "rice " would never
+  // substring-match "cooked rice", showing a false "No matches". It filters both halves.
+  const q = searchQuery.trim().toLowerCase()
+  const sections: PantrySection[] = []
+  const outRows: PantryRowData[] = []
+  for (const c of categories) {
+    const rows: PantryRowData[] = []
+    for (const i of c.ingredients) {
+      if (q && !i.name.toLowerCase().includes(q)) continue
+      const row = { ...i, catId: c.id }
+      if (i.inStock) rows.push(row)
+      else outRows.push(row)
+    }
+    if (rows.length > 0) sections.push({ id: c.id, name: c.name, data: rows })
+  }
+  if (outRows.length > 0) sections.push({ id: OUT_SECTION_ID, name: 'Out of stock', data: outRows })
 
   const totalItems = categories.reduce((s, c) => s + c.ingredients.length, 0)
-  // In stock and untouched for 3+ weeks. The pantry could only grow (every write set in_stock
-  // TRUE), so meal generation cooked from ghosts; this is the question that keeps it honest.
-  const staleItems = categories.flatMap(c => c.ingredients.filter(i => isStale(i.since, i.inStock)).map(i => ({ ...i, catId: c.id })))
+  // Perishables the app last had evidence of 3+ weeks ago — a scan, a receipt, a grocery check-off
+  // or a tap all reset the clock. Staples are never asked about: "untouched" says nothing about a
+  // jar of cumin that gets used and rebought without the app hearing of it. The question keeps
+  // meal generation honest, since a ghost ingredient costs a real recipe.
+  const staleItems = categories.flatMap(c => isPerishable(c.name) ? c.ingredients.filter(i => isStale(i.since, i.inStock)).map(i => ({ ...i, catId: c.id })) : [])
   useEffect(() => { if (staleItems.length === 0) setReviewOpen(false) }, [staleItems.length])
 
 
@@ -464,7 +476,7 @@ export default function PantryScreen() {
 
       {/* ── The pantry, as a grouped list ── */}
       <SectionList
-        sections={visibleCategories.map(c => ({ ...c, data: c.ingredients }))}
+        sections={sections}
         keyExtractor={(item) => item.id}
         stickySectionHeadersEnabled
         keyboardDismissMode="on-drag"
@@ -535,12 +547,12 @@ export default function PantryScreen() {
                 </Text>
               </TouchableOpacity>
             )}
-            {/* Items in stock and untouched for three weeks — a question, not a grade. Answers land
-                on pantry_items.last_confirmed_at / in_stock. */}
+            {/* Perishables in stock with no evidence for three weeks — a question, not a grade.
+                Answers land on pantry_items.last_confirmed_at / in_stock. */}
             {!isSearching && staleItems.length > 0 && (
               <TouchableOpacity style={styles.notice} onPress={() => setReviewOpen(true)} activeOpacity={0.7}>
                 <Text style={styles.noticeText} numberOfLines={1}>
-                  {staleItems.length} item{staleItems.length === 1 ? '' : 's'} untouched for 3+ weeks
+                  {staleItems.length} perishable{staleItems.length === 1 ? '' : 's'} from 3+ weeks ago
                   <Text style={styles.noticeLink}> · Review</Text>
                 </Text>
               </TouchableOpacity>
@@ -582,8 +594,8 @@ export default function PantryScreen() {
             ingredient={item}
             first={index === 0}
             last={index === section.data.length - 1}
-            onDelete={() => deleteIngredient(section.id, item.id)}
-            onToggle={() => toggleStock(section.id, item.id)}
+            onDelete={() => deleteIngredient(item.catId, item.id)}
+            onToggle={() => toggleStock(item.catId, item.id)}
           />
         )}
       />
@@ -686,7 +698,7 @@ export default function PantryScreen() {
               </TouchableOpacity>
             </View>
             <Text style={styles.reviewHint}>
-              Untouched for 3+ weeks. Tonight's meals are built from what's here, so a ghost ingredient costs a real recipe.
+              Last seen 3+ weeks ago — by a scan, a receipt or a tap. Tonight's meals are built from what's here, so a ghost ingredient costs a real recipe.
             </Text>
             <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
               {staleItems.map(i => (
@@ -739,17 +751,14 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   rowHairline: { position: 'absolute', top: 0, left: 14, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
   rowName: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
-  // Crossed off AND faded well under textMuted. Grey alone on #141414 was "very little visual
-  // difference" on device; Grocery crosses off a checked item, so "gone" reads the same here.
+  // Crossed off and faded, inside the OUT OF STOCK section — Grocery's treatment for a checked
+  // item. The section is the difference; this just keeps the rows from reading as in stock.
   rowNameOut: { color: 'rgba(255,255,255,0.35)', textDecorationLine: 'line-through' },
   rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
   // The typed name as the row it would become, under the search results.
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#141414', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginTop: 12 },
   addRowText: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
   noMatches: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', paddingTop: 28 },
-  // Faded with the name, so the whole row recedes; the strikethrough carries the state.
-  outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
-  outPillText: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.35)' },
   deleteActionLast: { borderBottomRightRadius: 14 },
 
   // Review sheet

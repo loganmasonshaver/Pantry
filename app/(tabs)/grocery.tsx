@@ -369,9 +369,11 @@ export default function GroceryScreen() {
 
     // Mark existing ones as in_stock in case they were previously toggled off (out of stock).
     // ilike (case-insensitive) is safer than equality — historical entries have inconsistent casing.
+    // A check-off is a restock, so it also resets the Pantry tab's stale clock (last_confirmed_at).
     const existingItems = checked.filter(i => existingNames.has(i.name.toLowerCase()))
+    const now = new Date().toISOString()
     for (const item of existingItems) {
-      await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', user.id).ilike('name', escapeLike(item.name))
+      await supabase.from('pantry_items').update({ in_stock: true, last_confirmed_at: now }).eq('user_id', user.id).ilike('name', escapeLike(item.name))
     }
 
     // Remove from grocery_items

@@ -43,10 +43,14 @@ export async function addPantryItemsDeduped(userId: string, rows: PantryInsertRo
   }
 
   // Re-stock existing rows that may have been out. ilike is case-insensitive — historical rows
-  // have inconsistent casing, so equality would miss them.
+  // have inconsistent casing, so equality would miss them. Seeing an item in a scan or on a
+  // receipt is also the strongest "still here" evidence the app ever gets, so it resets the
+  // stale clock — without this a user who rescans every fortnight was still asked "still have
+  // them?" about everything that was already on the shelf.
+  const now = new Date().toISOString()
   for (const name of restockNames) {
     // escapeLike: a raw "2% Milk" here is a wildcard pattern that also re-stocks other rows.
-    await supabase.from('pantry_items').update({ in_stock: true }).eq('user_id', userId).ilike('name', escapeLike(name))
+    await supabase.from('pantry_items').update({ in_stock: true, last_confirmed_at: now }).eq('user_id', userId).ilike('name', escapeLike(name))
   }
 
   return { error: null }

@@ -1716,6 +1716,33 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       semantic argument ("done" on iOS) losing to the contrast it had been providing. Tells: no
       "7w" anywhere in the list; Chicken Salad is struck through and plainly dimmer than Chicken
       above it; Review → each item reads "7 weeks ago", not "7w".
+      **Then Logan: "still very little visual difference" + "how would the system know items have
+      been untouched and not just regularly restocked, and the user doesn't uncheck much — did you
+      account for this?" → NO, it had not. BUILT, UNVERIFIED ON DEVICE:**
+      (1) **Out rows leave their aisle for one OUT OF STOCK section at the bottom** (crossed off,
+      faded, no tag — the header says it), and the move happens ON the tap, animated, the way a
+      ticked item drops to the bottom in Bring!. Reverses this morning's "never move on tap": that
+      was for a silent reorder inside a section; a labelled destination plus animation makes the
+      movement the feedback. Aisle counts are now in-stock counts. Grey-in-place was tried twice.
+      (2) **The stale check was built on a signal the app was throwing away.** All three restock
+      paths — pantry scan, receipt scan, grocery check-off (`lib/pantryInsert.ts`, `grocery.tsx`)
+      — set `in_stock` back to true on an existing item but never touched `last_confirmed_at`, so
+      a user who rescans every fortnight was still asked about everything already on the shelf.
+      Fixed: every restock resets the clock. (3) **Perishables only** — Produce, Meat & Fish,
+      Dairy & Eggs, Bakery (`isPerishable`, +1 test). Staples are never asked: "untouched" says
+      nothing about cumin that is used and rebought without the app hearing of it. Frozen is out
+      too. Notice reads "N perishables from 3+ weeks ago · Review"; sheet hint "Last seen 3+
+      weeks ago — by a scan, a receipt or a tap." What the check now means: a perishable with no
+      scan, receipt, check-off or tap for 3 weeks — which for a pineapple or ground beef is a fair
+      question, and for a user who never scans again it is one Keep-all every 3 weeks on the
+      perishable aisles only. Tells: (a) tap Chicken → it animates out of MEAT & FISH into an
+      OUT OF STOCK section at the very bottom, struck through; tap it there → it animates back;
+      (b) the notice count drops from 54 to the perishable aisles only (roughly Produce 9 + Meat 3
+      + Dairy 14 + Bakery); (c) after a pantry scan that sees Garlic again, Garlic leaves the
+      Review sheet — verify in SQL: `last_confirmed_at` on that row moves to the scan's moment.
+      Still not modelled, deliberately: cooking a meal as evidence its ingredients were there
+      (a logged meal is not necessarily a pantry meal); a per-aisle shelf life (3 weeks is generous
+      for produce and short for hard cheese — one number, a question not a rule).
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was
