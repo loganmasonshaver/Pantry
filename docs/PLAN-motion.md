@@ -61,19 +61,32 @@ Haptics are a native call and cost effectively nothing. Their risk is noise, not
 ## 4. Phases
 
 **Phase 0 — Baseline. No product code.** Release build, walkthrough, Instruments trace, numbers
-written into §6 of this file. ~1 h, mostly the build.
+written into §7 of this file. ~1 h, mostly the build.
+*Status 2026-09-15: tooling built (`f2de9e8`). The Release build of `4eceabd` — the code before any
+Phase 1 change — is installed on the phone. The walkthrough needs Logan's hands:*
+`bash scripts/motion-compare.sh baseline phase1` *traces that build, builds + installs the current
+code, traces again, compares, and reinstalls the dev build.*
 
 **Phase 1 — Fix what is already broken.** Expected to make the app lighter, not heavier.
-- a. Replace the 10 dead `LayoutAnimation` calls. A row that leaves gets `exiting={FadeOut}`; a
-  small container that resizes gets `layout={LinearTransition}`. In the 54-row Pantry list,
-  measure before giving rows a layout transition; fall back to fade-only. Where no motion is
-  wanted, delete the call rather than keep one that lies.
-- b. Pantry and Grocery toggles: a CSS transition on opacity for the Out/checked state. The state
-  change already renders; the transition adds no render.
-- c. Home calorie ring: `strokeDashoffset` runs 1.8 s on the JS thread right as Home loads
-  (`app/(tabs)/index.tsx`, `useNativeDriver: false`). Move it to Reanimated `useAnimatedProps`.
-- d. Home's ambient loops keep running while another tab is in front (tabs stay mounted). Pause on
-  blur.
+*Status 2026-09-15: BUILT (`e0a0e41` Home, `462f6b0` Pantry, `15310d6` Grocery, `2e3e063` Saved),
+unmeasured and unseen on device.*
+- a. Replace the 10 dead `LayoutAnimation` calls. **Done:** Home's log (cards, rows, Add meal),
+  Grocery (aisles, cards, rows, Add Item) and Saved's grid carry `LIST_LAYOUT` / `ROW_EXIT` from
+  `lib/motion.ts`. Two of the ten were in code nothing rendered (`SlotCard`, `toggleSlot`) and were
+  deleted with it. **Pantry: no reflow animation.** Reanimated's layout transitions do not reach
+  SectionList cells, and a `CellRendererComponent` workaround would glide rows while the sticky
+  section headers — wrapped by ScrollView in their own views — snap. So a Pantry toggle now fades
+  in place and the Out row sinks on the next load (as `dbc6512` had it); delete still closes the
+  gap in one frame.
+- b. Pantry and Grocery toggles: a CSS transition on opacity. **Done** (`STATE_FADE`).
+- c. Home calorie ring. **Done, and it was worse than planned:** a listener set a "remaining" count
+  on nearly every frame for 1.8 s — about a hundred renders per Home load — for a value rendered
+  nowhere. Now `useAnimatedProps` on the UI thread, no listener, no state.
+- d. ~~Pause Home's ambient loops on blur.~~ **Dropped, nothing to fix.** Every loop is RN Animated
+  with the native driver, so it runs natively with no JS round trips; each only runs in a transient
+  state (generating, empty pantry, resting card); and an inactive tab is detached from the native
+  hierarchy, so an off-screen loop is not composited. Revisit only if a trace shows hitches while
+  another tab is in front.
 
 **Phase 2 — Every action gets feedback.** First an audit table, every user action → its visual
 response and haptic, for Logan's OK before any code. Today: 19 haptic call sites, 34
@@ -120,4 +133,11 @@ library · converting the 245 TouchableOpacity.
 
 ## 7. Baseline numbers
 
-*(Phase 0 fills this in.)*
+| Run | Build | Recording | Hitches | Hitch time | Ratio | Worst |
+|---|---|---|---|---|---|---|
+| self-test, idle launch, no walkthrough | Release `4eceabd` | 21.1 s | 2 | 41.7 ms | 1.97 ms/s | 33.3 ms |
+| baseline walkthrough | Release `4eceabd` | *pending Logan* | | | | |
+| phase1 walkthrough | Release, Phase 1 | *pending Logan* | | | | |
+
+The self-test only proves the pipeline; both of its hitches were app launch. Compare the two
+walkthrough rows, never a walkthrough against the self-test.

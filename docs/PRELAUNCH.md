@@ -1799,8 +1799,8 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       only, UI thread only, zero renders from motion, navigators untouched, nothing at cold start,
       haptics on commits only, no new library. Measured in a RELEASE build with Instruments'
       Animation Hitches (< 5 ms/s), one commit per screen, revert any that fails.
-  - [ ] Phase 0 — baseline: Release build on device, fixed walkthrough, Instruments trace, numbers into the plan
-  - [ ] Phase 1 — fix what is broken: replace the 10 dead `LayoutAnimation` calls; opacity transition on Pantry/Grocery toggles; Home calorie ring off the JS thread; pause Home loops on blur
+  - [ ] Phase 0 — baseline. **Tooling BUILT (`f2de9e8`); the Release build of `4eceabd` (pre-Phase-1) is INSTALLED on the phone; self-test trace works (1.97 ms/s idle launch). WAITING ON LOGAN:** `bash scripts/motion-compare.sh baseline phase1` — two ~2.5 min walkthroughs, ~30 min total, it rebuilds between them and reinstalls the dev build at the end. Numbers go into PLAN-motion §7.
+  - [ ] Phase 1 — **BUILT, UNMEASURED, UNSEEN (`e0a0e41` `462f6b0` `15310d6` `2e3e063`).** All 10 dead `LayoutAnimation` calls gone (2 were in dead code, deleted); Reanimated gap-close on Home's log, Grocery and Saved; CSS opacity fade on Pantry and Grocery toggles; calorie ring on the UI thread (it was re-rendering ~100×/load for a value shown nowhere). Loop-pausing dropped: native-driver loops on detached tabs cost nothing. **Behaviour change:** a Pantry toggle now stays in place and fades; the Out row sinks on the next load, not on the tap (the tap-time "slide" was a one-frame jump). Tells: (1) swipe-delete a logged food on Home → the row fades and the rows/cards below glide up, the card's background shrinks with them, no snap; (2) swipe the day → the log is simply replaced, nothing slides from the old day; (3) the calorie ring still sweeps from empty on open; (4) Pantry: tap an item → it dims, strikes and shows "Out" over ~0.2 s without moving; leave the tab and come back → it is at the bottom of its aisle; (5) Grocery: check two items → names dim smoothly; Clear checked → they fade and the rest close up; swipe-delete two rows quickly → the second swipe works; (6) Saved: unsave a card → the rest slide into place; Undo → it returns and they slide back; typing in search → cards do NOT slide.
   - [ ] Phase 2 — action → feedback audit table for Logan's OK, then fill the gaps with PressableScale + `lib/haptics.ts`
   - [ ] Phase 3 — legacy `Swipeable` → `ReanimatedSwipeable` on Home log rows and Pantry rows
   - [ ] Phase 4 — screen transitions: consistency audit only; tabs stay instant
@@ -1812,6 +1812,8 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       snap. That includes `ccb57f7`'s "sinks to the bottom of its card with an animated slide":
       the row moves, but in one frame. Tell: tap a Pantry item → it JUMPS to the bottom of its
       card rather than sliding. Fix is Phase 1a above. CLAUDE.md landmine added.
+      **Fixed in code 2026-09-15 by Phase 1** — zero `LayoutAnimation` calls remain in app/ and
+      components/. Verification is Phase 1's tells.
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was
