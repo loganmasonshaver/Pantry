@@ -1568,8 +1568,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       return
                     }
                     onItemsAdded?.()
-                    // No cook-reveal flow wired (e.g. Home entry) → close as before.
-                    if (!onSeeMeals) { handleClose(); return }
+                    // The items are in. With no reveal to follow, this is the flow's end: success.
+                    // With the cook reveal next, only a light tick — the reveal has its own success
+                    // peak a moment later, and two in a row would blur into one buzz.
+                    if (!onSeeMeals) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); handleClose(); return }
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
                     // Committed to the reveal → warm the remaining meal images now, a few seconds
                     // before it mounts, so the deck doesn't out-run them. (The hero was warmed
                     // during review; these resolve from cache there.) Fire-and-forget.

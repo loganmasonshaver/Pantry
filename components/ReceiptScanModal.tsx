@@ -24,6 +24,7 @@ import { X, Check, Receipt, Camera, ImageIcon, Zap, Plus } from 'lucide-react-na
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
+import { haptic } from '@/lib/haptics'
 import { useAuth } from '@/context/AuthContext'
 import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAIConsent } from '@/context/AIConsentContext'
@@ -298,6 +299,7 @@ export default function ReceiptScanModal({ visible, onClose, onItemsAdded }: Pro
       return
     }
     savingRef.current = false
+    haptic.success() // the receipt's items are in the pantry; this modal had no haptic at all
     onItemsAdded?.()
     handleClose()
   }
