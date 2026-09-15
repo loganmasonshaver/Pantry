@@ -46,6 +46,9 @@ Haptics are a native call and cost effectively nothing. Their risk is noise, not
   rebuild the dev build afterwards).
 - **Xcode Instruments, "Animation Hitches" template,** on the wired phone. Apple's bands for hitch
   time: under 5 ms per second good, 5–10 warning, over 10 critical.
+  **Disk:** every recording spools ~5–6 GB of raw trace into `$TMPDIR` (`instruments*.ktrace`) and
+  xctrace never deletes it. Eighteen of them (31 GB) filled the Mac on 2026-09-15 and crashed a save.
+  `scripts/motion-trace.sh` now refuses to start under 12 GB free and removes its own spool.
 - **One fixed walkthrough, identical every run:** cold start to Home painted · switch every tab ·
   open a meal and back · open Log food and close · log a food · swipe-delete a log entry · swipe
   the week · toggle a Pantry item in and out · delete a Pantry item · check a grocery item · scroll

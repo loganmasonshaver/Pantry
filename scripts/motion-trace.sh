@@ -24,6 +24,19 @@ if [[ -z "$udid" ]]; then
   exit 1
 fi
 
+# Disk. A 150 s recording spools ~5–6 GB of raw kernel trace into $TMPDIR before it is compressed
+# into the .trace (under 1 GB), and xctrace never deletes that spool. On 2026-09-15 eighteen of them
+# (31 GB) filled the disk and xctrace crashed mid-save with Trace/BPT trap. So: refuse to start
+# without room, and remove this run's spool once the .trace is written (below).
+min_free_gb=12
+free_gb=$(df -g "$HOME" | awk 'NR==2 {print $4}')
+if (( free_gb < min_free_gb )); then
+  echo "Only ${free_gb} GB free; a recording needs about ${min_free_gb} GB while it saves." >&2
+  echo "Leftover Instruments spools, if any: $(du -ch "${TMPDIR:-/tmp}"/instruments*.ktrace 2>/dev/null | tail -1)" >&2
+  exit 1
+fi
+spool_marker="$(mktemp -t motion-trace-marker)"
+
 out="$out_dir/${label}-$(date +%Y%m%d-%H%M%S).trace"
 cat <<EOF
 
@@ -43,13 +56,27 @@ Do this walkthrough, at a normal pace, in this order:
 
 EOF
 
+record_status=0
 xcrun xctrace record \
   --template 'Animation Hitches' \
   --device "$udid" \
   --time-limit "${seconds}s" \
   --no-prompt \
   --output "$out" \
-  --launch -- com.kobalabs.pantry
+  --launch -- com.kobalabs.pantry || record_status=$?
+
+# This run's spool: newer than the marker. Removed whether or not the save succeeded — a crashed
+# save leaves the biggest one — but never while another recording is still running and using its own.
+if ! pgrep -f "xctrace record" >/dev/null; then
+  find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'instruments*.ktrace' -newer "$spool_marker" -exec rm -f {} + 2>/dev/null || true
+fi
+rm -f "$spool_marker"
+
+if (( record_status != 0 )); then
+  echo "xctrace exited with status ${record_status}; no usable trace. Free space now: $(df -h "$HOME" | awk 'NR==2 {print $4}')" >&2
+  rm -rf "$out"
+  exit "$record_status"
+fi
 
 echo
 echo "Saved: $out"
