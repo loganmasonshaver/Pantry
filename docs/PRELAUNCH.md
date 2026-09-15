@@ -1481,11 +1481,13 @@ session that wrote it.
       hold until the NEW hero's photo is ready, then cross-fade in (300ms). The tell is the ABSENCE
       of a shimmer beat between old and new. Testable same-day with the refresh button — it does not
       need a day rollover. (`08771ab`)
-- [ ] **Category icons and colours.** Every pantry category should now have a real icon, not a grey
+- [x] **Category icons and colours.** Every pantry category should now have a real icon, not a grey
       box, and the three overlapping condiment rows should be one. Testable on any reload; the
       backfill is already applied and verified at zero off-list rows. (`750f4d6`)
-- [ ] **Pantry "Add an item".** Header pill is now a `+` icon; a dashed "Add an item" row sits at the
+      *(SUPERSEDED 2026-09-15: the Pantry rebuild removed category icons and colour dots from the tab.)*
+- [x] **Pantry "Add an item".** Header pill is now a `+` icon; a dashed "Add an item" row sits at the
       end of the category list. Testable on any reload. (`129fe3c`)
+      *(SUPERSEDED 2026-09-15: no ✚ and no "Add an item" row — search doubles as add, `dbc6512`, seen on device.)*
 - [ ] **⚠️ COLD-START DEFECTS — Logan could not verify these, they need a NEW DAY's first open.**
       Both were found from the 11:21 screenshots on 2026-09-04 and both are fixed blind.
       - [x] **Calorie/protein goals must NOT flash the wrong numbers.** VERIFIED ON DEVICE 2026-09-04. The ring used to animate to
@@ -1649,7 +1651,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       once the slot has entries; "+ + Add Meal" → "+ Add meal"; Snack's icon is a cookie, not
       water drops. Tells: swipe a Breakfast row left → Delete slides in, tap → row gone; the
       Breakfast header shows the total; the Lunch card is a single line.
-- [ ] **BUILT 2026-09-15 (Logan: "go") — the Pantry tab rebuilt to the sketch. UNVERIFIED ON
+- [x] **BUILT 2026-09-15 (Logan: "go") — the Pantry tab rebuilt to the sketch. UNVERIFIED ON
       DEVICE.** Scan row = white "Scan pantry" primary + dark "Scan receipt" secondary, no line
       art, no AI badges. The photo banner is gone; a one-line STATUS STRIP shows only for a gap
       ("Add a protein source · Add to grocery"). A second strip, "N items untouched for 3+ weeks ·
@@ -1672,7 +1674,8 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       **Superseded in part by the second pass below** (the strips, the ✚, the dots, the
       strikethrough, the every-row age and the tab icon all changed the same day) — verify the
       second pass's tells, which cover this item's mechanics too.
-- [ ] **BUILT 2026-09-15 (Logan sent a screenshot of the rebuild, asked for "more premium, less
+      *(VERIFIED ON DEVICE 2026-09-15 via Logan's 13:10 and 13:43 screenshots: grouped list, scan pills, notice line, review. The toggle's sink-on-tap later became fade-in-place, `462f6b0`.)*
+- [x] **BUILT 2026-09-15 (Logan sent a screenshot of the rebuild, asked for "more premium, less
       cluttery, easy to understand and operate", then "ok do all") — Pantry tab, second pass.
       UNVERIFIED ON DEVICE.** The diagnosis from the screenshot: the list was fine; the top third
       was four full-width cards of equal weight (segmented control + ✚, stale strip, scan row,
@@ -1795,6 +1798,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       the count line and the long-press menu are off the table. Research and mock kept for the
       record (field study + https://claude.ai/artifact/WLBKjCY9eXpcTuYKP1LT8L). Do not reopen
       without Logan raising it.
+      *(VERIFIED ON DEVICE 2026-09-15 13:43 — see the note inside this item.)*
 - [ ] **PLANNED, GATED ON LOGAN'S "GO" (2026-09-15) — screen transitions + a small animation and
       haptic on every user action. Plan: `docs/PLAN-motion.md`.** Logan: "I did try this in the
       past and ultimately the app became too slow." Git says the earlier slowness was never the
@@ -1865,7 +1869,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       trace runs.** Loads normally → an artifact of remote launching, drop to post-launch. Sticks → a
       real first-launch bug; then the same check on a TestFlight install before submission. Evidence in
       the session scratchpad (hang1 healthy / hang2 stuck os_log exports), not in the repo.
-- [ ] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
+- [x] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
       today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
       Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
       2026-08-29 (`1eab76b`) and then forgotten. The 10 calls in Home, Pantry, Grocery and Saved
@@ -1874,6 +1878,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       card rather than sliding. Fix is Phase 1a above. CLAUDE.md landmine added.
       **Fixed in code 2026-09-15 by Phase 1** — zero `LayoutAnimation` calls remain in app/ and
       components/. Verification is Phase 1's tells.
+      *(FIXED IN CODE 2026-09-15 by motion Phase 1; zero LayoutAnimation calls remain. Device check is Phase 1's tells.)*
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was
@@ -2117,20 +2122,23 @@ Home ("drop all of those design changes for now") — parked, NOT rejected:
 - [x] ~~Cut "Cook tonight" from the Pantry tab.~~ DONE 2026-09-14 with the Home rebuild (§6c).
       Its readiness line moved to Home rather than being lost. Frees ~426pt on Pantry and removes
       the cold-day double-generation race.
-- [ ] Scan cards stay exactly as they are, full size, second on the screen. Logan pushed back on
+- [x] Scan cards stay exactly as they are, full size, second on the screen. Logan pushed back on
       demoting scan TWICE and he is right — scan is the acquisition hook. It is also not needed:
       banner + Cook tonight alone are 614 of the 926pt.
-- [ ] Result: header 78 + scan 130 + search 68 + categories header 36 = 312pt, rows land at 720.
+      *(SUPERSEDED 2026-09-15: scan is a two-pill row in the Pantry rebuild; Logan approved the layout.)*
+- [x] Result: header 78 + scan 130 + search 68 + categories header 36 = 312pt, rows land at 720.
+      *(SUPERSEDED 2026-09-15 by the Pantry rebuild's layout.)*
 
 **Pantry category rows carry two data points for 68pt each.**
 - [x] ~~Colour the icon circles at rest.~~ DONE 2026-09-14. `app/(tabs)/pantry.tsx:184` already has `category.iconColor`
       and only applies it when the row is EXPANDED, so all six read as identical grey. One line.
       This is also where the tab's visual identity comes from once the banner is gone.
-- [ ] Add 2-3 item names as a muted subtitle ("chicken, ground beef, salmon…"). Same height, triple
+- [x] Add 2-3 item names as a muted subtitle ("chicken, ground beef, salmon…"). Same height, triple
       the information, answers "what's in there" without a tap.
+      *(SUPERSEDED 2026-09-15: the accordions are gone; every item is visible as a row.)*
 
 **⚠️ The pantry cannot deplete — and meal generation is built on top of that.**
-- [ ] Every `in_stock` write in the app sets TRUE (`lib/pantryInsert.ts:41`, `grocery.tsx:374`,
+- [x] Every `in_stock` write in the app sets TRUE (`lib/pantryInsert.ts:41`, `grocery.tsx:374`,
       `pantry.tsx:558`). The only path to FALSE is the manual toggle at `pantry.tsx:486`, buried
       inside a collapsed category below the fold. So `useMealSuggestions.ts:106` generates from a
       pantry that only accumulates — an ever-growing fiction — and "Ready to cook" is a claim the
@@ -2138,6 +2146,7 @@ Home ("drop all of those design changes for now") — parked, NOT rejected:
       stale ingredient in the prompt forever. Needs a decision (log a meal → offer to mark its
       ingredients used? a "still have this?" nudge on items untouched for N weeks?), not a patch.
       Blocked on confirming `pantry_items.created_at` exists — the table is not in any migration.
+      *(ADDRESSED 2026-09-15: Out is a one-tap toggle on every visible row, and the perishable review marks items Used up.)*
 
 **Home layout — knobs left unspent after the 2026-09-04 compression.**
 Shipped: ring 170→124, header crunch, slot rows slimmed. The LOG_PEEK reserve is GONE as of
@@ -2151,10 +2160,12 @@ rows now lifts the meal log into view directly. Still available:
       rows away from the figure it measured, which is what read as "stacked weirdly").
 
 **Smaller, all confirmed by reading the code or the screenshots:**
-- [ ] Pantry tab icon is `UtensilsCrossed` (`app/(tabs)/_layout.tsx:96`) — a MEAL icon on the
+- [x] Pantry tab icon is `UtensilsCrossed` (`app/(tabs)/_layout.tsx:96`) — a MEAL icon on the
       ingredients tab. Should be a shelf/basket/box.
-- [ ] "Other" holds 12 of 56 pantry items — 21% still uncategorised after the 2026-09-03 backfill.
+      *(DONE 2026-09-15: `Refrigerator`, seen on device.)*
+- [x] "Other" holds 12 of 56 pantry items — 21% still uncategorised after the 2026-09-03 backfill.
       Either the scan model punts to Other freely or the canonical list has a gap.
+      *(DONE 2026-09-15: the name decides the category, `964a183` + `3fbbb93`; Other 30 → 1 across all users, 0 for Logan.)*
 - [ ] Saved Meals runs 4 filters over 5 meals. Show filters past a threshold (~8) or they read as
       scaffolding.
 - [ ] Grocery: "Just 2 items left to complete your list" at 0/2 — "left" implies progress made.
