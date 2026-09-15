@@ -24,6 +24,11 @@ This repo uses a single main-branch workflow. No feature branches, no PRs for so
    mid-push and leaves a bogus ledger row — this silently removed `trending_meals.source_verified`
    from prod on 2026-08-12. Recovery: `npx supabase migration repair --status reverted <version>`,
    renumber, re-push. Always write `add column if not exists` so a partial apply is re-runnable.
+6. **`add column … default now()` stamps every EXISTING row with the migration's own moment**, so a
+   backfill in the same file written as `where <col> is null` matches nothing. 2026-09-15:
+   `pantry_items.last_confirmed_at` got all 158 rows = 17:32:39 UTC, every item read "confirmed
+   today", and a corrective migration had to backfill from `created_at`. Add the column WITHOUT a
+   default, backfill, then set the default — or backfill by value, never by null-ness.
 
 ## ONE LIST UNTIL LAUNCH — `docs/PRELAUNCH.md`
 Logan works from exactly one list until the app ships: **`docs/PRELAUNCH.md`**. Every open item,

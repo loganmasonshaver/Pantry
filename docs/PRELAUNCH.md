@@ -1621,20 +1621,28 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       once the slot has entries; "+ + Add Meal" → "+ Add meal"; Snack's icon is a cookie, not
       water drops. Tells: swipe a Breakfast row left → Delete slides in, tap → row gone; the
       Breakfast header shows the total; the Lunch card is a single line.
-- [ ] **RAISED BY LOGAN 2026-09-14 — the Pantry tab ("can look better"; the scan cards "feel
-      vibe-coded, not premium"; unsure about the category accordions; the pantry check "fills
-      space"). SMALL FIXES BUILT, DIRECTION PLANNED, awaiting go. UNVERIFIED ON DEVICE:** the
-      footer "Add an item" row is gone (the header ✚ is the one add control); "Clear pantry" is
-      quiet red text, confirmation kept; the hero banner is hidden in the affirm state; the
-      "HOLD TO REORDER" label is gone (handles stay); category icons are coloured at rest.
-      PLAN (sketched in the 2026-09-14 session): scan row = one white primary "Scan pantry" pill
-      + a dark secondary "Scan receipt", no line art, no AI badges; the pantry check becomes a
-      one-line status strip shown only for a gap, plus a second, more useful line — items
-      untouched N weeks, "still have these?" — which needs `pantry_items.created_at` (confirmed
-      to exist) plus a `last_confirmed_at`; the categories become a grouped list with section
-      headers and every item visible (tap = out of stock, swipe = delete), which retires the
-      accordion, the drag-reorder and the count badges. "Other" at 21% of items is a
-      categorisation-quality problem for the scan model, separate from layout.
+- [ ] **BUILT 2026-09-15 (Logan: "go") — the Pantry tab rebuilt to the sketch. UNVERIFIED ON
+      DEVICE.** Scan row = white "Scan pantry" primary + dark "Scan receipt" secondary, no line
+      art, no AI badges. The photo banner is gone; a one-line STATUS STRIP shows only for a gap
+      ("Add a protein source · Add to grocery"). A second strip, "N items untouched for 3+ weeks ·
+      Still have them?", opens a review sheet: Keep (restarts the clock) / Used up (in_stock
+      false) / Keep all. Backed by `pantry_items.last_confirmed_at` (migration `…173237`; a
+      corrective `…173554` backfills from created_at because `default now()` had stamped all 158
+      rows with the migration's moment — CLAUDE.md gotcha added). `lib/pantryAge.ts` (4 tests):
+      age label "2d / 1w / 5w / 3mo", stale = in stock AND 21+ days. Every write that touches an
+      item (toggle, keep, used up) sets last_confirmed_at. The category accordions are a grouped
+      SectionList: coloured-dot section headers (sticky) with counts, every item visible as a row
+      (tap = in/out of stock, swipe = delete, grey age on the right, "Out" tag + strikethrough
+      when out). Retired: DraggableFlatList, the drag-reorder and its device-local order key, the
+      count badges, the scan-card beam animation and SVG, the hero image + gradient, ~55 dead
+      style keys. Section order = the store order the grocery list uses.
+      Tells: (1) the top of the tab is header → strips (if any) → two pills → search → PRODUCE
+      section, with rows visible without a tap; (2) tap a row → dims with "Out", tap again →
+      back; (3) swipe → Delete; (4) with items older than 3 weeks the grey strip appears; tap →
+      the sheet; "Used up" removes it from the sheet and marks the row Out; (5) ages on the right
+      read like "3w", not "today" for everything (the backfill worked: verified in SQL).
+      Still open from the plan: "Other" at 21% of items is a categorisation problem for the scan
+      model, separate from layout; the Pantry tab icon (UtensilsCrossed) still reads as a meal.
 
 ## 6g. RAISED BY LOGAN 2026-09-14 — the food log screen (`components/FoodSearchModal.tsx`, detail step)
 

@@ -1,0 +1,35 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { ageLabel, daysSince, isStale, STALE_AFTER_DAYS } from './pantryAge.ts'
+
+const NOW = Date.parse('2026-09-15T12:00:00Z')
+const ago = (days: number) => new Date(NOW - days * 86_400_000).toISOString()
+
+test('age labels: today, days, weeks, months', () => {
+  assert.equal(ageLabel(ago(0), NOW), 'today')
+  assert.equal(ageLabel(ago(0.5), NOW), 'today')
+  assert.equal(ageLabel(ago(2), NOW), '2d')
+  assert.equal(ageLabel(ago(6), NOW), '6d')
+  assert.equal(ageLabel(ago(7), NOW), '1w')
+  assert.equal(ageLabel(ago(35), NOW), '5w')
+  assert.equal(ageLabel(ago(60), NOW), '2mo')
+  assert.equal(ageLabel(ago(100), NOW), '3mo')
+})
+
+test('stale is 21+ days AND still in stock; out-of-stock items are never nagged about', () => {
+  assert.equal(STALE_AFTER_DAYS, 21)
+  assert.equal(isStale(ago(20), true, NOW), false)
+  assert.equal(isStale(ago(21), true, NOW), true)
+  assert.equal(isStale(ago(90), false, NOW), false)
+})
+
+test('a missing or unparseable date reads as fresh, never as stale', () => {
+  assert.equal(daysSince(null, NOW), 0)
+  assert.equal(daysSince('garbage', NOW), 0)
+  assert.equal(isStale(undefined, true, NOW), false)
+  assert.equal(ageLabel(undefined, NOW), 'today')
+})
+
+test('a future timestamp clamps to today rather than going negative', () => {
+  assert.equal(ageLabel(ago(-3), NOW), 'today')
+})

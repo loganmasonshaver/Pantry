@@ -1,29 +1,24 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
-import DraggableFlatList, { RenderItemParams, ScaleDecorator } from 'react-native-draggable-flatlist'
 import {
   View,
   Text,
   ScrollView,
+  SectionList,
   TouchableOpacity,
   TextInput,
   StyleSheet,
   Modal,
   KeyboardAvoidingView,
   Platform,
-  Image,
-  Animated as RNAnimated,
-  Easing,
   Alert,
   LayoutAnimation,
   Keyboard,
 } from 'react-native'
-import Svg, { G as SvgG, Rect as SvgRect, Line as SvgLine, Path as SvgPath } from 'react-native-svg'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { perfMark } from '@/lib/perf'
-import { Plus, ChevronDown, Check, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Salad, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham, GripVertical, Trash2 } from 'lucide-react-native'
+import { Plus, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
-import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { todayStr } from '@/lib/localDate'
 import { useAuth } from '@/context/AuthContext'
@@ -34,6 +29,7 @@ import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
+import { ageLabel, isStale } from '@/lib/pantryAge'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
@@ -45,6 +41,9 @@ type Ingredient = {
   id: string
   name: string
   inStock: boolean
+  // When it was added or last confirmed still there — the grey age beside the row, and the
+  // stale nudge at 21 days. ISO string; lib/pantryAge does the arithmetic.
+  since: string
 }
 
 type Category = {
@@ -102,105 +101,40 @@ const CATEGORY_CONFIG = STORE_CATEGORIES.map(name => ({
   iconColor: CATEGORY_COLORS[name] ?? '#888888',
 }))
 
-const CATEGORY_ORDER_KEY = 'pantry_category_order' // device-local saved drag order of categories
 const INSIGHT_ROTATION_KEY = 'pantry_insight_rotation' // visit counter → rotates the insight headline (Step D)
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
-// ── Swipeable ingredient row ───────────────────────────────────────────
-
-function IngredientRow({
-  ingredient,
-  onDelete,
-  onToggle,
-}: {
+// ── One ingredient row ─────────────────────────────────────────────────
+//
+// Every item is visible under its section header — the accordions hid the list behind a tap and
+// a count badge, on the tab whose whole job is "what do I have". Tap = in/out of stock, swipe =
+// delete; the age is the grey number on the right, and an out-of-stock row dims with an "Out" tag.
+function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
   ingredient: Ingredient
+  first: boolean
+  last: boolean
   onDelete: () => void
   onToggle: () => void
 }) {
   return (
     <Swipeable
       renderRightActions={() => (
-        <TouchableOpacity style={styles.deleteAction} onPress={onDelete} activeOpacity={0.85}>
+        <TouchableOpacity style={[styles.deleteAction, last && styles.deleteActionLast]} onPress={onDelete} activeOpacity={0.85}>
           <Text style={styles.deleteText}>Delete</Text>
         </TouchableOpacity>
       )}
       friction={2}
       overshootRight={false}
     >
-      <View style={styles.ingredientRow}>
-        <Text style={styles.ingredientName}>{ingredient.name}</Text>
-        {!ingredient.inStock && (
-          <View style={styles.outOfStockPill}>
-            <Text style={styles.outOfStockPillText}>Out</Text>
-          </View>
-        )}
-        <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
-          {ingredient.inStock ? (
-            <View style={styles.checkCircle}>
-              <Check size={12} stroke="#000000" strokeWidth={2.5} />
-            </View>
-          ) : (
-            <View style={styles.outOfStockDot} />
-          )}
-        </TouchableOpacity>
-      </View>
+      {/* Opaque, so the red action stays hidden behind the row until it is swiped open. */}
+      <TouchableOpacity style={[styles.row, first && styles.rowFirst, last && styles.rowLast, !first && styles.rowDivider]} onPress={onToggle} activeOpacity={0.7}>
+        <Text style={[styles.rowName, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Text>
+        {ingredient.inStock
+          ? <Text style={styles.rowAge}>{ageLabel(ingredient.since)}</Text>
+          : <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
+      </TouchableOpacity>
     </Swipeable>
-  )
-}
-
-// ── Category section ───────────────────────────────────────────────────
-
-function CategorySection({
-  category,
-  isExpanded,
-  onToggle,
-  onDelete,
-  onToggleStock,
-  drag,
-}: {
-  category: Category
-  isExpanded: boolean
-  onToggle: () => void
-  onDelete: (id: string) => void
-  onToggleStock: (id: string) => void
-  drag?: () => void
-}) {
-  return (
-    <View>
-      <View style={[styles.categorySection, isExpanded && styles.categorySectionExpanded]}>
-        <TouchableOpacity
-          style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 }}
-          onPress={onToggle}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.categoryIconCircle, { backgroundColor: `${category.iconColor}20` }]}>
-            <category.icon size={18} stroke={category.iconColor} strokeWidth={1.8} />
-          </View>
-          <Text style={styles.categoryName}>{category.name}</Text>
-          <View style={styles.categoryCountPill}>
-            <Text style={[styles.categoryCount, isExpanded && { color: category.iconColor }]}>{category.ingredients.length}</Text>
-          </View>
-        </TouchableOpacity>
-        <TouchableOpacity onPressIn={drag} style={{ padding: 8 }}>
-          <GripVertical size={16} stroke={COLORS.textMuted} strokeWidth={1.5} style={{ opacity: 0.5 }} />
-        </TouchableOpacity>
-      </View>
-
-      {isExpanded && (
-        <View style={styles.ingredientList}>
-          {category.ingredients.map((ing, index) => (
-            <View key={ing.id}>
-              <IngredientRow
-                ingredient={ing}
-                onDelete={() => onDelete(ing.id)}
-                onToggle={() => onToggleStock(ing.id)}
-              />
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
   )
 }
 
@@ -229,7 +163,6 @@ export default function PantryScreen() {
   const { isPremium } = usePremium()
   const [categories, setCategories] = useState<Category[]>([])
   const [loaded, setLoaded] = useState(false) // gate the empty state until the first fetch lands, so "your pantry is empty" doesn't flash before items arrive
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(['protein']))
   const [searchQuery, setSearchQuery] = useState('')
   const [showScanModal, setShowScanModal] = useState(false)
   const [showReceiptModal, setShowReceiptModal] = useState(false)
@@ -240,20 +173,8 @@ export default function PantryScreen() {
   const openScanWithConsent = async () => { if (await requestConsent()) setShowScanModal(true) }
   const openReceiptWithConsent = async () => { if (await requestConsent()) setShowReceiptModal(true) }
 
-  // Sweeping scan-beam animation reused by both scan cards. Single shared Animated
-  // value so both beams stay perfectly in sync — visually reads as one continuous
-  // pulse across the row. Loops indefinitely on mount.
-  const scanCardBeam = useRef(new RNAnimated.Value(0)).current
-  useEffect(() => {
-    const loop = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(scanCardBeam, { toValue: 1, duration: 2200, useNativeDriver: true, easing: Easing.linear }),
-        RNAnimated.timing(scanCardBeam, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
-    )
-    loop.start()
-    return () => loop.stop()
-  }, [])
+  // The stale-items review sheet ("still have these?").
+  const [reviewOpen, setReviewOpen] = useState(false)
   const [showAddModal, setShowAddModal] = useState(false)
   const [newIngredientName, setNewIngredientName] = useState('')
   const [addSaving, setAddSaving] = useState(false)
@@ -325,7 +246,7 @@ export default function PantryScreen() {
     if (!user) return
     const { data } = await supabase
       .from('pantry_items')
-      .select('id, name, category, in_stock')
+      .select('id, name, category, in_stock, created_at, last_confirmed_at')
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
     if (!data) return
@@ -335,7 +256,7 @@ export default function PantryScreen() {
     for (const row of data) {
       const catName = row.category || 'Other'
       if (!grouped.has(catName)) grouped.set(catName, [])
-      grouped.get(catName)!.push({ id: row.id, name: row.name, inStock: row.in_stock })
+      grouped.get(catName)!.push({ id: row.id, name: row.name, inStock: row.in_stock, since: row.last_confirmed_at ?? row.created_at })
     }
 
     // Build ordered category list: config order first, then any unknown
@@ -353,17 +274,9 @@ export default function PantryScreen() {
       }
     }
 
-    // Apply the user's saved drag order if present: saved names first (in saved order),
-    // then anything new that wasn't in the saved order, appended in config order.
-    try {
-      const savedRaw = await AsyncStorage.getItem(CATEGORY_ORDER_KEY)
-      if (savedRaw) {
-        const savedOrder: string[] = JSON.parse(savedRaw)
-        const rank = new Map(savedOrder.map((name, i) => [name, i]))
-        result.sort((a, b) => (rank.get(a.name) ?? 999) - (rank.get(b.name) ?? 999))
-      }
-    } catch {}
-
+    // Section order is the store order the grocery list already uses. The drag-reorder that
+    // used to live here went with the accordions; a device-local order nobody set was one more
+    // way for two screens to disagree.
     setCategories(result)
     setLoaded(true)
   }, [user?.id])
@@ -379,27 +292,32 @@ export default function PantryScreen() {
     }).catch(() => {})
   }, [fetchItems]))
 
-  const toggleSection = (id: string) => {
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  const toggleStock = async (categoryId: string, ingredientId: string) => {
-    const cat = categories.find(c => c.id === categoryId)
-    const ing = cat?.ingredients.find(i => i.id === ingredientId)
-    if (!ing) return
-    const next = !ing.inStock
+  // Either direction is a confirmation: "used up" and "back in stock" both mean the user looked at
+  // the shelf today, so the age resets and the stale nudge lets the item go.
+  const setStock = async (categoryId: string, ingredientId: string, inStock: boolean) => {
+    const now = new Date().toISOString()
     setCategories(prev =>
       prev.map(c =>
         c.id === categoryId
-          ? { ...c, ingredients: c.ingredients.map(i => i.id === ingredientId ? { ...i, inStock: next } : i) }
+          ? { ...c, ingredients: c.ingredients.map(i => i.id === ingredientId ? { ...i, inStock, since: now } : i) }
           : c
       )
     )
-    await supabase.from('pantry_items').update({ in_stock: next }).eq('id', ingredientId)
+    await supabase.from('pantry_items').update({ in_stock: inStock, last_confirmed_at: now }).eq('id', ingredientId)
+  }
+  const toggleStock = (categoryId: string, ingredientId: string) => {
+    const ing = categories.find(c => c.id === categoryId)?.ingredients.find(i => i.id === ingredientId)
+    if (ing) setStock(categoryId, ingredientId, !ing.inStock)
+  }
+  // "Keep" on the review sheet: still there, so the clock restarts; nothing else changes.
+  const confirmItem = async (categoryId: string, ingredientId: string) => setStock(categoryId, ingredientId, true)
+  const keepAll = async () => {
+    if (!user) return
+    const now = new Date().toISOString()
+    const ids = staleItems.map(i => i.id)
+    setCategories(prev => prev.map(c => ({ ...c, ingredients: c.ingredients.map(i => ids.includes(i.id) ? { ...i, since: now } : i) })))
+    setReviewOpen(false)
+    await supabase.from('pantry_items').update({ last_confirmed_at: now }).in('id', ids)
   }
 
   const deleteIngredient = async (categoryId: string, ingredientId: string) => {
@@ -472,13 +390,13 @@ export default function PantryScreen() {
     const { data, error } = await supabase
       .from('pantry_items')
       .insert({ user_id: user.id, name, category, in_stock: true })
-      .select('id, name, category, in_stock')
+      .select('id, name, category, in_stock, created_at, last_confirmed_at')
       .single()
     setAddSaving(false)
     addingRef.current = false
     if (error || !data) return
 
-    const newIng: Ingredient = { id: data.id, name: data.name, inStock: data.in_stock }
+    const newIng: Ingredient = { id: data.id, name: data.name, inStock: data.in_stock, since: data.last_confirmed_at ?? data.created_at ?? new Date().toISOString() }
     setCategories(prev => {
       const existing = prev.find(c => c.name === category)
       if (existing) {
@@ -506,6 +424,10 @@ export default function PantryScreen() {
     : categories
 
   const totalItems = categories.reduce((s, c) => s + c.ingredients.length, 0)
+  // In stock and untouched for 3+ weeks. The pantry could only grow (every write set in_stock
+  // TRUE), so meal generation cooked from ghosts; this is the question that keeps it honest.
+  const staleItems = categories.flatMap(c => c.ingredients.filter(i => isStale(i.since, i.inStock)).map(i => ({ ...i, catId: c.id })))
+  useEffect(() => { if (staleItems.length === 0) setReviewOpen(false) }, [staleItems.length])
 
 
   perfMark('Pantry RENDER')
@@ -528,24 +450,17 @@ export default function PantryScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ── Category sections (draggable) ── */}
-      <DraggableFlatList
-          data={visibleCategories}
-          keyExtractor={(item) => item.id}
-          onDragEnd={({ data }) => {
-            if (!isSearching) {
-              setCategories(data)
-              // Persist the order (device-local — it's a UI preference) so fetchItems can
-              // restore it instead of always re-sorting by CATEGORY_CONFIG on next focus.
-              AsyncStorage.setItem(CATEGORY_ORDER_KEY, JSON.stringify(data.map(c => c.name))).catch(() => {})
-            }
-          }}
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 }}
-          ListEmptyComponent={
-            loaded ? (
+      {/* ── The pantry, as a grouped list ── */}
+      <SectionList
+        sections={visibleCategories.map(c => ({ ...c, data: c.ingredients }))}
+        keyExtractor={(item) => item.id}
+        stickySectionHeadersEnabled
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 }}
+        ListEmptyComponent={
+          loaded ? (
             <View style={styles.emptyStateInline}>
               <View style={styles.emptyIconCircle}>
                 <Camera size={28} stroke="#4ADE80" strokeWidth={1.8} />
@@ -561,212 +476,99 @@ export default function PantryScreen() {
               {!isSearching && (
                 <PressableScale style={styles.emptyScanBtn} haptic onPress={openScanWithConsent}>
                   <ScanLine size={18} stroke="#000" strokeWidth={2.5} />
-                  <Text style={styles.emptyScanBtnText}>Scan Pantry</Text>
+                  <Text style={styles.emptyScanBtnText}>Scan pantry</Text>
                 </PressableScale>
               )}
             </View>
-            ) : null
-          }
-          ListHeaderComponent={
-            <>
-              {/* Hero banner — a personalized "what to stock next" insight (goal + diet aware),
-                  replacing the old item-count "Stock Level" (see lib/pantryProfile). */}
-              {/* Only while there is a GAP to act on. The affirm state — "Dialed in", four ticks —
-                  is terminal: the pantry only grows, so once seen it is seen forever, and it was
-                  filling ~200pt above the categories with a sentence nobody acts on (§6d). */}
-              {pantryInsight.tone !== 'affirm' && (
-              <View style={[styles.heroBanner, { marginHorizontal: 0 }]}>
-                <Image
-                  source={{ uri: 'https://fdafjnkqqtpsjtddbfdz.supabase.co/storage/v1/object/public/ingredient-images/pantry-hero.webp?v=2' }}
-                  style={[styles.heroBannerImage, { opacity: totalItems >= 25 ? 0.6 : totalItems > 0 ? 0.45 : 0.35 }]}
-                  resizeMode="cover"
-                />
-                <LinearGradient colors={['transparent', 'rgba(0,0,0,0.5)', 'rgba(0,0,0,0.9)', '#000000']} locations={[0, 0.4, 0.75, 1]} style={styles.heroBannerGradient} />
-                <View style={styles.heroBannerContent}>
-                  <Text style={styles.heroBannerLabel}>{pantryInsight.tone === 'empty' ? 'GET STARTED' : 'STOCK NEXT'}</Text>
-                  <Text style={styles.heroInsightHeadline} numberOfLines={2}>{pantryInsight.headline}</Text>
-                  {/* Only gap/empty reach here (the guard above), where the detail explains the WHY
-                      and pairs with the CTA. */}
-                  <Text style={styles.heroInsightDetail} numberOfLines={2}>{pantryInsight.detail}</Text>
-                  {/* Pantry Check strip — at-a-glance macro coverage (Step C). ✓ = stocked, ! = gap
-                      for this goal. In the affirm state this IS the content; in gap states it's the
-                      supporting overview under the headline+detail. */}
-                  {pantryInsight.coverage.length > 0 && (
-                    <View style={styles.coverageStrip}>
-                      {pantryInsight.coverage.map(c => (
-                        <View key={c.label} style={[styles.coverageChip, !c.ok && styles.coverageChipWarn]}>
-                          <Text style={[styles.coverageMark, { color: c.ok ? COLORS.macroProtein : COLORS.macroPrep }]}>{c.ok ? '✓' : '!'}</Text>
-                          <Text style={[styles.coverageLabel, !c.ok && styles.coverageLabelWarn]}>{c.label}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                  {pantryInsight.suggestedItems.length > 0 && (
-                    <PressableScale style={styles.heroInsightCta} onPress={addInsightToGrocery} haptic disabled={insightAdded}>
-                      <Text style={styles.heroInsightCtaText}>
-                        {insightAdded ? '✓ Added to grocery' : `Add ${pantryInsight.suggestedItems.join(', ')} to grocery`}
-                      </Text>
-                    </PressableScale>
-                  )}
-                </View>
-              </View>
-              )}
-
-              {/* Scan cards — each card has a compact animated illustration filling
-                  the lower half so the cards aren't visually empty. Both share the
-                  same scanCardBeam loop so the sweeping beams stay in sync. */}
-              <View style={[styles.scanRow, { marginHorizontal: 0 }]}>
-                <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={openScanWithConsent} activeOpacity={0.85}>
-                  <View style={styles.scanCardBadgeAbs}><Text style={styles.scanCardBadgeText}>AI</Text></View>
-                  <View><Text style={styles.scanCardTitle}>Scan Pantry</Text><Text style={styles.scanCardSub}>Auto-detect items</Text></View>
-                  {/* Compact pantry visual: 2 shelves × 3 items, beam sweeps top→bottom */}
-                  <View style={styles.scanCardVisual}>
-                    <Svg width="100%" height="100%" viewBox="0 0 160 70">
-                      {[24, 56].map(y => (
-                        <SvgG key={y}>
-                          <SvgRect x={6} y={y - 1.5} width={148} height={2} fill="rgba(74,222,128,0.18)" />
-                          <SvgLine x1={6} y1={y + 0.5} x2={154} y2={y + 0.5} stroke="#4ADE80" strokeWidth={1} opacity={0.55} />
-                        </SvgG>
-                      ))}
-                      {/* Shelf 1 */}
-                      <SvgG>
-                        <SvgRect x={16} y={6} width={14} height={2.5} rx={0.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.15)" />
-                        <SvgRect x={17} y={8.5} width={12} height={15} rx={1.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
-                        <SvgRect x={18} y={14} width={10} height={6} fill="rgba(0,201,167,0.30)" />
-                      </SvgG>
-                      <SvgG>
-                        <SvgRect x={72} y={6} width={18} height={17} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
-                        <SvgLine x1={74} y1={10} x2={88} y2={10} stroke="#4ADE80" strokeWidth={0.8} opacity={0.5} />
-                        <SvgRect x={74} y={14} width={14} height={3} fill="rgba(0,201,167,0.30)" />
-                      </SvgG>
-                      <SvgG>
-                        <SvgRect x={120} y={8} width={20} height={1.5} rx={0.3} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.2)" />
-                        <SvgRect x={120} y={9.5} width={20} height={14} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
-                        <SvgRect x={120} y={14} width={20} height={5} fill="rgba(0,201,167,0.30)" />
-                      </SvgG>
-                      {/* Shelf 2 */}
-                      <SvgG>
-                        <SvgRect x={16} y={38} width={16} height={2.5} rx={0.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.2)" />
-                        <SvgRect x={17} y={40.5} width={14} height={15} rx={1.5} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
-                        <SvgRect x={17} y={46} width={14} height={7} fill="rgba(0,201,167,0.30)" />
-                      </SvgG>
-                      <SvgG>
-                        <SvgPath d="M 72 56 L 72 41 L 81 38 L 90 41 L 90 56 Z" stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
-                        <SvgRect x={73} y={48} width={16} height={6} fill="rgba(0,201,167,0.30)" />
-                      </SvgG>
-                      <SvgG>
-                        <SvgRect x={118} y={42} width={24} height={14} stroke="#4ADE80" strokeWidth={1} fill="rgba(74,222,128,0.05)" />
-                        <SvgRect x={118} y={47} width={24} height={4} fill="rgba(0,201,167,0.30)" />
-                      </SvgG>
-                    </Svg>
-                    {/* Corner brackets */}
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerTL]} />
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerTR]} />
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerBL]} />
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerBR]} />
-                    {/* Sweeping beam */}
-                    <RNAnimated.View
-                      pointerEvents="none"
-                      style={[
-                        styles.scanCardBeam,
-                        {
-                          transform: [{
-                            translateY: scanCardBeam.interpolate({ inputRange: [0, 1], outputRange: [2, 68] }),
-                          }],
-                        },
-                      ]}
-                    />
-                  </View>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.scanCard, { flex: 1 }]} onPress={openReceiptWithConsent} activeOpacity={0.85}>
-                  <View style={styles.scanCardBadgeAbs}><Text style={styles.scanCardBadgeText}>AI</Text></View>
-                  <View><Text style={styles.scanCardTitle}>Scan Receipt</Text><Text style={styles.scanCardSub}>Import purchases</Text></View>
-                  {/* Compact receipt visual: paper with item lines + price column, beam sweeps */}
-                  <View style={styles.scanCardVisual}>
-                    <Svg width="100%" height="100%" viewBox="0 0 160 70">
-                      {/* Receipt body with serrated bottom edge */}
-                      <SvgPath
-                        d="M 40 4 L 120 4 L 120 60 L 116 56 L 112 60 L 108 56 L 104 60 L 100 56 L 96 60 L 92 56 L 88 60 L 84 56 L 80 60 L 76 56 L 72 60 L 68 56 L 64 60 L 60 56 L 56 60 L 52 56 L 48 60 L 44 56 L 40 60 Z"
-                        stroke="#4ADE80"
-                        strokeWidth={1}
-                        fill="rgba(74,222,128,0.05)"
-                      />
-                      {/* Header line (store name placeholder) */}
-                      <SvgRect x={50} y={10} width={40} height={3} rx={0.5} fill="rgba(74,222,128,0.30)" />
-                      {/* Itemized rows: 5 rows of (item label + price) */}
-                      {[20, 28, 36, 44, 52].map(y => (
-                        <SvgG key={y}>
-                          <SvgRect x={46} y={y} width={32} height={1.5} rx={0.4} fill="rgba(74,222,128,0.22)" />
-                          <SvgRect x={94} y={y} width={20} height={1.5} rx={0.4} fill="rgba(0,201,167,0.30)" />
-                        </SvgG>
-                      ))}
-                    </Svg>
-                    {/* Corner brackets */}
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerTL]} />
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerTR]} />
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerBL]} />
-                    <View style={[styles.scanCardCorner, styles.scanCardCornerBR]} />
-                    {/* Sweeping beam (same value as pantry card → in sync) */}
-                    <RNAnimated.View
-                      pointerEvents="none"
-                      style={[
-                        styles.scanCardBeam,
-                        {
-                          transform: [{
-                            translateY: scanCardBeam.interpolate({ inputRange: [0, 1], outputRange: [2, 68] }),
-                          }],
-                        },
-                      ]}
-                    />
-                  </View>
-                </TouchableOpacity>
-              </View>
-
-              {/* Search bar */}
-              <View style={[styles.searchBar, { marginHorizontal: 0 }]}>
-                <Search size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
-                <TextInput ref={searchRef} style={styles.searchInput} placeholder="Search ingredients..." placeholderTextColor={COLORS.textMuted} value={searchQuery} onChangeText={setSearchQuery} returnKeyType="search" blurOnSubmit />
-                {isSearching && (
-                  <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7}>
-                    <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+          ) : null
+        }
+        ListHeaderComponent={
+          <>
+            {/* Status strips — one line each, only when there is something to ACT on. The photo
+                banner that used to sit here graded the pantry ("Dialed in", four ticks) and took
+                ~200pt to do it; a gap is the only insight worth a line, and it comes with its
+                action. Hidden while searching so the results start at the top. */}
+            {!isSearching && pantryInsight.tone === 'gap' && (
+              <View style={styles.strip}>
+                <View style={[styles.stripDot, { backgroundColor: COLORS.macroPrep }]} />
+                <Text style={styles.stripText} numberOfLines={2}>{pantryInsight.headline}</Text>
+                {pantryInsight.suggestedItems.length > 0 && (
+                  <TouchableOpacity onPress={addInsightToGrocery} disabled={insightAdded} hitSlop={8} activeOpacity={0.7}>
+                    <Text style={styles.stripLink}>{insightAdded ? '✓ Added' : 'Add to grocery'}</Text>
                   </TouchableOpacity>
                 )}
               </View>
-
-              {/* Categories header — only when there are categories */}
-              {visibleCategories.length > 0 && (
-                <View style={styles.categoriesHeader}>
-                  <Text style={styles.categoriesTitle}>Categories</Text>
-                </View>
-              )}
-            </>
-          }
-          ListFooterComponent={
-            totalItems > 0 ? (
-              <View style={styles.footerWrap}>
-                {/* One add control — the ✚ in the header. This row held a second door to the same
-                    sheet, six cards below the first. Clear pantry stays as quiet text: destructive
-                    and irreversible, so it keeps its confirmation and loses its red button. */}
-                <Text style={styles.footerCount}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''}</Text>
-                <TouchableOpacity onPress={clearPantry} activeOpacity={0.7} hitSlop={8}>
-                  <Text style={styles.clearLink}>Clear pantry</Text>
+            )}
+            {/* The check that asks a question instead of grading: items in stock and untouched for
+                three weeks. Answers land on pantry_items.last_confirmed_at / in_stock. */}
+            {!isSearching && staleItems.length > 0 && (
+              <View style={styles.strip}>
+                <View style={[styles.stripDot, { backgroundColor: COLORS.textMuted }]} />
+                <Text style={styles.stripText} numberOfLines={2}>
+                  {staleItems.length} item{staleItems.length === 1 ? '' : 's'} untouched for 3+ weeks
+                </Text>
+                <TouchableOpacity onPress={() => setReviewOpen(true)} hitSlop={8} activeOpacity={0.7}>
+                  <Text style={styles.stripLink}>Still have {staleItems.length === 1 ? 'it' : 'them'}?</Text>
                 </TouchableOpacity>
               </View>
-            ) : null
-          }
-          renderItem={({ item: cat, drag, isActive }: RenderItemParams<Category>) => (
-            <ScaleDecorator>
-              <CategorySection
-                category={cat}
-                isExpanded={isSearching || expandedIds.has(cat.id)}
-                onToggle={() => toggleSection(cat.id)}
-                onDelete={(ingId) => deleteIngredient(cat.id, ingId)}
-                onToggleStock={(ingId) => toggleStock(cat.id, ingId)}
-                drag={drag}
-              />
-            </ScaleDecorator>
-          )}
-        />
+            )}
+
+            {/* Scan row. Two pills, no line art, no "AI" badges: the illustrations existed to fill
+                cards that had nothing to say, and the badge is the tell. Scan pantry is the white
+                primary and wider — it is the acquisition hook; a receipt is the follow-up. */}
+            <View style={styles.scanRow}>
+              <PressableScale style={styles.scanPrimary} haptic onPress={openScanWithConsent}>
+                <ScanLine size={18} stroke="#000000" strokeWidth={2.4} />
+                <Text style={styles.scanPrimaryText}>Scan pantry</Text>
+              </PressableScale>
+              <PressableScale style={styles.scanSecondary} haptic onPress={openReceiptWithConsent}>
+                <Receipt size={17} stroke={COLORS.textWhite} strokeWidth={2} />
+                <Text style={styles.scanSecondaryText}>Scan receipt</Text>
+              </PressableScale>
+            </View>
+
+            {/* Search bar */}
+            <View style={[styles.searchBar, { marginHorizontal: 0 }]}>
+              <Search size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
+              <TextInput ref={searchRef} style={styles.searchInput} placeholder="Search ingredients..." placeholderTextColor={COLORS.textMuted} value={searchQuery} onChangeText={setSearchQuery} returnKeyType="search" blurOnSubmit />
+              {isSearching && (
+                <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7}>
+                  <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
+                </TouchableOpacity>
+              )}
+            </View>
+          </>
+        }
+        ListFooterComponent={
+          totalItems > 0 ? (
+            <View style={styles.footerWrap}>
+              {/* One add control — the ✚ in the header. Clear pantry stays as quiet text: destructive
+                  and irreversible, so it keeps its confirmation and loses its red button. */}
+              <Text style={styles.footerCount}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''}</Text>
+              <TouchableOpacity onPress={clearPantry} activeOpacity={0.7} hitSlop={8}>
+                <Text style={styles.clearLink}>Clear pantry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null
+        }
+        // Sticky, so the section you are in stays named while its rows scroll under it.
+        renderSectionHeader={({ section }) => (
+          <View style={styles.sectionHeader}>
+            <View style={[styles.sectionDot, { backgroundColor: section.iconColor }]} />
+            <Text style={styles.sectionTitle}>{section.name.toUpperCase()}</Text>
+            <Text style={styles.sectionCount}>{section.data.length}</Text>
+          </View>
+        )}
+        renderItem={({ item, index, section }) => (
+          <PantryRow
+            ingredient={item}
+            first={index === 0}
+            last={index === section.data.length - 1}
+            onDelete={() => deleteIngredient(section.id, item.id)}
+            onToggle={() => toggleStock(section.id, item.id)}
+          />
+        )}
+      />
 
       {/* ── Scan Modal ── */}
       <PantryScanModal
@@ -852,12 +654,88 @@ export default function PantryScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* ── "Still have these?" — the stale-items review ── */}
+      <Modal visible={reviewOpen} transparent animationType="slide" onRequestClose={() => setReviewOpen(false)}>
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setReviewOpen(false)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Still have these?</Text>
+              <TouchableOpacity style={styles.modalCloseBtn} onPress={() => setReviewOpen(false)}>
+                <X size={18} stroke={COLORS.textWhite} strokeWidth={2} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.reviewHint}>
+              Untouched for 3+ weeks. Tonight's meals are built from what's here, so a ghost ingredient costs a real recipe.
+            </Text>
+            <ScrollView style={{ maxHeight: 340 }} showsVerticalScrollIndicator={false}>
+              {staleItems.map(i => (
+                <View key={i.id} style={styles.reviewRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.rowName} numberOfLines={1}>{i.name}</Text>
+                    <Text style={styles.rowAge}>{ageLabel(i.since)}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.reviewBtn} onPress={() => setStock(i.catId, i.id, false)} activeOpacity={0.7}>
+                    <Text style={styles.reviewBtnText}>Used up</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.reviewBtn, styles.reviewBtnKeep]} onPress={() => confirmItem(i.catId, i.id)} activeOpacity={0.7}>
+                    <Text style={[styles.reviewBtnText, { color: '#000000' }]}>Keep</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.reviewKeepAll} onPress={keepAll} activeOpacity={0.7}>
+              <Text style={styles.reviewKeepAllText}>Keep all</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
+
+  // Status strips
+  strip: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#141414', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
+  stripDot: { width: 8, height: 8, borderRadius: 4 },
+  stripText: { flex: 1, fontSize: 13, color: COLORS.textWhite },
+  stripLink: { fontSize: 13, fontWeight: '700', color: '#4ADE80' },
+
+  // Scan row
+  scanRow: { flexDirection: 'row', gap: 8, marginTop: 4, marginBottom: 12 },
+  scanPrimary: { flex: 1.6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.textWhite, borderRadius: 30, paddingVertical: 14 },
+  scanPrimaryText: { fontSize: 15, fontWeight: '700', color: '#000000' },
+  scanSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingVertical: 14 },
+  scanSecondaryText: { fontSize: 14, fontWeight: '600', color: COLORS.textWhite },
+
+  // Grouped list
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 16, paddingBottom: 8, paddingHorizontal: 2, backgroundColor: COLORS.background },
+  sectionDot: { width: 8, height: 8, borderRadius: 4 },
+  sectionTitle: { flex: 1, fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2 },
+  sectionCount: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, backgroundColor: '#141414', paddingHorizontal: 14, paddingVertical: 12 },
+  rowFirst: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },
+  rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
+  rowDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  rowName: { flex: 1, fontSize: 15, color: COLORS.textWhite, fontWeight: '500' },
+  rowNameOut: { color: COLORS.textMuted, textDecorationLine: 'line-through' },
+  rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
+  outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  outPillText: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted },
+  deleteActionLast: { borderBottomRightRadius: 14 },
+
+  // Review sheet
+  reviewHint: { fontSize: 13, color: COLORS.textMuted, lineHeight: 18, marginBottom: 12 },
+  reviewRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  reviewBtn: { borderRadius: 30, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: COLORS.cardElevated },
+  reviewBtnKeep: { backgroundColor: '#4ADE80' },
+  reviewBtnText: { fontSize: 13, fontWeight: '700', color: COLORS.textWhite },
+  reviewKeepAll: { alignItems: 'center', paddingVertical: 14, marginTop: 8 },
+  reviewKeepAllText: { fontSize: 14, fontWeight: '600', color: '#4ADE80' },
 
   header: {
     flexDirection: 'row',
@@ -872,223 +750,15 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     backgroundColor: COLORS.cardElevated,
   },
-  manualEntryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: COLORS.textWhite,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  manualEntryText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#000000',
-  },
 
-  heroBanner: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    // Height ADAPTS to content (was a fixed 220): compact for the common affirm state (headline +
-    // chips), taller only when a gap state adds a detail line + CTA. minHeight keeps a photo strip
-    // visible; flex-end anchors the content to the bottom over the darkened part of the image.
-    minHeight: 168,
-    justifyContent: 'flex-end',
-    borderRadius: 24,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  heroBannerImage: {
-    // Absolute so the image doesn't drive the banner's height — the content does.
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-  },
-  heroBannerGradient: {
-    // Full-cover scrim: transparent at the top of the card, solid black at the bottom, so the
-    // content sits on dark regardless of how tall the (adaptive) banner grows.
-    position: 'absolute',
-    top: 0, left: 0, right: 0, bottom: 0,
-  },
-  heroBannerContent: {
-    // In normal flow now (not absolute) so the banner sizes to it. paddingTop leaves a photo strip
-    // visible above the text even when the content is short.
-    paddingHorizontal: 20,
-    paddingTop: 22,
-    paddingBottom: 18,
-  },
-  heroBannerLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#4ADE80',
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-    marginBottom: 5,
-  },
-  heroInsightHeadline: {
-    fontSize: 19,
-    fontWeight: '800',
-    color: COLORS.textWhite,
-    letterSpacing: -0.3,
-    lineHeight: 23,
-    marginBottom: 5,
-  },
-  heroInsightDetail: {
-    fontSize: 12.5,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.72)',
-    lineHeight: 17,
-  },
-  coverageStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7,
-    marginTop: 11,
-  },
-  coverageChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.08)', // subtle glass pill over the hero image
-    borderRadius: 30,
-    paddingVertical: 4.5,
-    paddingHorizontal: 10,
-  },
   // Gap chips get an amber tint + hairline so the eye lands on what's missing; ok chips stay quiet.
-  coverageChipWarn: {
-    backgroundColor: 'rgba(245,158,11,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.4)',
-    paddingHorizontal: 9, // compensate for the added border so warn/ok chips read the same size
-  },
-  coverageMark: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  coverageLabel: {
-    fontSize: 11.5,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.85)',
-  },
-  coverageLabelWarn: {
-    color: '#FDE68A', // warm off-white so the gap label reads a touch brighter than the ok labels
-  },
-  heroInsightCta: {
-    alignSelf: 'flex-start',
-    marginTop: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 30,
-    paddingVertical: 9,
-    paddingHorizontal: 16,
-  },
-  heroInsightCtaText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#000000',
-  },
 
-  scanRow: {
-    flexDirection: 'row',
-    marginHorizontal: 20,
-    marginBottom: 16,
-    gap: 10,
-  },
-  scanCard: {
-    backgroundColor: '#191919',
-    borderRadius: 24,
-    paddingVertical: 13, // slimmed (was 16) — these are daily utility, not hero cards
-    paddingHorizontal: 16,
-    alignItems: 'flex-start',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    position: 'relative',
-  },
-  scanIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: 'rgba(74,222,128,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanCardBadge: {
-    backgroundColor: '#4ADE80',
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
   // Absolute-positioned variant — sits in the top-right corner of the card so
   // we can drop the icon row entirely and let the title start at the top.
-  scanCardBadgeAbs: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: '#4ADE80',
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    zIndex: 1,
-  },
-  scanCardBadgeText: { fontSize: 9, fontWeight: '800', color: '#004a22', letterSpacing: 0.5 },
-  scanCardTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
-  scanCardSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   // Compact animated illustration sitting below the title in each scan card.
   // Mirrors the home-screen hero animation but downsized to fit the card width.
-  scanCardVisual: {
-    width: '100%',
-    height: 50, // slimmed (was 70); SVG viewBox scales to fit, beam animation unaffected
-    marginTop: 4,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  scanCardCorner: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderColor: '#4ADE80',
-  },
-  scanCardCornerTL: { top: 0, left: 0, borderTopWidth: 1.5, borderLeftWidth: 1.5 },
-  scanCardCornerTR: { top: 0, right: 0, borderTopWidth: 1.5, borderRightWidth: 1.5 },
-  scanCardCornerBL: { bottom: 0, left: 0, borderBottomWidth: 1.5, borderLeftWidth: 1.5 },
-  scanCardCornerBR: { bottom: 0, right: 0, borderBottomWidth: 1.5, borderRightWidth: 1.5 },
-  scanCardBeam: {
-    position: 'absolute',
-    left: 2,
-    right: 2,
-    height: 1.5,
-    backgroundColor: '#4ADE80',
-    shadowColor: '#4ADE80',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 5,
-  },
 
   // kept for reference — replaced by scanRow
-  scanHero: {
-    marginHorizontal: 20,
-    marginBottom: 16,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(74, 222, 128, 0.20)',
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    gap: 10,
-  },
-  scanHeroBadge: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    backgroundColor: 'rgba(74, 222, 128, 0.15)',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  scanHeroBadgeText: { fontSize: 11, fontWeight: '600', color: '#4ADE80', letterSpacing: 0.2 },
-  scanHeroTitle: { fontSize: 17, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.3 },
-  scanHeroSubtitle: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center', lineHeight: 19 },
 
   searchBar: {
     flexDirection: 'row',
@@ -1105,92 +775,9 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: 15, color: COLORS.textWhite, padding: 0 },
 
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 40 },
 
-  categoriesHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    marginBottom: 12,
-    paddingHorizontal: 4,
-  },
-  categoriesTitle: { fontSize: 18, fontWeight: '700', color: COLORS.textWhite },
 
-  categorySection: {
-    marginBottom: 8,
-    backgroundColor: '#191919',
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    gap: 12,
-  },
-  categorySectionExpanded: {
-    backgroundColor: COLORS.cardElevated,
-    borderWidth: 1,
-    borderColor: 'rgba(74,222,128,0.15)',
-  },
-  categoryIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#262626',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  categoryName: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
-  categoryCountPill: {
-    backgroundColor: '#262626',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  categoryCount: { fontSize: 12, color: COLORS.textMuted, fontWeight: '700' },
 
-  ingredientList: {
-    marginLeft: 20,
-    paddingLeft: 16,
-    borderLeftWidth: 2,
-    borderLeftColor: '#262626',
-    marginBottom: 8,
-  },
-  ingredientRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    backgroundColor: 'transparent',
-  },
-  ingredientName: { flex: 1, fontSize: 14, color: COLORS.textWhite, fontWeight: '400' },
-  checkCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#4ADE80',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  outOfStockDot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  outOfStockPill: {
-    backgroundColor: 'rgba(74,222,128,0.1)',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginRight: 8,
-  },
-  outOfStockPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#4ADE80',
-  },
-  divider: { height: 1, backgroundColor: 'rgba(255,255,255,0.06)', marginLeft: 16 },
 
   deleteAction: {
     backgroundColor: '#EF4444',
@@ -1200,7 +787,6 @@ const styles = StyleSheet.create({
   },
   deleteText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
 
-  emptyState: { alignItems: 'center', paddingTop: 60, gap: 8 },
   emptyScanBtn: {
     backgroundColor: COLORS.textWhite,
     borderRadius: 30,
@@ -1233,7 +819,6 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 20, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.3 },
   emptySub: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 20, maxWidth: 280 },
 
-  timestamp: { textAlign: 'center', fontSize: 13, color: COLORS.textMuted, fontWeight: '500', marginTop: 24, letterSpacing: 0.3 },
   footerWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4, paddingTop: 18, paddingBottom: 28 },
   footerCount: { fontSize: 13, color: COLORS.textMuted, fontWeight: '500', letterSpacing: 0.3 },
   clearLink: { fontSize: 13, fontWeight: '600', color: '#EF4444' },
