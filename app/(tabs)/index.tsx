@@ -16,7 +16,8 @@ import {
   Keyboard,
 } from 'react-native'
 import Reanimated, { FadeIn, FadeOut, LinearTransition, SlideInRight, SlideInLeft, LayoutAnimationConfig, useSharedValue, useAnimatedProps, withSequence, withTiming, Easing as ReEasing } from 'react-native-reanimated'
-import { LIST_LAYOUT, ROW_EXIT } from '@/lib/motion'
+import { LIST_LAYOUT, ROW_ENTER, ROW_EXIT } from '@/lib/motion'
+import { loggedRecently } from '@/lib/logSignal'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -974,7 +975,9 @@ export default function HomeScreen() {
     const prevTotalCal = calorieMilestoneRef.current
     calorieMilestoneRef.current = newTotalCal
     const goal = calorieGoalRef.current
-    if (!fromCache && prevTotalCal !== null && goal > 0 && prevTotalCal < goal && newTotalCal >= goal) {
+    // loggedRecently: only when a log the user just made caused it. A focus/resume/other-device
+    // refetch can cross the goal too, and a buzz with no touch behind it reads as a glitch.
+    if (!fromCache && prevTotalCal !== null && goal > 0 && prevTotalCal < goal && newTotalCal >= goal && loggedRecently()) {
       haptic.success()
     }
     setSlots(result)
@@ -1082,6 +1085,8 @@ export default function HomeScreen() {
   const [logSlot, setLogSlot] = useState('Breakfast')
   const [logSaving, setLogSaving] = useState(false)
 
+  // The id of the slot the user just added, so only that card gets an entering fade.
+  const justAddedSlotRef = useRef<string | null>(null)
   const confirmAddSlot = () => {
     const trimmed = newSlotName.trim()
     if (!trimmed) return
@@ -1090,7 +1095,10 @@ export default function HomeScreen() {
     if (mealSlotsRef.current.some(l => l.toLowerCase() === trimmed.toLowerCase())) {
       setNewSlotName(''); setShowAddModal(false); return
     }
+    // The new card fades in (ROW_ENTER on the one card whose id this is); the ones below glide.
+    justAddedSlotRef.current = slotId(trimmed)
     saveMealSlots([...mealSlotsRef.current, trimmed])
+    haptic.light() // a small commit: the slot is part of the user's structure now
     setNewSlotName('')
     setShowAddModal(false)
   }
@@ -1242,7 +1250,8 @@ export default function HomeScreen() {
           <TouchableOpacity onPress={goBackDay} activeOpacity={0.6} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
           </TouchableOpacity>
-          <PressableScale scaleTo={0.94} haptic onPress={() => setSelectedDate(todayStr())}>
+          {/* A tick only when it actually moves the view to today — not on a tap that changes nothing. */}
+          <PressableScale scaleTo={0.94} haptic={!isToday} onPress={() => setSelectedDate(todayStr())}>
             <Text style={styles.dayNavText}>
               {isToday ? 'Today' : (() => {
                 const d = new Date(selectedDate + 'T12:00:00')
@@ -1393,10 +1402,10 @@ export default function HomeScreen() {
 
         {/* ── Hero scan-your-pantry card — sits high on screen as the unmissable first action ── */}
         {pantryFetched && pantryNames.size === 0 && (
+          // No haptic: this only opens the scanner. The scan's own capture and results carry them.
           <PressableScale
             style={styles.scanHero}
             scaleTo={0.98}
-            haptic
             onPress={openScanWithConsent}
           >
             {/* Pantry-cabinet illustration in SVG: 3 shelves with visible depth,
@@ -1618,12 +1627,23 @@ export default function HomeScreen() {
                       </View>
                     )
                   }
+                  // Real touchables, not nested `Text onPress`: a nested text link gave no press
+                  // feedback at all, so tapping New picks looked dead until the shimmer arrived.
                   return (
-                    <Text style={[styles.discoverNudgeText, styles.discoverNudge]}>
-                      Not feeling these?{' '}
-                      <Text style={styles.discoverNudgeLink} onPress={regenerate}>New picks</Text>
-                      {nudge === 'redo' ? <> · <Text style={styles.discoverNudgeLink} onPress={goDiscover}>Browse Discover</Text></> : null}
-                    </Text>
+                    <View style={[styles.discoverNudge, styles.discoverNudgeRow]}>
+                      <Text style={styles.discoverNudgeText}>Not feeling these? </Text>
+                      <TouchableOpacity onPress={regenerate} activeOpacity={0.5} hitSlop={8}>
+                        <Text style={[styles.discoverNudgeText, styles.discoverNudgeLink]}>New picks</Text>
+                      </TouchableOpacity>
+                      {nudge === 'redo' ? (
+                        <>
+                          <Text style={styles.discoverNudgeText}> · </Text>
+                          <TouchableOpacity onPress={goDiscover} activeOpacity={0.5} hitSlop={8}>
+                            <Text style={[styles.discoverNudgeText, styles.discoverNudgeLink]}>Browse Discover</Text>
+                          </TouchableOpacity>
+                        </>
+                      ) : null}
+                    </View>
                   )
                 })()}
               </View>
@@ -1678,7 +1698,7 @@ export default function HomeScreen() {
                 // The card's background is on the animated shell, not the touchable: when a row
                 // leaves, the shell's height glides, and a background on an inner view would snap
                 // to the new height while the card around it was still moving.
-                <Reanimated.View key={slot.id} layout={LIST_LAYOUT} exiting={ROW_EXIT} style={styles.mealSlotShell}>
+                <Reanimated.View key={slot.id} layout={LIST_LAYOUT} exiting={ROW_EXIT} entering={slot.id === justAddedSlotRef.current ? ROW_ENTER : undefined} style={styles.mealSlotShell}>
                 <TouchableOpacity style={[styles.mealSlotCard, !hasEntries && styles.mealSlotCardEmpty]} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
                   {/* flex-start, not center: the icon belongs beside the header, and on a four-entry
                       card it used to float beside the second row. */}
@@ -2283,6 +2303,7 @@ const styles = StyleSheet.create({
   pantryRowNeed: { fontSize: 11, color: '#F59E0B', fontWeight: '600' },
   pantryRowBetter: { fontSize: 11, color: COLORS.textMuted, fontWeight: '600' },
   discoverNudge: { marginTop: 4, alignSelf: 'center' },
+  discoverNudgeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' },
   discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
   discoverNudgeLink: { color: '#4ADE80', fontWeight: '700' },
   discoverCapWrap: { marginTop: 6, alignItems: 'center', gap: 10, alignSelf: 'stretch' },

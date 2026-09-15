@@ -1,4 +1,4 @@
-import { Easing, FadeOut, LinearTransition } from 'react-native-reanimated'
+import { Easing, FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
 
 // The app's motion vocabulary, in one place so every list moves the same way. Rules for adding to it
 // are in docs/PLAN-motion.md §2: transform/opacity only, UI thread only, no renders caused by motion.
@@ -14,6 +14,10 @@ export const LIST_LAYOUT = LinearTransition.duration(220).easing(Easing.out(Easi
 
 // The row that leaves. Shorter than the gap-close so it is gone before the neighbours settle.
 export const ROW_EXIT = FadeOut.duration(160)
+
+// A row the USER just added. Only ever passed to that one row — an `entering` on every row would
+// also play on first load, on a day switch and as a virtualized list scrolls rows in.
+export const ROW_ENTER = FadeIn.duration(200)
 
 // A state change shown in place (in/out of stock, checked). A Reanimated CSS transition: the
 // render that flips the state already happens, so the fade costs no extra render and no worklet.
