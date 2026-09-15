@@ -57,7 +57,30 @@ flip: a thin day every 3-4 days since Aug 29. Two mechanisms, both in code, neit
   error by design. Fixed (u flag + `_shared/json-safe.ts` at every jsonb insert, including the
   meals batch, where one such string would have refused a whole day). Verified: row 679. **Read
   `pipeline_runs` before 2026-09-13 20:24 as an incomplete record.**
-- [ ] **PASS = a scheduled 08:00 UTC run stores ≥ 12, two days running (Sep 14 + Sep 15)**, and the
+- [ ] **FAILED 2026-09-14 AND 2026-09-15: both scheduled runs stored 0 and wrote no `pipeline_runs`
+  row.** Found 2026-09-15 17:40 UTC. `cron.job_run_details` said "succeeded" (= request queued);
+  `net._http_response` for Sep 15: `timed_out` at pg_net's default 5 s; the health check read 0
+  (Sep 15) and a gateway timeout (Sep 14). A manual dry run on the same code at 17:47 UTC:
+  **HTTP 504 IDLE_TIMEOUT at exactly 150 s** — the gateway's request limit — no row. Root cause:
+  the attempt loop had no wall budget ("a whole cron run takes ~70s, so five attempts fit
+  easily", the code's own comment) and Gemini now answers in ~45-50 s per call (Sep 13: ~17 s),
+  so five unioned attempts cannot fit. TWO FIXES, both live: migration `20260915174909` keeps the
+  cron's client attached (`timeout_milliseconds` 200 s; health check 30 s) — side effect: the
+  cron's real status/body now lands in `net._http_response` for the first time; and
+  `generate-trending-meals` (commit 2dcea32, DEPLOYED) starts no attempt after 50 s, clamps a
+  call to end by 85 s, and records `attemptsSkippedForTime` in the funnel. **Dry run on the
+  deployed code at 17:54 UTC: HTTP 200 in 59 s, wouldStore 10, llmRaw [19], 1 attempt, 5
+  skipped for time, funnel row 793 written.** So tomorrow's cron will RETURN; how much it stores
+  now depends on Gemini's latency that hour — one attempt gave 10 today. Do not fire manual runs
+  before the 08:00 UTC cron (7 YouTube runs/day; today used 3).
+  **Read the Sep 16 result with the SQL in handoff §1.** PASS is unchanged at ≥ 12 on a scheduled
+  run — but a 200 with ~10 and a funnel row is the plumbing fixed and the yield question back
+  where it was; a 504 or a timed-out row is a new failure. If yield stays under 12 because only
+  one attempt fits, the next single variable is the per-call latency: the provider list already
+  carries OpenAI as the second entry, and a second attempt at 17 s fits where one at 50 s does
+  not — measure `t+ms` in the function logs (dashboard; this session had no logs tool) before
+  touching the budget constants. **Never widen the retention tolerance.**
+- [ ] **PASS = a scheduled 08:00 UTC run stores ≥ 12, two days running (now Sep 16 + Sep 17)**, and the
   daily line reads "Discover: N new recipes, all have photos" in grey. Read `pipeline_runs`
   (`dry_run=false`): `llmRaw`/`llmYields` per attempt, `rejected.dropped`, `ingredientsRecovered`.
   If a thin day recurs, compare KINDS: low `llmRaw` on every attempt is the model, high `dropped`
