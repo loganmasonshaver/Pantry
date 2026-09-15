@@ -17,6 +17,7 @@ import {
 import { X, ChevronDown, Check } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { saveOverride, deleteOverride } from '@/hooks/useMacroOverrides'
+import { haptic } from '@/lib/haptics'
 import { pickDefaultServing, type FoodServing } from '@/lib/fatsecret'
 import {
   applyOverride, pickerUnits, correctionStartAmount, correctionToStore, defaultCorrectionPortion,
@@ -120,6 +121,7 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
     const { error } = await saveOverride(userId, { food_key: foodKey, food_name: foodName, ...nutrients, ...basis })
     setSaving(false)
     if (error) { Alert.alert('Save failed', error); return }
+    haptic.success() // the correction is stored
     onSaved()
     onClose()
   }
@@ -129,6 +131,7 @@ export default function MacroEditModal({ visible, onClose, foodKey, foodName, us
     const { error } = await deleteOverride(userId, foodKey)
     setSaving(false)
     if (error) { Alert.alert('Reset failed', error); return }
+    haptic.success() // back to the original numbers
     onSaved()
     onClose()
   }

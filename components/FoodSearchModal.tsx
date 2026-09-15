@@ -24,6 +24,8 @@ import { COLORS } from '@/constants/colors'
 import { todayStr } from '@/lib/localDate'
 import { supabase } from '@/lib/supabase'
 import { trackMealLogged } from '@/lib/analytics'
+import { haptic } from '@/lib/haptics'
+import { markLogged } from '@/lib/logSignal'
 import { useAuth } from '@/context/AuthContext'
 import {
   searchFoods,
@@ -458,6 +460,11 @@ export default function FoodSearchModal({ visible, slots, defaultSlot, onClose, 
           prot: macros.protein,
         }).then(setRecentFoods).catch(() => {})
       }
+      // success only once the write has landed — this modal had no haptic at all, on the action
+      // people repeat most. markLogged BEFORE onLogged: Home refetches in onLogged and checks it
+      // to decide whether crossing the goal deserves its own tick.
+      haptic.success()
+      markLogged()
       onLogged()
       handleClose()
     } catch (e: any) {

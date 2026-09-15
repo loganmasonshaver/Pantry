@@ -16,6 +16,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { X, ChevronRight } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { supabase } from '@/lib/supabase'
+import { haptic } from '@/lib/haptics'
+import { markLogged } from '@/lib/logSignal'
 import { getFoodById, parseMacros, pickDefaultServing, FoodDetail, FoodServing } from '@/lib/fatsecret'
 
 type Props = {
@@ -105,6 +107,8 @@ export default function EditPortionModal({
 
     setSaving(false)
     if (error) { Alert.alert('Error', error.message); return }
+    haptic.success() // after the update lands, never on a failed save
+    markLogged() // an edited portion can cross the goal; Home treats it as this user's log
     onUpdated(logId, calories, protein, carbs, fat)
     onClose()
   }
