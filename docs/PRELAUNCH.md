@@ -1770,6 +1770,21 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       IS the item. Keeps: scan row, search-as-add, Meat & Fish first, no move on tap, the
       perishable/restock logic. Risk is taste (emoji on black); fallback is one lucide icon per
       AISLE. Est. half a day, $0, no network.
+      **EMOJI RETRACTED the same hour (Logan: "would this make the app feel cheap or off-brand?
+      honest thoughts only" → yes).** The app's identity is moody photography + a monochrome UI;
+      emoji bring Apple's saturated cartoon palette (the aisle-dot problem ×54) and are a
+      utility-app / vibe-coded tell in the sparkles-icon family. Looked at 17 of the 298 bucket
+      photos: whole foods (garlic, lime, pineapple, cauliflower, spinach, rice, salmon, chicken,
+      potato, onion) are excellent and match the meal photography exactly; the failures are the
+      packaged class (olive oil with a gibberish label, cheddar as a cartoon holed block, black
+      beans that read as peppercorns, a cluttered milk still life) — 3–4 of 17. **Revised
+      proposal, awaiting Logan's pick:** ROWS with a 44pt photo thumbnail in Home's square style
+      (swipe/tap/search-as-add all stay; Out = photo grey + struck + tag); whole foods get photos,
+      packaged goods a quiet #1f1f1f placeholder with a low-opacity aisle icon (not emoji);
+      Logan reviews the 298 once from a grid page; on-demand generation re-added WITH auth and a
+      no-packaging/no-label/no-text prompt (~$0.003/image, global cache). Serve thumbnails at a
+      small size — the bucket files are 1024² webp, 50–136 KB each. Tiles-with-photos remains an
+      option but would make Pantry the most image-dense screen in the app.
 - [ ] **DEFERRED, GATED ON LOGAN'S "GO" (2026-09-15) — screen transitions + a small animation and
       haptic on every user action.** Logan: "there might be a chance that adding these transitions
       and haptics will slow down the app and make it feel laggy. I did try this in the past with
