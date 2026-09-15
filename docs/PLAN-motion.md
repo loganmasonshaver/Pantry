@@ -94,6 +94,66 @@ PressableScale, 245 TouchableOpacity (those already dim on press natively and st
 Pantry toggle, add item, review Keep / Used up, grocery check, Log food / Save changes, New picks,
 add to grocery, unsave, Discover save. Filled with PressableScale and `lib/haptics.ts` only.
 
+### Phase 2 audit — PROPOSAL, awaiting Logan's OK (2026-09-15)
+
+Every state-changing action in `app/` and `components/` was inventoried with its current feedback;
+three findings were re-read in code before this proposal relied on them. The pattern: haptics are
+concentrated on openers and deletes, and missing from the commits people do most — logging a food,
+toggling a pantry item, checking a grocery item. Rule 8 decides every row: a haptic marks a commit,
+fires after it succeeds when there is a network result, and never marks opening, navigating or a
+view filter.
+
+**A. Add a haptic** — commits with none today.
+
+| Action | Where | Haptic |
+|---|---|---|
+| Log a food / Save changes | FoodSearchModal | `success`, after the write returns |
+| Mark a pantry item in or out | Pantry | `selection` |
+| Check or uncheck a grocery item | Grocery | `selection` |
+| Stale review: Keep, Used up / Keep all | Pantry sheet | `selection` / `success` |
+| Add an ingredient; inline-add a grocery item; add a meal slot | Pantry, Grocery, Home | `light`, after the insert |
+| Insight "Add to grocery" | Pantry | `light` |
+| Thumbs up / down | Meal detail | `selection` |
+| Update Log; Save or Reset a nutrition correction | EditPortionModal, MacroEditModal | `success` |
+| "Add N items to Pantry" (receipt) / "Add all N to Pantry" (scan) | Scan modals | `success` |
+| Save a goal, pick a diet, log weight | Profile (no haptics today at all) | `success` |
+| Save preferences; save a recipe | food-preferences, RecipeFormModal | `success` |
+| Undo an unsave; undo a staple opt-out | Saved, Meal detail | `light` |
+| Rename a grocery item (commit) | Grocery | `selection` |
+
+**B. Move to after the result.**
+- Meal detail **Save**: today PressableScale's `haptic` ticks on the tap — before the paywall opens
+  for a non-subscriber and before the save RPC, even when it fails. → `success` when the save lands.
+- Saved **Extract Recipe**: ticks before the link check, consent and network. → `success` when
+  the recipe arrives.
+
+**C. Remove** — haptics on things that are not commits.
+- The openers: Scan pantry, Scan receipt, Home's scan hero, Browse trending, Show all recipes.
+- Meal detail **Log Meal** only opens the slot picker, then the pick fires a second haptic. Keep
+  one: the pick, upgraded from `medium` to `success`.
+- **Today** when already on today.
+- Cook reveal's tick on every card change, which also fires on auto-advance with no touch. Keep the
+  peak `success`; tick only when the user swiped.
+- Home's goal-crossed `success` can fire from a background refetch (focus, resume, another device).
+  Fire it only when the crossing follows a log made in this session.
+- **Tab bar tick — Logan's call.** It is navigation, so rule 8 says remove it; Apple's own tab bars
+  do not tick. It has been there since July, so it stays unless Logan says otherwise.
+
+**D. Add a visual** — the only three with no response at all.
+- **New picks** is a nested `Text onPress`: no dim, nothing until the shimmer. → a touchable with the
+  standard dim.
+- A row the user adds appears in one frame: Grocery inline add, a new meal slot. → `FadeIn` entering,
+  with the list's first load skipped (`LayoutAnimationConfig skipEntering` mounted with the first
+  data). **Not Pantry:** in a virtualized SectionList an entering fade replays as rows scroll in.
+- Grocery rename commit: the `selection` haptic in A is enough.
+
+**E. Leave as they are.** Filter chips, search, servings stepper, Measured/Eyeball, unit pickers
+(view state, not commits: spring or dim only). Alert-driven flows (sign out, delete account, restore
+purchases): the system alert is the feedback.
+
+Cost: haptics are single native calls with no render; D's two fades follow §2. About 30 call sites,
+one commit per screen, measured like Phase 1.
+
 **Phase 3 — Swipe rows on the UI thread.** The legacy `Swipeable` (Home log rows, Pantry rows) is
 deprecated and built on the old Animated API. `ReanimatedSwipeable` ships in the installed
 gesture-handler as a documented drop-in, with small behaviour differences in `renderRightActions`.
