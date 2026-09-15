@@ -218,14 +218,14 @@ export default function CookReveal() {
     return () => clearTimeout(t)
   }, [activeIndex, revealed.length, reduceMotion, gateOpen, nextImageReady])
 
-  // Each NEW card gets its own small reward: a light tap plus a glow swell that settles back to
-  // ambient. Deliberately quieter than the peak's Success notification + full bloom, so cards 2-3
-  // feel like beats of the same moment rather than competing with it — but they're no longer
-  // anticlimactic after card 1.
+  // Each NEW card gets its own small reward: a glow swell that settles back to ambient, and a light
+  // tap when the USER moved the deck (swipe or dot). Auto-advance changes cards with nobody
+  // touching the phone, and a buzz with no touch behind it reads as a glitch — the glow alone carries
+  // those. Still quieter than the peak's Success notification + full bloom.
   useEffect(() => {
     if (activeIndex === prevActive.current) return
     prevActive.current = activeIndex
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    if (userTookOver.current) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
     if (!gateOpen || reduceMotion) return
     Animated.sequence([
       Animated.timing(glowAnim, { toValue: 0.75, duration: 220, useNativeDriver: true }),
