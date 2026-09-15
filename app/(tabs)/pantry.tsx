@@ -260,6 +260,7 @@ export default function PantryScreen() {
   const addInsightToGrocery = async () => {
     if (!user || pantryInsight.suggestedItems.length === 0 || insightAdded) return
     setInsightAdded(true) // optimistic; the banner will re-evaluate on next pantry change
+    haptic.light() // the link's text flips to "Added" at the same moment
     const rows = await Promise.all(pantryInsight.suggestedItems.map(async name => ({
       user_id: user.id, name, category: await categorizeItem(name), checked: false,
     })))
@@ -327,6 +328,9 @@ export default function PantryScreen() {
   // the shelf today, so the age resets and the stale nudge lets the item go.
   const setStock = async (categoryId: string, ingredientId: string, inStock: boolean) => {
     const now = new Date().toISOString()
+    // selection: the lightest tick, for a two-state flip. Covers the row tap and the review sheet's
+    // Keep / Used up, which all land here.
+    haptic.selection()
     // The row stays where it is and fades to its new state (STATE_FADE in PantryRow). It sinks to
     // the bottom of its aisle on the next load — see fetchItems.
     setCategories(prev =>
@@ -349,6 +353,7 @@ export default function PantryScreen() {
     const now = new Date().toISOString()
     const ids = staleItems.map(i => i.id)
     setCategories(prev => prev.map(c => ({ ...c, ingredients: c.ingredients.map(i => ids.includes(i.id) ? { ...i, since: now } : i) })))
+    haptic.success() // finishes the whole review in one tap
     setReviewOpen(false)
     await supabase.from('pantry_items').update({ last_confirmed_at: now }).in('id', ids)
   }
@@ -423,6 +428,7 @@ export default function PantryScreen() {
     setAddSaving(false)
     addingRef.current = false
     if (error || !data) return
+    haptic.light() // after the insert, so a failed add never ticks
 
     const newIng: Ingredient = { id: data.id, name: data.name, inStock: data.in_stock, since: data.last_confirmed_at ?? data.created_at ?? new Date().toISOString() }
     setCategories(prev => {
@@ -502,7 +508,7 @@ export default function PantryScreen() {
               </View>
               <Text style={styles.emptyTitle}>Your pantry is empty</Text>
               <Text style={styles.emptySub}>Scan a shelf or your fridge and we'll fill this in for you.</Text>
-              <PressableScale style={styles.emptyScanBtn} haptic onPress={openScanWithConsent}>
+              <PressableScale style={styles.emptyScanBtn} onPress={openScanWithConsent}>
                 <ScanLine size={18} stroke="#000" strokeWidth={2.5} />
                 <Text style={styles.emptyScanBtnText}>Scan pantry</Text>
               </PressableScale>
@@ -517,11 +523,12 @@ export default function PantryScreen() {
                 also the one bright shape above the list, which is why everything else up here is
                 a field or a line of text. */}
             <View style={styles.scanRow}>
-              <PressableScale style={styles.scanPrimary} haptic onPress={openScanWithConsent}>
+              {/* No haptics on these: they only open a scanner. Capture and results carry the feedback. */}
+              <PressableScale style={styles.scanPrimary} onPress={openScanWithConsent}>
                 <ScanLine size={18} stroke="#000000" strokeWidth={2.4} />
                 <Text style={styles.scanPrimaryText}>Scan pantry</Text>
               </PressableScale>
-              <PressableScale style={styles.scanSecondary} haptic onPress={openReceiptWithConsent}>
+              <PressableScale style={styles.scanSecondary} onPress={openReceiptWithConsent}>
                 <Receipt size={17} stroke={COLORS.textWhite} strokeWidth={2} />
                 <Text style={styles.scanSecondaryText}>Scan receipt</Text>
               </PressableScale>
