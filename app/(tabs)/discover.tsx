@@ -14,6 +14,7 @@ import {
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter, useFocusEffect } from 'expo-router'
+import { useIsFocused } from '@react-navigation/native'
 import { Flame, Compass, Utensils, Plus, Search, X } from 'lucide-react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
@@ -598,6 +599,10 @@ export default function DiscoverScreen() {
   const pendingFeedRef = useRef<DiscoverMeal[] | null>(null)
   // True while the blur was caused by pushing a meal detail rather than by leaving the tab.
   const detailPushRef = useRef(false)
+  // Whether a fresh pool may be applied right now or has to be parked — see fetchTrending. The tab
+  // is on screen, or the reader is inside one of its recipes and will come back to this layout.
+  const onScreenRef = useRef(false)
+  const awayOnDetailRef = useRef(false)
   const TRENDING_TTL_MS = 5 * 60 * 1000
 
   // Instant paint from the cache — but only if it was written TODAY. readDiscoverCache enforces
@@ -643,7 +648,12 @@ export default function DiscoverScreen() {
     // and the image prefetch are still written immediately below, so nothing is lost if the app
     // dies first. When there is nothing on screen yet (no cache, or a new day) it applies at once —
     // otherwise the screen would sit on a skeleton waiting for a swap that never comes.
-    if (hasContentRef.current) {
+    //
+    // It also applies at once when NOBODY IS LOOKING: the tab is mounted but not on screen and the
+    // reader is not inside one of its recipes. Parking there waited for a blur that had already
+    // happened, so an app resumed the next morning opened Discover on yesterday's feed. The tab is
+    // now preloaded at launch (tabs _layout), which makes that the common case, not an edge.
+    if (hasContentRef.current && (onScreenRef.current || awayOnDetailRef.current)) {
       pendingFeedRef.current = mapped
     } else {
       setTrending(mapped)
@@ -660,12 +670,15 @@ export default function DiscoverScreen() {
   // double-fetch on cold load. This single hook covers both — plus it re-syncs
   // creator-recipe edits and overnight cron runs without a manual reload.
   useFocusEffect(useCallback(() => {
+    onScreenRef.current = true
     fetchTrending()
     // Cleanup = blur. Applying the parked pool here means the re-shelve happens on a screen nobody
     // is looking at, and the next focus renders the full pool with no visible movement.
     return () => {
+      onScreenRef.current = false
       // Held back on a detail push — the pool stays parked and applies on a real tab change instead.
-      if (detailPushRef.current) { detailPushRef.current = false; return }
+      if (detailPushRef.current) { detailPushRef.current = false; awayOnDetailRef.current = true; return }
+      awayOnDetailRef.current = false
       if (pendingFeedRef.current) { setTrending(pendingFeedRef.current); pendingFeedRef.current = null }
     }
   }, [fetchTrending]))
@@ -779,8 +792,11 @@ export default function DiscoverScreen() {
 
   // Record the pick, once per day. Kept out of the memo so the memo stays pure; the guard below is
   // what stops it looping, since writing heroStore re-runs the memo that produced `featured`.
+  // Only while the tab is ON SCREEN: it is preloaded in the background at launch, and recording on
+  // that invisible paint would mark a dish "served" on days the reader never opened Discover.
+  const isFocused = useIsFocused()
   useEffect(() => {
-    if (!featured || heroStore === undefined) return
+    if (!featured || heroStore === undefined || !isFocused) return
     // Only the ALL feed picks the day's hero. A chip's hero is a VIEW of that filter, not a choice:
     // recording it overwrote today's pick and marked it seen, so Breakfast -> Lunch -> All came back
     // to a different dish (the Skillet became the Chilli Oil pasta). Chips still show their own best
@@ -795,7 +811,7 @@ export default function DiscoverScreen() {
     }
     setHeroStore(next)
     writeHeroPick(next)
-  }, [featured, heroStore, activeFilter])
+  }, [featured, heroStore, activeFilter, isFocused])
   // The rail is a CURATED shelf, not the whole browsing surface — that distinction is why the tab
   // felt empty. With ~110 meals retained, a single 8-item rail meant ~90% of the pool was
   // unreachable. The rail stays tight (10, protein-varied) and everything else drops into the

@@ -1,4 +1,4 @@
-import { Tabs } from 'expo-router'
+import { Tabs, router } from 'expo-router'
 import { useEffect } from 'react'
 import { View, StyleSheet, AppState } from 'react-native'
 import * as Haptics from 'expo-haptics'
@@ -18,6 +18,11 @@ import {
 // selectionAsync is the lightest haptic and is meant for exactly this kind of change;
 // never fire heavier impacts (or anything on scroll) from a tab bar or it becomes noise.
 const tabPressHaptic = { tabPress: () => { Haptics.selectionAsync() } }
+
+// How long after the feed prefetch lands before Discover's screen is preloaded. Home's cold start
+// (cache hydration, today's log, the meal cards' photos) owns the first seconds; this keeps the
+// preload's disk reads and shelving out of them.
+const DISCOVER_PRELOAD_DELAY_MS = 2500
 
 type TabIconProps = {
   Icon: React.ElementType
@@ -50,7 +55,25 @@ export default function TabLayout() {
   // is the exact case where the cached day is stale.
   useEffect(() => {
     if (!user) return
-    prefetchDiscover(user.id)
+    let cancelled = false
+    let delay: ReturnType<typeof setTimeout> | null = null
+    let idle: number | null = null
+    // The warm cache alone still left the SCREEN cold: a lazy tab mounts on the tap, so its disk
+    // reads, the shelving of the whole pool and the first photos all ran behind a skeleton the
+    // moment Logan opened it ("doesn't start loading till I click on the tab"). So once the feed is
+    // on disk, the Discover screen is PRELOADED — rendered in the background, detached like any
+    // visited tab (animation stays 'none'), and finished by the time anyone taps Compass.
+    // Ordered after prefetchDiscover so it hydrates today's feed rather than a stale-day miss, then
+    // held back until Home has had the launch to itself and the JS thread is idle.
+    prefetchDiscover(user.id).then(() => {
+      if (cancelled) return
+      delay = setTimeout(() => {
+        idle = requestIdleCallback(
+          () => { if (!cancelled) router.prefetch('/(tabs)/discover') },
+          { timeout: 3000 }, // an idle callback alone can wait forever on a busy thread
+        )
+      }, DISCOVER_PRELOAD_DELAY_MS)
+    })
     // Home's meal generation was gated on Home's OWN pantry read, so nothing could start until
     // that screen had mounted, rendered and completed a round trip. Starting the same read here —
     // where the tab bar mounts, before any screen does — takes that hop off the critical path.
@@ -58,7 +81,12 @@ export default function TabLayout() {
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') prefetchDiscover(user.id)
     })
-    return () => sub.remove()
+    return () => {
+      cancelled = true
+      sub.remove()
+      if (delay) clearTimeout(delay)
+      if (idle !== null) cancelIdleCallback(idle)
+    }
   }, [user])
 
   return (
