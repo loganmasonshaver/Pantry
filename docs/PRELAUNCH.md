@@ -1811,7 +1811,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
   - [ ] Phase 4 — screen transitions: consistency audit only; tabs stay instant
   - [ ] Phase 5 — onboarding animations, only if Phase 0 shows hitches there
 - [ ] **RAISED BY LOGAN 2026-09-15 — Discover does not start loading until its tab is tapped, and the
-      skeleton "looks glitchy/bad" until it does. ASSESSED, FIX PROPOSED, AWAITING "GO".** Cause: the
+      skeleton "looks glitchy/bad" until it does. BUILT 2026-09-15 (`abcaba8`, Logan: "ok build after phase 2"), NOT YET ON THE PHONE — installs after the Phase 2 walkthrough.** Also fixed on the way: a pool fetched while Discover was not on screen was parked until a blur that had already happened, so a next-morning resume opened on yesterday's feed. Cause: the
       DATA is already warm — the tab layout's `prefetchDiscover` writes today's feed to disk at launch
       — but the SCREEN is a lazy tab, so nothing mounts until the tap. Then, on the tap: two
       sequential disk reads (personalisation, then the ~400 KB feed), JSON parse, shelving the whole
