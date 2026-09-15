@@ -19,6 +19,7 @@ import { COLORS } from '@/constants/colors'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { trackFoodPreferencesUpdated } from '../lib/analytics'
+import { haptic } from '../lib/haptics'
 
 const TEAL = '#00C9A7'
 
@@ -179,6 +180,7 @@ export default function FoodPreferencesScreen() {
       Alert.alert('Save Failed', error.message)
       return
     }
+    haptic.success() // saved; the screen closes on the same beat
     trackFoodPreferencesUpdated(allDislikes.length)
     router.back()
   }

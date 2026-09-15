@@ -22,6 +22,7 @@ import { useKeyboardVisible } from '@/hooks/useKeyboardVisible'
 import { useAIConsent } from '@/context/AIConsentContext'
 import { trackAIError } from '@/lib/analytics'
 import { edgeErrorInfo } from '@/lib/edgeError'
+import { haptic } from '@/lib/haptics'
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -221,6 +222,7 @@ export default function RecipeFormModal({ visible, onClose, onSaved, editMeal }:
         const { error } = await supabase.from('saved_meals').insert(payload)
         if (error) throw error
       }
+      haptic.success() // after insert or update — a thrown error skips it
       onSaved()
       onClose()
     } catch (e: any) {

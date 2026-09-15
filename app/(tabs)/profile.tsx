@@ -32,6 +32,7 @@ import { useSuperwall, useUser } from 'expo-superwall'
 import { usePremium } from '@/context/SuperwallContext'
 import { trackWeightLogged } from '@/lib/analytics'
 import { trackGoalsCustomized } from '@/lib/engagement'
+import { haptic } from '@/lib/haptics'
 
 const { width } = Dimensions.get('window')
 
@@ -604,6 +605,7 @@ export default function ProfileScreen() {
     const { error } = await supabase.from('profiles').update({ [editGoal.field]: num }).eq('id', user.id)
     if (error) { Alert.alert('Save failed', error.message); return }
     // Only after the write succeeded — a failed save is not a customised goal.
+    haptic.success() // Profile had no haptics at all; a goal change is the screen's main commit
     trackGoalsCustomized(user.id)
     setProfile(p => p ? { ...p, [editGoal.field]: num } : p)
     // Calorie/protein/meals/prep all size meal generation — drop the cached daily meals so
@@ -676,7 +678,11 @@ export default function ProfileScreen() {
   const [showDietTypeModal, setShowDietTypeModal] = useState(false)
   const saveDietType = async (value: string) => {
     if (!user) return
-    await supabase.from('profiles').update({ diet_type: value }).eq('id', user.id)
+    // Read the error, like saveGoal: supabase-js RETURNS a refused write, so this used to update the
+    // screen (and now would tick) for a diet the database never stored.
+    const { error } = await supabase.from('profiles').update({ diet_type: value }).eq('id', user.id)
+    if (error) { Alert.alert('Save failed', error.message); return }
+    haptic.success()
     setProfile(p => p ? { ...p, diet_type: value } : p)
     // Diet shapes what meals we suggest — drop the daily cache so the change takes
     // effect immediately instead of after the next midnight rollover.
@@ -933,7 +939,7 @@ export default function ProfileScreen() {
         const { error } = await supabase
           .from('weight_logs')
           .insert({ user_id: user!.id, weight_kg: kg })
-        if (!error) { fetchWeightLogs(); trackWeightLogged(kg) }
+        if (!error) { haptic.success(); fetchWeightLogs(); trackWeightLogged(kg) }
       },
       'plain-text',
       currentWeightLbs ? `${currentWeightLbs}` : '',
