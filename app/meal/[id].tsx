@@ -12,9 +12,10 @@ import {
   Animated,
   Linking,
 } from 'react-native'
+import { haptic } from '@/lib/haptics'
+import { markLogged } from '@/lib/logSignal'
 let Haptics: any = null
 try { Haptics = require('expo-haptics') } catch {}
-const hapticImpact = () => Haptics?.impactAsync?.(Haptics?.ImpactFeedbackStyle?.Medium).catch?.(() => {})
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft, Utensils, Clock, Pencil, Check, X, ShoppingCart, ThumbsUp, ThumbsDown, User, Instagram, Youtube, Plus, Minus } from 'lucide-react-native'
@@ -191,6 +192,7 @@ export default function MealDetailScreen() {
     if (!user || !stapleUndo) return
     if (stapleUndoTimer.current) clearTimeout(stapleUndoTimer.current)
     const { norm } = stapleUndo
+    haptic.light() // the basic is back on the assumed list
     setExcludedStaples(prev => { const n = new Set(prev); n.delete(norm); return n })
     const nextManual = manualExcludedRef.current.filter(s => s !== norm)
     manualExcludedRef.current = nextManual
@@ -222,6 +224,7 @@ export default function MealDetailScreen() {
     const prev = userRating
     // Tapping the same rating again clears it (toggle behavior).
     const next = prev === rating ? null : rating
+    haptic.selection() // up, down or cleared — each is a change of the user's opinion
     setUserRating(next)
     if (next === null) {
       await supabase.from('meal_ratings').delete()
@@ -550,6 +553,9 @@ export default function MealDetailScreen() {
     if (error) {
       Alert.alert('Error', error.message)
     } else {
+      // The tick marks the save LANDING. It used to fire on the tap — before the paywall opened
+      // for a non-subscriber and before this RPC, even when it failed.
+      haptic.success()
       setSaved(true)
       trackMealSaved(meal!.name, meal!.calories, meal!.protein)
       // Analytics (PostHog) and ENGAGEMENT (profiles counter + Loops) are different systems and
@@ -614,6 +620,8 @@ export default function MealDetailScreen() {
     if (error) {
       Alert.alert('Error', error.message)
     } else {
+      haptic.success() // the one haptic for logging: Log Meal only opened this picker
+      markLogged() // lets Home's goal-crossed tick fire for this log when it refetches
       setLogged(true)
       trackMealLogged(slot, meal.calories, meal.protein, {
         source: source as any, shelfKey, position: position !== undefined ? parseInt(position, 10) : undefined,
@@ -1115,7 +1123,6 @@ export default function MealDetailScreen() {
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <PressableScale
             style={[styles.logButton, (logged || logging) && styles.logButtonDone]}
-            haptic
             onPress={handleLog}
             disabled={logged || logging}
           >
@@ -1129,7 +1136,6 @@ export default function MealDetailScreen() {
           </PressableScale>
           <PressableScale
             style={[styles.saveButton, (saved || saving) && styles.saveButtonDone]}
-            haptic
             onPress={handleSave}
             disabled={saved || saving}
           >
@@ -1158,7 +1164,6 @@ export default function MealDetailScreen() {
                   key={slot}
                   style={styles.slotOptionBtn}
                   onPress={() => {
-                    hapticImpact()
                     setShowSlotPicker(false)
                     logToSlot(slot)
                   }}
