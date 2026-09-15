@@ -1838,6 +1838,16 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       Next: a Release-visible marker (os_signpost or a timestamp written to AsyncStorage) at auth
       resolved / Home mounted / splash hidden, then 10 first-launches-after-install per build.
       Evidence kept: `~/pantry-traces/phase1-20260915-151815.trace`.
+      **REPRODUCED 2026-09-15 16:1x on the Phase 2 Release build: its FIRST launch after install,
+      launched by xctrace with nobody touching the phone, stuck the same way — 2 UI commits, none
+      after 2 s, foreground and active.** Two new builds, two stuck first launches; ~13 later launches
+      all fine. So the pattern is "first launch after installing a build", which is exactly what every
+      App Store install and update is. Likely NOT Phase 1/2 code (it gates on auth/onboarding
+      resolution, untouched), but unproven. Promoted from curiosity to launch-risk. Cheap repro
+      without a rebuild: `xcrun devicectl device install app --device <udid> <DerivedData>/Release-iphoneos/Pantry.app`,
+      then a traced launch — reinstalling resets the "first launch" state. Do the instrumented
+      investigation AFTER Logan's Phase 2 walkthrough, because a reinstall would put his walkthrough
+      back on a first launch.
 - [ ] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
       today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
       Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
