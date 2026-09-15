@@ -1623,9 +1623,9 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
 - [ ] **Scan-card placement.** Probably state-gated rather than fixed — an empty pantry has nothing
       else to show and scan IS the content; a stocked one should not be pitched a feature it has
       already adopted. Logan pushed back on demoting scan and that pushback is recorded.
-- [ ] **Scan Pantry card illustration** — the line drawing does not read as a shelf with food on it.
-      Same root problem as the category icons: line art asked to carry meaning at a size where it
-      reads as abstract shapes.
+- [x] **Scan Pantry card illustration — GONE 2026-09-15 with the rebuild.** The scan row is two
+      pills with an icon each, no art. (Was: the line drawing did not read as a shelf with food on
+      it — line art asked to carry meaning at a size where it reads as abstract shapes.)
 
 ---
 - [ ] **BUILT 2026-09-14 (Logan: "do your rec for the redo button") — ↻ moved out of the header,
@@ -1664,7 +1664,41 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       back; (3) swipe → Delete; (4) with items older than 3 weeks the grey strip appears; tap →
       the sheet; "Used up" removes it from the sheet and marks the row Out; (5) ages on the right
       read like "3w", not "today" for everything (the backfill worked: verified in SQL).
-      Still open from the plan: the Pantry tab icon (UtensilsCrossed) still reads as a meal.
+      **Superseded in part by the second pass below** (the strips, the ✚, the dots, the
+      strikethrough, the every-row age and the tab icon all changed the same day) — verify the
+      second pass's tells, which cover this item's mechanics too.
+- [ ] **BUILT 2026-09-15 (Logan sent a screenshot of the rebuild, asked for "more premium, less
+      cluttery, easy to understand and operate", then "ok do all") — Pantry tab, second pass.
+      UNVERIFIED ON DEVICE.** The diagnosis from the screenshot: the list was fine; the top third
+      was four full-width cards of equal weight (segmented control + ✚, stale strip, scan row,
+      bordered search card) before the first ingredient at ~36% of the screen, three add paths,
+      and "7w" on every one of 54 rows. Changes, all in `app/(tabs)/pantry.tsx` plus one line in
+      `app/(tabs)/_layout.tsx`: (a) the ✚ is gone — search doubles as manual add (placeholder
+      "Search or add…"; a typed name with no exact match puts an `Add "kimchi"` row under the
+      results, which opens the existing add sheet with the name prefilled; a partial match like
+      "Kimchi Paste" still offers it); (b) search is a 38pt filled field, no border, not a card;
+      (c) the strips are one-line grey text notices with no background, directly above the list
+      they describe ("54 items untouched for 3+ weeks · Review", "Add a protein source · Add to
+      grocery"), the whole line the tap target; (d) scan pills 2pt shorter, otherwise untouched —
+      the one bright shape above the list, deliberately; (e) the age shows ONLY on stale rows
+      (3+ weeks) — one scan stamps one date on every row, so a fresh pantry said "7w" fifty
+      times; (f) Out rows are dimmed + "Out" tag, no strikethrough (that is "done" on iOS), and
+      sink to the bottom of their section on LOAD, never on the tap; (g) dividers inset to the
+      text edge; (h) row name 15 → 16; (i) section-header colour dots gone, count a step dimmer
+      than the title (Grocery never had dots, so nothing drifts); (j) tab icon UtensilsCrossed →
+      Refrigerator (lucide 0.577 has it). Green now appears once above the tab bar, on "Review".
+      Rejected on the way: Reminders-style circles on every row (54 green ticks), demoting scan
+      (Logan's recorded pushback), sorting Out rows on the tap (jumps under the finger). Gates:
+      tests 654, tsc 135/16 unchanged, the 8081 bundle serves the markers.
+      Tells: (1) the header is the segmented control alone, then scan, search, a grey notice line,
+      then PRODUCE — the first row sits noticeably higher than in the screenshot; (2) fresh rows
+      show NOTHING on the right, stale ones "7w"; Review → Keep on one → its "7w" disappears from
+      the list; (3) type "kimchi" → an `Add "kimchi"` row under any partial matches → tap → the
+      sheet opens with the name filled → Add → the row lands in its section and the Add row is
+      gone; (4) Chicken Salad (Out) sits at the BOTTOM of Meat & Fish on open; tapping a row Out
+      leaves it in place; (5) the Pantry tab shows a fridge; (6) the "Out" name is grey, not
+      struck through. Judge on device: a right column that is empty on every fresh row — if it
+      feels too blank, the fallback is the age at 11pt in a dimmer grey, not removal.
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was

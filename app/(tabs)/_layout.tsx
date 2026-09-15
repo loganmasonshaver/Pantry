@@ -8,7 +8,7 @@ import { prefetchDiscover } from '@/lib/discoverFeed'
 import { prefetchPantryNames } from '@/lib/pantryPrefetch'
 import {
   Home,
-  UtensilsCrossed,
+  Refrigerator,
   Compass,
   Bookmark,
   User,
@@ -91,7 +91,7 @@ export default function TabLayout() {
         listeners={tabPressHaptic}
         options={{
           tabBarIcon: ({ focused }) => (
-            <TabIcon Icon={UtensilsCrossed} focused={focused} />
+            <TabIcon Icon={Refrigerator} focused={focused} />
           ),
         }}
       />

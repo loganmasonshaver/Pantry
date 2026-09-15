@@ -109,7 +109,8 @@ const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id, 
 //
 // Every item is visible under its section header — the accordions hid the list behind a tap and
 // a count badge, on the tab whose whole job is "what do I have". Tap = in/out of stock, swipe =
-// delete; the age is the grey number on the right, and an out-of-stock row dims with an "Out" tag.
+// delete; a STALE row carries its grey age on the right, and an out-of-stock row dims with an
+// "Out" tag.
 function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
   ingredient: Ingredient
   first: boolean
@@ -128,10 +129,14 @@ function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
       overshootRight={false}
     >
       {/* Opaque, so the red action stays hidden behind the row until it is swiped open. */}
-      <TouchableOpacity style={[styles.row, first && styles.rowFirst, last && styles.rowLast, !first && styles.rowDivider]} onPress={onToggle} activeOpacity={0.7}>
+      <TouchableOpacity style={[styles.row, first && styles.rowFirst, last && styles.rowLast]} onPress={onToggle} activeOpacity={0.7}>
+        {/* Inset hairline, the iOS grouped-list divider: starts at the text, not the card edge. */}
+        {!first && <View style={styles.rowHairline} pointerEvents="none" />}
         <Text style={[styles.rowName, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Text>
+        {/* The age shows only once it matters. One scan stamps one date on every row, so a fresh
+            pantry read "7w" fifty times and said nothing; Keep on the review sheet clears it. */}
         {ingredient.inStock
-          ? <Text style={styles.rowAge}>{ageLabel(ingredient.since)}</Text>
+          ? (isStale(ingredient.since, ingredient.inStock) ? <Text style={styles.rowAge}>{ageLabel(ingredient.since)}</Text> : null)
           : <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
       </TouchableOpacity>
     </Swipeable>
@@ -258,6 +263,10 @@ export default function PantryScreen() {
       if (!grouped.has(catName)) grouped.set(catName, [])
       grouped.get(catName)!.push({ id: row.id, name: row.name, inStock: row.in_stock, since: row.last_confirmed_at ?? row.created_at })
     }
+
+    // Out rows sink to the bottom of their section here, at load, never on the tap that marks
+    // them Out — a row that jumps under the finger is worse than one that waits for the next visit.
+    for (const list of grouped.values()) list.sort((a, b) => Number(b.inStock) - Number(a.inStock))
 
     // Build ordered category list: config order first, then any unknown
     const result: Category[] = []
@@ -410,6 +419,15 @@ export default function PantryScreen() {
   }
 
   const isSearching = searchQuery.trim().length > 0
+  // An exact (case-insensitive) name hides the footer's "Add" row; a partial match ("Kimchi
+  // Paste" for "kimchi") still offers it, so a shorter name is never unaddable.
+  const hasExactMatch = isSearching && categories.some(c => c.ingredients.some(i => i.name.toLowerCase() === searchQuery.trim().toLowerCase()))
+  const openAddFromSearch = () => {
+    searchRef.current?.blur() // one focused input at a time; the sheet's own field autofocuses
+    setNewIngredientName(searchQuery.trim())
+    setDisambigChoices([])
+    setShowAddModal(true)
+  }
   const visibleCategories = isSearching
     ? categories
         .map(cat => ({
@@ -435,19 +453,10 @@ export default function PantryScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       {/* ── Header (fixed) ── */}
       <View style={styles.header}>
+        {/* No ✚. Typing a name into the search field is how an item is added by hand: the header
+            has held a white "Manual Entry" pill, then an icon, and each was a third add path beside
+            two scan buttons on a screen whose search field already takes the name. */}
         <PantryGroceryTabs active="pantry" />
-        {/* The one way to type an item in. Was a solid white "Manual Entry" pill — the loudest
-            control on the screen while not being its primary action — then an icon plus a second
-            "Add an item" row at the end of the list; the row went, the icon is where iOS puts add. */}
-        <TouchableOpacity
-          style={styles.addIconBtn}
-          onPress={() => setShowAddModal(true)}
-          activeOpacity={0.7}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityLabel="Add an item to your pantry"
-        >
-          <Plus size={20} stroke={COLORS.textWhite} strokeWidth={2.5} />
-        </TouchableOpacity>
       </View>
 
       {/* ── The pantry, as a grouped list ── */}
@@ -460,62 +469,30 @@ export default function PantryScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40, flexGrow: 1 }}
         ListEmptyComponent={
-          loaded ? (
+          !loaded ? null : isSearching ? (
+            // The footer's "Add" row follows this line, so the text only has to say no.
+            <Text style={styles.noMatches}>No matches</Text>
+          ) : (
             <View style={styles.emptyStateInline}>
               <View style={styles.emptyIconCircle}>
                 <Camera size={28} stroke="#4ADE80" strokeWidth={1.8} />
               </View>
-              <Text style={styles.emptyTitle}>
-                {isSearching ? 'No matches' : 'Your pantry is empty'}
-              </Text>
-              <Text style={styles.emptySub}>
-                {isSearching
-                  ? "Try a different search — or add it as a new item."
-                  : "Scan a shelf or your fridge and we'll fill this in for you."}
-              </Text>
-              {!isSearching && (
-                <PressableScale style={styles.emptyScanBtn} haptic onPress={openScanWithConsent}>
-                  <ScanLine size={18} stroke="#000" strokeWidth={2.5} />
-                  <Text style={styles.emptyScanBtnText}>Scan pantry</Text>
-                </PressableScale>
-              )}
+              <Text style={styles.emptyTitle}>Your pantry is empty</Text>
+              <Text style={styles.emptySub}>Scan a shelf or your fridge and we'll fill this in for you.</Text>
+              <PressableScale style={styles.emptyScanBtn} haptic onPress={openScanWithConsent}>
+                <ScanLine size={18} stroke="#000" strokeWidth={2.5} />
+                <Text style={styles.emptyScanBtnText}>Scan pantry</Text>
+              </PressableScale>
             </View>
-          ) : null
+          )
         }
         ListHeaderComponent={
           <>
-            {/* Status strips — one line each, only when there is something to ACT on. The photo
-                banner that used to sit here graded the pantry ("Dialed in", four ticks) and took
-                ~200pt to do it; a gap is the only insight worth a line, and it comes with its
-                action. Hidden while searching so the results start at the top. */}
-            {!isSearching && pantryInsight.tone === 'gap' && (
-              <View style={styles.strip}>
-                <View style={[styles.stripDot, { backgroundColor: COLORS.macroPrep }]} />
-                <Text style={styles.stripText} numberOfLines={2}>{pantryInsight.headline}</Text>
-                {pantryInsight.suggestedItems.length > 0 && (
-                  <TouchableOpacity onPress={addInsightToGrocery} disabled={insightAdded} hitSlop={8} activeOpacity={0.7}>
-                    <Text style={styles.stripLink}>{insightAdded ? '✓ Added' : 'Add to grocery'}</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            )}
-            {/* The check that asks a question instead of grading: items in stock and untouched for
-                three weeks. Answers land on pantry_items.last_confirmed_at / in_stock. */}
-            {!isSearching && staleItems.length > 0 && (
-              <View style={styles.strip}>
-                <View style={[styles.stripDot, { backgroundColor: COLORS.textMuted }]} />
-                <Text style={styles.stripText} numberOfLines={2}>
-                  {staleItems.length} item{staleItems.length === 1 ? '' : 's'} untouched for 3+ weeks
-                </Text>
-                <TouchableOpacity onPress={() => setReviewOpen(true)} hitSlop={8} activeOpacity={0.7}>
-                  <Text style={styles.stripLink}>Still have {staleItems.length === 1 ? 'it' : 'them'}?</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
             {/* Scan row. Two pills, no line art, no "AI" badges: the illustrations existed to fill
                 cards that had nothing to say, and the badge is the tell. Scan pantry is the white
-                primary and wider — it is the acquisition hook; a receipt is the follow-up. */}
+                primary and wider — it is the acquisition hook; a receipt is the follow-up. It is
+                also the one bright shape above the list, which is why everything else up here is
+                a field or a line of text. */}
             <View style={styles.scanRow}>
               <PressableScale style={styles.scanPrimary} haptic onPress={openScanWithConsent}>
                 <ScanLine size={18} stroke="#000000" strokeWidth={2.4} />
@@ -527,23 +504,60 @@ export default function PantryScreen() {
               </PressableScale>
             </View>
 
-            {/* Search bar */}
-            <View style={[styles.searchBar, { marginHorizontal: 0 }]}>
+            {/* Search doubles as manual add — a name with no exact match puts an "Add" row in the
+                footer. Styled as a field, not a card: it had the notice strip's padding, border and
+                radius and read as one more surface in a stack of four above the first ingredient. */}
+            <View style={styles.searchBar}>
               <Search size={16} stroke={COLORS.textMuted} strokeWidth={1.8} />
-              <TextInput ref={searchRef} style={styles.searchInput} placeholder="Search ingredients..." placeholderTextColor={COLORS.textMuted} value={searchQuery} onChangeText={setSearchQuery} returnKeyType="search" blurOnSubmit />
+              <TextInput ref={searchRef} style={styles.searchInput} placeholder="Search or add…" placeholderTextColor="rgba(255,255,255,0.35)" value={searchQuery} onChangeText={setSearchQuery} returnKeyType="search" blurOnSubmit />
               {isSearching && (
-                <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7}>
+                <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.7} hitSlop={8}>
                   <X size={16} stroke={COLORS.textMuted} strokeWidth={2} />
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* Notices — one line of text each, only when there is something to ACT on, and directly
+                above the list they describe. They were cards above the scan row, where a review
+                prompt outranked the primary action; the photo banner before that graded the pantry
+                ("Dialed in", four ticks) and took ~200pt to do it. The whole line is the tap
+                target. Hidden while searching so the results start at the top. */}
+            {!isSearching && pantryInsight.tone === 'gap' && (
+              <TouchableOpacity style={styles.notice} onPress={addInsightToGrocery} disabled={insightAdded || pantryInsight.suggestedItems.length === 0} activeOpacity={0.7}>
+                <Text style={styles.noticeText} numberOfLines={2}>
+                  {pantryInsight.headline}
+                  {pantryInsight.suggestedItems.length > 0 && (
+                    <Text style={styles.noticeLink}> · {insightAdded ? 'Added' : 'Add to grocery'}</Text>
+                  )}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {/* Items in stock and untouched for three weeks — a question, not a grade. Answers land
+                on pantry_items.last_confirmed_at / in_stock. */}
+            {!isSearching && staleItems.length > 0 && (
+              <TouchableOpacity style={styles.notice} onPress={() => setReviewOpen(true)} activeOpacity={0.7}>
+                <Text style={styles.noticeText} numberOfLines={1}>
+                  {staleItems.length} item{staleItems.length === 1 ? '' : 's'} untouched for 3+ weeks
+                  <Text style={styles.noticeLink}> · Review</Text>
+                </Text>
+              </TouchableOpacity>
+            )}
           </>
         }
         ListFooterComponent={
-          totalItems > 0 ? (
+          isSearching ? (
+            // The typed name, offered as the row it would become. It disappears once an exact
+            // match exists, which is also the feedback that the add landed.
+            hasExactMatch ? null : (
+              <TouchableOpacity style={styles.addRow} onPress={openAddFromSearch} activeOpacity={0.7}>
+                <Plus size={16} stroke={COLORS.textWhite} strokeWidth={2.5} />
+                <Text style={styles.addRowText} numberOfLines={1}>Add "{searchQuery.trim()}"</Text>
+              </TouchableOpacity>
+            )
+          ) : totalItems > 0 ? (
             <View style={styles.footerWrap}>
-              {/* One add control — the ✚ in the header. Clear pantry stays as quiet text: destructive
-                  and irreversible, so it keeps its confirmation and loses its red button. */}
+              {/* Clear pantry stays as quiet text: destructive and irreversible, so it keeps its
+                  confirmation and loses its red button. */}
               <Text style={styles.footerCount}>{totalItems} ingredient{totalItems !== 1 ? 's' : ''}</Text>
               <TouchableOpacity onPress={clearPantry} activeOpacity={0.7} hitSlop={8}>
                 <Text style={styles.clearLink}>Clear pantry</Text>
@@ -554,7 +568,8 @@ export default function PantryScreen() {
         // Sticky, so the section you are in stays named while its rows scroll under it.
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeader}>
-            <View style={[styles.sectionDot, { backgroundColor: section.iconColor }]} />
+            {/* No aisle-colour dot: sixteen colours down one scroll read as noise, the sticky name
+                does the wayfinding, and Grocery's headers never had one. */}
             <Text style={styles.sectionTitle}>{section.name.toUpperCase()}</Text>
             <Text style={styles.sectionCount}>{section.data.length}</Text>
           </View>
@@ -699,31 +714,35 @@ export default function PantryScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.background },
 
-  // Status strips
-  strip: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#141414', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8 },
-  stripDot: { width: 8, height: 8, borderRadius: 4 },
-  stripText: { flex: 1, fontSize: 13, color: COLORS.textWhite },
-  stripLink: { fontSize: 13, fontWeight: '700', color: '#4ADE80' },
+  // Notice lines — text, not cards. Green is spent here and nowhere else on this screen: white is
+  // the action, grey is information, green is the one soft link, red only on a swipe.
+  notice: { paddingVertical: 6, paddingHorizontal: 2 },
+  noticeText: { fontSize: 13, color: COLORS.textMuted, lineHeight: 18 },
+  noticeLink: { color: COLORS.accentGreen, fontWeight: '600' },
 
   // Scan row
-  scanRow: { flexDirection: 'row', gap: 8, marginTop: 4, marginBottom: 12 },
-  scanPrimary: { flex: 1.6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.textWhite, borderRadius: 30, paddingVertical: 14 },
+  scanRow: { flexDirection: 'row', gap: 8, marginTop: 4, marginBottom: 10 },
+  scanPrimary: { flex: 1.6, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.textWhite, borderRadius: 30, paddingVertical: 12 },
   scanPrimaryText: { fontSize: 15, fontWeight: '700', color: '#000000' },
-  scanSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingVertical: 14 },
+  scanSecondary: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: COLORS.cardElevated, borderRadius: 30, paddingVertical: 12 },
   scanSecondaryText: { fontSize: 14, fontWeight: '600', color: COLORS.textWhite },
 
   // Grouped list
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 16, paddingBottom: 8, paddingHorizontal: 2, backgroundColor: COLORS.background },
-  sectionDot: { width: 8, height: 8, borderRadius: 4 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', paddingTop: 16, paddingBottom: 8, paddingHorizontal: 2, backgroundColor: COLORS.background },
   sectionTitle: { flex: 1, fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2 },
-  sectionCount: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
+  sectionCount: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.4)' }, // a step under the title, so the name leads
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, backgroundColor: '#141414', paddingHorizontal: 14, paddingVertical: 12 },
   rowFirst: { borderTopLeftRadius: 14, borderTopRightRadius: 14 },
   rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
-  rowDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
-  rowName: { flex: 1, fontSize: 15, color: COLORS.textWhite, fontWeight: '500' },
-  rowNameOut: { color: COLORS.textMuted, textDecorationLine: 'line-through' },
-  rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
+  rowHairline: { position: 'absolute', top: 0, left: 14, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
+  rowName: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
+  // Dimmed, not struck through: strikethrough is "done" on iOS, and the Out tag already says it.
+  rowNameOut: { color: COLORS.textMuted },
+  rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500', fontVariant: ['tabular-nums'] },
+  // The typed name as the row it would become, under the search results.
+  addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#141414', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginTop: 12 },
+  addRowText: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
+  noMatches: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', paddingTop: 28 },
   outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
   outPillText: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted },
   deleteActionLast: { borderBottomRightRadius: 14 },
@@ -745,33 +764,16 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
   },
-  addIconBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: COLORS.cardElevated,
-  },
-
-  // Gap chips get an amber tint + hairline so the eye lands on what's missing; ok chips stay quiet.
-
-  // Absolute-positioned variant — sits in the top-right corner of the card so
-  // we can drop the icon row entirely and let the title start at the top.
-  // Compact animated illustration sitting below the title in each scan card.
-  // Mirrors the home-screen hero animation but downsized to fit the card width.
-
-  // kept for reference — replaced by scanRow
-
+  // A field, not a card: fixed 38pt, filled, no border.
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 20,
-    marginBottom: 20,
-    backgroundColor: COLORS.background,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: COLORS.trackDark,
+    height: 38,
+    marginBottom: 8,
+    backgroundColor: '#141414',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    gap: 8,
   },
   searchInput: { flex: 1, fontSize: 15, color: COLORS.textWhite, padding: 0 },
 
