@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Reanimated, { FadeIn } from 'react-native-reanimated'
 import { LIST_LAYOUT } from '@/lib/motion'
+import { haptic } from '@/lib/haptics'
 import PressableScale from '../../components/PressableScale'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
@@ -206,6 +207,9 @@ export default function SavedScreen() {
       })
       if (error) throw error
       if (data?.error) throw new Error(data.error)
+      // The tick marks the recipe ARRIVING. It used to fire on the tap, before the link check, the
+      // consent prompt and a network call that can take seconds and still fail.
+      haptic.success()
       // Auto-fill the recipe form with extracted data
       setShowImportModal(false)
       setImportUrl('')
@@ -382,6 +386,7 @@ export default function SavedScreen() {
       is_user_created: removed.meal.is_user_created,
       servings: removed.meal.servings ?? 1,
     })
+    haptic.light() // the card is back — ticks as it reappears, after the re-insert
     setMeals(prev => {
       const next = [...prev]
       next.splice(removed.index, 0, removed.meal)
@@ -467,7 +472,8 @@ export default function SavedScreen() {
           </View>
           <Text style={styles.emptyTitle}>Nothing saved yet</Text>
           <Text style={styles.emptySub}>Bookmark any meal you love and it lands here — ready to cook.</Text>
-          <PressableScale style={styles.emptyBrowseBtn} haptic onPress={() => router.push('/(tabs)/discover')}>
+          {/* No haptic: it only navigates. */}
+          <PressableScale style={styles.emptyBrowseBtn} onPress={() => router.push('/(tabs)/discover')}>
             <Compass size={18} stroke="#000" strokeWidth={2.5} />
             <Text style={styles.emptyBrowseBtnText}>Browse trending</Text>
           </PressableScale>
@@ -520,7 +526,6 @@ export default function SavedScreen() {
             <PressableScale
               style={[styles.importBtn, (!importUrl.trim() || importing) && { opacity: 0.4 }]}
               onPress={handleImportFromUrl}
-              haptic
               disabled={!importUrl.trim() || importing}
             >
               {importing ? (
