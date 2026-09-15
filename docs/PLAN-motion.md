@@ -208,6 +208,8 @@ library · converting the 245 TouchableOpacity.
 | baseline walkthrough | Release `4eceabd` | 151.1 s | 12 | 150.0 ms | 0.99 ms/s | 25.0 ms |
 | phase1 walkthrough, first attempt | Release `2e3e063` | 23.1 s | — | — | — | — |
 | phase1 walkthrough, redo | Release `2e3e063` | 151.3 s | 10 | 187.5 ms | 1.24 ms/s | 37.5 ms |
+| phase2 walkthrough, first attempt | Release `fb00875` | — | xctrace crashed saving: disk full (§3) | | | |
+| phase2 walkthrough | Release `fb00875` | 151.1 s | 13 | 229.2 ms | 1.52 ms/s | 66.7 ms |
 
 The self-test only proves the pipeline; both of its hitches were app launch. Compare the two
 walkthrough rows, never a walkthrough against the self-test.
@@ -220,3 +222,11 @@ do not measure the JS thread. The first phase1 attempt stuck on the splash on th
 after install and was stopped at 23 s (PRELAUNCH §6c, "a launch can stick on the splash").
 The recurring "offscreen passes" hitches (13–22 passes) appear in BOTH builds — shadows or
 rounded masks being re-rendered, most likely on Discover's scroll. A lead, not a Phase 1 effect.
+
+**Phase 2 reading.** 1.52 ms/s, still far inside the good band. The difference from Phase 1 is one
+hitch: 66.7 ms at 1.4 s, during launch, before any screen Phase 2 touched has a haptic to fire —
+without it the run is 1.08 ms/s. Launch-frame cost varies run to run (baseline's was 8.3 ms). So no
+evidence Phase 2 costs frames, which fits: haptics are native calls with no render. The three runs
+do rise (0.99 → 1.24 → 1.52); each step is one or two hitches, but if Phase 3 adds another, stop and
+look before continuing. The offscreen-pass hitches (25 and 33 passes this run) are still the largest
+recurring cost and still predate all of this.
