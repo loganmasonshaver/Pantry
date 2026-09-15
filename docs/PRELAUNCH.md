@@ -1848,6 +1848,23 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       then a traced launch — reinstalling resets the "first launch" state. Do the instrumented
       investigation AFTER Logan's Phase 2 walkthrough, because a reinstall would put his walkthrough
       back on a first launch.
+      **INVESTIGATED 2026-09-15 16:2x–16:4x with os_log captured (Instruments `--instrument os_log`).**
+      Reproduced a third time on the Discover-preload build's first launch. What the logs show: JS
+      starts on time (`Running "main"`), creates the same 21 native module objects as a healthy
+      launch, reads `profiles`, loads Home's meal photos, talks to Superwall, PostHog and Expo push —
+      i.e. the app renders Home in JS and the network works. But the SCREEN takes no UI commits after
+      ~1.9 s, and iOS's launch animation never runs (UIKit deactivation reason 5 / "animating
+      application lifecycle event: 1" is present in the healthy launch and absent in every stuck one).
+      Ruled out: expo-updates (not installed, disabled in Expo.plist); expo-splash-screen holding the
+      native splash (not a dependency); SuperwallProvider withholding children (renders them always);
+      the app's own providers gating render; network failure; phone auto-lock (Logan: auto-lock is
+      off); `expo run:ios` launching the app (it only installs); reinstalling the SAME binary (a
+      devicectl reinstall launched healthy). Every stuck launch so far was a launch STARTED REMOTELY
+      by xctrace on a newly built binary — none was a human tapping the icon. **Open question, and the
+      next tell: after the next new build installs, Logan opens Pantry by tapping the icon, before any
+      trace runs.** Loads normally → an artifact of remote launching, drop to post-launch. Sticks → a
+      real first-launch bug; then the same check on a TestFlight install before submission. Evidence in
+      the session scratchpad (hang1 healthy / hang2 stuck os_log exports), not in the repo.
 - [ ] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
       today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
       Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
