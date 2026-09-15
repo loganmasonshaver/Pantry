@@ -7,9 +7,6 @@ import {
   Dimensions,
   Animated as RNAnimated,
   Easing,
-  LayoutAnimation,
-  Platform,
-  UIManager,
   Image,
   Modal,
   TextInput,
@@ -18,7 +15,8 @@ import {
   RefreshControl,
   Keyboard,
 } from 'react-native'
-import Reanimated, { FadeIn, FadeOut, LinearTransition, SlideInRight, SlideInLeft } from 'react-native-reanimated'
+import Reanimated, { FadeIn, FadeOut, LinearTransition, SlideInRight, SlideInLeft, LayoutAnimationConfig, useSharedValue, useAnimatedProps, withSequence, withTiming, Easing as ReEasing } from 'react-native-reanimated'
+import { LIST_LAYOUT, ROW_EXIT } from '@/lib/motion'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { memo, useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -61,12 +59,6 @@ import { takePantryNames } from '@/lib/pantryPrefetch'
 import { perfMark } from '../../lib/perf'
 import { GeneratedMeal } from '../../lib/meals'
 import { supabase } from '../../lib/supabase'
-
-// LayoutAnimation requires explicit opt-in on Android — iOS supports it natively.
-// We're iOS-only but this guards future Android builds from silent no-op animations.
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true)
-}
 
 const { width } = Dimensions.get('window')
 
@@ -143,9 +135,10 @@ function iconForSlot(label: string): React.ElementType {
   return Utensils
 }
 
-// strokeDashoffset is an SVG attribute, so it still can't use the native driver — but binding
-// it to the Animated value directly avoids a per-frame React render, which was the real cost.
-const AnimatedSvgCircle = RNAnimated.createAnimatedComponent(SvgCircle)
+// Reanimated, so the ring's strokeDashoffset is computed on the UI thread. RN Animated could not
+// use its native driver for an SVG attribute and stepped it from the JS thread for 1.8s — right
+// while Home is loading.
+const AnimatedSvgCircle = Reanimated.createAnimatedComponent(SvgCircle)
 
 function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number }) {
   const remaining = goal - consumed
@@ -158,32 +151,26 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
   const radius = (size - strokeWidth) / 2
   const circumference = 2 * Math.PI * radius
 
-  const animProgress = useRef(new RNAnimated.Value(0)).current
-  const [displayRemaining, setDisplayRemaining] = useState(goal)
+  // 0 → 1 of the ring drawn. Nothing about this animation touches React: no listener, no state.
+  // The old version set a "remaining" count from a listener on nearly every frame for 1.8s — about
+  // a hundred renders per Home load or log change — for a number the ring stopped showing.
+  const animProgress = useSharedValue(0)
 
   useEffect(() => {
-    if (isOver) {
-      // Over goal — show full red ring immediately, display how much over
-      setDisplayRemaining(remaining)
-      return
-    }
-    animProgress.setValue(0)
-    setDisplayRemaining(goal)
-    // useNativeDriver: false — strokeDashoffset is an SVG attribute, not a transform/opacity,
-    // so the native driver can't animate it. We pay the JS-bridge cost here to drive the ring.
-    RNAnimated.timing(animProgress, { toValue: progress, duration: 1800, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start()
-    // Only the LABEL goes through React now, and only when the rounded integer changes — the ring
-    // itself is bound to the Animated value below. This was two setState calls per frame for
-    // 1800ms (~108 re-renders of this subtree) and made any concurrent state change expensive.
-    let lastShown = goal
-    const listener = animProgress.addListener(({ value }) => {
-      const next = Math.round(goal - goal * value)
-      if (next !== lastShown) { lastShown = next; setDisplayRemaining(next) }
-    })
-    // stopAnimation() too — otherwise an in-flight ring animation keeps firing the
-    // listener (setState) after unmount, warning on a dead component.
-    return () => { animProgress.removeListener(listener); animProgress.stopAnimation() }
+    // Over goal: the full red ring, no animation.
+    if (isOver) { animProgress.value = 1; return }
+    // Redraw from empty on every change, as before. withSequence, not two assignments, so the
+    // reset is guaranteed to land before the timing starts on the UI thread. Reduce Motion (set
+    // globally in _layout) makes this jump straight to the end.
+    animProgress.value = withSequence(
+      withTiming(0, { duration: 0 }),
+      withTiming(progress, { duration: 1800, easing: ReEasing.out(ReEasing.cubic) }),
+    )
   }, [consumed, goal])
+
+  const ringProps = useAnimatedProps(() => ({
+    strokeDashoffset: circumference * (1 - animProgress.value),
+  }))
 
   return (
     <View style={{ alignItems: 'center', justifyContent: 'center', width: size, height: size }}>
@@ -191,7 +178,7 @@ function CalorieGaugeInner({ consumed, goal }: { consumed: number; goal: number 
         <SvgCircle cx={size / 2} cy={size / 2} r={radius} stroke="rgba(255,255,255,0.10)" strokeWidth={strokeWidth} fill="transparent" />
         <AnimatedSvgCircle cx={size / 2} cy={size / 2} r={radius} stroke={isOver ? '#EF4444' : '#4ADE80'} strokeWidth={strokeWidth} fill="transparent"
           strokeDasharray={`${circumference}`}
-          strokeDashoffset={isOver ? 0 : animProgress.interpolate({ inputRange: [0, 1], outputRange: [circumference, 0] })}
+          animatedProps={ringProps}
           strokeLinecap="round" />
       </Svg>
       {/* The percentage, not the number. The kcal figure now lives beside the ring at a size a
@@ -373,106 +360,6 @@ function PantryMealRow({ meal, missing, structural, known, onPress }: { meal: Ge
         )}
       </View>
     </TouchableOpacity>
-  )
-}
-
-function SlotCard({
-  slot,
-  expanded,
-  onToggle,
-  onDeleteEntry,
-  onEditEntry,
-  onRemoveSlot,
-  onLog,
-}: {
-  slot: MealSlot
-  expanded: boolean
-  onToggle: () => void
-  onDeleteEntry: (entryId: string) => void
-  onEditEntry: (entry: LogEntry) => void
-  onRemoveSlot: () => void
-  onLog: () => void
-}) {
-  const router = useRouter()
-  const [pendingDelete, setPendingDelete] = useState(false)
-  const slotCal = slot.entries.reduce((s, e) => s + e.calories, 0)
-
-  return (
-    <View style={styles.slotCard}>
-      <TouchableOpacity
-        style={styles.slotHeader}
-        onPress={pendingDelete ? undefined : onToggle}
-        onLongPress={() => setPendingDelete(true)}
-        delayLongPress={400}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.slotLabel}>{slot.label}</Text>
-        {pendingDelete ? (
-          <View style={styles.slotDeleteRow}>
-            <TouchableOpacity onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut); onRemoveSlot() }} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.slotRemoveText}>Remove Slot</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setPendingDelete(false)} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Text style={styles.slotCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <View style={styles.slotHeaderRight}>
-            <Text style={styles.slotCal}>{slot.entries.length === 0 ? 'Empty' : `${slotCal} kcal`}</Text>
-            <ChevronDown size={16} stroke={COLORS.textMuted} strokeWidth={2} style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }} />
-          </View>
-        )}
-      </TouchableOpacity>
-      {expanded && slot.entries.length > 0 && (
-        <View style={styles.slotEntries}>
-          {slot.entries.map((entry, i) => (
-            <View key={entry.id}>
-              {i > 0 && <View style={styles.slotDivider} />}
-              <View style={styles.logCard}>
-                  <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} activeOpacity={0.7} onPress={() => {
-                    if (entry.food_id) {
-                      onEditEntry(entry)
-                    } else if (entry.meal_data) {
-                      router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify(entry.meal_data) }})
-                    } else {
-                      router.push({ pathname: '/meal/[id]', params: { id: entry.id, mealData: JSON.stringify({
-                        name: entry.name, calories: entry.calories, protein: entry.protein,
-                        carbs: entry.carbs, fat: entry.fat, ingredients: [], steps: [], image: null,
-                      })}})
-                    }
-                  }}>
-                    <View style={styles.logIconCircle} />
-                    <View style={styles.logInfo}>
-                      <Text style={styles.logName}>{entry.name}</Text>
-                      <Text style={styles.logTime}>{entry.time}</Text>
-                    </View>
-                    <View style={styles.logMacros}>
-                      <Text style={styles.logCal}>{entry.calories} kcal</Text>
-                      <Text style={styles.logPro}>{entry.protein}g protein</Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={{ padding: 8, marginLeft: 4 }}
-                    activeOpacity={0.6}
-                    onPress={() => onDeleteEntry(entry.id)}
-                  >
-                    <Trash2 size={16} stroke="#EF4444" strokeWidth={1.8} />
-                  </TouchableOpacity>
-              </View>
-            </View>
-          ))}
-        </View>
-      )}
-      {expanded && slot.entries.length === 0 && (
-        <View style={styles.slotEmpty}>
-          <Text style={styles.slotEmptyText}>Nothing logged yet</Text>
-          <PressableScale style={styles.slotLogBtn} onPress={onLog} haptic>
-            <Plus size={14} stroke="#4ADE80" strokeWidth={2} />
-            <Text style={styles.slotLogBtnText}>Log</Text>
-          </PressableScale>
-        </View>
-      )}
-    </View>
   )
 }
 
@@ -920,8 +807,12 @@ export default function HomeScreen() {
     // would catch nothing and the slot would silently revert on the next load.
     if (error) console.log('[slots] meal_slots update refused:', error.message)
   }, [user?.id])
-  const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set(['breakfast']))
   const [selectedDate, setSelectedDate] = useState(() => todayStr())
+  // The day the rendered slots BELONG to, set in the same update as the slots. It keys the log
+  // section, so another day's data replaces the cards outright instead of animating from the
+  // previous day's layout. Keyed on this and not selectedDate, because selectedDate changes a
+  // render before that day's rows arrive.
+  const [slotsDate, setSlotsDate] = useState(() => todayStr())
   // Sunday-start week containing `anchor`. Noon, not midnight, for the same reason every other date
   // helper in this file uses it: a midnight Date lands on the previous day under some DST offsets.
   const weekOf = (anchor: string): string[] => {
@@ -1040,7 +931,7 @@ export default function HomeScreen() {
 
   // Builds the day from rows — the network's or the disk mirror's. The milestone haptic fires only
   // on a network result: a cold start hydrating a day already past the goal must not tick.
-  const applyLogRows = useCallback((data: any[], fromCache: boolean) => {
+  const applyLogRows = useCallback((data: any[], fromCache: boolean, forDate: string) => {
     const slotMap = new Map<string, LogEntry[]>()
     ;['Breakfast', 'Lunch', 'Dinner'].forEach(s => slotMap.set(s, []))
 
@@ -1086,8 +977,8 @@ export default function HomeScreen() {
     if (!fromCache && prevTotalCal !== null && goal > 0 && prevTotalCal < goal && newTotalCal >= goal) {
       haptic.success()
     }
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
     setSlots(result)
+    setSlotsDate(forDate)
     // Warm what a tap on an entry will need — the food record and the user's corrections — so the
     // edit screen builds synchronously even on the first tap after a cold start. Disk reads for
     // anything logged since the cache existed; one FatSecret call per older entry, once a session.
@@ -1113,7 +1004,7 @@ export default function HomeScreen() {
     if (!data) return
     fetchedFor.current = selectedDate
     AsyncStorage.setItem(dayLogsKey(user.id, selectedDate), JSON.stringify(data)).catch(() => {})
-    applyLogRows(data, false)
+    applyLogRows(data, false, selectedDate)
   }, [user?.id, selectedDate, applyLogRows])
 
   useEffect(() => {
@@ -1122,7 +1013,7 @@ export default function HomeScreen() {
     let cancelled = false
     AsyncStorage.getItem(dayLogsKey(user.id, date)).then(raw => {
       if (cancelled || !raw || fetchedFor.current === date) return
-      try { applyLogRows(JSON.parse(raw), true) } catch {}
+      try { applyLogRows(JSON.parse(raw), true, date) } catch {}
     }).catch(() => {})
     return () => { cancelled = true }
   }, [user?.id, selectedDate, applyLogRows])
@@ -1149,35 +1040,12 @@ export default function HomeScreen() {
     fetchTodayLogs()
   }, [fetchTodayLogs]))
 
-  const toggleSlot = (id: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
-    setExpandedSlots(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
-  }
-
   const deleteEntry = async (slotId: string, entryId: string) => {
     haptic.medium() // stronger than a routine tap — removing a logged meal
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut)
+    // The row fades and the rows and cards below close the gap: LIST_LAYOUT / ROW_EXIT on their
+    // wrappers in the log section. Nothing to configure here.
     setSlots(prev => prev.map(s => s.id === slotId ? { ...s, entries: s.entries.filter(e => e.id !== entryId) } : s))
     await supabase.from('meal_logs').delete().eq('id', entryId)
-  }
-
-  const removeSlot = async (slotId: string) => {
-    const slot = slots.find(s => s.id === slotId)
-    setSlots(prev => prev.filter(s => s.id !== slotId))
-    setExpandedSlots(prev => { const next = new Set(prev); next.delete(slotId); return next })
-    // Remove it from the user's STRUCTURE too, or the next refetch rebuilds it from the profile and
-    // the slot reappears — the mirror image of the bug this whole change fixes.
-    if (slot && mealSlotsRef.current.includes(slot.label)) {
-      saveMealSlots(mealSlotsRef.current.filter(l => l !== slot.label))
-    }
-    if (slot && user) {
-      // Delete from the day being VIEWED, not always today — otherwise removing a slot
-      // while looking at a past date wipes today's logs and orphans the viewed day's.
-      await supabase.from('meal_logs').delete()
-        .eq('user_id', user.id)
-        .eq('slot', slot.label)
-        .eq('logged_at', selectedDate)
-    }
   }
 
   const [ratings, setRatings] = useState<Record<string, 1 | -1>>({})
@@ -1778,6 +1646,12 @@ export default function HomeScreen() {
         <View style={styles.logSection}>
           <Text style={styles.logTitle}>Daily meal log</Text>
 
+          {/* Gap-close motion lives on the wrappers below: a row or card that leaves fades
+              (ROW_EXIT), and every card and row whose own box moves glides (LIST_LAYOUT) — Reanimated
+              layout animations are per component, so each moving box carries its own. Keyed on the
+              day the slots belong to, with entering and exiting skipped, so a different day's data
+              REPLACES the cards instead of animating out of the last day's layout. */}
+          <LayoutAnimationConfig key={slotsDate} skipEntering skipExiting>
           <View style={{ marginTop: 10, gap: 8 }}>
             {slots.map((slot) => {
               const hasEntries = slot.entries.length > 0
@@ -1802,7 +1676,11 @@ export default function HomeScreen() {
                 // affordance and three cards each saying "Nothing logged yet" was noise (the macro
                 // card already says it at 0). `disabled` once it has entries, so the rows keep
                 // their own taps and swipes.
-                <TouchableOpacity key={slot.id} style={[styles.mealSlotCard, !hasEntries && styles.mealSlotCardEmpty]} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
+                // The card's background is on the animated shell, not the touchable: when a row
+                // leaves, the shell's height glides, and a background on an inner view would snap
+                // to the new height while the card around it was still moving.
+                <Reanimated.View key={slot.id} layout={LIST_LAYOUT} exiting={ROW_EXIT} style={styles.mealSlotShell}>
+                <TouchableOpacity style={[styles.mealSlotCard, !hasEntries && styles.mealSlotCardEmpty]} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
                   {/* flex-start, not center: the icon belongs beside the header, and on a four-entry
                       card it used to float beside the second row. */}
                   <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
@@ -1830,8 +1708,8 @@ export default function HomeScreen() {
                           the Pantry rows already use; the per-row ✕ was the third way to delete
                           (the edit screen has one too) and four of them crowded the food. */}
                       {slot.entries.map((entry, idx) => (
+                        <Reanimated.View key={entry.id} layout={LIST_LAYOUT} exiting={ROW_EXIT}>
                         <Swipeable
-                          key={entry.id}
                           renderRightActions={() => (
                             <TouchableOpacity style={styles.entryDelete} onPress={() => deleteEntry(slot.id, entry.id)} activeOpacity={0.85}>
                               <Text style={styles.entryDeleteText}>Delete</Text>
@@ -1845,18 +1723,24 @@ export default function HomeScreen() {
                             <Text style={styles.entryNums}>{entry.calories} · <Text style={{ color: '#4ADE80' }}>{Math.round(entry.protein)}P</Text></Text>
                           </TouchableOpacity>
                         </Swipeable>
+                        </Reanimated.View>
                       ))}
                     </View>
                   </View>
                 </TouchableOpacity>
+                </Reanimated.View>
               )
             })}
           </View>
 
+          {/* Moves with the cards above it, or it would jump while they glide. */}
+          <Reanimated.View layout={LIST_LAYOUT}>
           <TouchableOpacity style={styles.addSlotBtn} activeOpacity={0.6} onPress={() => setShowAddModal(true)}>
             <Plus size={15} stroke="#4ADE80" strokeWidth={2} />
             <Text style={styles.addSlotText}>Add meal</Text>
           </TouchableOpacity>
+          </Reanimated.View>
+          </LayoutAnimationConfig>
 
         </View>
 
@@ -2457,12 +2341,11 @@ const styles = StyleSheet.create({
   },
 
   // Meal slot cards (MyFitnessPal style)
+  mealSlotShell: { backgroundColor: COLORS.cardElevated, borderRadius: 16 },
   mealSlotCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.cardElevated,
-    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
