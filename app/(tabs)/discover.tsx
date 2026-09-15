@@ -1522,10 +1522,10 @@ export default function DiscoverScreen() {
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No {activeFilter} recipes right now</Text>
             <Text style={styles.emptySub}>Try a different filter — the daily pool changes every morning.</Text>
+            {/* No haptic: resetting a view filter is not a commit. */}
             <PressableScale
               onPress={() => setActiveFilter('All')}
               style={styles.emptyResetBtn}
-              haptic
             >
               <Text style={styles.emptyResetText}>Show all recipes</Text>
             </PressableScale>
