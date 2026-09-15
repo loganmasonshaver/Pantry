@@ -1743,6 +1743,15 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       Still not modelled, deliberately: cooking a meal as evidence its ingredients were there
       (a logged meal is not necessarily a pantry meal); a per-aisle shelf life (3 weeks is generous
       for produce and short for hard cheese — one number, a question not a rule).
+      **Then Logan on the OUT OF STOCK section, before seeing it: wrong call — a row vanishing on
+      tap, beside swipe-to-delete on the same row, "feels like it's deleting it", and the section
+      is hidden below 50+ rows. REVERTED the same hour, DECISION NOT TO REOPEN:** an Out row stays
+      in its aisle — crossed off, 35% white, tagged "Out" (the tag legible, on purpose) — and sinks
+      to the bottom of its own card with an animated slide, so the tap reads as a state change in
+      view. Aisle counts are total rows again. Tells: tap Chicken → it slides to the bottom of MEAT
+      & FISH, struck through, with an "Out" tag; tap it there → it slides back up. If strike + 35%
+      + tag + position is STILL not enough on device, the next lever is a leading glyph on every
+      row, not a relocation.
 - [x] **FIXED 2026-09-15 (Logan: "do the other 21 percent") — "Other" was the app believing the
       scan model.** `normalizeCategory` accepted ANY category that exists in the list before
       looking at the name, and "Other" is in the list — so the model's punt on "Brown Sugar" was

@@ -54,11 +54,10 @@ type Category = {
   ingredients: Ingredient[]
 }
 
-// What the list renders: in-stock rows under their aisle, and every out-of-stock row in one
-// section at the bottom. catId keeps toggle and delete pointed at the row's real category.
+// What the list renders: each aisle with its in-stock rows first and its out-of-stock rows sunk
+// to the bottom of the same card. catId keeps toggle and delete pointed at the category.
 type PantryRowData = Ingredient & { catId: string }
 type PantrySection = { id: string; name: string; data: PantryRowData[] }
-const OUT_SECTION_ID = 'out-of-stock'
 
 // ── Category config ────────────────────────────────────────────────────
 
@@ -119,9 +118,10 @@ const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id, 
 //
 // Every item is visible under its section header — the accordions hid the list behind a tap and
 // a count badge, on the tab whose whole job is "what do I have". Tap = in/out of stock, swipe =
-// delete. An out-of-stock row leaves its aisle for the OUT OF STOCK section at the bottom, crossed
-// off and faded (the treatment Grocery gives a checked item). Grey-in-place was tried twice and
-// read as "very little visual difference" on device; position is what a user notices.
+// delete. An out-of-stock row stays in its aisle — crossed off, faded, tagged "Out", and sunk to
+// the bottom of the card. It must NOT leave the card: a separate OUT OF STOCK section at the end
+// of the list was tried, and Logan's call was that a row vanishing on tap, beside swipe-to-delete
+// on the same row, reads as a delete — and the destination is off-screen on any real pantry.
 function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
   ingredient: Ingredient
   first: boolean
@@ -144,9 +144,10 @@ function PantryRow({ ingredient, first, last, onDelete, onToggle }: {
         {/* Inset hairline, the iOS grouped-list divider: starts at the text, not the card edge. */}
         {!first && <View style={styles.rowHairline} pointerEvents="none" />}
         <Text style={[styles.rowName, !ingredient.inStock && styles.rowNameOut]} numberOfLines={1}>{ingredient.name}</Text>
-        {/* Nothing on the right. No age (a batch scan stamps one date on every line, so it read
-            "7w" fifty times; the notice line carries the count and the review sheet the per-item
-            age) and no "Out" tag (the section header says it). */}
+        {/* No age on the right — a batch scan stamps one date on every line, so it read "7w"
+            fifty times; the notice line carries the count and the review sheet the per-item age.
+            The "Out" tag is the one legible thing on a faded row, which is the point of it. */}
+        {!ingredient.inStock && <View style={styles.outPill}><Text style={styles.outPillText}>Out</Text></View>}
       </TouchableOpacity>
     </Swipeable>
   )
@@ -310,9 +311,9 @@ export default function PantryScreen() {
   // the shelf today, so the age resets and the stale nudge lets the item go.
   const setStock = async (categoryId: string, ingredientId: string, inStock: boolean) => {
     const now = new Date().toISOString()
-    // The row changes section (aisle ↔ OUT OF STOCK), so the gap closes and opens with it: the
-    // move IS the feedback, the way a ticked item drops to the bottom in Bring!. Update-only,
-    // like deleteIngredient — a create/delete config fights gesture-handler's swipe transform.
+    // The row sinks to the bottom of its card (or rises back), animated and in view — feedback
+    // that it changed state, not that it went anywhere. Update-only, like deleteIngredient — a
+    // create/delete config fights gesture-handler's swipe transform.
     LayoutAnimation.configureNext({ duration: 250, update: { type: LayoutAnimation.Types.easeInEaseOut } })
     setCategories(prev =>
       prev.map(c =>
@@ -441,18 +442,17 @@ export default function PantryScreen() {
   // substring-match "cooked rice", showing a false "No matches". It filters both halves.
   const q = searchQuery.trim().toLowerCase()
   const sections: PantrySection[] = []
-  const outRows: PantryRowData[] = []
   for (const c of categories) {
     const rows: PantryRowData[] = []
+    const out: PantryRowData[] = []
     for (const i of c.ingredients) {
       if (q && !i.name.toLowerCase().includes(q)) continue
       const row = { ...i, catId: c.id }
       if (i.inStock) rows.push(row)
-      else outRows.push(row)
+      else out.push(row)
     }
-    if (rows.length > 0) sections.push({ id: c.id, name: c.name, data: rows })
+    if (rows.length + out.length > 0) sections.push({ id: c.id, name: c.name, data: [...rows, ...out] })
   }
-  if (outRows.length > 0) sections.push({ id: OUT_SECTION_ID, name: 'Out of stock', data: outRows })
 
   const totalItems = categories.reduce((s, c) => s + c.ingredients.length, 0)
   // Perishables the app last had evidence of 3+ weeks ago — a scan, a receipt, a grocery check-off
@@ -751,10 +751,13 @@ const styles = StyleSheet.create({
   rowLast: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14 },
   rowHairline: { position: 'absolute', top: 0, left: 14, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
   rowName: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
-  // Crossed off and faded, inside the OUT OF STOCK section — Grocery's treatment for a checked
-  // item. The section is the difference; this just keeps the rows from reading as in stock.
+  // Crossed off and faded well under textMuted — Grocery's treatment for a checked item. With the
+  // tag and the sink to the bottom of the card, three signals that the row is here, not in stock.
   rowNameOut: { color: 'rgba(255,255,255,0.35)', textDecorationLine: 'line-through' },
   rowAge: { fontSize: 12, color: COLORS.textMuted, fontWeight: '500' },
+  // Legible on purpose: the tag is what a faded, struck-through row still says clearly.
+  outPill: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 },
+  outPillText: { fontSize: 11, fontWeight: '600', color: COLORS.textMuted },
   // The typed name as the row it would become, under the search results.
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#141414', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginTop: 12 },
   addRowText: { flex: 1, fontSize: 16, color: COLORS.textWhite, fontWeight: '500' },
