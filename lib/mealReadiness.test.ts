@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { missingIngredients, structuralMissing, isOptionalGap, neededMissing } from './mealReadiness.ts'
+import { missingIngredients, structuralMissing, isOptionalGap, neededMissing, pantryHas } from './mealReadiness.ts'
 
 const pantry = new Set(['chicken breast', 'rice', 'cheddar cheese', 'onion'])
 const none = new Set<string>()
 
-test('two-way substring: pantry "chicken breast" covers meal "chicken", and the reverse', () => {
+test('same food, either direction: pantry "chicken breast" covers meal "chicken", and the reverse', () => {
   assert.deepEqual(missingIngredients([{ name: 'chicken' }], pantry, none), [])
   assert.deepEqual(missingIngredients([{ name: 'cheese' }], pantry, none), [])
   assert.deepEqual(missingIngredients([{ name: 'red onion' }], pantry, none), [])
@@ -62,4 +62,12 @@ test('needed = every live gap except the listed garnishes, including ones the se
   assert.deepEqual(neededMissing(meal, pantry, none), ['tortillas', 'sour cream'])
   // Everything missing is a garnish → nothing needed → Ready to cook.
   assert.deepEqual(neededMissing({ ingredients: [{ name: 'rice' }, { name: 'fresh lime juice' }], garnish_missing: ['fresh lime juice'] }, pantry, none), [])
+})
+
+test('a different food that contains the word is missing on every surface (the banana peppers case)', () => {
+  const p = new Set(['banana peppers', 'banana cream pudding mix'])
+  assert.deepEqual(missingIngredients([{ name: 'banana' }], p, none), ['banana'])
+  assert.equal(pantryHas('banana', p), false)
+  assert.equal(pantryHas('banana', new Set(['bananas'])), true)
+  assert.deepEqual(neededMissing({ ingredients: [{ name: 'banana' }, { name: 'milk' }] }, new Set(['banana peppers', 'milk']), none), ['banana'])
 })

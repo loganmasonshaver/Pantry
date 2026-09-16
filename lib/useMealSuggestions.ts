@@ -8,6 +8,7 @@ import { generationKey, isGenerating, beginGeneration, endGeneration, publishGen
 import { perfMark } from './perf'
 import { prefetchMealImages } from '../components/MealImage'
 import { takeCookNowPrefetch } from './mealPrefetch'
+import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
 import { writeMealCache, mealCacheKey, CachedMeals as SharedCachedMeals } from './mealCache'
 // Shared with the scan-time image warm — one implementation so the global image cache/cost model
 // stays identical no matter who asks for an image.
@@ -192,6 +193,14 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       if (ingredients.length === 0) {
         setError('Add a few items to your pantry first')
         setErrorCode('empty_pantry')
+        setLoading(false)
+        return
+      }
+      // Below the floor the server refuses and refunds the slot; skipping the round trip says the
+      // same thing sooner. Cook Now only — a meal plan is allowed to shop.
+      if (mode === 'cookNow' && ingredients.length < MIN_PANTRY_FOR_COOK_NOW) {
+        setError(thinPantryMessage(ingredients.length))
+        setErrorCode('pantry_too_thin')
         setLoading(false)
         return
       }

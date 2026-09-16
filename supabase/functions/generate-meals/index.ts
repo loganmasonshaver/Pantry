@@ -14,7 +14,7 @@ import { scaleToTarget, topUpProtein, clampPortions, roundIngredientGrams, fundP
 import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
 import { flavourAxes, flavourShelf, isSweetDish } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
-import { findMissing } from '../_shared/pantry-check.ts'
+import { findMissing, MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../_shared/pantry-check.ts'
 import { nameFormGaps, nameIngredientGaps, nameTechniqueGaps, dryStapleOverload, ghostIngredients, unusedIngredients } from '../_shared/recipe-integrity.ts'
 import { MEAL_GEN_CAP_PER_DAY } from '../_shared/caps.ts'
 import { assumedStaplesFor } from '../_shared/staples.ts'
@@ -506,6 +506,16 @@ Deno.serve(async (req: Request) => {
     })()
 
     const isCookNow = mode === "cookNow"
+    // A pantry this small cannot make three real dinners. The model reaches for food the user does
+    // not own, the cookability gate drops every candidate, and the deck comes back empty — after a
+    // paid call and a spent slot. Refuse first, give the slot back, and say how far off they are.
+    // The client mirrors this check so the round trip is normally never made.
+    if (isCookNow && !dryRun && ingredients.length < MIN_PANTRY_FOR_COOK_NOW) {
+      console.log(`[generate-meals] pantry too thin for Cook Now: ${ingredients.length} < ${MIN_PANTRY_FOR_COOK_NOW}`)
+      await refundScan(req, 'meal_gen')
+      return new Response(JSON.stringify({ error: thinPantryMessage(ingredients.length), code: 'pantry_too_thin' }),
+        { status: 422, headers: { 'Content-Type': 'application/json' } })
+    }
 
     // Detect distinct primary protein sources in the pantry. If 3+ are available,
     // enforce that each of the 3 displayed meals uses a different one. With 1-2
@@ -985,15 +995,14 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       funnel.notCookableMissing = structuralGaps
       if (isCookNow) {
         const cookable = meals.filter((m: any) => !m._notCookable)
-        // Floored like every other drop here: a deck of two is worse than a deck with one dish that
-        // needs a shopping trip, and on a thin pantry the model may have nothing better to offer.
-        if (cookable.length >= displayCount) {
-          const dropped = meals.length - cookable.length
-          if (dropped > 0) console.log(`Cookability: dropped ${dropped}/${beforeCookable} needing a structural ingredient the pantry lacks`)
-          meals = cookable
-        } else if (meals.some((m: any) => m._notCookable)) {
-          console.log(`Cookability: ${meals.filter((m: any) => m._notCookable).length} meal(s) need a missing structural ingredient, but only ${cookable.length} fully-cookable candidates remain — keeping them rather than showing a short deck`)
-        }
+        // NOT floored. This used to keep uncookable meals whenever fewer than displayCount survived,
+        // "rather than show a short deck" — and the short deck was the honest one. The padding put
+        // "3 meals you can make right now" over dishes that needed a shopping trip, and Home's
+        // "Need: …" was the only true line on the screen. A deck of one or two is what the pantry
+        // supports; an empty one is refused below with the slot refunded.
+        const dropped = meals.length - cookable.length
+        if (dropped > 0) console.log(`Cookability: dropped ${dropped}/${beforeCookable} needing a structural ingredient the pantry lacks`)
+        meals = cookable
       }
       // Counts the meals this gate REJECTED, not the ones still carrying the flag. Reading it after
       // the filter reported 0 while three candidates had just been dropped — a counter that is
@@ -1001,6 +1010,12 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       funnel.notCookable = beforeCookable - meals.length
       funnel.notCookableKept = meals.filter((m: any) => m._notCookable).length
       funnel.afterCookable = meals.length
+      if (isCookNow && !dryRun && meals.length === 0) {
+        console.log(`[generate-meals] no cookable candidates from ${ingredients.length} pantry items — refusing, slot refunded`)
+        await refundScan(req, 'meal_gen')
+        return new Response(JSON.stringify({ error: thinPantryMessage(ingredients.length), code: 'pantry_too_thin' }),
+          { status: 422, headers: { 'Content-Type': 'application/json' } })
+      }
     }
 
     // DIETARY RESTRICTIONS — the ONE gate here that is never floored.

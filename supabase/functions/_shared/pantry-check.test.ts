@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { findMissing, isInPantry, isStructural } from './pantry-check.ts'
+import { findMissing, isInPantry, isStructural, thinPantryMessage, MIN_PANTRY_FOR_COOK_NOW } from './pantry-check.ts'
 
 // Logan's real pantry, read from production 2026-09-07.
 const PANTRY = [
@@ -131,14 +131,17 @@ test('a food the pantry simply does not have stays missing', () => {
   assert.equal(isInPantry('feta', REAL_PANTRY), false)
 })
 
-// DELIBERATE loose match, decided rather than inherited. "crushed tomatoes" resolves to
-// "Tomato Sauce" through the head-noun prefix rule once -oes singularises correctly. They are
-// different products, but swapping sauce for crushed tomatoes is ordinary cooking, and this
-// module's rule is that a false MISSING drops a whole dinner while a false PRESENT costs one
-// wrong shopping line. Asserted so the behaviour is visible if anyone tightens the matcher later.
-test('a close substitute resolves rather than killing the meal', () => {
-  assert.equal(isInPantry('crushed tomatoes', REAL_PANTRY), true)
-  assert.equal(isInPantry('diced tomatoes', REAL_PANTRY), true)
+// This used to assert the OPPOSITE: "crushed tomatoes" resolving to "Tomato Sauce" as a deliberate
+// loose match. It came from the head-noun prefix clause ("tomato sauce" starts with "tomato "), and
+// that clause is the one that made "Banana Peppers" cover banana and passed a banana smoothie as
+// cookable with no banana on the shelf. It also disagreed with the test right below, where plain
+// "tomatoes" against "Tomato Sauce" is missing — the adjective was the only difference. A product
+// made from a food does not stock the food, crushed or not; the model can still be told the sauce
+// is there and choose it itself.
+test('an adjective does not turn a derived product back into the food', () => {
+  assert.equal(isInPantry('crushed tomatoes', REAL_PANTRY), false)
+  assert.equal(isInPantry('diced tomatoes', REAL_PANTRY), false)
+  assert.equal(isInPantry('tomato sauce', REAL_PANTRY), true)
 })
 
 test('a product made from a food does not stock the food — the Oat Milk porridge', () => {
@@ -187,4 +190,68 @@ test('a class word as the last word is not a match — the modifier is the ingre
   assert.equal(isInPantry('soy sauce', ['Soy Sauce']), true)
   assert.equal(isInPantry('diced onion', ['Yellow Onions']), true, 'a real food head noun still matches')
   assert.equal(isInPantry('large eggs', ['Eggs']), true)
+})
+
+// ── Same-food rule: a name inside another name is only a match when both name the same food ──
+// Logan's 2026-09-16 pantry: "Banana Peppers" (a fridge-door jar) and "Banana Cream Pudding Mix",
+// no bananas. The old substring test called both "banana", a banana smoothie passed as cookable,
+// and Home said "Ready to cook" over a shelf with no banana on it.
+test('a different food that contains the word is NOT a match', () => {
+  const p = ['Banana Peppers', 'Banana Cream Pudding Mix']
+  assert.equal(isInPantry('banana', p), false)
+  assert.equal(isInPantry('bananas', p), false)
+  assert.equal(isInPantry('egg', ['Eggplant']), false)
+  assert.equal(isInPantry('rice', ['Licorice']), false)
+  assert.equal(isInPantry('salt', ['Salted Butter']), false)
+  assert.equal(isInPantry('apple', ['Apple Cider Vinegar']), false)
+  assert.equal(isInPantry('banana', ['Banana Bread']), false)
+  assert.equal(isInPantry('chicken', ['Chicken Salad']), false)
+  assert.equal(isInPantry('corn', ['Corn Tortillas']), false)
+  // ...and the reverse direction: a recipe's product is not covered by the food it is made from.
+  assert.equal(isInPantry('chicken stock', ['Chicken']), false)
+  assert.equal(isInPantry('coconut milk', ['Coconut']), false)
+  assert.equal(isInPantry('peanut butter', ['Peanuts']), false)
+})
+
+test('the same food plus adjectives, a cut, or a plural IS a match, both directions', () => {
+  assert.equal(isInPantry('chicken', ['Chicken Breast']), true)
+  assert.equal(isInPantry('chicken', ['Boneless Skinless Chicken Thighs']), true)
+  assert.equal(isInPantry('chicken breasts', ['Chicken']), true)
+  assert.equal(isInPantry('diced chicken', ['Chicken Breast']), true)
+  assert.equal(isInPantry('chicken breast', ['Chicken Thighs']), true) // same bird; generous on purpose
+  assert.equal(isInPantry('onion', ['Yellow Onions']), true)
+  assert.equal(isInPantry('diced onion', ['Yellow Onions']), true)
+  assert.equal(isInPantry('rice', ['Cooked Rice']), true)
+  assert.equal(isInPantry('potato', ['Red Potatoes']), true)
+  assert.equal(isInPantry('garlic', ['Garlic Cloves']), true)
+  assert.equal(isInPantry('garlic cloves', ['Garlic']), true)
+  assert.equal(isInPantry('broccoli florets', ['Broccoli']), true)
+  assert.equal(isInPantry('pineapple', ['Pineapple Chunks']), true)
+  assert.equal(isInPantry('salmon', ['Salmon Fillets']), true)
+  assert.equal(isInPantry('steak', ['Ribeye Steak']), true)
+  assert.equal(isInPantry('cheddar', ['Cheddar Cheese']), true)
+  assert.equal(isInPantry('cheddar cheese', ['Cheddar']), true)
+  assert.equal(isInPantry('cheese', ['Shredded Cheese']), true)
+  assert.equal(isInPantry('cheese', ['Cottage Cheese']), true)
+  assert.equal(isInPantry('milk', ['Oat Milk']), true) // the documented swap
+  assert.equal(isInPantry('egg', ['Eggs']), true)
+  assert.equal(isInPantry('spinach', ['Baby Spinach']), true)
+  assert.equal(isInPantry('beef', ['Ground Beef']), true)
+})
+
+test('form words: a qualified spice stays missing; the bare word is the one cheap false positive', () => {
+  // "ground cloves" against Garlic: the form word is stripped, "ground" is left, nothing matches.
+  assert.equal(isInPantry('ground cloves', ['Garlic']), false)
+  // Bare "cloves" against Garlic Cloves reads as present. It has the same shape as "steak" against
+  // "Ribeye Steak", which must match, and nothing structural tells the spice from the part. Cheap:
+  // a couple of grams of a spice is a garnish, so it costs an OPTIONAL line, never a meal.
+  assert.equal(isInPantry('cloves', ['Garlic Cloves']), true)
+  assert.equal(isInPantry('egg', ['Liquid Egg Whites']), false)
+  assert.equal(isInPantry('egg whites', ['Liquid Egg Whites']), true)
+})
+
+test('thin-pantry message carries the count and reads whole at one', () => {
+  assert.equal(thinPantryMessage(4), 'Not enough in your pantry yet for full meals — 4 ingredients so far. Scan another shelf or add a few basics.')
+  assert.equal(thinPantryMessage(1), 'Not enough in your pantry yet for full meals — 1 ingredient so far. Scan another shelf or add a few basics.')
+  assert.ok(MIN_PANTRY_FOR_COOK_NOW >= 4)
 })

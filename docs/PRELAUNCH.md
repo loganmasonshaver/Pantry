@@ -1523,9 +1523,22 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
-- [ ] **RAISED BY LOGAN 2026-09-16 — three pantry matchers disagree, and the two loose ones are why
-      Home said "Ready to cook" for a smoothie whose banana he does not have.** Proven by running all
-      three on the same inputs (scratch script, 2026-09-16):
+- [ ] **BUILT + DEPLOYED 2026-09-16, UNVERIFIED on device — ONE pantry matcher on all three surfaces.**
+      `lib/mealReadiness.ts` now imports `isInPantry` from `_shared/pantry-check.ts` (plain TS, no
+      Deno; Metro bundles it — confirmed by building the real entry and finding it in the bundle) and
+      the meal screen reads `pantryHas` from there, so Home, the detail and the server's cookability
+      gate cannot disagree by construction. The matcher itself got the SAME-FOOD rule: a name inside
+      another name matches only when both have the same head noun after cuts are stripped, so
+      "banana peppers" ≠ banana, "eggplant" ≠ egg, "licorice" ≠ rice, "salted butter" ≠ salt,
+      "chicken salad" ≠ chicken, "egg whites" ≠ egg, "crushed tomatoes" ≠ Tomato Sauce (its old
+      test asserted the opposite; the clause behind it was the banana one) — while "chicken breast",
+      "boneless skinless chicken thighs", "garlic cloves", "pineapple chunks", "Ribeye Steak" for
+      steak, "Cheddar Cheese" for cheddar all still match (+4 tests, 25 in the file). One known cheap
+      false positive kept: bare "cloves" against Garlic Cloves (same shape as steak; a garnish).
+      Tells: (1) the smoothie on Home reads **Need: banana** (or the deck no longer contains it after
+      the next generation); (2) meal screen agrees with Home on every card; (3) `generate-meals`
+      deployed 2026-09-16 ~02:10 CDT — the only function that imports pantry-check, so nothing else
+      is stale. **Original finding:** three matchers, proven by running all three on the same inputs:
       | ingredient | pantry | server `isInPantry` | Home `missingIngredients` | detail `isAlreadyInList` |
       |---|---|---|---|---|
       | banana | banana peppers, banana cream pudding mix | present | present | **missing** |
@@ -1547,13 +1560,30 @@ claiming exact wording from the top apps is guessing.
       was created alongside Bell Peppers and Greek Pepperoncini (a fridge-door jar reading, not the
       bunch). The bananas were MISSED, not mislabelled; scan-pantry keeps no raw output (logs only),
       so the dashboard function log at ~01:49 CDT is the only place to confirm per-photo counts.
-- [ ] **RAISED BY LOGAN 2026-09-16 — the meal screen opens with EVERY ingredient under + Add, then
-      corrects itself a beat later.** `pantryNames` starts as an empty Set and is fetched on mount;
+- [ ] **BUILT 2026-09-16, UNVERIFIED on device — the meal screen no longer opens with every ingredient
+      under + Add.** `pantryKnown` gate: rows render as one muted list with no chips or labels until
+      the pantry has answered; the Pantry tab's disk mirror (`lib/pantryMirror.ts`, key shared with
+      the tab) seeds it in a few ms, the network read confirms. Tell: open any meal — no flash of
+      "+ Add" on things you own. **Original finding:** `pantryNames` starts as an empty Set and is fetched on mount;
       until it lands every row is a NEED row. Home had the identical bug and gates on `known`
       (`pantryFetched`); the meal screen never got the gate. Fix: hold the buckets (render rows
       without chips/labels) until the pantry query resolves, and seed from the Pantry tab's disk
       mirror `pantry_items:<uid>` for an instant first paint. Clean bounded fix — ship on next pass.
-- [ ] **RAISED BY LOGAN 2026-09-16 — thin pantry: what happens, what should.** Today: 0 items → Home's
+- [ ] **BUILT + DEPLOYED 2026-09-16, UNVERIFIED on device — thin pantry.** (a) the server no longer pads
+      the deck with uncookable meals: a deck of one or two is returned as is, and an EMPTY one is
+      refused with the slot refunded; (b) floor: under **6** in-stock items Cook Now is refused before
+      the model is called (server `MIN_PANTRY_FOR_COOK_NOW`, mirrored client-side so no round trip),
+      slot refunded; (c) one message everywhere (`thinPantryMessage`): "Not enough in your pantry yet
+      for full meals — N ingredients so far. Scan another shelf or add a few basics."; (d) Home's
+      resting card becomes "Not enough to cook from yet" + that line + a **Scan pantry** action that
+      opens the scanner and retries after the save; (e) the reveal shows the line with no Retry, and
+      the headline says "1 meal you can make" for a deck of one; (f) the scan modal's Add-all ends on
+      the success step with the line and Done when the pantry is still under the floor. Tells (needs
+      a test account or toggling most of the pantry Out): (1) with 5 in-stock items Home shows the
+      card, tapping it opens the scanner, no generation is spent (`scan_usage` meal_gen unchanged);
+      (2) with 6+ items but nothing cookable (e.g. only condiments) the same card appears after a
+      refunded generation; (3) a normal pantry is unchanged. Not a "Need:" removal: Home's Need line
+      stays and now means only "the pantry changed since this deck was made". **Original finding:** Today: 0 items → Home's
       scan hero, no generation (`empty_pantry` when the ingredient list is empty); ≥ 1 item →
       generation runs against the item(s) + assumed staples. Server drops macro-band failures and
       meals needing a structural item the pantry lacks — BUT when fewer than 3 cookable candidates

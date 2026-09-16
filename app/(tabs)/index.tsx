@@ -269,7 +269,11 @@ function MealCardResting({ pantryCount, onPress, error, errorCode }: { pantryCou
           style={StyleSheet.absoluteFill}
         />
       </RNAnimated.View>
-      <Text style={styles.restingTitle}>{error ? "Couldn't get tonight's meals" : "Get tonight's meals"}</Text>
+      {/* A thin pantry is not a failure to fetch — the app looked and there was not enough. Name that,
+          and make the one action the thing that fixes it. */}
+      <Text style={styles.restingTitle}>
+        {error ? (errorCode === 'pantry_too_thin' ? 'Not enough to cook from yet' : "Couldn't get tonight's meals") : "Get tonight's meals"}
+      </Text>
       {/* Home was the ONLY surface that dropped the error on the floor — Pantry and cook-reveal
           both render it. Without this a failed generation looks identical to a fresh one: the card
           says "Let's cook", the tap fails silently, and the user taps forever. That is what a
@@ -285,7 +289,7 @@ function MealCardResting({ pantryCount, onPress, error, errorCode }: { pantryCou
           since tapping cannot succeed until tomorrow. */}
       {errorCode !== 'meal_cap_reached' && (
         <View style={styles.restingCTA}>
-          <Text style={styles.restingCTAText}>{error ? 'Try again' : "Let's cook"}</Text>
+          <Text style={styles.restingCTAText}>{error ? (errorCode === 'pantry_too_thin' ? 'Scan pantry' : 'Try again') : "Let's cook"}</Text>
         </View>
       )}
     </TouchableOpacity>
@@ -1649,7 +1653,14 @@ export default function HomeScreen() {
               // The FAILURE state, not the opening state: the cache was checked, no meals exist and
               // nothing is loading — a generation that failed or was capped. Tapping retries. The
               // empty-pantry case never gets here; its own block above is gated on size === 0.
-              <MealCardResting pantryCount={pantryNames.size} onPress={retry} error={mealsError} errorCode={mealsErrorCode} />
+              <MealCardResting
+                pantryCount={pantryNames.size}
+                // Too thin → the card's action is the scanner, not another generation that would be
+                // refused for the same reason.
+                onPress={mealsErrorCode === 'pantry_too_thin' ? () => setShowPantryScanFromHome(true) : retry}
+                error={mealsError}
+                errorCode={mealsErrorCode}
+              />
             ) : null}
           </View>
         )}
@@ -1948,6 +1959,9 @@ export default function HomeScreen() {
           // rows now that the scan added items — the initial fetch only runs on load.
           // (The staples ask now lives inside the scan review flow, not a post-scan popup.)
           await loadPantryNames()
+          // The thin-pantry card sent them to scan; the new items are the reason to try again.
+          // Still under the floor → the client refuses again without a round trip.
+          if (mealsErrorCode === 'pantry_too_thin') retry()
         }}
       />
 

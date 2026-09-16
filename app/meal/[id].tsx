@@ -27,7 +27,8 @@ import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples, stapleKey } from '@/constants/staples'
-import { isOptionalGap } from '@/lib/mealReadiness'
+import { isOptionalGap, pantryHas } from '@/lib/mealReadiness'
+import { readPantryMirrorNames } from '@/lib/pantryMirror'
 import { escapeLike } from '@/lib/sqlLike'
 import { todayStr } from '@/lib/localDate'
 import { DEFAULT_SLOT_LABELS } from '@/lib/mealSlots'
@@ -54,7 +55,7 @@ type PortionMode = 'Eyeball' | 'Measured'
 
 import {
   cleanIngredientName, isNeedToBuy, getWholeUnitDisplay, getMeasuredDisplay, toEyeball,
-  stripAdjectives, isAlreadyInList, stripStepNumber, scaleVisual, formatTimeBreakdown, formatTimePhases, imageIngredientNames,
+  stripAdjectives, stripStepNumber, scaleVisual, formatTimeBreakdown, formatTimePhases, imageIngredientNames,
 } from '@/lib/ingredientDisplay'
 
 function renderStepContent(step: string | { title: string; detail: string }) {
@@ -126,6 +127,10 @@ export default function MealDetailScreen() {
   const [cookServings, setCookServings] = useState<number | null>(null)
   const [addedToGrocery, setAddedToGrocery] = useState<Set<string>>(new Set())
   const [pantryNames, setPantryNames] = useState<Set<string>>(new Set())
+  // False until a pantry read has answered. The set starts empty, and an empty set reads as "you
+  // have nothing", so for the beat before the fetch landed every ingredient sat under "+ Add" and
+  // then jumped into IN YOUR PANTRY. Home gates the same way (`known`); this screen never did.
+  const [pantryKnown, setPantryKnown] = useState(false)
   const [groceryNames, setGroceryNames] = useState<Set<string>>(new Set())
   // Basics the user has opted out of assuming (normalized names). Drives the "we assumed" tier —
   // an excluded staple stops being shown as assumed and moves to "you'll need".
@@ -144,10 +149,22 @@ export default function MealDetailScreen() {
 
   useEffect(() => {
     if (!user) return
+    // The Pantry tab's disk mirror answers in a few ms and is right whenever the tab has loaded
+    // this account; the network read then confirms or corrects it.
+    let networkAnswered = false
+    readPantryMirrorNames(user.id).then(names => {
+      if (networkAnswered || !names) return
+      setPantryNames(names)
+      setPantryKnown(true)
+    })
     supabase.from('pantry_items').select('name').eq('user_id', user.id).eq('in_stock', true)
       // .trim() matters: Discover trims its pantry set and this one didn't, so a row stored with
       // stray whitespace matched there and never here — a third way the two screens disagreed.
-      .then(({ data }) => setPantryNames(new Set(data?.map(i => i.name.toLowerCase().trim()) ?? [])))
+      .then(({ data }) => {
+        networkAnswered = true
+        setPantryNames(new Set(data?.map(i => i.name.toLowerCase().trim()) ?? []))
+        setPantryKnown(true)
+      })
     supabase.from('grocery_items').select('name').eq('user_id', user.id)
       .then(({ data }) => setGroceryNames(new Set(data?.map(i => i.name.toLowerCase()) ?? [])))
     // Excluded set = the user's manual opt-outs PLUS diet-conflicting basics (butter for vegan,
@@ -937,7 +954,7 @@ export default function MealDetailScreen() {
               needs to act on. "Have" = explicitly in pantry OR a cooking basic (salt, oil, etc.)
               that everyone is assumed to have. */}
           {(() => {
-            const inPantry = (ing: any) => isAlreadyInList(ing.name, pantryNames)
+            const inPantry = (ing: any) => pantryHas(ing.name, pantryNames) // the server's matcher — Home reads the same one
             const isBasic = (ing: any) => !inPantry(ing) && isAssumedStaple(ing.name, excludedStaples)
             // scaledIngredients, not meal.ingredients: the stepper is a VIEW. Saving, logging and
             // editing all read meal.ingredients so they keep the recipe as authored.
@@ -969,7 +986,7 @@ export default function MealDetailScreen() {
             )
             const showSections = sectionsPresent.size > 1
 
-            const renderRow = (ing: any, kind: 'need' | 'optional' | 'have' | 'basic') => {
+            const renderRow = (ing: any, kind: 'need' | 'optional' | 'have' | 'basic' | 'pending') => {
               // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
               // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
               const wholeUnit = getWholeUnitDisplay(ing.name, ing.grams, ing.visual)
@@ -981,7 +998,7 @@ export default function MealDetailScreen() {
               const displayName = wholeUnit ? wholeUnit.name : ing.name
               const isAdded = addedToGrocery.has(ing.name)
               // 'have' (in pantry) and 'basic' (assumed) both render muted vs the actionable NEED rows.
-              const isHaveRow = kind !== 'need' // OPTIONAL rows are muted too: nothing to act on unless you want it
+              const isHaveRow = kind !== 'need' // OPTIONAL and PENDING rows are muted too: nothing to act on yet
               // NEED taps toggle the grocery list. HAVE and BASIC rows are inert at the row level —
               // the basic opt-out now lives ONLY on the "assumed" pill (a precise, deliberate target),
               // so a stray row tap never opts a staple out.
@@ -1012,7 +1029,7 @@ export default function MealDetailScreen() {
                       <Text style={styles.ingredientSection}>{`  · for the ${ing.section}`}</Text>
                     )}
                   </Text>
-                  {kind === 'have' ? (
+                  {kind === 'pending' ? null : kind === 'have' ? (
                     // HAVE row: just a quiet green check confirming state — no shopping action
                     // because buying something you already have is the whole bug we're fixing.
                     <View style={styles.haveIndicator}>
@@ -1050,6 +1067,15 @@ export default function MealDetailScreen() {
               )
             }
 
+            // Until the pantry has answered there are no buckets to draw: one flat, muted list with
+            // no chips and no labels, so nothing on screen claims a state that is about to flip.
+            if (!pantryKnown) {
+              return (
+                <View style={styles.ingredientList}>
+                  {scaledIngredients.map(ing => renderRow(ing, 'pending'))}
+                </View>
+              )
+            }
             return (
               <>
                 {needRows.length > 0 && (

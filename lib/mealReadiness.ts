@@ -6,6 +6,16 @@
 // false "Got everything" on the card while the detail screen correctly showed every ingredient
 // missing. Extracted from the Pantry tab so Home and the meal detail read from one definition.
 import { isAssumedStaple } from '../constants/staples.ts'
+// The SERVER's matcher, imported rather than mirrored. Home, the meal screen and the cookability
+// gate used to run three different "do you have it" tests and gave three different answers for one
+// pantry — "Banana Peppers" was banana on two of them. The file is plain TypeScript with no Deno
+// in it, so the app can bundle it, and node already runs its tests.
+import { isInPantry } from '../supabase/functions/_shared/pantry-check.ts'
+
+// One pantry item covers this ingredient — the meal screen's "IN YOUR PANTRY" test.
+export function pantryHas(name: string, pantryNames: Set<string>): boolean {
+  return isInPantry(name, [...pantryNames])
+}
 
 type Named = { name: string }
 
@@ -14,17 +24,12 @@ type Named = { name: string }
 export function missingIngredients(mealIngs: Named[] | undefined, pantryNames: Set<string>, excludedStaples: Set<string>): string[] {
   if (!mealIngs) return []
   const missing: string[] = []
+  const list = [...pantryNames]
   for (const ing of mealIngs) {
-    const n = ing.name.toLowerCase()
     // Salt, oil and the rest are assumed unless the user has opted out of one (staples_excluded,
     // or a diet that rules it out) — then it flips back into NEED.
     if (isAssumedStaple(ing.name, excludedStaples)) continue
-    // Two-way substring: pantry "chicken breast" covers meal "chicken", and the reverse.
-    let have = false
-    for (const p of pantryNames) {
-      if (p === n || p.includes(n) || n.includes(p)) { have = true; break }
-    }
-    if (!have) missing.push(ing.name)
+    if (!isInPantry(ing.name, list)) missing.push(ing.name)
   }
   return missing
 }

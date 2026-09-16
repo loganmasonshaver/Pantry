@@ -39,6 +39,7 @@ import { categorizeItem } from '@/lib/categories'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { prefetchCookNowMeals, warmMealImages } from '@/lib/mealPrefetch'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
+import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
@@ -346,7 +347,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [addingMissed, setAddingMissed] = useState(false)
   // Post-save success step (returning scanners only) — offers the cook-reveal vs "maybe later".
   const [showSaved, setShowSaved] = useState(false)
-  const [savedCapped, setSavedCapped] = useState(false) // success step with no reveal: today's meal picks are used up
+  // Success step with no reveal, and why: today's meal picks are used up, or the pantry is still too
+  // thin for the generator to build from. null = the normal step with See what you can cook.
+  const [savedReason, setSavedReason] = useState<null | 'capped' | { thin: number }>(null)
   const [savedCount, setSavedCount] = useState(0)
   // Tapped review photo → fullscreen pinch-to-zoom overlay (in-tree, not a nested Modal).
   const [zoomUri, setZoomUri] = useState<string | null>(null)
@@ -691,7 +694,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setMissedInput('')
       setAddingMissed(false)
       setShowSaved(false)
-      setSavedCapped(false)
+      setSavedReason(null)
       setZoomUri(null)
       setCurrentPhoto(0)
       nudgedRef.current = false
@@ -1073,14 +1076,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               {/* Capped: no time is promised. The quota resets at UTC midnight while the meal cache
                   turns over at LOCAL midnight, so "tomorrow" would be wrong for part of the day. */}
               <Text style={styles.savedSub}>
-                {savedCapped
+                {savedReason === 'capped'
                   ? "You've used today's meal picks. Your next ones will use everything you just added."
-                  : "Now the good part — we've lined up meals you can cook right now with what you have. No shopping."}
+                  : savedReason
+                    ? thinPantryMessage(savedReason.thin)
+                    : "Now the good part — we've lined up meals you can cook right now with what you have. No shopping."}
               </Text>
             </View>
             <View style={styles.savedActions}>
-              {savedCapped ? (
-                // One action. "See what you can cook" would open the deck from before the scan.
+              {savedReason ? (
+                // One action. "See what you can cook" would open the deck from before the scan, or
+                // an error card saying the pantry is thin — neither is a payoff.
                 <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.85} onPress={() => handleClose()}>
                   <Text style={styles.primaryBtnText}>Done</Text>
                 </TouchableOpacity>
@@ -1587,14 +1593,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     // An unreadable count counts as not capped — the server still decides.
                     if (prefetchOutcomeRef.current === 'failed' || prefetchOutcomeRef.current === 'none') {
                       const used = await fetchMealGenUsedToday(user.id)
-                      if (used !== null && used >= MEAL_GEN_CAP_PER_DAY) {
+                      // A pantry under the floor is the other reason the prefetch is refused. Read the
+                      // count the server would read (in-stock rows, the just-saved ones included).
+                      const { count } = await supabase.from('pantry_items').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('in_stock', true)
+                      const thin = typeof count === 'number' && count < MIN_PANTRY_FOR_COOK_NOW ? count : null
+                      if ((used !== null && used >= MEAL_GEN_CAP_PER_DAY) || thin !== null) {
                         setSaving(false)
                         savingRef.current = false
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}) // the flow ends here
                         // COOK_REVEAL_SEEN_KEY is deliberately NOT set: a first scanner who hits this
                         // still gets the auto-reveal on their next scan.
                         setSavedCount(selected.length)
-                        setSavedCapped(true)
+                        setSavedReason(thin !== null ? { thin } : 'capped')
                         setShowSaved(true)
                         return
                       }

@@ -68,7 +68,8 @@ function CountUp({ value, active, reduceMotion, style }: { value: number; active
 // fades into place. The count is the only piece that gets an overshoot pop: research is explicit
 // that spring overshoot on a whole line of text reads cheap, but on one small accent it reads good.
 function HeadlineChunks({ count, anims }: { count: number; anims: Animated.Value[] }) {
-  const pieces = [String(count), 'meals you', 'can make', 'right now']
+  // The deck is no longer padded to three, so one meal is a real case: "1 meal you can make".
+  const pieces = [String(count), count === 1 ? 'meal you' : 'meals you', 'can make', 'right now']
   return (
     <View style={styles.headlineRow}>
       {pieces.map((piece, i) => (
@@ -296,8 +297,8 @@ export default function CookReveal() {
         <View style={styles.loaderWrap}>
           {/* Show the real reason (e.g. the daily cap message) instead of a generic line. */}
           <Text style={styles.loaderTitle}>{error}</Text>
-          {/* Retry can't help once the daily cap is hit, or when the pantry is empty — hide it. */}
-          {errorCode !== 'meal_cap_reached' && errorCode !== 'empty_pantry' && (
+          {/* Retry can't help once the daily cap is hit, or when the pantry is empty or too thin — hide it. */}
+          {errorCode !== 'meal_cap_reached' && errorCode !== 'empty_pantry' && errorCode !== 'pantry_too_thin' && (
             <TouchableOpacity style={styles.retryBtn} onPress={() => { animatedRef.current = false; retry() }}>
               <Text style={styles.retryText}>Try again</Text>
             </TouchableOpacity>

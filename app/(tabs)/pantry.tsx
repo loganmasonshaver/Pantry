@@ -32,6 +32,7 @@ import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/cat
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
 import { ageLabelLong, isPerishable, isStale } from '@/lib/pantryAge'
 import { groupPantryRows, type PantryRow } from '@/lib/pantryGroup'
+import { pantryMirrorKey as pantryCacheKey } from '@/lib/pantryMirror'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
@@ -115,7 +116,6 @@ const CATEGORY_CONFIG = PANTRY_ORDER.map(name => ({
 const INSIGHT_ROTATION_KEY = 'pantry_insight_rotation' // visit counter → rotates the insight headline (Step D)
 // The pantry list, mirrored per user so the tab paints before the query answers. Same shape as the
 // query's rows, so one grouping function serves both.
-const pantryCacheKey = (uid: string) => `pantry_items:${uid}`
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
