@@ -770,3 +770,26 @@ test('nameIngredientGaps: a pasta dish made with a named shape is not missing pa
   // Still a gap when nothing pasta-shaped is listed at all.
   assert.deepEqual(nameIngredientGaps('Beef Burrito Pasta', [{ name: 'ground beef' }, { name: 'cheddar' }, { name: 'salsa' }]), ['pasta'])
 })
+
+test('nameIngredientGaps: a copycat of a branded product is not missing the product', () => {
+  assert.deepEqual(nameIngredientGaps('Low Calorie Nutella', [{ name: 'hazelnuts' }, { name: 'cocoa powder' }, { name: 'protein powder' }]), [])
+  assert.deepEqual(nameIngredientGaps('Creamy Oreo Nutella Spread', [{ name: 'oreos' }, { name: 'cocoa powder' }, { name: 'greek yogurt' }]), [])
+  assert.deepEqual(nameIngredientGaps('Protein Oreos', [{ name: 'oat flour' }, { name: 'cocoa powder' }, { name: 'greek yogurt' }]), [])
+  // As an ingredient the promise stands.
+  assert.deepEqual(nameIngredientGaps('Nutella Brownies', [{ name: 'flour' }, { name: 'eggs' }, { name: 'cocoa powder' }]), ['nutella'])
+  assert.deepEqual(nameIngredientGaps('Oreo Protein Shake', [{ name: 'milk' }, { name: 'protein powder' }, { name: 'ice' }]), ['oreo'])
+})
+
+test('nameIngredientGaps: a carrier made from a listed vegetable is not missing the carrier', () => {
+  assert.deepEqual(nameIngredientGaps('Zucchini Tortilla Wraps', [{ name: 'zucchini' }, { name: 'eggs' }, { name: 'mozzarella' }, { name: 'chicken breast' }]), [])
+  assert.deepEqual(nameIngredientGaps('Cauliflower Rice Bowl', [{ name: 'cauliflower' }, { name: 'chicken thighs' }, { name: 'soy sauce' }]), [])
+  assert.deepEqual(nameIngredientGaps('Sweet Potato Noodle Stir Fry', [{ name: 'sweet potato' }, { name: 'ground beef' }, { name: 'sesame oil' }]), [])
+  // The maker has to be listed, and has to be a maker.
+  assert.deepEqual(nameIngredientGaps('Zucchini Tortilla Wraps', [{ name: 'eggs' }, { name: 'mozzarella' }, { name: 'chicken breast' }]), ['zucchini', 'tortilla'])
+  assert.deepEqual(nameIngredientGaps('Cottage Cheese Pasta', [{ name: 'cottage cheese' }, { name: 'garlic' }, { name: 'parmesan' }]), ['pasta'])
+  assert.deepEqual(nameIngredientGaps('Chicken Tortilla Soup', [{ name: 'chicken' }, { name: 'tomatoes' }, { name: 'corn' }]), ['tortilla'])
+})
+
+test('nameIngredientGaps: albacore is tuna', () => {
+  assert.deepEqual(nameIngredientGaps('Crispy Pasta Tuna Salad', [{ name: 'rotini' }, { name: 'canned albacore' }, { name: 'greek yogurt' }]), [])
+})

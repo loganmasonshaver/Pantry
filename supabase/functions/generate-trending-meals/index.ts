@@ -8,6 +8,7 @@ import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { decideAttempt, pickProvider, countDelta, addCounts, type Counts } from '../_shared/attempt-budget.ts'
+import { filterTitleRepeats } from '../_shared/title-dedup.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
 import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
@@ -595,13 +596,19 @@ Deno.serve(async (req: Request) => {
     // density-skip rule (recipes that don't naturally hit 25% get rejected upstream).
     const seen = new Set<string>()
     console.log(`[funnel] raw YouTube candidates: ${allVideos.length}`)
-    const deduped = allVideos.filter(v => {
+    const dedupedByVideo = allVideos.filter(v => {
       if (recentVideoIds.has(v.videoId)) return false
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
       if (seen.has(key)) return false
       seen.add(key)
       return true
     })
+    // Dishes the pool already holds, matched on the TITLE, out before the floor so the floor
+    // refills from lower-view videos instead of from repeats. The model kept picking these when
+    // asked not to; see _shared/title-dedup.ts.
+    const titleDedup = filterTitleRepeats(dedupedByVideo, poolNamesForPrompt)
+    const deduped = titleDedup.kept
+    console.log(`[funnel] title repeats: ${titleDedup.dropped.length} of ${dedupedByVideo.length} match a pool dish${titleDedup.skipped ? ' — over the drop share, filter SKIPPED' : ''}`)
 
     // View floor. Target is 100k, but a HARD 100k floor would abort the whole cron on a thin day
     // (MIN_TRENDING_MEALS keeps the previous run, so Discover would just go stale). Step down
@@ -637,7 +644,10 @@ Deno.serve(async (req: Request) => {
     uniqueVideos = uniqueVideos.filter(v => sourceIngredients(v.description || '').length >= 3)
     console.log(`[funnel] ingredient-list gate: ${uniqueVideos.length}/${beforeGate} videos have a readable list`)
     funnel.rawCandidates = allVideos.length
-    funnel.afterDedup = deduped.length
+    funnel.afterDedup = dedupedByVideo.length
+    funnel.afterTitleDedup = deduped.length
+    funnel.titleRepeatsSkipped = titleDedup.skipped
+    funnel.titleRepeats = titleDedup.dropped.slice(0, 40).map(d => ({ t: d.title.slice(0, 100), m: d.matched }))
     funnel.viewFloorUsed = usedFloor
     funnel.afterViewFloor = beforeGate
     funnel.afterIngredientGate = uniqueVideos.length

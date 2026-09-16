@@ -304,6 +304,8 @@ const SYNONYMS: Record<string, string[]> = {
   steak: ['sirloin', 'ribeye', 'flank', 'beef'],
   beef: ['steak', 'sirloin', 'ribeye', 'chuck', 'brisket'],
   chicken: ['poultry'],
+  // Each names tuna and nothing else; a brand-stripped line ("2 cans albacore") is still tuna.
+  tuna: ['albacore', 'skipjack', 'yellowfin', 'ahi'],
   peanut: ['pb'],
   corn: ['mais', 'sweetcorn'],
   blueberry: ['borówki', 'borówka'],
@@ -322,6 +324,39 @@ const SYNONYMS: Record<string, string[]> = {
   // candidate out of ten and is absorbed by the floor on the drop.
   toast: ['bread', 'sourdough', 'baguette', 'bagel', 'english muffin', 'brioche'],
   bread: ['toast', 'sourdough', 'baguette', 'brioche'],
+}
+
+// Branded products fitness creators remake at home. When the brand is the name's HEAD word
+// ("Low Calorie Nutella", "Protein Oreos") or the head is a form the brand itself is ("Oreo
+// Nutella Spread"), the dish is a copy of the product and cannot contain it — 2026-09-16 rejected
+// one protein-Nutella spread three times for "missing nutella". As a modifier ("Nutella
+// Brownies", "Oreo Cheesecake") the brand is an ingredient and the gap stands.
+const COPYCAT_BRANDS: Record<string, string[]> = {
+  nutella: ['spread', 'butter', 'dip', 'sauce'],
+  biscoff: ['spread', 'butter', 'cookie', 'cookies', 'dip'],
+  oreo: ['cookie', 'cookies'],
+}
+
+// Carriers a creator makes FROM a vegetable: "Zucchini Tortilla", "Cauliflower Rice", "Sweet
+// Potato Noodles". The carrier is the dish's OUTPUT, not an input, so its absence is the recipe
+// working as named. Fires only when the maker immediately precedes the carrier in the name AND is
+// listed itself — "Cottage Cheese Pasta" (a sauce on pasta) still has to list pasta.
+const MADE_OF: Record<string, string[]> = {
+  tortilla: ['zucchini', 'cauliflower', 'egg', 'spinach', 'sweet potato', 'chickpea', 'lentil', 'oat', 'almond'],
+  noodle: ['zucchini', 'carrot', 'cucumber', 'sweet potato', 'egg', 'kelp', 'shirataki', 'konjac'],
+  pasta: ['zucchini'],
+  rice: ['cauliflower', 'broccoli', 'konjac', 'shirataki'],
+}
+function madeFrom(nameSeq: string[], carrier: string, makers: string[], listed: Set<string>): boolean {
+  const i = nameSeq.indexOf(carrier)
+  if (i <= 0) return false
+  const one = nameSeq[i - 1]
+  const two = i >= 2 ? `${nameSeq[i - 2]} ${nameSeq[i - 1]}` : ''
+  return makers.some(m => {
+    const parts = m.split(' ').map(singular)
+    const phrase = parts.join(' ')
+    return (phrase === one || phrase === two) && parts.every(p => listed.has(p))
+  })
 }
 
 /**
@@ -378,6 +413,9 @@ const GRAIN_DERIVATIVE = /\b(milk|flour|water|syrup|bran|starch)\b/i
 export function nameIngredientGaps(name: string, ingredients: any[] | undefined): string[] {
   const nameTokens = tokens(name)
   if (nameTokens.size === 0) return []
+  // Ordered, for the head-word and made-of rules; tokens() is a set.
+  const nameSeq = (name ?? '').toLowerCase().match(/[a-zÀ-ɏ]+/g)?.map(singular) ?? []
+  const head = nameSeq[nameSeq.length - 1] ?? ''
   const lines = realIngredients(ingredients)
     .map(i => (typeof i === 'string' ? i : String((i as any)?.name ?? '')))
   const ingTokens = tokens(lines.join(' '))
@@ -404,6 +442,8 @@ export function nameIngredientGaps(name: string, ingredients: any[] | undefined)
     const pool = MEAT_LIKE.has(stem) ? substantive : GRAIN_LIKE.has(stem) ? grainSubstantive : ingTokens
     if (pool.has(stem)) continue
     if ((SYNONYMS[food] ?? []).some(alt => pool.has(singular(alt)))) continue
+    if (COPYCAT_BRANDS[food] && (head === stem || COPYCAT_BRANDS[food].some(f => singular(f) === head))) continue
+    if (MADE_OF[food] && madeFrom(nameSeq, stem, MADE_OF[food], pool)) continue
     gaps.push(food)
   }
   return gaps
