@@ -800,7 +800,7 @@ For each video you select, output the recipe AS THE CREATOR PRESENTED IT.
 CORE FIDELITY RULES — do not violate these:
 - READ macros from the video description first. Most fitness creators list calories/protein/carbs/fat directly. If they listed numbers, USE THEM VERBATIM. Do not recalculate.
 - READ ingredients and quantities from the description verbatim. Preserve the creator's portions exactly. Do not scale, round, or substitute.
-- SHELF_TAG — exactly one, from this list ONLY: mexican, indian, asian, italian, mediterranean, american-comfort, sweet-treat, high-protein-snack, breakfast. Pick the one a hungry person would use to describe the dish, not the most technically defensible. A cuisine wins when the dish clearly belongs to one (paneer masala = indian, teriyaki bowl = asian, gnocchi = italian). When it has no cuisine — protein bowls, cottage cheese pancakes, yogurt bites, cloud bread — use sweet-treat, high-protein-snack or breakfast instead. Never invent a value outside the list.
+- SHELF_TAG — exactly one; the list and the order to decide in are under SHELF_TAG below.
 - ALLERGENS — answer for the dish AS COOKED, including anything hidden inside a prepared component. Pesto contains parmesan (dairy) and pine nuts. Gnocchi, teriyaki, hoisin and most soy sauce contain wheat. Caesar dressing contains dairy and anchovy. Naan and brioche contain dairy. If a component's usual recipe contains the allergen, say true — do not assume a special-diet version. When unsure, say TRUE. A false "contains" costs one meal a filter tag; a false "does not contain" sends an allergen to someone avoiding it, and those are not equivalent mistakes.
 - SERVINGS AND SCALE — read this before touching any quantity. Creators list INGREDIENTS for the whole batch and MACROS per serving. Do not reconcile those by shrinking the ingredients.
   * "servings" = how many servings the creator's ingredient list makes. If they say "makes 8", use 8. If they give per-serving macros and a batch of ingredients, work out how many servings that batch is. If it's a single-portion dish, 1.
@@ -907,9 +907,26 @@ SHELF_TAG — REQUIRED, and it must be copied EXACTLY from this list. Any other 
 and the recipe loses its shelf, so never invent one, never leave it out, and never pluralise or
 rephrase (not "desserts", not "asian-inspired", not "snack"):
   mexican | indian | asian | italian | mediterranean | american-comfort | sweet-treat | high-protein-snack | breakfast
-Pick by what the dish IS: cuisine first if it clearly belongs to one, otherwise sweet-treat for
-desserts, high-protein-snack for small savoury bites, breakfast for morning food, and
-american-comfort as the catch-all for everything else. Every recipe gets one — there is no "none".
+Each shelf answers what someone browsing is in the mood for. Decide IN THIS ORDER and stop at the
+first that fits:
+  1. A DESSERT, from any cuisine → sweet-treat. Cakes, cheesecakes, brownies, cookies, ice cream and
+     frozen yogurt, mousse, tiramisu, laddu, halwa, kheer. Someone browsing "Indian night" is
+     planning dinner, so an Indian sweet belongs here, not there.
+  2. A SNACK eaten between meals, sweet or savoury, with no clear cuisine → high-protein-snack.
+     Protein balls, bites, bars, bark, clusters, cups, dips, crackers, jerky.
+  3. A SAVOURY dish that clearly belongs to one cuisine → that cuisine, whatever meal it is eaten at.
+     indian: masala, dal, dosa, paratha, chilla, vada, cutlets and kebabs made with besan or soya,
+     momos, and Indo-Chinese (manchurian, chilli paneer, schezwan). mexican: tacos, fajitas,
+     enchiladas, Tex-Mex. asian: Chinese, Japanese, Korean, Thai, Vietnamese. mediterranean: Greek,
+     Turkish, Levantine (kofta, shawarma, falafel, tzatziki). italian: pasta, pizza, lasagna, gnocchi,
+     calzone — unless the dish is named for an American one (mac and cheese, cheesesteak pasta,
+     buffalo chicken pasta) → american-comfort.
+  4. MORNING FOOD → breakfast. Pancakes, waffles, crepes, oats, chia pudding, smoothies, smoothie and
+     yogurt bowls, egg dishes, breakfast wraps, toast.
+  5. Anything else → american-comfort.
+A salad or bowl is decided by the same order: a Greek salad is mediterranean, a burrito bowl is
+mexican. Do not use mediterranean for a salad just because it is fresh. Every recipe gets exactly
+one — there is no "none".
 
 ${TIME_RULES}
 
