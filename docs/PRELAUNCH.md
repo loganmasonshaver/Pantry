@@ -1495,9 +1495,17 @@ claiming exact wording from the top apps is guessing.
 - [ ] **OPEN — Home "Cook from your pantry": two ✓ Ready to cook over three meals reads as partial
       failure** (Logan 2026-09-16). All three were cookable; the third showed "Better with: fresh lime
       juice" instead of the check (`PantryMealRow` in `app/(tabs)/index.tsx`: Need → Better with →
-      Ready, first match wins). Logan has his own idea; Claude's rec given in chat: keep the check for
-      every cookable meal and put the garnish after it ("✓ Ready to cook · + lime juice"), so the ONE
-      state without a check stays the real problem, "Need: …". Not built — waiting on Logan's pick.
+      Ready, first match wins). **Direction agreed 2026-09-16 (Logan's idea):** the Home row shows
+      only ✓ Ready to cook or Need: — no garnish line — and the garnish is mentioned ONLY on the meal
+      screen, as a suggestion. **The catch found in code:** the meal screen does not split gaps today;
+      it lists every missing non-staple under "YOU'LL NEED" with "Tap an item to add it to your
+      grocery list", so the lime juice already reads there as a requirement — deleting the Home line
+      alone would make Home say Ready and the detail say You'll need. Build: an "OPTIONAL" group
+      AFTER "IN YOUR PANTRY" (garnish = missing but not in `structural_missing`, via
+      `lib/mealReadiness.ts` so both screens share one definition), muted rows, keep the per-row
+      "+ Add", hint "Not needed for this dish — nice if you have it." "YOU'LL NEED" keeps only
+      structural gaps. Meals cached before the server split have no list and fall back to all
+      gaps as needed, as Home already does. Not built — waiting on "go".
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
 - [x] ~~Delete or wire the dead review screen first~~ — DELETED 2026-08-30. It was not a
       delete-vs-wire fork: step 55 is a strictly better version of the same review-and-confirm
