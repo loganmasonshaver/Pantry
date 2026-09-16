@@ -122,8 +122,8 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   sign-off as ingredients; 2 came from real run 808. New whole-line claim rules; scanned against
   every stored ingredient name: exactly the 20 junk lines, zero false positives. Gelatin dessert
   (Sep 13) repaired in place.
-  - [ ] **LOGAN: delete the two Sep 16 rows** (no real ingredient list to recover; the agent does
-    not hard-delete):
+  - [x] **DELETED by Logan 2026-09-16** (verified: 0 remain; today's live rows now 6) — the two Sep 16
+    rows with no real ingredient list:
     `delete from trending_meals where id in ('d794e444-ac90-4fae-999e-4238ab387985', '0b2f069e-705e-41cc-8003-808536413708');`
     ("Oats and Paneer Savory Breakfast", "Soya and Corn Protein Breakfast")
 - [x] **SHELF RULE (`a321d98`, DEPLOYED, unexercised until Sep 17).** The prompt had two rules that
