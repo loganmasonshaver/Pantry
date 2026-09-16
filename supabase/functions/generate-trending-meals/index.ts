@@ -1070,6 +1070,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     funnel.attempts = attemptLog
     funnel.poolNamesInPrompt = poolNamesForPrompt.length
     funnel.promptChars = prompt.length
+    // What the model chose FROM. Without this, "would a title pre-filter have removed the pool
+    // repeats" can only be measured with another quota-costing run; with it, offline from the row.
+    funnel.candidates = uniqueVideos.map(v => ({ t: String(v.title ?? '').slice(0, 120), id: v.videoId, views: v.viewCount ?? null }))
     // Per PROVIDER, summed from its own attempts. These were the run's cumulative counters written
     // under whichever provider ran last, so llm_OpenAI read raw 13 with Gemini's drops inside it.
     const providerTotals: Record<string, { raw: number; sanitized: number; rejected: Counts }> = {}
