@@ -18,6 +18,9 @@ attributable. Full reasoning for each item is in §0 below and in the commit bod
 - [ ] **1. It ran and returned.** PASS = HTTP 200, `timing.totalMs` < 150 000, a row exists. Then the
   NEW 08:05 photo step (cron job 6, `?stage=images`): its `net._http_response` body reads
   `{"stage":"images","rows":N,...}` with status 200; `rows` 0 means the 08:00 run finished every photo.
+  Since `lib/discoverPublish.ts` a recipe without its AI photo is HIDDEN from Discover, so any row
+  still without one after 08:05 is a recipe nobody can see — zero expected:
+  `select name from trending_meals where generated_at = current_date and (image is null or image not like '%/storage/v1/object/public/%');`
   `select id, created_at, stored, funnel->'timing' timing, funnel->'attemptsSkippedForTime' t, funnel->'attemptsSkippedForList' l, funnel->'imagesSkippedForTime' img from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
   `select id, created, status_code, timed_out, error_msg from net._http_response order by id desc limit 2;` (cron + 08:20 health check)
   `imagesSkippedForTime` present = FAL was slow and the deadline worked (those rows keep thumbnails
@@ -44,7 +47,8 @@ attributable. Full reasoning for each item is in §0 below and in the commit bod
   "cheesecake" still finds all ~22; chia puddings + smoothie/yogurt bowls on Breakfast, protein balls
   + bark on Protein snacks, manchurian + momos on Indian night; **Salads & bowls** shows more than 2
   salads WHEN it rotates in (6 of 12 shelves render per day — it may not appear on the 17th); NEW
-  TODAY badges on the cron's rows; no re-layout when the pool loads. Daily report line (~9:05)
+  TODAY badges on the cron's rows; no re-layout when the pool loads; no recipe on a YouTube thumbnail
+  anywhere (they now wait for their AI photo). Daily report line (~9:05)
   reads "Discover: N new recipes, all have photos".
 - [ ] **7. Shards and model — BUILT (`303f098`), measured here, decided by the rule below.**
   Only after 1-5 are read. Each is a same-list replay of the 08:00 run: ~1 YouTube quota unit,
