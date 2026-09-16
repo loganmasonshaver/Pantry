@@ -7,8 +7,8 @@ import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
-import { decideAttempt, pickProvider, countDelta, addCounts, type Counts } from '../_shared/attempt-budget.ts'
-import { filterTitleRepeats, contentWords, nameContains } from '../_shared/title-dedup.ts'
+import { decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder, type Counts } from '../_shared/attempt-budget.ts'
+import { filterTitleRepeats, contentWords, nameContains, compilationTitle } from '../_shared/title-dedup.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
 import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
@@ -611,7 +611,10 @@ Deno.serve(async (req: Request) => {
     // "What I eat in a day" and "full day of eating" videos list foods, so they clear the
     // ingredient gate, and the model turns them into a "recipe" called Daily Meal Plan.
     const nonRecipeTitles = titleDedup.kept.filter(v => nonDishName(v.title))
-    const deduped = titleDedup.kept.filter(v => !nonDishName(v.title))
+    // Multi-recipe videos too: one recipe per video is the contract, so "7 snack recipes" spends a
+    // slot on nothing or on one generic pick, and the view floor can refill from a single-dish video.
+    const compilations = titleDedup.kept.filter(v => !nonDishName(v.title) && compilationTitle(v.title))
+    const deduped = titleDedup.kept.filter(v => !nonDishName(v.title) && !compilationTitle(v.title))
     console.log(`[funnel] title repeats: ${titleDedup.dropped.length} of ${dedupedByVideo.length} match a pool dish${titleDedup.skipped ? ' — over the drop share, filter SKIPPED' : ''}`)
 
     // View floor. Target is 100k, but a HARD 100k floor would abort the whole cron on a thin day
@@ -652,6 +655,7 @@ Deno.serve(async (req: Request) => {
     funnel.afterTitleDedup = deduped.length
     funnel.titleRepeatsSkipped = titleDedup.skipped
     funnel.nonRecipeTitles = nonRecipeTitles.slice(0, 20).map(v => v.title.slice(0, 100))
+    funnel.compilationTitles = compilations.slice(0, 20).map(v => v.title.slice(0, 100))
     funnel.titleRepeats = titleDedup.dropped.slice(0, 40).map(d => ({ t: d.title.slice(0, 100), m: d.matched }))
     funnel.viewFloorUsed = usedFloor
     funnel.afterViewFloor = beforeGate
@@ -785,9 +789,9 @@ Deno.serve(async (req: Request) => {
     }).join('\n\n')
     const videoList = renderVideoList(uniqueVideos)
 
-    const buildPrompt = (videoList: string) => `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
+    const buildPrompt = (videoList: string, count: number = uniqueVideos.length) => `You are a fitness editor curating the most appetizing high-protein recipes from this week's trending YouTube content. Your job is to FAITHFULLY surface recipes the creator already made — not to invent or modify them. Pantry users trust that what they see in the app matches what the YouTuber actually cooked.
 
-Here are ${uniqueVideos.length} trending YouTube recipe videos. Use both the title AND description to understand what each recipe is.
+Here are ${count} trending YouTube recipe videos. Use both the title AND description to understand what each recipe is.
 
 ${videoList}
 
@@ -890,7 +894,7 @@ ATOMIC STEPS: each step contains ONE primary cooking action so users can glance-
   Never drop a time, a temperature, a heat level or a doneness cue that the creator stated.
   This applies to the FORMAT of the steps, not the content — still respect the creator's recipe faithfully. Just break their consolidated instructions into individual actions.
 
-OUTPUT TARGET: Return a recipe for EVERY video below that is genuinely a recipe — aim for 30-40 from the ${uniqueVideos.length} provided, and treat that as a floor of effort rather than a quota to stop at. Every one of these videos was pre-screened and carries a published ingredient list, so the great majority CAN yield a faithful recipe; skipping is for a video that is not a recipe at all, not for one you judge unexciting.
+OUTPUT TARGET: Return a recipe for EVERY video below that is genuinely a recipe — aim for ${count >= 40 ? '30-40' : `all ${count}`} from the ${count} provided, and treat that as a floor of effort rather than a quota to stop at. Every one of these videos was pre-screened and carries a published ingredient list, so the great majority CAN yield a faithful recipe; skipping is for a video that is not a recipe at all, not for one you judge unexciting.
 
 Do NOT self-filter for density, variety, appeal or balance. Downstream code stores up to 18 and ranks by density, source-video like rate, uniqueness and macro agreement, so a bigger pool directly produces a better feed and a small one silently starves it — returning ~17 is how a day ends up showing 11. Skipping on quality grounds does not raise the bar, it just hands the ranker fewer options.
 
@@ -1065,6 +1069,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // One video, one dish. A later attempt re-picks a kept video under a tweaked name ("Beef" →
     // "Beefy", "Kebab" → "Kebabs") often enough that both name gates missed two in one dry run.
     const seenVideoIdx = new Map<number, string>()
+    // Videos no later attempt should be asked about: kept, or rejected for a reason another attempt
+    // cannot change (a pool or in-run repeat, a duplicate name or ingredient set, not a dish, a name
+    // gap the creator's own list shares). A dropped ingredient or a model-caused gap stays in play.
+    const terminalVideoIdx = new Set<number>()
+    const MIN_RETRY_LIST = 3
     const seenIngredientSigs: Set<string>[] = []
     // Funnel counters — tally exactly why the LLM's raw output shrinks. Cumulative across attempts,
     // so the stored funnel describes the run, not its last call.
@@ -1083,7 +1092,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     funnel.rejectedDetail = rejectedDetail
     // Per-attempt record (timing, provider, yield, reasons). The funnel had no timing at all, so
     // "was Gemini slow today" could only be answered from the dashboard's logs.
-    type AttemptLog = { n: number; provider: string; offset: number; startMs: number; loopEndMs: number; callTimeoutMs: number; ms: number; raw: number; kept: number; rejected?: Counts; errors?: string[] }
+    type AttemptLog = { n: number; provider: string; offset: number; listSize: number; startMs: number; loopEndMs: number; callTimeoutMs: number; ms: number; raw: number; kept: number; rejected?: Counts; errors?: string[] }
     const attemptLog: AttemptLog[] = []
     funnel.attempts = attemptLog
     funnel.poolNamesInPrompt = poolNamesForPrompt.length
@@ -1100,7 +1109,6 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Rotating the list so every video leads in some attempt is what makes a retry a new sample
     // rather than a replay. video_index is mapped back to the canonical order right after parsing,
     // so nothing downstream knows the prompt was rotated.
-    const rotationStep = Math.ceil(uniqueVideos.length / MAX_ATTEMPTS)
     let primaryFailedLast = false
     for (let attemptNo = 0; primary && attemptNo < MAX_ATTEMPTS; attemptNo++) {
       const provider = pickProvider(primary, fallback, primaryFailedLast)
@@ -1112,10 +1120,18 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         funnel.attemptsSkippedForTime = MAX_ATTEMPTS - attemptNo
         break
       }
-      const offset = uniqueVideos.length ? (attemptNo * rotationStep) % uniqueVideos.length : 0
-      const order = uniqueVideos.map((_, i) => (i + offset) % uniqueVideos.length)
-      const attemptPrompt = attemptNo === 0 ? prompt : buildPrompt(renderVideoList(order.map(i => uniqueVideos[i])))
-      const entry: AttemptLog = { n: attemptNo + 1, provider: provider.name, offset, startMs: elapsed, loopEndMs: budget.loopEndMs, callTimeoutMs: budget.callTimeoutMs, ms: 0, raw: 0, kept: 0 }
+      // Attempt 1 sees the whole list; every later attempt sees only what is still in play, rotated.
+      const order = attemptNo === 0
+        ? uniqueVideos.map((_, i) => i)
+        : nextAttemptOrder(uniqueVideos.length, terminalVideoIdx, attemptNo, MAX_ATTEMPTS)
+      if (attemptNo > 0 && order.length < MIN_RETRY_LIST) {
+        stageLog(`attempt ${attemptNo + 1} skipped: only ${order.length} video(s) still in play`)
+        funnel.attemptsSkippedForList = MAX_ATTEMPTS - attemptNo
+        break
+      }
+      const offset = order[0] ?? 0
+      const attemptPrompt = attemptNo === 0 ? prompt : buildPrompt(renderVideoList(order.map(i => uniqueVideos[i])), order.length)
+      const entry: AttemptLog = { n: attemptNo + 1, provider: provider.name, offset, listSize: order.length, startMs: elapsed, loopEndMs: budget.loopEndMs, callTimeoutMs: budget.callTimeoutMs, ms: 0, raw: 0, kept: 0 }
       attemptLog.push(entry)
       const errsBefore = providerErrors.length
       const rejBefore = rejCounts()
@@ -1216,10 +1232,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             const calories = Number(r.calories) || 0
             if (calories <= 0 || protein <= 0) { rejNoMacros++; note('noMacros', name, `${calories} kcal, ${protein} g protein`); return false }
             const key = normalize(name)
-            if (!key || seenNames.has(key)) { rejDupName++; note('dupName', name, 'same name kept earlier this run'); return false }
-            const junk = nonDishName(name)
-            if (junk) { rejNotADish++; note('notADish', name, junk); return false }
             const vidx = Number(r.video_index) || 0
+            const retire = () => { if (vidx) terminalVideoIdx.add(vidx) }
+            if (!key || seenNames.has(key)) { rejDupName++; retire(); note('dupName', name, 'same name kept earlier this run'); return false }
+            const junk = nonDishName(name)
+            if (junk) { rejNotADish++; retire(); note('notADish', name, junk); return false }
             if (vidx && seenVideoIdx.has(vidx)) { rejDupVideo++; note('dupVideo', name, `video ${vidx} already kept as "${seenVideoIdx.get(vidx)}"`); return false }
             const candWords = wordsOf(name)
             // Precompute scoring inputs once so the MMR selection downstream doesn't
@@ -1251,11 +1268,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               rejNearDup++
               const inRun = r._maxJaccardToday >= r._maxJaccardPrev
               note('nearDup', name, `${inRun ? `"${closestToday}" (this run)` : `"${closestPrev}" (pool)`} jaccard ${maxJac.toFixed(2)}`)
+              retire()
               return false
             }
             if (containsPrev || containsToday) {
               rejNearDup++
               note('nearDup', name, `contains ${containsToday ? `"${containsToday}" (this run)` : `"${containsPrev}" (pool)`} plus at most one word`)
+              retire()
               return false
             }
             // Second, independent duplicate test: same dish, different label. Checked against both
@@ -1269,6 +1288,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               if (maxIngJac >= NEAR_DUP_INGREDIENT_JACCARD) {
                 rejDupIngredients++
                 note('dupIngredients', name, `ingredient overlap ${maxIngJac.toFixed(2)}`)
+                retire()
                 console.log(`[funnel] rejected "${name}" — ingredient overlap ${maxIngJac.toFixed(2)} with an existing meal (different name, same recipe)`)
                 return false
               }
@@ -1361,6 +1381,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             const gaps = nameIngredientGaps(name, counted)
             if (gaps.length > 0) {
               rejNameGap++
+              // A gap the creator's own list shares cannot be closed by asking again — the Korean
+              // beef bowl whose published list is the sauce was re-picked four times in one run.
+              if (gaps.every(g => nameIngredientGaps(name, srcList).includes(g))) retire()
               // The model's own list rides along: a "missing nutella" on a protein-Nutella copycat and a
               // "missing pasta" on a rotini dish read as real drops from the count alone.
               note('nameGap', name, `missing ${gaps.join(', ')} — listed: ${counted.map((i: any) => i?.name ?? i).join(', ').slice(0, 240)}`)
@@ -1451,6 +1474,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenWordSets.push(candWords)
             seenWordSetNames.push(name)
             if (vidx) seenVideoIdx.set(vidx, name)
+            retire()
             if (candSig.size >= 3) seenIngredientSigs.push(candSig)
             return true
           }).slice(0, 30)

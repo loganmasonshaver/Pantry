@@ -84,6 +84,17 @@ export function nameContains(cand: Set<string>, known: Set<string>): boolean {
   return true
 }
 
+// Multi-recipe videos. The prompt is one recipe per video, so a "3 snacks in 5 minutes" slot
+// yields nothing or one generic pick — 5 of 25 candidates on 2026-09-16's real run were these.
+// A number, then up to five words, then a plural: "7 Healthy Ready to Eat Snack Recipes",
+// "4 Delicious Soya Recipes", "3 High-Protein Snacks". Or "my … smoothies". "Recipes Every Home
+// Cook Should Know Ep 12 | Korean Beef Bowls" has no number before its plural and stays.
+const COMPILATION_RE = /\b\d+\s+(?:[\p{L}'’-]+\s+){0,5}?(recipes|snacks|meals|ideas|ways|breakfasts|lunches|dinners|desserts|smoothies)\b|\bmy\s+(?:[\p{L}'’-]+\s+){0,2}?(smoothies|recipes|snacks|meals|breakfasts|lunches|dinners)\b/iu
+export function compilationTitle(title: string): string | null {
+  const m = COMPILATION_RE.exec((title ?? '').replace(/#\S+/g, ' '))
+  return m ? m[0].trim() : null
+}
+
 // If the filter would remove more than this share of the list, something is wrong with the
 // list or the pool (not with the day), and a thin day is worse than a wasted pick.
 export const MAX_DROP_SHARE = 0.4

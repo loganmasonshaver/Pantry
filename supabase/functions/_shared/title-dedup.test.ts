@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { contentWords, preparePool, findTitleRepeat, filterTitleRepeats, nameContains } from './title-dedup.ts'
+import { contentWords, preparePool, findTitleRepeat, filterTitleRepeats, nameContains, compilationTitle } from './title-dedup.ts'
 
 const POOL = [
   'Cottage Cheese Flatbread', 'Strawberry Cheesecake Ice Cream', 'Banana Bread High Protein Pancakes',
@@ -59,4 +59,17 @@ test('nameContains: a known name plus at most one word is the same dish', () => 
   assert.equal(nameContains(w('Chicken Fried Rice with Egg'), w('Chicken Rice')), false)   // two extra words
   assert.equal(nameContains(w('Creamy Vegan Tofu Pasta'), w('Creamy Vegan Mushroom Pasta')), false)
   assert.equal(nameContains(w('Fudgy Brownies'), w('Brownies')), false)                    // one-word names never claim
+})
+
+test('compilationTitle: multi-recipe videos are named; single recipes with numbers are not', () => {
+  assert.ok(compilationTitle('3 High-Protein Snacks You Can Make in Under 5 minutes ⭐️🤏🏻 #ad'))
+  assert.ok(compilationTitle('7 Healthy Ready to Eat Snack Recipes | High Protein & Fibre Rich | Weight Loss'))
+  assert.ok(compilationTitle('4 Delicious Soya Recipes You Must Try! 😍🔥 | High-Protein Indian Snacks#shorts'))
+  assert.ok(compilationTitle('My high-protein smoothies made with anti-inflammatory whole foods'))
+  assert.ok(compilationTitle('The Only 3 Recipes You Need This Week'))
+  assert.equal(compilationTitle('Recipes Every Home Cook Should Know Ep 12 | Korean Beef Bowls #cooking #recipe'), null)
+  assert.equal(compilationTitle('2 Ingredient Protein Bagels'), null)
+  assert.equal(compilationTitle('5 Minute Protein Pancakes 🥞 40g protein'), null)
+  assert.equal(compilationTitle('Crispy Pasta Chipotle Mayo Tuna Salad'), null)
+  assert.equal(compilationTitle('Chicken Rice Bowls (4 servings, 45g protein)'), null)
 })

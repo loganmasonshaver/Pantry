@@ -60,6 +60,20 @@ export function pickProvider<P>(primary: P, fallback: P | null, primaryFailedLas
   return primaryFailedLast && fallback ? fallback : primary
 }
 
+// Which videos the NEXT attempt asks about, and in what order. Videos already kept or terminally
+// rejected are out: on 2026-09-16's real run the model spent ~25 of 39 later-attempt picks on the
+// same tiramisu balls, the same paneer pasta and dishes it had already been given. The rest rotate
+// so a different video leads each attempt. `terminal` holds 1-based video_index values; the
+// result is 0-based positions into the candidate list, which is what the prompt renderer takes.
+export function nextAttemptOrder(total: number, terminal: Set<number>, attemptNo: number, maxAttempts: number): number[] {
+  const remaining: number[] = []
+  for (let i = 0; i < total; i++) if (!terminal.has(i + 1)) remaining.push(i)
+  if (remaining.length === 0) return []
+  const step = Math.ceil(remaining.length / Math.max(1, maxAttempts))
+  const offset = (attemptNo * step) % remaining.length
+  return remaining.map((_, k) => remaining[(k + offset) % remaining.length])
+}
+
 export type Counts = Record<string, number>
 
 // Per-attempt rejection counts from the run's cumulative counters. Only non-zero keys, so an

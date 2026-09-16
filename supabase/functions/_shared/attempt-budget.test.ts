@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  WALL_BUDGET_MS, MIN_ATTEMPT_MS, llmLoopEndMs, decideAttempt, pickProvider, countDelta, addCounts,
+  WALL_BUDGET_MS, MIN_ATTEMPT_MS, llmLoopEndMs, decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder,
 } from './attempt-budget.ts'
 
 test('the loop end moves earlier as survivors grow, and never lets the tail estimate run past the wall', () => {
@@ -76,4 +76,15 @@ test('addCounts keeps the full key shape, zeros included', () => {
   const keys = ['noMacros', 'nearDup', 'dropped']
   assert.deepEqual(addCounts({}, { nearDup: 3 }, keys), { noMacros: 0, nearDup: 3, dropped: 0 })
   assert.deepEqual(addCounts({ noMacros: 1, nearDup: 3, dropped: 0 }, { noMacros: 2 }, keys), { noMacros: 3, nearDup: 3, dropped: 0 })
+})
+
+test('nextAttemptOrder leaves out kept and dead videos, keeps every other one, and rotates per attempt', () => {
+  const terminal = new Set([1, 3, 7])           // video_index values, 1-based
+  const a1 = nextAttemptOrder(8, terminal, 1, 5)
+  assert.deepEqual([...a1].sort(), [1, 3, 4, 5, 7])   // positions 0,2,6 are gone
+  const a2 = nextAttemptOrder(8, terminal, 2, 5)
+  assert.deepEqual([...a2].sort(), [...a1].sort())
+  assert.notEqual(a1[0], a2[0])                        // a different video leads
+  assert.deepEqual(nextAttemptOrder(3, new Set([1, 2, 3]), 1, 5), [])
+  assert.deepEqual(nextAttemptOrder(4, new Set(), 0, 5), [0, 1, 2, 3])
 })
