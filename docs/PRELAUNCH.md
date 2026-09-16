@@ -1529,9 +1529,12 @@ claiming exact wording from the top apps is guessing.
         - Line 2 (white/muted, 14 regular, prose): goal word from `profiles.fitness_goal` + numbers
           computed from the THREE MEALS ON SCREEN (max calories, min protein), so it is true of
           every card: lose → "Each one is under 620 calories with at least 48 g of protein — built
-          for your cut." · build → "Each one brings at least 48 g of protein — built for your
+          for your cut." · gain → "Each one brings at least 48 g of protein — built for your
           bulk." · maintain (Body Recomp) → "Each one keeps protein high at under 620 calories —
-          built for your recomp." · no goal → the numbers sentence without the goal clause.
+          built for your recomp." · null → the numbers sentence without the goal clause.
+          **Prod values are `lose` / `maintain` / `gain` (not `build`, which is only the onboarding
+          option id), and 13 of 20 profiles are NULL** — the fallback is the common case for older
+          accounts, so it has to read as complete on its own, not as a missing clause.
         - Data: one `profiles.select('fitness_goal')` alongside the existing pantry count (parallel,
           same effect). Layout: header grows ~20pt; deckArea is flex:1 so the deck re-centres; the
           build-up placeholder reserves two lines so nothing moves at the gate. Not built.
