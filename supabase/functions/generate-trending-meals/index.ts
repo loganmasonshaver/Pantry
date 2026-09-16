@@ -7,7 +7,7 @@ import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
-import { decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder, type Counts } from '../_shared/attempt-budget.ts'
+import { decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder, chunkOrder, type Counts } from '../_shared/attempt-budget.ts'
 import { filterTitleRepeats, contentWords, nameContains, compilationTitle } from '../_shared/title-dedup.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
 import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
@@ -40,6 +40,94 @@ async function fetchWithTimeout(url: string, ms = 15000): Promise<Response> {
 }
 
 const today = () => new Date().toISOString().split('T')[0]
+
+// Flux images for trending rows, via generate-meal-image. A function rather than an inline block
+// because it runs in TWO places: at the end of the daily run, and as its own scheduled invocation
+// (?stage=images, 08:05 UTC) that gets a fresh time budget. Images are the one stage this pipeline
+// does not control — 10 rows took 9 s and 9 rows took 30 s an hour apart on 2026-09-16 — so they
+// should never be what decides whether the recipe run returns.
+//
+// onlyMissing=false (the daily run): today's rows plus any older row still without an AI image.
+// onlyMissing=true (the image step): only rows still on a thumbnail or with no image at all, so it
+// never regenerates a photo the daily run already made.
+async function generateTrendingImages(
+  authToken: string, startedAt: number, opts: { deadlineMs: number; onlyMissing: boolean },
+): Promise<{ rows: number; skippedForTime: number }> {
+  // Today's rows PLUS any earlier one still without an AI image. generate-meal-image's own
+  // comment claims "the pipeline and the cron still self-heal rows" — they did not: this select
+  // was today-only, so a meal whose image failed during its own run kept its YouTube thumbnail
+  // forever. On 2026-09-06 that was 6 of 12, and every other run in the previous week was 100%,
+  // which is what a transient FAL saturation looks like: recoverable, never retried.
+  //
+  // Cheap by construction — it matches only BROKEN rows, so a healthy pool adds nothing beyond
+  // today's batch, and retention already bounds how far back rows exist.
+  const { data: inserted } = await db.from('trending_meals')
+    .select('id, name, ingredients, steps, generated_at, image')
+    .or(opts.onlyMissing
+      // A null image is NULL to "not like", not true — it needs its own clause.
+      ? 'image.is.null,image.not.like.%/storage/v1/object/public/%'
+      : `generated_at.eq.${today()},image.not.like.%/storage/v1/object/public/%`)
+  let skippedForTime = 0
+  if (inserted) {
+    // Generate in small waves instead of firing all ~18 at FAL at once. The
+    // simultaneous burst saturated FAL's rate limit, so even generate-meal-image's
+    // internal 3-retry couldn't recover and meals were left on their YouTube
+    // thumbnail. Bounding concurrency keeps FAL un-saturated so retries succeed.
+    const IMG_CONCURRENCY = 5
+    const genImage = async (meal: any) => {
+      try {
+        // Pass the VISUAL hint with the name ("1 slice American cheese", not "American cheese").
+        // Without it the renderer has no idea of scale and draws a whole slab of cheese.
+        // A bare gram weight is skipped — it tells the model nothing about how the item looks.
+        const ingredientNames = (meal.ingredients || []).map((i: any) => {
+          const hint = String(i.visual ?? '').trim()
+          return hint && !/^\d+(\.\d+)?\s*(g|ml|oz)$/i.test(hint) ? `${hint} ${i.name}` : i.name
+        })
+        const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            // Authenticate as the trusted internal caller. generate-meal-image requires auth
+            // on a cache miss, and every freshly-generated trending meal IS a miss — without
+            // this header the call 401s and the meal stays on its YouTube thumbnail.
+            'Authorization': `Bearer ${authToken}`,
+          },
+          // steps are LOAD-BEARING for the image, not decoration. generate-meal-image has a rule
+          // that an ingredient mixed/whisked/blended into something else must NOT be drawn as a
+          // separate dollop — but it can only apply that if it can read the steps. Omitting them
+          // is why a Burger Bowl's greek-yogurt-based burger sauce rendered as a white blob of
+          // sour cream sitting on top instead of a sauce mixed through the dish.
+          // replaceTrending so a RETRY can overwrite the YouTube thumbnail it is there to replace.
+          // Without it the backfill is gap-fill-only and every repair is a no-op on exactly the
+          // rows that need one.
+          body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [], replaceTrending: true }),
+          // No image call may run past the deadline; the gateway cuts the whole function at 150 s.
+          // A row that misses keeps its thumbnail for the next pass of this function.
+          signal: AbortSignal.timeout(Math.max(1_000, opts.deadlineMs - (Date.now() - startedAt))),
+        })
+        const imgData = await imgRes.json()
+        if (imgData.image) {
+          await db.from('trending_meals').update({ image: imgData.image }).eq('id', meal.id)
+          console.log(`Image OK: ${meal.name}`)
+        } else {
+          console.log(`No image returned for ${meal.name}`)
+        }
+      } catch (e) {
+        console.log(`Image gen failed for ${meal.name}:`, e)
+      }
+    }
+    for (let i = 0; i < inserted.length; i += IMG_CONCURRENCY) {
+      // A wave needs ~5-15 s; do not start one that cannot finish.
+      if (Date.now() - startedAt > opts.deadlineMs - 8_000) {
+        skippedForTime = inserted.length - i
+        console.log(`[funnel] images: out of time at t+${Date.now() - startedAt}ms, ${skippedForTime} rows left on their thumbnails`)
+        break
+      }
+      await Promise.all(inserted.slice(i, i + IMG_CONCURRENCY).map(genImage))
+    }
+  }
+  return { rows: inserted?.length ?? 0, skippedForTime }
+}
 
 // How long a YouTube-sourced meal stays in the table AND on screen. Must match
 // isYouTubeRecipeVisible in app/(tabs)/discover.tsx — if they drift, either the feed hides rows
@@ -313,12 +401,33 @@ Deno.serve(async (req: Request) => {
   // recipes from the same prompt and the same code), so one run cannot validate a change and the
   // repeats were the expensive part. This makes them free.
   const dryRun = url.searchParams.get('dryRun') === 'true'
+  // ?replay=<pipeline_runs id> — re-run ONLY the model stage on that run's stored candidate list
+  // (funnel.candidates), refetched with one videos.list call (~1 YouTube quota unit per 50 videos,
+  // against ~1,300 for a full search). Same videos, one variable changed: the way to compare
+  // shards, models and prompts without spending a day's quota on each. Dry runs only.
+  // Compare SAME-DAY runs: a past day's stored dishes are now in the pool and would be rejected
+  // as repeats, which the original run did not face.
+  const replayOf = Number(url.searchParams.get('replay') ?? '') || 0
+  if (replayOf && !dryRun) {
+    return new Response(JSON.stringify({ error: 'replay requires dryRun=true' }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+  }
   stageLog('start')
+
+  // ?stage=images — the photo step on its own, with its own time budget. Scheduled at 08:05 UTC,
+  // after the recipe run has returned; it only touches rows still missing an AI image, so on a day
+  // the recipe run finished its photos it does nothing.
+  if (url.searchParams.get('stage') === 'images') {
+    const t0 = Date.now()
+    const img = await generateTrendingImages(CRON_SECRET || supabaseServiceKey, t0, { deadlineMs: 140_000, onlyMissing: true })
+    return new Response(JSON.stringify({ stage: 'images', rows: img.rows, skippedForTime: img.skippedForTime, ms: Date.now() - t0 }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
 
   // Return cached only if today's YouTube batch was already generated. Scoping to
   // trend_source='YouTube trending' is critical — without it, a creator posting a recipe
   // today is enough to satisfy the cache check, so the YouTube generator never runs.
-  if (!forceRefresh) {
+  if (!forceRefresh && !replayOf) {
     const { data: existing } = await db.from('trending_meals')
       .select('id')
       .eq('generated_at', today())
@@ -483,7 +592,34 @@ Deno.serve(async (req: Request) => {
     const isFoodTitle = (t: string) => /\b(recipe|cook|meal|food|dish|breakfast|lunch|dinner|snack|dessert|bake|grill|fry|roast|smoothie|salad|wrap|bowl|pasta|stir fry|pancake|cheesecake|brownie|cottage cheese|protein|anabolic)\b/i.test(t)
     const isNotRecipeContent = (t: string) => /mukbang|asmr|review|what i ate|day of eating|vlog/i.test(t.toLowerCase())
 
-    for (const config of queryConfigs) {
+    if (replayOf) {
+      const { data: runRow } = await db.from('pipeline_runs').select('funnel').eq('id', replayOf).single()
+      const ids: string[] = ((runRow?.funnel as any)?.candidates ?? []).map((c: any) => String(c?.id ?? '')).filter(Boolean)
+      if (ids.length === 0) {
+        return new Response(JSON.stringify({ error: `pipeline_runs ${replayOf} has no stored candidates` }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      }
+      for (let i = 0; i < ids.length; i += 50) {
+        const detailUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${ids.slice(i, i + 50).join(',')}&key=${youtubeKey}`
+        const detailData = await (await fetchWithTimeout(detailUrl)).json()
+        if (detailData.error) {
+          return new Response(JSON.stringify({ error: `videos.list: ${String(detailData.error?.message ?? '').slice(0, 200)}` }), { status: 502, headers: { 'Content-Type': 'application/json' } })
+        }
+        for (const item of detailData.items ?? []) {
+          const thumbnail = item.snippet?.thumbnails?.high?.url || item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url
+          if (!item.id || !item.snippet?.title || !thumbnail) continue
+          allVideos.push({
+            videoId: item.id, title: item.snippet.title, thumbnail,
+            description: truncateSafe(item.snippet.description || '', DESC_PARSE_CHARS),
+            viewCount: parseInt(item.statistics?.viewCount ?? '0', 10) || 0,
+            likeCount: parseInt(item.statistics?.likeCount ?? '0', 10) || 0,
+            sourceLang: item.snippet.defaultAudioLanguage ?? item.snippet.defaultLanguage ?? null,
+          })
+        }
+      }
+    }
+
+    // A replay skips both searches: its candidate list is the stored one.
+    for (const config of (replayOf ? [] : queryConfigs)) {
       try {
         const publishedAfter = new Date(Date.now() - config.windowDays * 86400000).toISOString()
         // maxResults 50, not 20. search.list costs 100 quota units regardless of how many results
@@ -562,7 +698,7 @@ Deno.serve(async (req: Request) => {
 
     // YouTube algorithmic trending in Howto & Style (videoCategoryId=26) — what YouTube's own
     // ranker considers viral RIGHT NOW. Independent of our keyword queries.
-    try {
+    if (!replayOf) try {
       const trendingUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&chart=mostPopular&videoCategoryId=26&regionCode=US&maxResults=50&key=${youtubeKey}`
       const trendingRes = await fetchWithTimeout(trendingUrl)
       const trendingData = await trendingRes.json()
@@ -598,7 +734,9 @@ Deno.serve(async (req: Request) => {
     const seen = new Set<string>()
     console.log(`[funnel] raw YouTube candidates: ${allVideos.length}`)
     const dedupedByVideo = allVideos.filter(v => {
-      if (recentVideoIds.has(v.videoId)) return false
+      // A replay's list already passed these filters in its original run; the videos that run
+      // STORED are now in recentVideoIds and would be removed from the comparison.
+      if (!replayOf && recentVideoIds.has(v.videoId)) return false
       const key = v.title.toLowerCase().replace(/[^a-z]/g, '').substring(0, 20)
       if (seen.has(key)) return false
       seen.add(key)
@@ -607,14 +745,16 @@ Deno.serve(async (req: Request) => {
     // Dishes the pool already holds, matched on the TITLE, out before the floor so the floor
     // refills from lower-view videos instead of from repeats. The model kept picking these when
     // asked not to; see _shared/title-dedup.ts.
-    const titleDedup = filterTitleRepeats(dedupedByVideo, poolNamesForPrompt)
+    const titleDedup = replayOf
+      ? { kept: dedupedByVideo, dropped: [] as { title: string; matched: string }[], skipped: false }
+      : filterTitleRepeats(dedupedByVideo, poolNamesForPrompt)
     // "What I eat in a day" and "full day of eating" videos list foods, so they clear the
     // ingredient gate, and the model turns them into a "recipe" called Daily Meal Plan.
-    const nonRecipeTitles = titleDedup.kept.filter(v => nonDishName(v.title))
+    const nonRecipeTitles = replayOf ? [] : titleDedup.kept.filter(v => nonDishName(v.title))
     // Multi-recipe videos too: one recipe per video is the contract, so "7 snack recipes" spends a
     // slot on nothing or on one generic pick, and the view floor can refill from a single-dish video.
-    const compilations = titleDedup.kept.filter(v => !nonDishName(v.title) && compilationTitle(v.title))
-    const deduped = titleDedup.kept.filter(v => !nonDishName(v.title) && !compilationTitle(v.title))
+    const compilations = replayOf ? [] : titleDedup.kept.filter(v => !nonDishName(v.title) && compilationTitle(v.title))
+    const deduped = replayOf ? titleDedup.kept : titleDedup.kept.filter(v => !nonDishName(v.title) && !compilationTitle(v.title))
     console.log(`[funnel] title repeats: ${titleDedup.dropped.length} of ${dedupedByVideo.length} match a pool dish${titleDedup.skipped ? ' — over the drop share, filter SKIPPED' : ''}`)
 
     // View floor. Target is 100k, but a HARD 100k floor would abort the whole cron on a thin day
@@ -652,6 +792,7 @@ Deno.serve(async (req: Request) => {
     console.log(`[funnel] ingredient-list gate: ${uniqueVideos.length}/${beforeGate} videos have a readable list`)
     funnel.rawCandidates = allVideos.length
     funnel.afterDedup = dedupedByVideo.length
+    if (replayOf) funnel.replayOf = replayOf
     funnel.afterTitleDedup = deduped.length
     funnel.titleRepeatsSkipped = titleDedup.skipped
     funnel.nonRecipeTitles = nonRecipeTitles.slice(0, 20).map(v => v.title.slice(0, 100))
@@ -921,14 +1062,18 @@ first that fits:
      Turkish, Levantine (kofta, shawarma, falafel, tzatziki). italian: pasta, pizza, lasagna, gnocchi,
      calzone — unless the dish is named for an American one (mac and cheese, cheesesteak pasta,
      buffalo chicken pasta) → american-comfort.
-  4. MORNING FOOD → breakfast. Pancakes, waffles, crepes, oats, chia pudding, smoothies, smoothie and
-     yogurt bowls, egg dishes, breakfast wraps, toast.
+     A FUSION takes the cuisine of its sauce and staples, not of its shape: paneer pasta, lauki pasta
+     in schezwan sauce, a pizza on a moong dal base, noodles with paneer and soya chunks → indian.
+     A stir-fry with no clearer cuisine → asian.
+  4. MORNING FOOD → breakfast. Pancakes, waffles, crepes, oats, chia pudding, parfaits, smoothies,
+     smoothie and yogurt bowls, egg dishes, breakfast wraps, toast.
   5. A SAVOURY SALAD OR BOWL with no clear cuisine → salads-bowls. Tuna, egg, chicken and pasta
      salads, bean salads, protein and grain bowls, sweet potato bowls, lettuce wraps of a salad.
      A salad or bowl WITH a clear cuisine was already decided at step 3: a Greek salad is
      mediterranean, a burrito bowl is mexican, a poke bowl is asian. Never use mediterranean for a
      salad just because it is fresh.
-  6. Anything else → american-comfort.
+  6. Anything else → american-comfort, including a soup, sandwich or wrap with no clear cuisine. A
+     wrap of lunch fillings (ham and cheese) is not breakfast because it is a wrap.
 Every recipe gets exactly one — there is no "none".
 
 ${TIME_RULES}
@@ -1021,6 +1166,37 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const selected = forceProvider
       ? providers.filter(p => p.name.toLowerCase() === forceProvider)
       : providers
+    // ?model=<id> — DRY RUNS ONLY, so a URL can never change what the cron ships. For comparing
+    // models on the same candidates (with ?replay). A closed list: each entry's output cap was
+    // chosen for this pipeline's answer size, and a model not listed has not been thought through.
+    const modelParam = (url.searchParams.get('model') ?? '').trim()
+    if (modelParam) {
+      const GOOGLE = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+      const OPENAI = "https://api.openai.com/v1/chat/completions"
+      const MODEL_CHOICES: Record<string, { url: string; key: string | undefined; name: string; maxTokens: number }> = {
+        'gemini-3.1-flash-lite': { url: GOOGLE, key: googleAiKey, name: 'Google', maxTokens: 48000 },
+        'gemini-3.8-flash': { url: GOOGLE, key: googleAiKey, name: 'Google', maxTokens: 48000 },
+        'gpt-4o-mini': { url: OPENAI, key: openaiApiKey, name: 'OpenAI', maxTokens: 16000 },
+        'gpt-4.1-mini': { url: OPENAI, key: openaiApiKey, name: 'OpenAI', maxTokens: 32000 },
+        'gpt-5.4-mini': { url: OPENAI, key: openaiApiKey, name: 'OpenAI', maxTokens: 32000 },
+      }
+      const choice = MODEL_CHOICES[modelParam]
+      if (!dryRun || !choice || !choice.key) {
+        return new Response(JSON.stringify({
+          error: !dryRun ? 'model override is dry-run only' : !choice ? `unknown model "${modelParam}"` : `no key for ${choice.name}`,
+          available: Object.keys(MODEL_CHOICES),
+        }), { status: 400, headers: { 'Content-Type': 'application/json' } })
+      }
+      selected.splice(0, selected.length, { url: choice.url, key: choice.key, model: modelParam, name: choice.name, maxTokens: choice.maxTokens })
+    }
+    funnel.model = selected[0]?.model ?? null
+    // ?shards=<videos per call> — parallel calls per attempt. OFF (0) for the scheduled run until a
+    // same-day replay has measured it; dry runs may set it. See chunkOrder.
+    const SHARD_SIZE_DEFAULT = 0
+    const shardParam = Number(url.searchParams.get('shards') ?? '')
+    const shardSize = dryRun && shardParam > 0 ? Math.floor(shardParam) : SHARD_SIZE_DEFAULT
+    funnel.shardSize = shardSize
+
     if (forceProvider && selected.length === 0) {
       return new Response(JSON.stringify({
         error: `unknown provider "${forceProvider}"`,
@@ -1072,6 +1248,79 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // so gpt-4o-mini — kept only for outages — was attempt #2 of EVERY run. Once the budget admitted
     // ~2 attempts that was half the model work: Sep 16 spent it on 4 raw, 0 kept, and the rotated
     // Gemini retries never ran. OpenAI now takes a slot only after a Gemini attempt returns nothing.
+    // One model call: request, parse, map video_index back to the canonical list, drop a recipe cut
+    // at the token limit. Never throws — errors come back as strings — so one shard failing cannot
+    // take the other shards' recipes down with it.
+    type Provider = { url: string; key: string; model: string; name: string; maxTokens: number }
+    const callModel = async (provider: Provider, promptText: string, order: number[], timeoutMs: number): Promise<{ recipes: any[]; errors: string[]; ms: number }> => {
+      const t0 = Date.now()
+      const errors: string[] = []
+      try {
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+        // gpt-5 family: max_completion_tokens (it covers reasoning too) and no forced temperature —
+        // the same two rules scan-pantry had to learn for gpt-5.4.
+        const newGenOpenAI = /^gpt-5/.test(provider.model)
+        const res = await fetch(provider.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
+          // max_tokens has been raised twice for the same reason and was still too small: at 8000
+          // a run returned finish_reason=length with the JSON cut mid-string at 22,684 chars, and
+          // the resulting SyntaxError surfaced as the generic "Failed to generate recipes" 500.
+          // That is the third time this cap has masqueraded as "the model produced nothing".
+          //
+          // Per PROVIDER, because the ceilings differ and a single number silently broke the
+          // fallback: gemini-3.1-flash-lite documents a 64K output limit (32000 takes half and
+          // leaves headroom), while gpt-4o-mini tops out at 16,384 — so the shared 32000 was an
+          // invalid request to OpenAI before its body was even read. The cap is a truncation
+          // guard, not a budget: nothing is charged for tokens the model does not emit.
+          body: JSON.stringify(newGenOpenAI
+            ? { model: provider.model, messages: [{ role: "user", content: promptText }], max_completion_tokens: provider.maxTokens }
+            : { model: provider.model, messages: [{ role: "user", content: promptText }], temperature: 0.7, max_tokens: provider.maxTokens }),
+          signal: controller.signal,
+        }).finally(() => clearTimeout(timeoutId))
+        const data = await res.json()
+        stageLog(`LLM call done: ${provider.name}, ${order.length} videos, response ${JSON.stringify(data).length} bytes`)
+        if (data.error) {
+          errors.push(`${provider.name}: api error: ${String(data.error?.message ?? 'unknown').slice(0, 300)}`)
+          return { recipes: [], errors, ms: Date.now() - t0 }
+        }
+        const text = data.choices?.[0]?.message?.content || "[]"
+        // finish_reason 'length' means the model hit max_tokens and the JSON is cut mid-array.
+        // That parses as a SyntaxError indistinguishable from a malformed response, so name it.
+        const finish = data.choices?.[0]?.finish_reason ?? 'unknown'
+        const clean = text.replace(/```json|```/g, "").trim()
+        let parsed: any
+        try {
+          parsed = JSON.parse(clean)
+        } catch (pe) {
+          errors.push(`${provider.name}: unparseable JSON (finish_reason=${finish}, ${clean.length} chars): ${(pe as Error).message.slice(0, 120)}`)
+          return { recipes: [], errors, ms: Date.now() - t0 }
+        }
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          errors.push(`${provider.name}: returned no recipes (finish_reason=${finish}, ${clean.length} chars)`)
+          return { recipes: [], errors, ms: Date.now() - t0 }
+        }
+        // Map video_index back from this call's list to the canonical one.
+        for (const r of parsed) {
+          const k = Number(r?.video_index)
+          if (r && Number.isFinite(k) && k >= 1 && k <= order.length) r.video_index = order[k - 1] + 1
+        }
+        // A graceful close AT the token limit is invisible to JSON.parse. Three stored rows had a
+        // fragment for their final ingredient name ("Roas", "ga", "Turmeric Powd"), each the last
+        // entry of its array. Drop the last recipe, not the batch: "fewer recipes, never
+        // incomplete recipes".
+        if (finish === 'length') {
+          const cut = parsed.pop()
+          errors.push(`${provider.name}: output hit max_tokens, dropped trailing recipe "${cut?.name ?? '?'}"`)
+        }
+        return { recipes: parsed, errors, ms: Date.now() - t0 }
+      } catch (e) {
+        errors.push(`${provider.name}: threw: ${String((e as Error).message).slice(0, 200)}`)
+        return { recipes: [], errors, ms: Date.now() - t0 }
+      }
+    }
+
     const LLM_RETRIES = 4
     const MAX_ATTEMPTS = 1 + LLM_RETRIES
     // Also the attempt loop's stop line. It used to stop at 12 ("pool large enough for MMR to pick
@@ -1112,7 +1361,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     funnel.rejectedDetail = rejectedDetail
     // Per-attempt record (timing, provider, yield, reasons). The funnel had no timing at all, so
     // "was Gemini slow today" could only be answered from the dashboard's logs.
-    type AttemptLog = { n: number; provider: string; offset: number; listSize: number; startMs: number; loopEndMs: number; callTimeoutMs: number; ms: number; raw: number; kept: number; rejected?: Counts; errors?: string[] }
+    type AttemptLog = { n: number; provider: string; offset: number; listSize: number; shardMs?: number[]; startMs: number; loopEndMs: number; callTimeoutMs: number; ms: number; raw: number; kept: number; rejected?: Counts; errors?: string[] }
     const attemptLog: AttemptLog[] = []
     funnel.attempts = attemptLog
     funnel.poolNamesInPrompt = poolNamesForPrompt.length
@@ -1150,7 +1399,6 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         break
       }
       const offset = order[0] ?? 0
-      const attemptPrompt = attemptNo === 0 ? prompt : buildPrompt(renderVideoList(order.map(i => uniqueVideos[i])), order.length)
       const entry: AttemptLog = { n: attemptNo + 1, provider: provider.name, offset, listSize: order.length, startMs: elapsed, loopEndMs: budget.loopEndMs, callTimeoutMs: budget.callTimeoutMs, ms: 0, raw: 0, kept: 0 }
       attemptLog.push(entry)
       const errsBefore = providerErrors.length
@@ -1160,76 +1408,20 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       }
       stageLog(`LLM call start: ${provider.name} (attempt ${attemptNo + 1}, list offset ${offset}, call timeout ${budget.callTimeoutMs}ms)`)
       try {
-        // 90s hard timeout. Without this the fetch hangs indefinitely if the provider
-        // stalls — and on Free-tier edge functions a hanging Gemini call would silently
-        // burn through the entire ~150s wall budget without returning any logs. 90s
-        // gives Gemini room to handle the larger prompt with variety rules + 60-video
-        // candidate pool while still leaving 60s for FatSecret + image generation.
-        const controller = new AbortController()
-        // Clamped to the loop's end so a stalled provider cannot spend the tail's time.
-        const timeoutId = setTimeout(() => controller.abort(), budget.callTimeoutMs)
-        const res = await fetch(provider.url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
-          // max_tokens has been raised twice for the same reason and was still too small: at 8000
-          // a run returned finish_reason=length with the JSON cut mid-string at 22,684 chars, and
-          // the resulting SyntaxError surfaced as the generic "Failed to generate recipes" 500.
-          // That is the third time this cap has masqueraded as "the model produced nothing".
-          //
-          // It got tighter, not looser, when the description parser stopped truncating at 500
-          // chars: the SOURCE INGREDIENT LIST checklists are now complete, so a recipe that used
-          // to emit 5 ingredients now correctly emits 15, and 15-20 recipes of that size do not
-          // fit in 8000 tokens.
-          //
-          // Per PROVIDER, because the ceilings differ and a single number silently broke the
-          // fallback: gemini-3.1-flash-lite documents a 64K output limit (32000 takes half and
-          // leaves headroom), while gpt-4o-mini tops out at 16,384 — so the shared 32000 was an
-          // invalid request to OpenAI before its body was even read. The cap is a truncation
-          // guard, not a budget: nothing is charged for tokens the model does not emit.
-          body: JSON.stringify({ model: provider.model, messages: [{ role: "user", content: attemptPrompt }], temperature: 0.7, max_tokens: provider.maxTokens }),
-          signal: controller.signal,
-        }).finally(() => clearTimeout(timeoutId))
-        const data = await res.json()
-        stageLog(`LLM call done: ${provider.name}, response ${JSON.stringify(data).length} bytes`)
-        if (data.error) {
-          const msg = String(data.error?.message ?? 'unknown').slice(0, 300)
-          stageLog(`LLM error: ${msg}`)
-          providerErrors.push(`${provider.name}: api error: ${msg}`)
-          continue
-        }
-        const text = data.choices?.[0]?.message?.content || "[]"
-        // finish_reason 'length' means the model hit max_tokens and the JSON is cut mid-array.
-        // That parses as a SyntaxError indistinguishable from a malformed response, so name it.
-        const finish = data.choices?.[0]?.finish_reason ?? 'unknown'
-        const clean = text.replace(/```json|```/g, "").trim()
-        let parsed: any
-        try {
-          parsed = JSON.parse(clean)
-        } catch (pe) {
-          providerErrors.push(`${provider.name}: unparseable JSON (finish_reason=${finish}, ${clean.length} chars): ${(pe as Error).message.slice(0, 120)}`)
-          continue
-        }
-        // Map video_index back from this attempt's rotated order to the canonical one.
-        if (Array.isArray(parsed)) for (const r of parsed) {
-          const k = Number(r?.video_index)
-          if (r && Number.isFinite(k) && k >= 1 && k <= order.length) r.video_index = order[k - 1] + 1
-        }
-        if (!Array.isArray(parsed) || parsed.length === 0) {
-          providerErrors.push(`${provider.name}: returned no recipes (finish_reason=${finish}, ${clean.length} chars)`)
-        }
-        // A graceful close AT the token limit is invisible to JSON.parse. finish_reason was only
-        // consulted when the parse FAILED, so a response the model cut short but closed cleanly was
-        // accepted whole — and the recipe carrying the cut is the last one. Three stored rows had a
-        // fragment for their final ingredient name ("Roas", "ga", "Turmeric Powd"), each the last
-        // entry of its array.
-        //
-        // Drop the last recipe, not the batch: everything before the cut is complete, and the
-        // failure mode here is deliberately "fewer recipes, never incomplete recipes".
-        if (finish === 'length' && Array.isArray(parsed) && parsed.length > 0) {
-          const cut = parsed.pop()
-          console.log(`[funnel] finish_reason=length — dropped trailing recipe "${cut?.name ?? '?'}" as truncated`)
-          providerErrors.push(`${provider.name}: output hit max_tokens, dropped trailing recipe "${cut?.name ?? '?'}"`)
-        }
+        // Parallel calls over short lists when shards are on; one call over the whole list when off
+        // (attempt 1 then reuses the prompt already built). The model's answers are merged and go
+        // through the sanitize path below ONE AT A TIME — it mutates the dedup registers, so it
+        // must never run concurrently.
+        const shards = chunkOrder(order, shardSize)
+        const calls = await Promise.all(shards.map(sh => callModel(
+          provider,
+          attemptNo === 0 && shards.length === 1 ? prompt : buildPrompt(renderVideoList(sh.map(i => uniqueVideos[i])), sh.length),
+          sh,
+          budget.callTimeoutMs,
+        )))
+        for (const c of calls) providerErrors.push(...c.errors)
+        if (shards.length > 1) entry.shardMs = calls.map(c => c.ms)
+        const parsed: any[] = calls.flatMap(c => c.recipes)
         if (Array.isArray(parsed) && parsed.length > 0) {
           // Within-batch name dedup — Groq sometimes ignores the variety prompt
           // and returns two recipes for the same dish (e.g. two oatmeal bowls)
@@ -1997,85 +2189,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       runRowId = runRow?.id ?? null
     } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
 
-    // Generate Flux images via the shared two-stage pipeline (Gemini visual description
-    // → Flux render). Parallelized — was sequential, but each image takes 20-60s and 6
-    // serially blew past the edge function timeout. Promise.all means the slowest single
-    // image determines total time (~30s) rather than 6× ~30s. generate-meal-image has its
-    // own internal rate limit so concurrent calls are safe.
     console.log('Stage: image generation (parallel)')
     const imgStart = Date.now()
-    // Today's rows PLUS any earlier one still without an AI image. generate-meal-image's own
-    // comment claims "the pipeline and the cron still self-heal rows" — they did not: this select
-    // was today-only, so a meal whose image failed during its own run kept its YouTube thumbnail
-    // forever. On 2026-09-06 that was 6 of 12, and every other run in the previous week was 100%,
-    // which is what a transient FAL saturation looks like: recoverable, never retried.
-    //
-    // Cheap by construction — it matches only BROKEN rows, so a healthy pool adds nothing beyond
-    // today's batch, and retention already bounds how far back rows exist.
-    const { data: inserted } = await db.from('trending_meals')
-      .select('id, name, ingredients, steps, generated_at, image')
-      .or(`generated_at.eq.${today()},image.not.like.%/storage/v1/object/public/%`)
-    if (inserted) {
-      // Generate in small waves instead of firing all ~18 at FAL at once. The
-      // simultaneous burst saturated FAL's rate limit, so even generate-meal-image's
-      // internal 3-retry couldn't recover and meals were left on their YouTube
-      // thumbnail. Bounding concurrency keeps FAL un-saturated so retries succeed.
-      const IMG_CONCURRENCY = 5
-      // No image call may run past this; the gateway cuts the whole function at 150 s. A row whose
-      // image is skipped or aborted keeps its YouTube thumbnail and is picked up by the self-heal
-      // select above on the next run — a thumbnail for a day beats a 504 with nothing logged.
-      const IMAGE_DEADLINE_MS = 143_000
-      const genImage = async (meal: any) => {
-        try {
-          // Pass the VISUAL hint with the name ("1 slice American cheese", not "American cheese").
-          // Without it the renderer has no idea of scale and draws a whole slab of cheese.
-          // A bare gram weight is skipped — it tells the model nothing about how the item looks.
-          const ingredientNames = (meal.ingredients || []).map((i: any) => {
-            const hint = String(i.visual ?? '').trim()
-            return hint && !/^\d+(\.\d+)?\s*(g|ml|oz)$/i.test(hint) ? `${hint} ${i.name}` : i.name
-          })
-          const imgRes = await fetch(`${supabaseUrl}/functions/v1/generate-meal-image`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              // Authenticate as the trusted internal caller. generate-meal-image requires auth
-              // on a cache miss, and every freshly-generated trending meal IS a miss — without
-              // this header the call 401s and the meal stays on its YouTube thumbnail. Use the
-              // same CRON_SECRET-preferred token the cron itself authenticates with.
-              'Authorization': `Bearer ${CRON_SECRET || supabaseServiceKey}`,
-            },
-            // steps are LOAD-BEARING for the image, not decoration. generate-meal-image has a rule
-            // that an ingredient mixed/whisked/blended into something else must NOT be drawn as a
-            // separate dollop — but it can only apply that if it can read the steps. Omitting them
-            // is why a Burger Bowl's greek-yogurt-based burger sauce rendered as a white blob of
-            // sour cream sitting on top instead of a sauce mixed through the dish.
-            // replaceTrending so a RETRY can overwrite the YouTube thumbnail it is there to replace.
-            // Without it the backfill is gap-fill-only and every repair is a no-op on exactly the
-            // rows that need one.
-            body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [], replaceTrending: true }),
-            signal: AbortSignal.timeout(Math.max(1_000, IMAGE_DEADLINE_MS - (Date.now() - fnStart))),
-          })
-          const imgData = await imgRes.json()
-          if (imgData.image) {
-            await db.from('trending_meals').update({ image: imgData.image }).eq('id', meal.id)
-            console.log(`Image OK: ${meal.name}`)
-          } else {
-            console.log(`No image returned for ${meal.name}`)
-          }
-        } catch (e) {
-          console.log(`Image gen failed for ${meal.name}:`, e)
-        }
-      }
-      for (let i = 0; i < inserted.length; i += IMG_CONCURRENCY) {
-        // A wave needs ~5-15 s; do not start one that cannot finish.
-        if (Date.now() - fnStart > IMAGE_DEADLINE_MS - 8_000) {
-          funnel.imagesSkippedForTime = inserted.length - i
-          console.log(`[funnel] images: out of time at t+${Date.now() - fnStart}ms, ${inserted.length - i} rows left on their thumbnails for the next run's self-heal`)
-          break
-        }
-        await Promise.all(inserted.slice(i, i + IMG_CONCURRENCY).map(genImage))
-      }
-    }
+    const img = await generateTrendingImages(CRON_SECRET || supabaseServiceKey, fnStart, { deadlineMs: 143_000, onlyMissing: false })
+    if (img.skippedForTime) funnel.imagesSkippedForTime = img.skippedForTime
     console.log(`Stage: image generation done in ${Date.now() - imgStart}ms`)
 
     // Re-fetch from DB so the response includes AI-generated image URLs (not YouTube thumbnails)

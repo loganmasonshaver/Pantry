@@ -74,6 +74,22 @@ export function nextAttemptOrder(total: number, terminal: Set<number>, attemptNo
   return remaining.map((_, k) => remaining[(k + offset) % remaining.length])
 }
 
+// Splits one attempt's video list into parallel calls. On 2026-09-16 the model returned about a
+// third of a 25-48 video list and favoured the top of it; a short list has no bottom. Shards are
+// balanced (25 at size 6 is 5x5, not 6,6,6,6,1) and capped at `maxShards` concurrent calls, which
+// raises the size rather than the call count — Gemini's per-minute limits are per account and not
+// published. size <= 0 means one call with the whole list, the behaviour before shards.
+export const MAX_PARALLEL_SHARDS = 5
+export function chunkOrder(order: number[], size: number, maxShards = MAX_PARALLEL_SHARDS): number[][] {
+  if (order.length === 0) return []
+  if (size <= 0) return [order]
+  const count = Math.min(Math.max(1, maxShards), Math.ceil(order.length / size))
+  const per = Math.ceil(order.length / count)
+  const out: number[][] = []
+  for (let i = 0; i < order.length; i += per) out.push(order.slice(i, i + per))
+  return out
+}
+
 export type Counts = Record<string, number>
 
 // Per-attempt rejection counts from the run's cumulative counters. Only non-zero keys, so an

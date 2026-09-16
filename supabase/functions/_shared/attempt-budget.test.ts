@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  WALL_BUDGET_MS, MIN_ATTEMPT_MS, llmLoopEndMs, decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder,
+  WALL_BUDGET_MS, MIN_ATTEMPT_MS, llmLoopEndMs, decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder, chunkOrder,
 } from './attempt-budget.ts'
 
 test('the loop end moves earlier as survivors grow, and never lets the tail estimate run past the wall', () => {
@@ -87,4 +87,14 @@ test('nextAttemptOrder leaves out kept and dead videos, keeps every other one, a
   assert.notEqual(a1[0], a2[0])                        // a different video leads
   assert.deepEqual(nextAttemptOrder(3, new Set([1, 2, 3]), 1, 5), [])
   assert.deepEqual(nextAttemptOrder(4, new Set(), 0, 5), [0, 1, 2, 3])
+})
+
+test('chunkOrder: balanced shards, capped concurrency, off means one call', () => {
+  const ids = Array.from({ length: 25 }, (_, i) => i)
+  assert.deepEqual(chunkOrder(ids, 6).map(s => s.length), [5, 5, 5, 5, 5])
+  assert.deepEqual(chunkOrder(ids, 3).map(s => s.length), [5, 5, 5, 5, 5])   // capped at 5 calls, size grows
+  assert.deepEqual(chunkOrder(ids.slice(0, 7), 6).map(s => s.length), [4, 3])
+  assert.deepEqual(chunkOrder(ids, 0), [ids])
+  assert.deepEqual(chunkOrder([], 6), [])
+  assert.deepEqual(chunkOrder(ids, 6).flat(), ids)                           // nothing lost, order kept
 })
