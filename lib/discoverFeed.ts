@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { todayStr } from './localDate'
 import type { TimePhase } from './ingredientDisplay'
+import { isReadyToShow } from './discoverPublish'
 
 // The Discover feed's data layer, split out of app/(tabs)/discover.tsx so the screen and the
 // background prefetch run the SAME query, mapping and cache format. Duplicating any of it is how
@@ -96,7 +97,9 @@ export async function loadTrendingMeals(): Promise<DiscoverMeal[] | null> {
     console.warn(`[discover] fetch hit the ${TRENDING_FETCH_LIMIT}-row ceiling — tail unreachable, add generated_at pagination`)
   }
 
-  return filterTrendingByLifecycle(data)
+  // Not before its photo: a row still on its YouTube placeholder is left out until the AI photo
+  // lands (see discoverPublish). Filtered here, so the cache, the prefetch and every shelf agree.
+  return filterTrendingByLifecycle(data.filter(isReadyToShow))
     .map((m: any) => ({
       id: m.id, name: m.name, calories: m.calories, protein: m.protein,
       carbs: m.carbs, fat: m.fat, prepTime: m.prep_time,
