@@ -2461,6 +2461,21 @@ What that sweep left open:
 - [ ] Note the fidelity fixes landed AFTER most of the library was generated. Whichever dishes the
       trailer uses must be regenerated anyway (see §2b) — do the high-res render in the same pass.
 - [ ] Shot list: https://claude.ai/code/artifact/766f88c0-a922-463a-ad84-09059a351b14
+- [ ] **Phone shell + tooling — Logan asked 2026-09-16 for a Rotato-like skill/repo path. PLAN ONLY,
+      nothing installed.** Both slots already draw a flat 2D shell (`OnboardingTrailer.tsx` PHONE_W 250;
+      paywall `w1.phoneContainer` 280pt × 9:19.5 with drawn side buttons, `contentFit="cover"`, 0.9×
+      rate). A 3D phone baked into the video REPLACES those shells — it cannot sit inside them — so
+      "Rotato-style" is the shell decision rev 3 left open, answered yes. Recommended path (tool facts in
+      memory `reference_trailer_tooling`): **Remotion**, free for a ≤3-person company. Start **2.5D** —
+      CSS `perspective` + a few degrees of `rotateX/Y` on a rounded div holding the cut, which is what
+      the "clean and smooth" Twitter trailers actually do; go to `npx create-video@latest --three` +
+      `@remotion/three` only if the phone must turn past ~25° (procedural slab phone, no Dynamic Island,
+      needs the ANGLE GL renderer). Zero-install fallback: AppLaunchFlow (browser, free tier, takes a
+      screen recording; watermark/resolution unverified). Paid 1:1 Rotato stand-in: SmoothCapture ~$99
+      one-time (records the iPhone over USB, 3D frames). Not it: Screen Studio (2D frames, subscription),
+      Higgsfield (generative video warps UI text). Dry-run the render path with the existing 886×1920
+      `.mov` before shoot night so ANGLE/HEVC/size are proven; the wire-in sets playbackRate back to 1.0
+      and deletes the drawn shell. Still gated on §3 and the hero-image decision above.
 
 ## 8. App Store screenshots + description  *(after 3)*
 - [x] **NAME DECIDED 2026-09-04 — `Pantry: AI Meal Planner` (23/30), already live in ASC.**
