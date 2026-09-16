@@ -307,6 +307,14 @@ correctly all along).
       File" with nothing uploaded. Apple requires a shot of the purchase UI per auto-renewable
       subscription; this is the usual cause of a product sitting in Missing Metadata. Upload a
       screenshot of the Superwall paywall showing both prices — the same image serves both products.
+      **Still empty on Monthly as of 2026-09-16** (Logan's screenshots). Annual not seen that day.
+- [ ] **Draft Submission started 2026-09-16 02:06 with ONLY the "Pantry Premium" GROUP in it.**
+      Apple's two blockers on it: (1) "New subscription groups must be submitted with an
+      auto-renewable subscription from within that group" — press **Add for Review on Pantry
+      Monthly AND Pantry Annual** so they join the group in the same draft; (2) "add an app version
+      for the selected platform" — the 1.0 iOS version, i.e. this cannot be submitted until §12.
+      Leave the draft sitting; it waits. Tell for each product being complete: its status leaves
+      "Prepare for Submission", and Superwall's "Missing required metadata" clears.
 - [x] **Subscription GROUP localization — DONE 2026-09-04** ("Pantry Premium", English (U.S.),
       "Use App Name"). Was empty; this is a separate field from the per-subscription localization.
 - [x] ~~Subscription GROUP localization is EMPTY.~~ The "Pantry Premium" group's Localization
@@ -1482,6 +1490,29 @@ claiming exact wording from the top apps is guessing.
         earlier set with no sign the scan changed nothing — the same silent-stale the flash was.
         Rare (cap or timeout); the right fix is load() forcing a generation when the prefetch it
         awaited resolved null.
+      - [ ] **PLAN (Logan 2026-09-16) — Home says generations are done for today, Pantry still offers
+        Scan.** Both are true: two separate server caps. Logan's row that day: `meal_gen` 6/6 (daily),
+        `pantry` 6 in the rolling week (cap = `SCAN_CAP_WEEK`, overridden for testing — §9),
+        `image_gen` 22/24. The HARM is what a scan does next: it spends a scan slot, saves the items,
+        the meal prefetch is refused by the meal cap and resolves null, and the reveal serves the
+        earlier deck under "3 meals you can make right now" — nothing on screen reflects the scan.
+        Plan, not built:
+        1. **Do NOT disable Scan when meals are capped.** The scan's first value is the pantry
+           itself (list, grocery, tomorrow's picks); blocking inventory on meal quota punishes the
+           most engaged user and the button would look broken for no visible reason.
+        2. **Skip the reveal when generation is capped.** In the Add-all handler, before the
+           `seen` fork: if the server's meal count is at the cap (read the same quota the hook's
+           `refreshQuota` reads), go to the existing "N items added" success step with ONE line —
+           "New meal picks unlock tomorrow and will use everything you just added." — and no See
+           meals button (no promise it cannot keep, no redundant CTA).
+        3. **Close the general edge:** in `fetchAndGenerate`, a prefetch that resolved null makes
+           the cache read below it untrustworthy for THIS scan — force one generation; if that
+           fails too, show the reveal's error state, never the earlier deck.
+        4. **Verify, nothing to build:** tomorrow's first open misses the date-keyed cache and
+           generates from a fresh `pantry_items` read, so the scanned items are used.
+        Testing note: resetting only `meal_gen` leaves `image_gen` at 22/24, so the next reveal's
+        third card shows no photo — that is the image cap, not the download gate regressing. Reset
+        both (`reference_scan_cap_reset_sql` in memory).
       - [ ] **UNVERIFIED — no Pantry-tab flash between "Add all" and the reveal** (Logan 2026-09-16,
         second pass). The modal used to close FIRST and push the reveal 400 ms later because UIKit
         drops a push that starts mid-dismissal — so the Pantry tab showed for the gap. Now the push
