@@ -805,3 +805,25 @@ test('nonDishName: plans, vlogs and health claims are not dishes; food is', () =
   assert.equal(nonDishName('spinach cottage cheese egg omelet — deconstructed egg bites what I eat'), null)
   assert.equal(nonDishName('Meal Prep Chicken Burrito Bowls'), null)
 })
+
+const CANNELLONI_SRC = ['💪 43,1 g Protein', '🍝 31,6 g Kohlenhydrate', '🥑 13,4 g Fett', '135 g Cannelloni', '400 g Hähnchenbrustfilet', '125 g Mozzarella Light', '60 g Gratin-Käse Light', '40 g Parmesan', '600 g gehackte Tomaten', '120 ml Leichte Sahne', 'Salz', 'Pfeffer', 'Paprikapulver, edelsüß', 'Tomatengewürz']
+test('isNonIngredientLine: emoji-led macro lines, "= N g protein" annotations and bare macro words are not ingredients', () => {
+  assert.equal(realIngredients(CANNELLONI_SRC).length, 11)
+  for (const l of ['💪 43,1 g Protein', '🍝 31,6 g Kohlenhydrate', '🥑 13,4 g Fett', '80 g green pumpkin seeds = 29.60 g protein (Austrian pumpkin seeds)', '2 bananas (240 g) = 1.75 g protein', 'carbohydrates', 'protein content']) {
+    assert.equal(isNonIngredientLine(l), true, l)
+  }
+  // Food that mentions a macro word survives.
+  for (const l of ['30 g protein powder', '135 g Cannelloni', '400 g Hähnchenbrustfilet', '2 scoops vanilla protein', 'fat-free greek yogurt']) {
+    assert.equal(isNonIngredientLine(l), false, l)
+  }
+})
+
+test('nameIngredientGaps: baked oats made from oat flour are oats; a rice bowl made from rice flour is not', () => {
+  assert.deepEqual(nameIngredientGaps('Marble Baked Oats', [{ name: 'oat flour' }, { name: 'cocoa powder' }, { name: 'baking powder' }, { name: 'chocolate chunks' }]), [])
+  assert.deepEqual(nameIngredientGaps('Chicken Rice Bowl', [{ name: 'rice flour' }, { name: 'chicken' }, { name: 'soy sauce' }]), ['rice'])
+})
+
+test('nonDishName: a homemade protein powder is a pantry staple, not a dish', () => {
+  assert.equal(nonDishName('Homemade Desi Protein Powder'), 'protein powder')
+  assert.equal(nonDishName('Protein Powder Pancakes'), null)
+})

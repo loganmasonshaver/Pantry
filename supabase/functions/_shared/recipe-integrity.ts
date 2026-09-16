@@ -40,7 +40,16 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   //
   // Anchored to END OF LINE, which is the whole safety of it: "30 g protein powder" is a real
   // ingredient and must survive, and it only does because "powder" follows the macro word.
-  /^\s*[\d.,]+\s*(?:g|kcal|kj)?\s*(protein|eiwei(ß|ss)|kohlenhydrate?|carbs?|fett|fat|calories|kalorien)\s*$/i,
+  // Leading emoji allowed: "💪 43,1 g Protein / 🍝 31,6 g Kohlenhydrate / 🥑 13,4 g Fett" headed a
+  // German cannelloni's list, the digit anchor missed all three, and a 3.5M-view recipe was
+  // rejected 11/14 on every attempt for lines that were never food.
+  /^[^\p{L}\p{N}]*[\d.,]+\s*(?:g|kcal|kj)?\s*(protein|eiwei(ß|ss)|kohlenhydrate?|carbs?|fett|fat|calories|kalorien)\s*$/iu,
+  // A per-line nutrition annotation restating an ingredient: "80 g pumpkin seeds = 29.60 g protein".
+  // The food is BEFORE the "=", so the colon rule above never sees it; the real line sits higher
+  // in the same list, so this is a duplicate, not a drop.
+  /=\s*[\d.,]+\s*(?:g|kcal)\s*(protein|carbs?|carbohydrates?|fat|calories|kalorien|eiwei(ß|ss)|kohlenhydrate?|fett)\b/iu,
+  // The macro word alone — what the model writes back when it echoes one of the lines above.
+  /^[^\p{L}\p{N}]*(?:protein(?:\s+content)?|carbohydrates?|carbs|kohlenhydrate|eiwei(?:ß|ss)|fett|fats?|calories|kcal)\s*$/iu,
   // A bare macro header with no number or colon — "kcal/protein/fat/carbs" as its own line.
   /^[\s\W]*(kcal|calories)\s*[\/|,].*(protein|fat|carb)/i,
   /^(zutaten|ingredienti|ingr[ée]dients?|ingredients?|składniki|makroskładniki|przepis|recept\w*)\b/i, // headings, incl. localized
@@ -332,7 +341,7 @@ const SYNONYMS: Record<string, string[]> = {
 // on candidate TITLES before the model, so the pick is not spent.
 // Hashtags come off first: a real pumpkin loaf was filtered on "#routine", and "what I eat" alone
 // took an omelet whose title mentioned it in passing — the compilations say "in a day".
-const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin))\b/i
+const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|protein powder\s*$|spice mix\s*$|seasoning blend\s*$)/i
 export function nonDishName(name: string): string | null {
   const m = NOT_A_DISH_RE.exec((name ?? '').replace(/#\S+/g, ' '))
   return m ? m[1].toLowerCase() : null
@@ -443,9 +452,11 @@ export function nameIngredientGaps(name: string, ingredients: any[] | undefined)
 
   // Same escape hatch the meat pool gets: when the NAME itself says the derivative ("Oat Milk
   // Latte", "Rice Flour Pancakes"), the creator means the derivative and the plain set is right.
+  // Oat flour is ground oats, not a derivative the way rice flour or almond milk are: baked oats
+  // and oat pancakes are routinely made from blended oats. It stays in the oat pool.
   const grainSubstantive = GRAIN_DERIVATIVE.test(name)
     ? ingTokens
-    : tokens(lines.filter(l => !GRAIN_DERIVATIVE.test(l)).join(' '))
+    : tokens(lines.filter(l => !GRAIN_DERIVATIVE.test(l) || /\boats?\s+flour\b/i.test(l)).join(' '))
 
   const gaps: string[] = []
   for (const food of DEFINING_FOODS) {

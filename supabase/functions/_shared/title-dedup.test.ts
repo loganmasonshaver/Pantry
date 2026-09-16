@@ -18,6 +18,8 @@ test('the 2026-09-16 repeats are caught from their titles', () => {
   assert.equal(findTitleRepeat('STRAWBERRY CHEESECAKE PROTEIN ICE CREAM (Ninja Creami)', pool), 'Strawberry Cheesecake Ice Cream')
   assert.equal(findTitleRepeat('Banana Bread Protein Pancakes 🥞 40g protein', pool), 'Banana Bread High Protein Pancakes')
   assert.equal(findTitleRepeat('TIRAMISU CHIA PUDDING | 30g protein', pool), 'Tiramisu Chia Pudding')
+  // 6M views, picked by the model in four of five attempts on 2026-09-16, each pick wasted.
+  assert.equal(findTitleRepeat('The Most DELICIOUS High Protein Tiramisu Balls! 💪🏼☕️ #highprotein #tiramisu #shorts', preparePool([...POOL, 'Tiramisu Protein Balls'])), 'Tiramisu Protein Balls')
   // The zucchini version was rejected downstream at 0.75 anyway; removing it early is consistent.
   assert.equal(findTitleRepeat('Cottage Cheese Zucchini Flatbread', pool), 'Cottage Cheese Flatbread')
 })

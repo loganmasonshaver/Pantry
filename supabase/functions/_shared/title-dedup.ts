@@ -22,6 +22,7 @@ const TITLE_STOPWORDS = new Set([
   'cal', 'kcal', 'gram', 'grams', 'ingredient', 'ingredients', 'meal', 'prep', 'idea', 'ideas', 'lunch', 'dinner',
   'breakfast', 'snack', 'snacks', 'dessert', 'ever', 'need', 'try', 'better', 'than', 'new', 'way', 'homemade',
   'no', 'without', 'free', 'style', 'version', 'hack', 'under', 'over', 'per', 'serving', 'fitness', 'gym',
+  'most',
 ])
 
 // Form words the model swaps freely when it renames a dish it was told is in the pool: "Tiramisu
@@ -43,7 +44,8 @@ function singular(w: string): string {
 // singularised, stopwords and two-letter fragments dropped.
 export function contentWords(s: string): Set<string> {
   const out = new Set<string>()
-  for (const raw of (s ?? '').toLowerCase().match(/[a-zà-ɏ]+/g) ?? []) {
+  // Hashtags off first: "#highprotein #tiramisu" glue words together and count as content.
+  for (const raw of (s ?? '').toLowerCase().replace(/#\S+/g, ' ').match(/[a-zà-ɏ]+/g) ?? []) {
     const w0 = singular(raw)
     const w = CANON[w0] ?? w0
     if (w.length > 2 && !TITLE_STOPWORDS.has(w) && !TITLE_STOPWORDS.has(raw)) out.add(w)
