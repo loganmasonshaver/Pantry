@@ -1472,6 +1472,12 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
+- [ ] **OPEN — Home "Cook from your pantry": two ✓ Ready to cook over three meals reads as partial
+      failure** (Logan 2026-09-16). All three were cookable; the third showed "Better with: fresh lime
+      juice" instead of the check (`PantryMealRow` in `app/(tabs)/index.tsx`: Need → Better with →
+      Ready, first match wins). Logan has his own idea; Claude's rec given in chat: keep the check for
+      every cookable meal and put the garnish after it ("✓ Ready to cook · + lime juice"), so the ONE
+      state without a check stays the real problem, "Need: …". Not built — waiting on Logan's pick.
 - [ ] Walk the whole flow start to finish on a real device and confirm the UI holds at each step.
 - [x] ~~Delete or wire the dead review screen first~~ — DELETED 2026-08-30. It was not a
       delete-vs-wire fork: step 55 is a strictly better version of the same review-and-confirm
@@ -1495,6 +1501,17 @@ claiming exact wording from the top apps is guessing.
       80pt tiles scrolling sideways past four) and the headline reads "Check these N items · Tap a
       name to fix it · ✕ to remove · type below to add". Tell: a 14-photo scan shows the headline
       directly under the strip and the list scrolls to the last item.
+- [ ] **UNVERIFIED — the SCANNING screen's ‹ goes to the camera; the "More ingredients" areas hub is
+      DELETED** (2026-09-16, second pass). Logan's original ask was about the THEATRE's ‹, which went
+      to the hub (a second screen of the same photos); the build below changed the REVIEW's ‹ instead,
+      so on device he still landed on the hub. Now: theatre ‹ → camera with the filmstrip, the hub
+      block + its state/styles/icons are gone (it had no other way in), and a scan still in flight is
+      re-shown, never re-paid: going back mid-scan and pressing the button (it reads **View results**)
+      returns to the running scan. A changed photo set or ✕ supersedes the run and drops its results
+      (✕ mid-scan also stopped late results landing in the closed modal, where the meal prefetch could
+      fire a paid generation). Tells: (1) scan → ‹ during the theatre → camera, strip intact, button
+      "View results" → theatre continues, `scan_usage` pantry count +1 not +2; (2) same after the
+      scan finishes → straight to the review; (3) no route ever shows "More ingredients, tastier meals".
 - [ ] **UNVERIFIED — review ‹ goes to the CAMERA, and the scan is not spent twice** (2026-09-16,
       Logan: "get rid of that screen"). ‹ on the review used to reopen the loading theatre, which had
       nothing left to show. Now it lands on the camera with the photos still in the strip AND the

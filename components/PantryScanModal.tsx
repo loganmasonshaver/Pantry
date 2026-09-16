@@ -25,7 +25,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
-import { X, ScanLine, Check, Plus, Zap, ImageIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Snowflake, Package, Utensils, Container, Lightbulb, Tag, EyeOff } from 'lucide-react-native'
+import { X, ScanLine, Check, Plus, Zap, ImageIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Lightbulb, Tag, EyeOff } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 import { ScanTheater } from './ScanTheater'
 import { supabase } from '@/lib/supabase'
@@ -167,15 +167,6 @@ const CAMERA_TIPS = [
   'Drawers and shelves separately',
 ]
 
-const EXTRA_OPTIONS: { id: string; label: string; icon: any }[] = [
-  { id: 'fridge',  label: 'Fridge',        icon: Refrigerator },
-  { id: 'freezer', label: 'Freezer',       icon: Snowflake },
-  { id: 'pantry',  label: 'Pantry',        icon: Package },
-  { id: 'counter', label: 'Counter',       icon: Utensils },
-  { id: 'fridge2', label: 'Second Fridge', icon: Container },
-  { id: 'custom',  label: 'Custom',        icon: Plus },
-]
-
 // ── Sub-components ─────────────────────────────────────────────────────
 
 function ProgressDots({ total, active }: { total: number; active: number }) {
@@ -278,10 +269,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [retryNonce, setRetryNonce] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
   const [photos, setPhotos] = useState<PhotoEntry[]>([])
-  const [pendingLabel, setPendingLabel] = useState<string | null>(null) // area label queued when "add area" is tapped from the hub
   const [showDone, setShowDone] = useState(false)
-  const [customLabel, setCustomLabel] = useState('')
-  const [showCustomInput, setShowCustomInput] = useState(false)
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
 
   // Prefetch cook-now meals the moment a scan produces items and we're heading toward the
@@ -331,7 +319,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const titleAnim = useRef(new Animated.Value(0)).current
   useEffect(() => {
     // photos.length, not just step: the hero is FIRST-SHOT copy. Re-entering the camera from the
-    // areas hub re-runs this, and without the photo check it replayed "Start with your fridge"
+    // scan or review screen's back arrow re-runs this, and without the photo check it replayed "Start with your fridge"
     // over a scan already three photos deep. Settling to 1 also retires the hero the instant the
     // first shot lands, instead of leaving it up for the rest of HERO_HOLD_MS.
     if (step !== 1 || photos.length > 0) { titleAnim.setValue(1); return }
@@ -386,6 +374,13 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const scannedFpRef = useRef<string | null>(null)
   const photoFp = (ps: PhotoEntry[]) => ps.map(p => p.id).join('|')
   const resultsForThesePhotos = showDone && !scanError && scannedFpRef.current === photoFp(photos)
+  // The scan call currently in flight, and a counter that supersedes it. ‹ on the scanning screen
+  // goes back to the camera WHILE the call runs; pressing Scan again on the same photos must re-show
+  // that run, not pay for a second one. A changed photo set or a close bumps the counter, and a
+  // superseded run's results are dropped instead of overwriting the newer state.
+  const scanRunRef = useRef<{ fp: string; id: number } | null>(null)
+  const scanRunIdRef = useRef(0)
+  const scanRunningForThesePhotos = scanRunRef.current?.fp === photoFp(photos)
 
   // Drives the scanning beam that sweeps top→bottom over the viewfinder — same motif as the
   // home "Scan your pantry" hero card, so the loading screen reads as the same scan action.
@@ -400,6 +395,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     // still works: showDone is false on that path. Results for a different photo set are stale:
     // clear them so the theatre counts from zero and the review cannot show the old list.
     if (resultsForThesePhotos) return
+    if (scanRunningForThesePhotos) return // the running call lands the results; do not pay twice
     if (showDone) { setShowDone(false); setDetectedItems([]); setZones([]) }
     setScanError(null)
     const loop = Animated.loop(
@@ -410,9 +406,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     )
     loop.start()
 
+    const runId = ++scanRunIdRef.current
+    scanRunRef.current = { fp: photoFp(photos), id: runId }
+    const current = () => scanRunIdRef.current === runId
+
     const scanPhotos = async () => {
       const base64Images = photos.filter(p => p.base64).map(p => p.base64!)
       if (base64Images.length === 0) {
+        if (!current()) return
         scannedFpRef.current = photoFp(photos)
         setShowDone(true)
         return
@@ -449,6 +450,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             setTimeout(() => reject(new Error('Scan is taking too long. Tap retry to try again.')), SCAN_HARD_TIMEOUT_MS)
           ),
         ])
+        if (!current()) return // superseded while the call ran — a newer photo set, or the scan was closed
         if ('declined' in scanResult) { onClose(); return }
         const result = scanResult.data as { layout: string; photoContainers?: string[]; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
         let itemIndex = 0
@@ -502,10 +504,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
           try { const body = await e.context.json(); if (body?.error) msg = body.error } catch { /* keep generic */ }
         }
         trackAIError('scan-pantry', e, { shown: msg })
+        if (!current()) return
         setScanError(msg)
       }
     }
-    scanPhotos()
+    scanPhotos().finally(() => { if (scanRunRef.current?.id === runId) scanRunRef.current = null })
 
     return () => { loop.stop() }
   }, [step, retryNonce])
@@ -642,15 +645,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     if (savingRef.current) return
     const unscanned = photos.length
     if (unscanned === 0 || step >= 5) { handleClose(); return }
-    // Back on the camera from the review, the photos ARE scanned — what ✕ would throw away is the
-    // paid result that has not been added yet, so the question names that instead.
+    // Back on the camera from the review or mid-scan, the photos ARE scanned (or being scanned) —
+    // what ✕ would throw away is the paid result, so the question names that instead.
+    const scanKept = resultsForThesePhotos || scanRunningForThesePhotos
     Alert.alert(
-      resultsForThesePhotos ? 'Discard this scan?' : `Discard ${unscanned} photo${unscanned === 1 ? '' : 's'}?`,
+      scanKept ? 'Discard this scan?' : `Discard ${unscanned} photo${unscanned === 1 ? '' : 's'}?`,
       resultsForThesePhotos
         ? `${detectedItems.length} item${detectedItems.length === 1 ? ' was' : 's were'} found but not added to your pantry yet.`
-        : `You haven't scanned ${unscanned === 1 ? 'it' : 'them'} yet. Closing loses ${unscanned === 1 ? 'it' : 'them'}.`,
+        : scanKept
+          ? 'Your photos are still being scanned. Nothing has been added to your pantry yet.'
+          : `You haven't scanned ${unscanned === 1 ? 'it' : 'them'} yet. Closing loses ${unscanned === 1 ? 'it' : 'them'}.`,
       [
-        { text: resultsForThesePhotos ? 'Keep' : 'Keep taking photos', style: 'cancel' },
+        { text: scanKept ? 'Keep' : 'Keep taking photos', style: 'cancel' },
         {
           text: 'Discard',
           style: 'destructive',
@@ -667,6 +673,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
     __DEV__ && console.log('[handoff] close', Date.now())
+    // Drop a scan still in flight. Its results used to land in the closed modal, where the meal
+    // prefetch effect could fire a paid generation for items nobody would ever see.
+    scanRunIdRef.current += 1
+    scanRunRef.current = null
     onClose()
     // Defer the reset until after the slide-out animation (~300ms) so the current
     // screen — e.g. the results view — collapses straight down instead of flashing
@@ -674,10 +684,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     setTimeout(() => {
       setStep(1)
       setPhotos([])
-      setPendingLabel(null)
       setShowDone(false)
-      setCustomLabel('')
-      setShowCustomInput(false)
       setDetectedItems([])
       setZones([])
       setFlashOn(false)
@@ -881,12 +888,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     }
     // next === 0 means "stay on the camera". The shutter used to hand you back to the areas hub
     // after EVERY photo, so four shots cost eight screen transitions and four camera remounts —
-    // all of it while you're stood at an open fridge that's warming up. Staying also keeps
-    // pendingLabel, so consecutive shots of the same area stay labelled as that area.
-    if (next !== 0) {
-      setPendingLabel(null) // consumed the queued "add this area" label (if any)
-      setStep(next)
-    }
+    // all of it while you're stood at an open fridge that's warming up.
+    if (next !== 0) setStep(next)
   }
 
   const launchGallery = async (label: string, next: number) => {
@@ -952,10 +955,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             : 'The rest were added. The skipped ones could not be prepared.',
         )
       }
-      if (next !== 0) {
-        setPendingLabel(null)
-        setStep(next)
-      }
+      if (next !== 0) setStep(next)
     }
   }
 
@@ -1102,19 +1102,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         {/* ── Steps 1-3: Camera steps ── */}
         {(step === 1 || step === 2 || step === 3) && (() => {
           const stepConfig = {
-            // Single-photo-first: the first capture lands straight on the review/scan hub (step 4) —
-            // no forced pantry→fridge→counter march. Extra areas are added optionally from the hub.
             // ONE clear first action. "Snap your fridge, pantry, or freezer" offered three choices at
-            // the moment the user just needs to point and shoot — so name the shot: the fridge. Other
-            // areas are offered right after, on the hub (step 4).
-            1: { dotIndex: 0, label: 'Fridge', title: 'Start with your fridge', subtitle: 'Open it up and capture the whole inside', next: 4 },
-            2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior', next: 4 },
-            3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out', next: 4 },
+            // the moment the user just needs to point and shoot — so name the shot: the fridge. More
+            // areas are just more shots from the same camera; there is no separate areas screen.
+            1: { dotIndex: 0, label: 'Fridge', title: 'Start with your fridge', subtitle: 'Open it up and capture the whole inside' },
+            2: { dotIndex: 1, label: 'Fridge', title: 'Now photograph your fridge', subtitle: 'Open it up and capture the full interior' },
+            3: { dotIndex: 2, label: 'Counter', title: 'Anything on your counter?', subtitle: 'Fruits, oils, or anything sitting out' },
           }[step]!
-          // Adding a specific area from the hub captures it with the SAME in-app camera as the first
-          // photo — pendingLabel carries the chosen area's name so the photo is labeled correctly.
-          const captureLabel = pendingLabel ?? stepConfig.label
-          const captureTitle = pendingLabel ? `Photograph your ${pendingLabel.toLowerCase()}` : stepConfig.title
+          const captureLabel = stepConfig.label
+          const captureTitle = stepConfig.title
           return (
             <View style={styles.cameraScreen}>
               {/* Full-bleed camera — fills the screen edge to edge, controls overlay on top */}
@@ -1219,8 +1215,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
                 {/* Captured filmstrip. Sits ABOVE the shutter, not beside it: the row carries the
                     only destructive control on this screen, and the shutter is where a thumb rests.
-                    Tap the image to check the shot full-screen; ✕ drops it. Removal is silent, the
-                    same as the hub's — and a mis-tap here is cheap in a way it usually isn't,
+                    Tap the image to check the shot full-screen; ✕ drops it. Removal is silent —
+                    a mis-tap here is cheap in a way it usually isn't,
                     because you're stood in front of the thing with the camera already open. */}
                 {/* Shown from the instant the picker's sheet closes until the photos arrive. iOS copies
                     the whole selection out of the library one photo at a time and returns them
@@ -1290,15 +1286,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   </TouchableOpacity>
                 </View>
 
-                {/* Scanning is now reachable WITHOUT the hub — the hub became a place you choose to
-                    go (add an area, check your shots) rather than a toll booth between every photo.
-                    "More areas" keeps the coverage nudge, which is the one genuinely useful thing
-                    the hub does: more ingredients is the app's quality lever, and nobody asks for a
-                    freezer photo unaided. */}
-                {/* Full-width, and the only action down here. "More areas" is gone — it was a second
-                    control competing with the primary one, and the areas hub is still one tap away
-                    on the back chevron. Disabled until every photo has finished encoding, because
-                    the upload silently drops photos that haven't. */}
+                {/* Full-width, and the only action down here. The camera is the whole capture flow:
+                    the "More ingredients" areas hub it used to lead to is gone, and more areas are
+                    just more shots. Disabled until every photo has finished encoding, because the
+                    upload silently drops photos that haven't. */}
                 {photos.length > 0 && (
                   <TouchableOpacity
                     style={[styles.cameraScanBtn, (pendingScan || importing) && styles.cameraScanBtnBusy]}
@@ -1312,165 +1303,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       ? <ActivityIndicator size="small" color="#000000" />
                       : <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />}
                     <Text style={styles.cameraScanBtnText}>
-                      {pendingScan || importing ? 'Preparing photos…' : resultsForThesePhotos ? 'View results' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
+                      {pendingScan || importing ? 'Preparing photos…' : resultsForThesePhotos || scanRunningForThesePhotos ? 'View results' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
                     </Text>
                   </TouchableOpacity>
                 )}
               </LinearGradient>
             </View>
-          )
-        })()}
-
-        {/* ── Step 4: Add More ── */}
-        {step === 4 && (() => {
-          // How many photos exist per area, so the tiles double as a checklist. Counting (not just
-          // a boolean) is what makes multiple fridges/counters work: a captured tile stays tappable
-          // and shows "· 2" — no special "Second Fridge" case needed.
-          const capturedCounts = photos.reduce((m, p) => {
-            const k = (p.label || '').trim().toLowerCase()
-            if (k) m[k] = (m[k] ?? 0) + 1
-            return m
-          }, {} as Record<string, number>)
-          return (
-          <View style={stepWithSafeTop}>
-            <View style={styles.topBar}>
-              {/* Back to the camera, NOT out of the scan. Only the camera-with-no-photos screen
-                  may abandon the process — anywhere else, a stray ✕ would throw away photos the
-                  user has already walked their kitchen to take. Same rule on steps 5 and 55. */}
-              <TouchableOpacity style={styles.closeBtn} onPress={() => { setPendingLabel(null); setStep(1) }}>
-                <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }} />
-            </View>
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.addMoreScroll}>
-              {/* States the actual payoff of adding areas: the AI cooks from what it can see, so
-                  more ingredients = food worth eating. ("More areas, better meals" described the
-                  mechanic; this describes what the user gets.) The grey status line under it is
-                  gone — the tile checkmarks below ARE the coverage state, and they get read. */}
-              <Text style={styles.hubTitle}>More ingredients, <Text style={styles.hubTitleAccent}>tastier meals</Text></Text>
-
-              {/* Captured so far — tangible progress, so the screen reads as a collection you're building. */}
-              {photos.length > 0 && (
-                <View style={styles.capturedSection}>
-                  <Text style={styles.sectionEyebrow}>CAPTURED · {photos.length}</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.capturedRow}>
-                    {photos.map(p => (
-                      <View key={p.id} style={styles.capturedCard}>
-                        {/* Tap the thumbnail to check the shot full-screen before scanning — the ✕ /
-                            check badges sit above it (absolute), so they still take their own taps. */}
-                        <TouchableOpacity
-                          activeOpacity={0.85}
-                          disabled={!p.uri}
-                          onPress={() => p.uri && setZoomUri(p.uri)}
-                          style={styles.capturedImg}
-                        >
-                          {p.uri
-                            ? <Image source={{ uri: p.uri }} style={styles.capturedImg} resizeMode="cover" />
-                            : <View style={[styles.capturedImg, styles.capturedImgEmpty]}><ScanLine size={18} stroke="#4ADE80" strokeWidth={1.5} /></View>}
-                        </TouchableOpacity>
-                        <View style={styles.capturedCheck}><Check size={11} stroke="#000" strokeWidth={3} /></View>
-                        {/* Tap ✕ to drop this photo; removing the last one bounces back to the camera
-                            (can't scan zero). Silent, no confirm — matches the app's UX convention. */}
-                        <TouchableOpacity
-                          style={styles.capturedRemove}
-                          onPress={() => {
-                            const next = photos.filter(x => x.id !== p.id)
-                            setPhotos(next)
-                            if (next.length === 0) setStep(1)
-                          }}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <X size={12} stroke="#FFFFFF" strokeWidth={2.5} />
-                        </TouchableOpacity>
-                        <View style={styles.capturedLabelWrap}><Text style={styles.capturedLabel} numberOfLines={1}>{p.label}</Text></View>
-                      </View>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-
-              <Text style={[styles.sectionEyebrow, { marginTop: 26 }]}>ADD AN AREA</Text>
-              <View style={styles.areaGrid}>
-                {EXTRA_OPTIONS.map(opt => {
-                  const Icon = opt.icon
-                  if (opt.id === 'custom') {
-                    return (
-                      <View key={opt.id} style={styles.areaCardWrap}>
-                        {showCustomInput ? (
-                          <View style={styles.customCard}>
-                            <TextInput
-                              style={styles.customInput}
-                              placeholder="Label..."
-                              placeholderTextColor={COLORS.textMuted}
-                              value={customLabel}
-                              onChangeText={setCustomLabel}
-                              autoFocus
-                            />
-                            <TouchableOpacity
-                              style={[styles.customAddBtn, !customLabel.trim() && { opacity: 0.4 }]}
-                              onPress={() => {
-                                if (!customLabel.trim()) return
-                                setPendingLabel(customLabel.trim())
-                                setCustomLabel('')
-                                setShowCustomInput(false)
-                                setStep(1)
-                              }}
-                              disabled={!customLabel.trim()}
-                            >
-                              <Text style={styles.customAddBtnText}>Add</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          <TouchableOpacity style={styles.areaCard} onPress={() => setShowCustomInput(true)} activeOpacity={0.85}>
-                            <View style={styles.areaIconWrap}><Plus size={22} stroke="#4ADE80" strokeWidth={2} /></View>
-                            <Text style={styles.areaCardText}>Custom</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    )
-                  }
-                  // Captured tiles stay tappable — that's how a second fridge / another counter gets
-                  // added, and the count makes it obvious it worked.
-                  const taken = capturedCounts[opt.label.toLowerCase()] ?? 0
-                  return (
-                    <View key={opt.id} style={styles.areaCardWrap}>
-                      <TouchableOpacity
-                        style={[styles.areaCard, taken > 0 && styles.areaCardTaken]}
-                        onPress={() => { setPendingLabel(opt.label); setStep(1) }}
-                        activeOpacity={0.85}
-                      >
-                        <View style={[styles.areaIconWrap, taken > 0 && styles.areaIconWrapTaken]}>
-                          <Icon size={22} stroke="#4ADE80" strokeWidth={1.8} />
-                        </View>
-                        <Text style={styles.areaCardText}>{opt.label}</Text>
-                        {taken > 0 && (
-                          <>
-                            <View style={styles.areaDoneBadge}>
-                              <Check size={11} stroke="#000" strokeWidth={3.5} />
-                            </View>
-                            <Text style={styles.areaDoneText}>
-                              {taken} photo{taken !== 1 ? 's' : ''} · tap to add more
-                            </Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                    </View>
-                  )
-                })}
-              </View>
-            </ScrollView>
-            <View style={[styles.actions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-              {/* Same requestScan as the camera's CTA. This one had NO encode guard at all — it
-                  called setStep(5) unconditionally, so a photo still encoding when you reached the
-                  hub was dropped from the upload without a word. */}
-              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 8, justifyContent: 'center' }]} onPress={requestScan} disabled={pendingScan} activeOpacity={0.85}>
-                {pendingScan
-                  ? <ActivityIndicator size="small" color="#000000" />
-                  : <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />}
-                <Text style={styles.primaryBtnText}>{pendingScan ? 'Preparing photos…' : resultsForThesePhotos ? 'View results' : `Scan ${photos.length} Photo${photos.length !== 1 ? 's' : ''}`}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
           )
         })()}
 
@@ -1481,9 +1319,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 push down by the safe-area inset so X lands below the status
                 bar at top-LEFT, matching the convention used by every other
                 step. */}
+            {/* Back to the CAMERA, photos still in the filmstrip (Logan). It went to the "More
+                ingredients" areas hub, a second screen of the same photos between the scan and the
+                camera. Safe mid-scan: the running call keeps going and Scan re-shows it. */}
             <TouchableOpacity
               style={[styles.closeBtn, styles.closeBtnAbs, { top: insets.top + 8, left: 8, right: undefined }]}
-              onPress={() => setStep(4)}
+              onPress={() => setStep(1)}
             >
               <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
             </TouchableOpacity>
@@ -1936,40 +1777,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addMoreScroll: {
-    paddingBottom: 20,
-  },
 
-  // ── Step-4 "add more" hub (redesigned) ──
-  hubTitle: { fontSize: 26, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.5, marginBottom: 24 },
-  hubTitleAccent: { color: '#4ADE80' },
-  sectionEyebrow: { fontSize: 11, fontWeight: '700', color: '#666666', letterSpacing: 1.2, marginBottom: 12 },
-  capturedSection: { marginBottom: 4 },
-  capturedRow: { gap: 12, paddingRight: 24 },
-  capturedCard: { width: 96, height: 112, borderRadius: 14, overflow: 'hidden', backgroundColor: '#1A1A1A', borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)' },
-  capturedImg: { width: '100%', height: '100%' },
-  capturedImgEmpty: { alignItems: 'center', justifyContent: 'center' },
-  capturedCheck: { position: 'absolute', top: 6, right: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
-  capturedRemove: { position: 'absolute', top: 6, left: 6, width: 22, height: 22, borderRadius: 11, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
-  capturedLabelWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: 'rgba(0,0,0,0.6)', paddingVertical: 4, paddingHorizontal: 6 },
-  capturedLabel: { fontSize: 10, fontWeight: '600', color: '#FFFFFF', textAlign: 'center' },
-  areaGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 14 },
-  areaCardWrap: { width: '48%' },
-  areaCard: { backgroundColor: '#141414', borderRadius: 16, minHeight: 120, paddingVertical: 16, paddingHorizontal: 14, alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' },
-  areaCardTaken: { borderColor: 'rgba(74,222,128,0.4)', backgroundColor: 'rgba(74,222,128,0.06)' },
-  areaDoneBadge: { position: 'absolute', top: 10, right: 10, width: 18, height: 18, borderRadius: 9, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center' },
-  areaDoneText: { fontSize: 10, fontWeight: '600', color: 'rgba(74,222,128,0.85)', marginTop: -4 },
-  areaIconWrap: { width: 44, height: 44, borderRadius: 12, backgroundColor: 'rgba(74,222,128,0.10)', alignItems: 'center', justifyContent: 'center' },
-  areaIconWrapTaken: { backgroundColor: 'rgba(74,222,128,0.14)' },
-  areaCardText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
-  areaCheck: { position: 'absolute', top: 12, right: 12, width: 20, height: 20, borderRadius: 10, backgroundColor: '#4ADE80', alignItems: 'center', justifyContent: 'center', zIndex: 2 },
-
-  // Top bar
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
   closeBtn: {
     width: 34,
     height: 34,
@@ -2223,31 +2031,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#4ADE80',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  customCard: {
-    backgroundColor: '#1A1A1A',
-    borderRadius: 14,
-    padding: 14,
-    gap: 10,
-  },
-  customInput: {
-    fontSize: 14,
-    color: '#FFFFFF',
-    padding: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.12)',
-    paddingBottom: 8,
-  },
-  customAddBtn: {
-    backgroundColor: '#4ADE80',
-    borderRadius: 8,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  customAddBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#000000',
   },
 
   // Loading layout
