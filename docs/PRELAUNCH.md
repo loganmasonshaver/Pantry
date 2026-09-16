@@ -15,7 +15,9 @@ the parser fixes, the junk-list gate, the image deadline, one shelf rule + the S
 **Do not change the model or fire a manual run before these are read** — the result must be
 attributable. Full reasoning for each item is in §0 below and in the commit bodies.
 
-- [ ] **1. It ran and returned.** PASS = HTTP 200, `timing.totalMs` < 150 000, a row exists.
+- [ ] **1. It ran and returned.** PASS = HTTP 200, `timing.totalMs` < 150 000, a row exists. Then the
+  NEW 08:05 photo step (cron job 6, `?stage=images`): its `net._http_response` body reads
+  `{"stage":"images","rows":N,...}` with status 200; `rows` 0 means the 08:00 run finished every photo.
   `select id, created_at, stored, funnel->'timing' timing, funnel->'attemptsSkippedForTime' t, funnel->'attemptsSkippedForList' l, funnel->'imagesSkippedForTime' img from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
   `select id, created, status_code, timed_out, error_msg from net._http_response order by id desc limit 2;` (cron + 08:20 health check)
   `imagesSkippedForTime` present = FAL was slow and the deadline worked (those rows keep thumbnails
@@ -38,18 +40,28 @@ attributable. Full reasoning for each item is in §0 below and in the commit bod
   morning → salads-bowls → american-comfort. Read each: `select name, shelf_tag, category from trending_meals where generated_at = current_date order by shelf_tag;`
   Also the Indian share of the batch (watch line ≤ 15%): `select count(*) filter (where shelf_tag = 'indian' or name ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) total from trending_meals where generated_at = current_date;`
 - [ ] **6. On the phone** (needs a build with `54c7fbc` + `fade012`; the Sep 16 00:01 release build
-  has neither): Discover shows ≤ 4 cheesecakes, ≤ 4 brownies, ≤ 10 pasta on the whole page; search
+  has neither; after a DB change, switch tabs and come back so Discover refetches): Discover shows ≤ 4 cheesecakes, ≤ 4 brownies, ≤ 10 pasta on the whole page; search
   "cheesecake" still finds all ~22; chia puddings + smoothie/yogurt bowls on Breakfast, protein balls
   + bark on Protein snacks, manchurian + momos on Indian night; **Salads & bowls** shows more than 2
   salads WHEN it rotates in (6 of 12 shelves render per day — it may not appear on the 17th); NEW
   TODAY badges on the cron's rows; no re-layout when the pool loads. Daily report line (~9:05)
   reads "Discover: N new recipes, all have photos".
-- [ ] **7. Model decision — only after 1-5 are read.** Plan with checked prices in §0 ("LEVER 3").
-  Next step on Logan's go: a `?replay=<runId>&model=&shards=` dry-run mode that re-runs only the
-  model stage on a stored run's `funnel.candidates` (~1 YouTube quota unit, not ~1,300), then compare
-  on Sep 17's candidates: Lite as-is · Lite in parallel 6-video shards · gemini-3.8-flash sharded ·
-  an OpenAI mini (gpt-5.4-mini or gpt-4.1-mini) sharded. Pick by recipes stored within 150 s.
-
+- [ ] **7. Shards and model — BUILT (`303f098`), measured here, decided by the rule below.**
+  Only after 1-5 are read. Each is a same-list replay of the 08:00 run: ~1 YouTube quota unit,
+  nothing written to Discover, a `pipeline_runs` dry row per replay. Fire in order, one at a time,
+  with `<id>` = the 08:00 run's `pipeline_runs` id:
+  `npx supabase db query --linked "select net.http_post(url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true&dryRun=true&replay=<id><EXTRA>', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret' limit 1)), body := '{}'::jsonb, timeout_milliseconds := 200000)"`
+  - A. `<EXTRA>` empty — Lite, no shards: the baseline on this exact list (should land near the cron's count)
+  - B. `&shards=6` — Lite in parallel pieces
+  - C. `&shards=6&model=gemini-3.8-flash`
+  - D. `&shards=6&model=gpt-5.4-mini`
+  Read each: `select id, stored, funnel->'model' model, funnel->'shardSize' shards, funnel->'timing' timing, funnel->'attempts' attempts from pipeline_runs where funnel->>'replayOf' = '<id>' order by id;`
+  **Decision rule (set in advance, 2026-09-16):** turn shards ON by default (`SHARD_SIZE_DEFAULT`) if B
+  stores ≥ A + 2 and fits well inside 150 s with no rate-limit errors in `attempts[].errors`. Switch
+  the model only if C or D stores ≥ 3 more than B on the same list AND costs ≤ ~$7/month at one run a
+  day (3.8 Flash ~$6 paid, free tier exists; gpt-5.4-mini ~$7+). Otherwise stay on Lite. One day's
+  list is one sample: repeat A-D on Sep 18's run before switching models, not before turning shards on.
+  Pricing checked 2026-09-16: see "LEVER 3" in §0.
 ---
 
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
