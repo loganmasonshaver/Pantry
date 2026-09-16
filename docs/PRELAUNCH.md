@@ -1850,7 +1850,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       while focused. Costs to measure: Discover's mount work and its first photos move to every
       launch, a few seconds in, on a phone that logs memory pressure. Tell after the fix: open the app,
       wait ~5 s on Home, tap Discover → the finished page, no skeleton.
-- [ ] **RAISED BY LOGAN 2026-09-15 — the Pantry tab takes a moment to load when tapped, for
+- [x] **RAISED BY LOGAN 2026-09-15 — the Pantry tab takes a moment to load when tapped, for
       ingredients already on his list. CAUSE FOUND, FIXED, UNVERIFIED ON DEVICE (`lib/pantryGroup.ts`
       + `app/(tabs)/pantry.tsx` + `app/(tabs)/_layout.tsx`).** The tab is a lazy route with NO local
       copy of the list: the tap mounted the screen, which then queried Supabase for every row and
@@ -1865,6 +1865,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       a row changed on another device can show for the second before the fetch answers. Tells: cold
       launch, wait ~5 s on Home, tap Pantry → the list is there immediately, no empty gap; toggle an
       item Out, force-quit, relaunch, tap Pantry → it is still Out and at the bottom of its aisle.
+      *(VERIFIED ON DEVICE 2026-09-15 — Logan: the tab paints instantly and an Out row survives a relaunch.)*
 - [ ] **RAISED BY LOGAN 2026-09-15 — pick MULTIPLE gallery photos in one go for a pantry scan.
       BUILT, UNVERIFIED ON DEVICE (`components/PantryScanModal.tsx`).** The gallery button opened a
       single-pick picker, so five shelf photos meant five trips. Now `allowsMultipleSelection` with
@@ -1918,6 +1919,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       real first-launch bug; then the same check on a TestFlight install before submission. Evidence in
       the session scratchpad (hang1 healthy / hang2 stuck os_log exports), not in the repo.
       *(CLOSED 2026-09-15 — Logan verified the app launches normally when he opens it himself; every stuck launch was started remotely by xctrace. Not proven on a first launch after a new install, so it is re-checked on the TestFlight install, §11.)*
+      *(CONFIRMED 2026-09-15: Logan opened a FRESH build by tapping the icon and it launched normally — the case the remote launches kept failing. TestFlight check in §11 still stands.)*
 - [x] **FOUND 2026-09-15 — every `LayoutAnimation` in the app is a no-op, including one reported
       today as an animation.** Reanimated disables React Native's LayoutAnimation on the New
       Architecture (software-mansion/react-native-reanimated#6751, open); first seen on device
