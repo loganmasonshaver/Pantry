@@ -349,12 +349,15 @@ correctly all along).
       File" with nothing uploaded. Apple requires a shot of the purchase UI per auto-renewable
       subscription; this is the usual cause of a product sitting in Missing Metadata. Upload a
       screenshot of the Superwall paywall showing both prices — the same image serves both products.
-      **Still empty on Monthly as of 2026-09-16** (Logan's screenshots). Annual not seen that day.
+      **Monthly DONE 2026-09-16 12:46** — paywall screenshot uploaded, added to the draft. **Annual
+      still to do** (same screenshot, Add for Review → Draft Submission (1)).
 - [ ] **Draft Submission started 2026-09-16 02:06 with ONLY the "Pantry Premium" GROUP in it.**
       Apple's two blockers on it: (1) "New subscription groups must be submitted with an
-      auto-renewable subscription from within that group" — press **Add for Review on Pantry
-      Monthly AND Pantry Annual** so they join the group in the same draft; (2) "add an app version
-      for the selected platform" — the 1.0 iOS version, i.e. this cannot be submitted until §12.
+      auto-renewable subscription from within that group" — **CLEARED 2026-09-16** once Monthly
+      joined the draft (Items Ready to Submit (2): group + Monthly); (2) "add an app version for
+      the selected platform" — the 1.0 iOS version, i.e. this cannot be submitted until §12.
+      Always pick the EXISTING "Draft Submission (1)" in the Add for Review dropdown, never
+      "Create New Submission" — the group and its subscriptions must ride together.
       Leave the draft sitting; it waits. Tell for each product being complete: its status leaves
       "Prepare for Submission", and Superwall's "Missing required metadata" clears.
 - [x] **Subscription GROUP localization — DONE 2026-09-04** ("Pantry Premium", English (U.S.),
