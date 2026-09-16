@@ -656,6 +656,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const handoffRef = useRef(false) // one push to the reveal per save; the success step's button is not bound to `saving`
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
+    __DEV__ && console.log('[handoff] close', Date.now())
     onClose()
     // Defer the reset until after the slide-out animation (~300ms) so the current
     // screen — e.g. the results view — collapses straight down instead of flashing
@@ -693,6 +694,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const goToReveal = () => {
     if (handoffRef.current) return
     handoffRef.current = true
+    __DEV__ && console.log('[handoff] push', Date.now())
     onSeeMeals?.()
     savingRef.current = false // handleClose refuses to run mid-save; the insert is long done
     setTimeout(handleClose, REVEAL_HANDOFF_MS)

@@ -193,8 +193,9 @@ function RootLayoutNav() {
         <Stack.Screen name="delivery-webview" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="food-preferences" options={{ animation: 'slide_from_bottom' }} />
         {/* Post-scan payoff screen. Pushed while the scan modal is still presented (the modal then
-            dismisses onto it), so the fade is only ever seen on the way back out. */}
-        <Stack.Screen name="cook-reveal" options={{ animation: 'fade' }} />
+            dismisses onto it). 'none' is under test: if the Pantry tab stops showing in the
+            hand-off, the push had been landing late and FADING over the tab. */}
+        <Stack.Screen name="cook-reveal" options={{ animation: 'none' }} />
       </Stack>
       {/* Branded splash overlay — covers any partial Stack render during cold start.
           Positioned AFTER the Stack so it floats above. */}

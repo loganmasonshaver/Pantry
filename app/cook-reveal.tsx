@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, Animated, ScrollView, Easing, Dimensions, AccessibilityInfo } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useRouter } from 'expo-router'
+import { useRouter, useNavigation } from 'expo-router'
 import * as Haptics from 'expo-haptics'
 import { LinearGradient } from 'expo-linear-gradient'
 import Svg, { Defs, RadialGradient, Stop, Rect } from 'react-native-svg'
@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import { supabase } from '@/lib/supabase'
+import { revealGoalLine } from '@/lib/revealLine'
 import { Shimmer } from '@/components/Shimmer'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
 
@@ -163,18 +164,35 @@ export default function CookReveal() {
   // the hook usually never fetches the pantry at all. null until it lands (or if it fails) and the
   // line falls back to the form without a total.
   const [pantryCount, setPantryCount] = useState<number | null>(null)
+  // The goal word for the second line. NULL on accounts that predate the column, so the sentence
+  // is written to read whole without it (see revealGoalLine).
+  const [fitnessGoal, setFitnessGoal] = useState<string | null>(null)
   useEffect(() => {
     if (!user?.id) return
     let cancelled = false
     supabase.from('pantry_items').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('in_stock', true)
       .then(({ count }) => { if (!cancelled && typeof count === 'number') setPantryCount(count) }, () => {}) // a failed count just keeps the shorter line
+    supabase.from('profiles').select('fitness_goal').eq('id', user.id).single()
+      .then(({ data }) => { if (!cancelled && data?.fitness_goal) setFitnessGoal(String(data.fitness_goal)) }, () => {})
     return () => { cancelled = true }
   }, [user?.id])
+
+  // Hand-off timing: when this screen mounted, and when the native push transition actually ran.
+  // Read alongside the scan modal's "[handoff] push/close" lines to see which side of the modal's
+  // dismissal the push lands on.
+  const navigation = useNavigation()
+  useEffect(() => {
+    __DEV__ && console.log('[handoff] reveal mount', Date.now())
+    const a = (navigation as any).addListener('transitionStart', () => __DEV__ && console.log('[handoff] reveal transitionStart', Date.now()))
+    const b = (navigation as any).addListener('transitionEnd', () => __DEV__ && console.log('[handoff] reveal transitionEnd', Date.now()))
+    return () => { a(); b() }
+  }, [navigation])
 
   // Every card's photo in hand — or given up on — before ANY meal shows. Holding for the hero alone
   // let cards 2 and 3 open on a shimmer and fill in under the reader's eyes. imageUnavailable is a
   // settled miss (retries exhausted), so a capped user is not held for a picture that will never come.
   const photosSettled = revealed.length > 0 && revealed.every(m => m.image || m.imageUnavailable)
+  const goalLine = revealGoalLine(revealed, fitnessGoal)
   // ...and PAINTED. A URL in hand still renders as a flat dark card until expo-image has the bytes,
   // which is what opened the gate onto a blank hero. The download is awaited; a failed one falls
   // through to the placeholder rather than holding the screen.
@@ -299,8 +317,9 @@ export default function CookReveal() {
             {revealed.length > 0
               ? <HeadlineChunks count={revealed.length} anims={chunkAnims} />
               : <Text style={styles.title}>Plating your meals…</Text>}
-            {/* Reserves the validation line's height; the real one fades in on open. */}
+            {/* Reserves both validation lines' height; the real ones fade in on open. */}
             <Text style={[styles.validation, { opacity: 0 }]}>·</Text>
+            <Text style={[styles.validationDetail, { opacity: 0 }]}>·</Text>
           </View>
           <View style={styles.deckArea}>
             <ScrollView
@@ -332,18 +351,21 @@ export default function CookReveal() {
             <View style={styles.header}>
               <Text style={styles.eyebrow}>FROM YOUR PANTRY</Text>
               <HeadlineChunks count={revealed.length} anims={chunkAnims} />
-              {/* The validation line: what the scan bought. "Picked from" and the pantry total, never
-                  a used-count over a total — "19 of your 119" invited the reader to compute the 100
-                  it did not use, when three dinners were never going to use a whole pantry. The
-                  total proves the scan counted everything; three good meals is the job. */}
-              <Animated.Text style={[styles.validation, {
+              {/* Two lines: what the scan bought, then what the meals are FOR. Line 1 carries the
+                  pantry total and never a used-count over it — "19 of your 119" invited the reader
+                  to compute the 100 it did not use. Line 2 is one sentence true of every card on
+                  screen, tied to the user's goal (revealGoalLine). */}
+              <Animated.View style={{
                 opacity: validationAnim,
                 transform: [{ translateY: validationAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
-              }]}>
-                {pantryCount !== null && pantryCount > 0
-                  ? `Picked from your ${pantryCount} items · nothing to buy`
-                  : 'Picked from your pantry · nothing to buy'}
-              </Animated.Text>
+              }}>
+                <Text style={styles.validation}>
+                  {pantryCount !== null && pantryCount > 0
+                    ? `Picked from your ${pantryCount} ingredients`
+                    : 'Picked from your ingredients'}
+                </Text>
+                <Text style={styles.validationDetail}>{goalLine}</Text>
+              </Animated.View>
             </View>
 
             <View style={styles.deckArea}>
@@ -483,6 +505,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 30, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.6, lineHeight: 36, textAlign: 'center' },
   headlineRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'flex-end' },
   validation: { marginTop: 10, fontSize: 13, fontWeight: '600', color: '#4ADE80', textAlign: 'center' },
+  // Prose, not a label: regular weight, soft white. minHeight holds two lines so a one-line
+  // sentence and a two-line one put the deck at the same y — and so does the build-up's placeholder.
+  validationDetail: { marginTop: 6, fontSize: 14, lineHeight: 20, minHeight: 40, color: 'rgba(255,255,255,0.72)', textAlign: 'center', paddingHorizontal: 8 },
 
   deck: { flexGrow: 0 },
   cardWrap: { width: CARD_W, marginRight: SPACING },

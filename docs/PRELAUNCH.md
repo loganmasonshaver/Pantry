@@ -1507,9 +1507,9 @@ claiming exact wording from the top apps is guessing.
         stack view has no window or a nav transition is in flight (RNSScreenStack.mm:669-700), so a
         push under a fully presented RN <Modal> should land at once — yet the tab shows. PLAN, in
         order, Logan's go needed:
-        1. **Diagnose first (2 min):** `console.log` timestamps at the reveal's mount and at the
-           modal's `handleClose`, read the Metro log (preview_logs) after one Add-all; and try
-           `animation: 'none'` on the cook-reveal route. Flash gone → the push was landing late and
+        1. **Diagnose first (2 min) — IN PLACE 2026-09-16:** `[handoff] push / reveal mount /
+           reveal transitionStart / transitionEnd / close` log lines (scan modal + reveal) and the
+           cook-reveal route on `animation: 'none'`. Next Add-all: read the Metro log. Flash gone → the push was landing late and
            FADING over the tab; keep 'none' (the way back snaps). Flash stays → the push is being
            held until the modal is gone, and a cover cannot help either (the tab's tree may be
            frozen); go to 2.
@@ -1522,8 +1522,13 @@ claiming exact wording from the top apps is guessing.
            native-stack `presentation: 'fullScreenModal'` route instead of an RN <Modal>; the reveal
            is then a `router.replace` inside one navigator, and the whole SafeAreaProvider-inside-
            Modal class of bugs retires with it.
-      - [ ] **PLAN — validation line rewrite** (Logan 2026-09-16: drop "nothing to buy", say
-        "ingredients", one or two sentences tied to THIS user's goal). Two lines under the headline:
+      - [ ] **BUILT 2026-09-16, UNVERIFIED on device — validation line rewrite** (Logan: drop
+        "nothing to buy", say "ingredients", a sentence tied to THIS user's goal). `lib/revealLine.ts`
+        (+9 tests) builds line 2 from the three cards' own numbers. Tells: line 1 "Picked from your
+        100 ingredients"; line 2 e.g. "Each one is under 630 calories with at least 48 g of protein."
+        — Logan's own row has `fitness_goal` NULL, so he sees the no-goal form until he sets a goal in
+        Profile → calculator; then "…— built for your cut." Nothing moves when the cards spring in.
+        As planned:
         - Line 1 (green, 13 semibold): **"Picked from your 100 ingredients"** ("…from your
           ingredients" until the count lands).
         - Line 2 (white/muted, 14 regular, prose): goal word from `profiles.fitness_goal` + numbers
