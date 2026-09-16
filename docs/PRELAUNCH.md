@@ -28,6 +28,7 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   | **real 805** | same | **10 LIVE** | 84 s; tail after the model: 1.7 s + 9.2 s images (reserve had been 55 s) |
   | dry 806 | + title filter, copycat/made-of, retune | 14 | **inflated**: 2 same-video pairs, 2 non-dishes, 2 renamed pool dishes |
   | dry 807 | + dupVideo, containment, notADish (`3fde183`) | 9 | gates right; 8 honest (Tiramisu Bites = 3rd rename of a pool dish, fixed in `7c66a52`) |
+  | **real 808** | same + image deadline, parser fixes after (`05179ea`, `6b2fd9c`) | **9 LIVE** (8 after a hand delete) | 128.9 s: images took 29.8 s (9.2 s an hour earlier) — 21 s from a 504; 3 recipes lost to two parser rules |
 
 - [x] **What is now enforced in code, all deterministic, all unit-tested (696 tests, tsc 135/16):**
   OpenAI only after a Gemini attempt that returned nothing · tail reserve 5 s + 1 s/recipe, attempt
@@ -43,22 +44,46 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   reject, all three remaining on 807 were correct: the burrito "pasta" video's list has no pasta
   line, the tuna salad's has no tuna, the Korean beef bowl's is the sauce alone. The creators put
   the food in the video, not the description. Gate stays.
-- [ ] **PASS: Sep 17 08:00 UTC cron.** HTTP 200, `timing.totalMs` < 150 000, every attempt Google
-  unless one returned nothing, **no two stored rows share a `video_id`**, no name in today's rows
-  contains a pool name. Yield: **8-10 is what this code does on a day like today; ≥ 12 is the goal.**
-  `select stored, funnel->'timing', funnel->'attempts', funnel->'afterTitleDedup' from pipeline_runs
-  where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
+- [x] **SAFETY, from real run 808 (`05179ea`, DEPLOYED):** the image stage is bounded — no wave starts
+  inside 8 s of 143 s, every image call aborts at 143 s, a row that misses keeps its YouTube
+  thumbnail for the next run's self-heal (`funnel.imagesSkippedForTime`); the `pipeline_runs` row
+  is written BEFORE images and updated after. Base reserve 5 → 10 s. Without this, 808's loop
+  running to its 117 s allowance would have been a 504 with nothing logged.
+- [x] **PARSER PRECISION, from 808 (`6b2fd9c`, DEPLOYED, replayed offline, NOT yet run):** emoji-led
+  macro lines ("💪 43,1 g Protein") and "= N g protein" annotations are no longer ingredients — the
+  cannelloni contract 14 → 11, the smoothie 10 → 5, both would have stored; oat flour counts as
+  oats ("Marble Baked Oats"); a name ending in protein powder / spice mix is not a dish; hashtags
+  and "most" out of titles (the 6M-view tiramisu balls now filtered before the model). On 808's
+  candidates that is **+4 (9 → 13) with no widening of any tolerance.** The row "Homemade Desi
+  Protein Powder" was deleted from today's live rows by hand (the new gate would have rejected it).
+- [ ] **PASS: Sep 17 08:00 UTC cron.** HTTP 200 · `timing.totalMs` < 150 000 · every attempt Google
+  unless one returned nothing · no two rows share a `video_id` · no name contains a pool name ·
+  `imagesSkippedForTime` absent (present = the deadline did its job on a slow FAL day, not a
+  failure). **Yield: 10-13 expected on this code; ≥ 12 is the goal.**
+  `select stored, funnel->'timing', funnel->'attempts', funnel->'afterTitleDedup', funnel->'imagesSkippedForTime' from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
   `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
-- [ ] **THE CEILING, honest, after today:** ~460 raw → 16-19 repeats and 4-6 non-recipes out by
-  title → view floor → **28-31 candidates with a readable list**. The model picks ~15-18 distinct
-  dishes of those across three rotated attempts (it returns ~30% of what "aim for 30-40" asks and
-  never touches 10-13 of the list); ~9 survive; the losses are real (one cannelloni 12/14, three
-  source lists missing their headline food). **To move past ~10 the levers left are:**
-  (1) **the model** — a `?model=` dry-run override to test the non-Lite tier on the same list; if
-  it returns 25 of 28 raw that is the whole story; pricing unknown, check first (Logan chose Lite
-  because free); (2) **candidate volume** — 13 → 26 searches, ~2,600 units/run, 3 runs/day, fine
-  post-launch; (3) post-launch **rotation**, because the repeat share (16-19 of 460 today) grows
-  with the pool. Do not chase 18 before launch: Discover shows the 30-day pool either way.
+- [ ] **WHERE 808's 25 CANDIDATES WENT (the `candidates` list makes this readable per run now):**
+  9 kept · 3 parser false rejects (fixed above) · 1 oat-flour false reject (fixed) · 4 correct pool
+  repeats (2 tiramisu videos, paneer pasta — 2 of them now caught by title before the model) · 1
+  correct nameGap (a "Korean beef bowl" whose list is the sauce alone) · **7 never picked, 5 of
+  them compilations** ("3 snacks in 5 minutes", "7 ready-to-eat snacks", "6 ladoo", "my
+  smoothies", "4 soya recipes" — the last yielded one generic pick). Later attempts spent ~25 of
+  39 picks re-asking about videos already kept or terminally rejected.
+- [ ] **SUGGESTIONS, not built (Logan's call):**
+  1. **Retry on the untried tail.** Attempts 2-5 rebuild the prompt anyway (rotation); rebuild it
+     WITHOUT videos already kept or terminally rejected (pool nearDup, dupVideo, notADish,
+     noSrcList — keep `dropped`/`nameGap` retryable, a later attempt completed a tuna salad today).
+     Stops ~25 wasted picks a run, makes later attempts shorter, and points the model at the 7 it
+     never touched. Expected +1-3. Deterministic; the pure part is testable.
+  2. **Compilations out before the model** (title `\b\d+\s+(recipes|snacks|meals|ways|ideas)\b`, "my
+     … smoothies"): 5 of 25 slots today produced 0-1 generic recipe; removing them lets the view
+     floor refill with single-dish videos. Or ask the model for the FIRST recipe of a compilation.
+  3. **The model tier** (`?model=` dry-run override) and **candidate volume** (13 → 26 searches) —
+     unchanged from earlier today; these are what move the ceiling past ~13.
+- [ ] **THE CEILING, after 808:** ~400-460 raw → 11-19 repeats + 3-6 non-recipes out by title →
+  floor → **25-31 candidates with a list**, of which ~5 are compilations. The model picks ~15-18
+  distinct; with today's parser fixes ~13 survive on a day like this. 12 is reachable most days;
+  18 is not without a bigger list or a model that returns what it is asked for.
 - [x] **"Only 3 meals showing" — no Discover-tab bug.** No today-only shelf; NEW TODAY badges are
   spread through the shelves; the pool (233 + today's 10, all with photos) is inside the client's
   30-day window. The "3" was the daily report line or three badges.
