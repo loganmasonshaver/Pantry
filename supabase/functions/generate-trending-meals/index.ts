@@ -7,6 +7,7 @@ import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
+import { decideAttempt, pickProvider, countDelta, addCounts, type Counts } from '../_shared/attempt-budget.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
 import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
@@ -1013,46 +1014,79 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     //
     // WALL BUDGET. This used to end "a whole cron run takes ~70s, so five attempts fit easily", and
     // on 2026-09-14 and 2026-09-15 the scheduled runs — and a manual dry run — all died at the
-    // gateway's 150 s idle limit (HTTP 504 IDLE_TIMEOUT) with nothing stored and no funnel row:
-    // five attempts at that day's Gemini latency did not fit, and a run that never returns is
-    // zero. An attempt is only STARTED while there is time for it to finish and still leave the
-    // tail (ranking, macros, images, the insert — ~40-60 s on a 12-recipe day) its share, and a
-    // call's own timeout is clamped to what is left. Fewer attempts is a thinner union; the union
-    // was built so that a thin day still stores what it has.
+    // gateway's 150 s idle limit (HTTP 504 IDLE_TIMEOUT) with nothing stored and no funnel row. An
+    // attempt is only STARTED if this run's slowest attempt so far would finish before a loop end
+    // that reserves the tail for the survivors it has; see _shared/attempt-budget.ts for the
+    // measured numbers. Fewer attempts is a thinner union; the union was built so that a thin day
+    // still stores what it has.
+    //
+    // PROVIDER ORDER. The retry list was [...selected, 4 × selected[0]] = Google, OpenAI, Google ×4,
+    // so gpt-4o-mini — kept only for outages — was attempt #2 of EVERY run. Once the budget admitted
+    // ~2 attempts that was half the model work: Sep 16 spent it on 4 raw, 0 kept, and the rotated
+    // Gemini retries never ran. OpenAI now takes a slot only after a Gemini attempt returns nothing.
     const LLM_RETRIES = 4
-    const ATTEMPT_START_DEADLINE_MS = 50_000   // no new attempt begins after this
-    const LLM_LOOP_END_MS = 85_000             // no call may run past this
-    const attempts = [...selected, ...Array.from({ length: LLM_RETRIES }, () => selected[0]).filter(Boolean)]
+    const MAX_ATTEMPTS = 1 + LLM_RETRIES
+    const primary = selected[0]
+    const fallback = selected[1] ?? null
     // Cross-attempt state. Names and word sets guard the same-dish-twice case; ingredient
     // signatures guard same-recipe-different-label. All three are only ever written for a recipe
     // that SURVIVED the whole filter (see the end of it).
     const seenNames = new Set<string>()
     const seenWordSets: Set<string>[] = []
+    const seenWordSetNames: string[] = []  // parallel to seenWordSets, for the nearDup detail
     const seenIngredientSigs: Set<string>[] = []
     // Funnel counters — tally exactly why the LLM's raw output shrinks. Cumulative across attempts,
     // so the stored funnel describes the run, not its last call.
     let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0
+    const rejCounts = (): Counts => ({ noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup,
+      fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
+      nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName })
+    const REJ_KEYS = Object.keys(rejCounts())
     let rawTotal = 0, sanitizedTotal = 0
     const droppedDetail: any[] = []
-    const servingsInferred: { name: string; to: number; ratio: number }[] = []
+    const servingsInferred: { name: string; to: number; ratio: number; provider: string }[] = []
+    // WHAT each dedup/quality gate rejected, not just how many. nearDup ran 3-14 a run against a
+    // 233-row pool with nothing saying whether it caught real repeats or "Creamy X Pasta" vs
+    // "Creamy Y Pasta". Capped: this rides in every funnel row.
+    const rejectedDetail: { attempt: number; kind: string; name: string; why: string }[] = []
+    funnel.rejectedDetail = rejectedDetail
+    // Per-attempt record (timing, provider, yield, reasons). The funnel had no timing at all, so
+    // "was Gemini slow today" could only be answered from the dashboard's logs.
+    type AttemptLog = { n: number; provider: string; offset: number; startMs: number; loopEndMs: number; callTimeoutMs: number; ms: number; raw: number; kept: number; rejected?: Counts; errors?: string[] }
+    const attemptLog: AttemptLog[] = []
+    funnel.attempts = attemptLog
+    // Per PROVIDER, summed from its own attempts. These were the run's cumulative counters written
+    // under whichever provider ran last, so llm_OpenAI read raw 13 with Gemini's drops inside it.
+    const providerTotals: Record<string, { raw: number; sanitized: number; rejected: Counts }> = {}
     // Each attempt sees the candidates in a DIFFERENT order. The model is near-deterministic for a
     // given prompt — a run whose five attempts yielded [2,0,0,0,0] re-proposed the same two dishes
     // every time — and it picks from the top of a 44-video list far more than from the bottom.
     // Rotating the list so every video leads in some attempt is what makes a retry a new sample
     // rather than a replay. video_index is mapped back to the canonical order right after parsing,
     // so nothing downstream knows the prompt was rotated.
-    const rotationStep = Math.ceil(uniqueVideos.length / Math.max(1, attempts.length))
-    for (const [attemptNo, provider] of attempts.entries()) {
+    const rotationStep = Math.ceil(uniqueVideos.length / MAX_ATTEMPTS)
+    let primaryFailedLast = false
+    for (let attemptNo = 0; primary && attemptNo < MAX_ATTEMPTS; attemptNo++) {
+      const provider = pickProvider(primary, fallback, primaryFailedLast)
       const elapsed = Date.now() - fnStart
-      if (attemptNo > 0 && elapsed > ATTEMPT_START_DEADLINE_MS) {
-        stageLog(`attempt ${attemptNo + 1} skipped: ${elapsed}ms elapsed, start deadline ${ATTEMPT_START_DEADLINE_MS}ms`)
-        funnel.attemptsSkippedForTime = attempts.length - attemptNo
+      const survivors = recipes?.length ?? 0
+      const budget = decideAttempt(attemptNo, elapsed, survivors, attemptLog.map(a => a.ms))
+      if (!budget.start) {
+        stageLog(`attempt ${attemptNo + 1} skipped: ${elapsed}ms elapsed + ${budget.expectedMs}ms expected > loop end ${budget.loopEndMs}ms for ${survivors} survivors`)
+        funnel.attemptsSkippedForTime = MAX_ATTEMPTS - attemptNo
         break
       }
       const offset = uniqueVideos.length ? (attemptNo * rotationStep) % uniqueVideos.length : 0
       const order = uniqueVideos.map((_, i) => (i + offset) % uniqueVideos.length)
       const attemptPrompt = attemptNo === 0 ? prompt : buildPrompt(renderVideoList(order.map(i => uniqueVideos[i])))
-      stageLog(`LLM call start: ${provider.name} (attempt ${attemptNo + 1}, list offset ${offset})`)
+      const entry: AttemptLog = { n: attemptNo + 1, provider: provider.name, offset, startMs: elapsed, loopEndMs: budget.loopEndMs, callTimeoutMs: budget.callTimeoutMs, ms: 0, raw: 0, kept: 0 }
+      attemptLog.push(entry)
+      const errsBefore = providerErrors.length
+      const rejBefore = rejCounts()
+      const note = (kind: string, name: string, why: string) => {
+        if (rejectedDetail.length < 40) rejectedDetail.push({ attempt: attemptNo + 1, kind, name, why })
+      }
+      stageLog(`LLM call start: ${provider.name} (attempt ${attemptNo + 1}, list offset ${offset}, call timeout ${budget.callTimeoutMs}ms)`)
       try {
         // 90s hard timeout. Without this the fetch hangs indefinitely if the provider
         // stalls — and on Free-tier edge functions a hanging Gemini call would silently
@@ -1060,9 +1094,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         // gives Gemini room to handle the larger prompt with variety rules + 60-video
         // candidate pool while still leaving 60s for FatSecret + image generation.
         const controller = new AbortController()
-        // Clamped to the loop's end so a stalled provider cannot spend the tail's time; the 15 s
-        // floor keeps a late attempt from being aborted before the model has produced anything.
-        const timeoutId = setTimeout(() => controller.abort(), Math.max(15_000, Math.min(90_000, LLM_LOOP_END_MS - (Date.now() - fnStart))))
+        // Clamped to the loop's end so a stalled provider cannot spend the tail's time.
+        const timeoutId = setTimeout(() => controller.abort(), budget.callTimeoutMs)
         const res = await fetch(provider.url, {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${provider.key}` },
@@ -1154,34 +1187,40 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             if (!name) { rejNoName++; return false }
             const protein = Number(r.protein) || 0
             const calories = Number(r.calories) || 0
-            if (calories <= 0 || protein <= 0) { rejNoMacros++; return false }
+            if (calories <= 0 || protein <= 0) { rejNoMacros++; note('noMacros', name, `${calories} kcal, ${protein} g protein`); return false }
             const key = normalize(name)
-            if (!key || seenNames.has(key)) { rejDupName++; return false }
+            if (!key || seenNames.has(key)) { rejDupName++; note('dupName', name, 'same name kept earlier this run'); return false }
             const candWords = wordsOf(name)
             // Precompute scoring inputs once so the MMR selection downstream doesn't
-            // re-walk the prevNames array for every candidate.
+            // re-walk the prevNames array for every candidate. The closest name is kept for the funnel.
             r._densityRatio = (protein * 4) / calories
-            r._maxJaccardPrev = prevNames.reduce(
-              (max: number, prev: string) => Math.max(max, precomputeJaccard(candWords, prev)),
-              0,
-            )
-            r._maxJaccardToday = seenWordSets.reduce(
-              (max: number, prev: Set<string>) => {
-                if (prev.size === 0) return max
-                let overlap = 0
-                candWords.forEach(w => { if (prev.has(w)) overlap++ })
-                const union = new Set([...candWords, ...prev]).size
-                const j = union > 0 ? overlap / union : 0
-                return Math.max(max, j)
-              },
-              0,
-            )
+            let closestPrev = ''
+            r._maxJaccardPrev = 0
+            for (const prev of prevNames) {
+              const j = precomputeJaccard(candWords, prev)
+              if (j > r._maxJaccardPrev) { r._maxJaccardPrev = j; closestPrev = prev }
+            }
+            let closestToday = ''
+            r._maxJaccardToday = 0
+            seenWordSets.forEach((prev: Set<string>, idx: number) => {
+              if (prev.size === 0) return
+              let overlap = 0
+              candWords.forEach(w => { if (prev.has(w)) overlap++ })
+              const union = new Set([...candWords, ...prev]).size
+              const j = union > 0 ? overlap / union : 0
+              if (j > r._maxJaccardToday) { r._maxJaccardToday = j; closestToday = seenWordSetNames[idx] }
+            })
             // Hard reject near-duplicates of anything already in the table. Previously only an
             // EXACT normalized-name match was rejected and similarity was a soft ranking score —
             // survivable at 7-day retention, but at 30+ days the same dish from four creators
             // would accumulate. Applies to both the stored history and today's own batch.
             const maxJac = Math.max(r._maxJaccardPrev, r._maxJaccardToday)
-            if (maxJac >= NEAR_DUP_JACCARD) { rejNearDup++; return false }
+            if (maxJac >= NEAR_DUP_JACCARD) {
+              rejNearDup++
+              const inRun = r._maxJaccardToday >= r._maxJaccardPrev
+              note('nearDup', name, `${inRun ? `"${closestToday}" (this run)` : `"${closestPrev}" (pool)`} jaccard ${maxJac.toFixed(2)}`)
+              return false
+            }
             // Second, independent duplicate test: same dish, different label. Checked against both
             // the stored history and today's own batch, exactly like the name test — two creators
             // posting the same recipe on the same day is the common case, not the rare one.
@@ -1192,6 +1231,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               for (const prev of seenIngredientSigs) maxIngJac = Math.max(maxIngJac, setJaccard(candSig, prev))
               if (maxIngJac >= NEAR_DUP_INGREDIENT_JACCARD) {
                 rejDupIngredients++
+                note('dupIngredients', name, `ingredient overlap ${maxIngJac.toFixed(2)}`)
                 console.log(`[funnel] rejected "${name}" — ingredient overlap ${maxIngJac.toFixed(2)} with an existing meal (different name, same recipe)`)
                 return false
               }
@@ -1237,7 +1277,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // had none — it means video_index pointed at the wrong video (or off the end), which is
             // a model indexing error, not an incomplete recipe. Counting them together made an
             // indexing bug look like an ingredient-retention problem.
-            if (srcList.length < 3) { rejNoSrcList++; return false }
+            if (srcList.length < 3) { rejNoSrcList++; note('noSrcList', name, `video_index ${r.video_index} has ${srcList.length} source lines`); return false }
             console.log(`[funnel] ingredient retention "${name}": ${got}/${srcList.length}`)
             if (got < srcList.length) {
               rejDropped++
@@ -1249,7 +1289,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               // (absorbing a promo block, a macro line, a second recipe) invents a specification
               // the model cannot meet and rejects good food. Capturing both sides is the only way
               // to tell those apart, and it has to be hand-checked, not counted.
-              if (droppedDetail.length < 12) droppedDetail.push({ name, got: counted.map((i: any) => i?.name ?? i), src: srcList })
+              if (droppedDetail.length < 12) droppedDetail.push({ attempt: attemptNo + 1, provider: provider.name, name, got: counted.map((i: any) => i?.name ?? i), src: srcList })
               return false
             }
             // The count above is blind to IDENTITY: three ingredients satisfy "three or more"
@@ -1270,18 +1310,21 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             const roleName = sectionHeadingIngredient(counted)
             if (roleName) {
               rejRoleName++
+              note('roleName', name, roleName)
               console.log(`[funnel] rejected "${name}" — "${roleName}" names a section, not a food`)
               return false
             }
             const cutName = truncatedAgainstSource(counted.map((i: any) => String(i?.name ?? '')), srcList)
             if (cutName) {
               rejTruncated++
+              note('truncated', name, cutName)
               console.log(`[funnel] rejected "${name}" — ingredient name "${cutName}" is a truncated copy of a source item`)
               return false
             }
             const gaps = nameIngredientGaps(name, counted)
             if (gaps.length > 0) {
               rejNameGap++
+              note('nameGap', name, `missing ${gaps.join(', ')}`)
               console.log(`[funnel] rejected "${name}" — named for ${gaps.join(', ')}, absent from ingredients`)
               return false
             }
@@ -1294,6 +1337,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // so this can only ever fire on a video that declared itself foreign.
             if (isNonEnglishSource(srcVideo?.sourceLang) && looksUntranslated(counted)) {
               rejUntranslated++
+              note('untranslated', name, String(srcVideo?.sourceLang ?? ''))
               console.log(`[funnel] rejected "${name}" — source is ${srcVideo?.sourceLang} and the ingredients were not translated`)
               return false
             }
@@ -1308,7 +1352,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             r.ingredients = massBearingIngredients(realIngredients(r.ingredients))
             r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
-            if (frac) { rejFractional++; console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
+            if (frac) { rejFractional++; note('fractional', name, String(frac)); console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
             // WHERE THE MACROS CAME FROM. The prompt already asks the model to calculate from the
             // creator's ingredients when the description states nothing, and it does not reliably
             // comply — "Jello" returned 20g protein where 120g of gelatin gives ~26g, and invented
@@ -1325,7 +1369,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               const inf = inferServings(r.ingredients, Number(r.calories) || 0, toInt(r.servings) ?? 1)
               if (inf) {
                 console.log(`[funnel] servings inferred "${name}": 1 → ${inf.servings} (batch ${inf.batchKcal} kcal vs ${Number(r.calories)} stated per serving, ratio ${inf.ratio.toFixed(1)})`)
-                servingsInferred.push({ name, to: inf.servings, ratio: Math.round(inf.ratio * 10) / 10 })
+                servingsInferred.push({ name, to: inf.servings, ratio: Math.round(inf.ratio * 10) / 10, provider: provider.name })
                 r.servings = inf.servings
               }
             }
@@ -1363,22 +1407,29 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // needs no reference data, and cannot abstain the way verifyMacros does. Runs AFTER the
             // recompute above so it judges the numbers that will actually be stored.
             const incoherent = macroIncoherence(r)
-            if (incoherent) { rejMacroIncoherent++; console.log(`[funnel] rejected "${name}" — ${incoherent}`); return false }
+            if (incoherent) { rejMacroIncoherent++; note('macroIncoherent', name, String(incoherent)); console.log(`[funnel] rejected "${name}" — ${incoherent}`); return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
+            seenWordSetNames.push(name)
             if (candSig.size >= 3) seenIngredientSigs.push(candSig)
             return true
           }).slice(0, 30)
           rawTotal += parsed.length
           sanitizedTotal += sanitized.length
           console.log(`[funnel] ${provider.name} LLM: ${parsed.length} raw → ${sanitized.length} sanitized this attempt; cumulative ${rawTotal} → ${sanitizedTotal} (rejected: noName ${rejNoName}, noMacros ${rejNoMacros}, dupName ${rejDupName}, nearDup ${rejNearDup}, fractional ${rejFractional}, dupIngredients ${rejDupIngredients}, dropped ${rejDropped}, nameGap ${rejNameGap}, untranslated ${rejUntranslated}, noSrcList ${rejNoSrcList}, truncated ${rejTruncated}, roleName ${rejRoleName}, macroIncoherent ${rejMacroIncoherent}, ingredientsRecovered ${rejRecovered})`)
+          entry.raw = parsed.length
+          entry.kept = sanitized.length
+          entry.rejected = countDelta(rejCounts(), rejBefore)
+          const prevTotal = providerTotals[provider.name] ?? { raw: 0, sanitized: 0, rejected: {} }
+          providerTotals[provider.name] = {
+            raw: prevTotal.raw + parsed.length,
+            sanitized: prevTotal.sanitized + sanitized.length,
+            rejected: addCounts(prevTotal.rejected, entry.rejected, REJ_KEYS),
+          }
           funnel[`llm_${provider.name}`] = {
-            raw: rawTotal, sanitized: sanitizedTotal,
-            rejected: { noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup,
-              fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
-              nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName },
-            droppedDetail,
-            servingsInferred,
+            ...providerTotals[provider.name],
+            droppedDetail: droppedDetail.filter(d => d.provider === provider.name),
+            servingsInferred: servingsInferred.filter(d => d.provider === provider.name),
           }
           if (sanitized.length > 0) {
             recipes = [...(recipes ?? []), ...sanitized]
@@ -1393,10 +1444,17 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         stageLog(`LLM call threw: ${(e as Error).message}`)
         providerErrors.push(`${provider.name}: threw: ${String((e as Error).message).slice(0, 200)}`)
         continue
+      } finally {
+        // Runs on every exit from the attempt, including the continues and the >= 12 break.
+        entry.ms = Date.now() - fnStart - entry.startMs
+        if (providerErrors.length > errsBefore) entry.errors = providerErrors.slice(errsBefore)
+        // raw 0 = nothing came back (error, timeout, unparseable, empty); all-rejected is not an outage.
+        if (provider === primary) primaryFailedLast = entry.raw === 0
       }
     }
 
     stageLog(`LLM yielded ${recipes?.length ?? 0} recipes`)
+    funnel.timing = { loopEndMs: Date.now() - fnStart }
 
     if (!recipes || recipes.length === 0) {
       return new Response(JSON.stringify({
@@ -1407,6 +1465,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         // 0 here with providerErrors empty means the model returned recipes and the sanitize
         // gates rejected every one — a completely different problem from a provider failure.
         sanitizedCount: recipes?.length ?? null,
+        attempts: attemptLog,
       }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
@@ -1724,6 +1783,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // Persist BEFORE returning. pg_net gives up on this request long before it finishes, so the
       // response body reaches nobody when the caller is the cron — the table is the only place a
       // run's result survives. Wrapped so a logging failure can never fail the run itself.
+      funnel.timing = { ...(funnel.timing as object), totalMs: Date.now() - fnStart }
       try {
         const { error: logErr } = await db.from('pipeline_runs').insert({
           dry_run: true, provider: (funnel.providerUsed as string | undefined) ?? null, stored: recipes.length, funnel: jsonSafe(funnel),
@@ -1831,6 +1891,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Scrubbed: one lone surrogate in any string refuses the WHOLE batch (see json-safe.ts).
     const { error } = await db.from('trending_meals').insert(jsonSafe(meals))
     stageLog(`[funnel] db insert: ${error ? '0 (FAILED)' : meals.length} rows — error: ${error?.message ?? 'none'}`)
+    funnel.timing = { ...(funnel.timing as object), insertAtMs: Date.now() - fnStart }
     // Only remove the stale rows once the new ones are safely in (keeps them as fallback on failure).
     if (!error && priorIds.length) {
       await db.from('trending_meals').delete().in('id', priorIds)
@@ -1913,6 +1974,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Re-fetch from DB so the response includes AI-generated image URLs (not YouTube thumbnails)
     const { data: finalMeals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
     console.log(`Success: ${meals.length} trending meals from YouTube + Groq`)
+    funnel.timing = { ...(funnel.timing as object), imagesMs: Date.now() - imgStart, totalMs: Date.now() - fnStart }
     try {
       const { error: logErr } = await db.from('pipeline_runs').insert({
         dry_run: false, provider: (funnel.providerUsed as string | undefined) ?? null, stored: meals.length, funnel: jsonSafe(funnel),
