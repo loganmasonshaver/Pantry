@@ -16,61 +16,62 @@ photos, whole run **58 s of the gateway's 150 s**. The pool is intact (233 rows 
 → attempt 1 Gemini **raw 9** → 3 kept (nearDup 3, nameGap 2, dropped 1) → attempt 2 **gpt-4o-mini**
 raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. Variety: all three are
 "Creamy … Pasta". What the audit found, in order of cost:
-- [x] **C + A + B BUILT + DEPLOYED 2026-09-16 (`be54721`).** A: OpenAI only after a Gemini attempt that
-  returned NOTHING. B: attempts start only while this run's slowest (×1.25) fits before a loop end
-  that reserves the tail for the survivors so far (`_shared/attempt-budget.ts`, 12 tests). C:
-  `funnel.attempts`, `funnel.timing`, per-provider `llm_<provider>`, `rejectedDetail`, `promptChars`.
-- [x] **LEVERS 1 + 2 BUILT + DEPLOYED (`91126c8`; Logan: "build the first two levers").** The prompt
-  names every pool dish (230) as do-not-pick; the retry union stops at STORE_CAP 18, not 12.
-  **Dry run 804: no backfire** — `dupIngredients` 0, none of the 9 survivors is a renamed pool dish —
-  **and no effect on repeats:** nearDup 9 again, the SAME five dishes (Cottage Cheese Flatbread,
-  Strawberry Cheesecake Ice Cream, Banana Bread Pancakes, Tiramisu Chia Pudding, the brownies).
-  Flash Lite reads the list the way it reads "aim for 30-40": not at all. Raw went up ([11,19] vs
-  [3,7,14]) — two samples, not evidence.
-- [x] **REAL RUN 805 (Logan: "then the real run"): stored 10, 10 AI photos, 10 source-verified, HTTP
-  200 in 84 s.** raw [17, 22] kept [9, 1], both Gemini. `timing`: loop 73.0 s, insert 74.7 s, images
-  9.2 s. Replaced today's 3. Today's daily line reads "only 10 (expected 12+)" — correct.
-  **Attempt 2 kept 1 of 22:** 7 were re-picks of attempt 1's dishes, 5 pool repeats, 5 nameGap.
-  The rotation is not producing new picks; a third attempt is worth ~+1 on a day like this.
-- [x] **RETUNE + PRECISION SHIPPED (`0233ee8`):** reserve 5 s + 1 s/recipe (was 10 + 2.5, i.e. 55 s
-  against a measured 11 s tail); estimate 1.25× slowest; pasta synonyms rotini/fusilli/ziti/
-  tortellini/gnocchi/…; every nameGap note now carries the model's ingredient list. Tests 684.
-- [ ] **PASS: Sep 17 08:00 UTC scheduled run.** `timing.totalMs` < 150 000, every attempt Google
-  unless one returned nothing, no 504 / `timed_out` row. Yield: ≥ 12 is the goal; **9-12 is what the
-  current code should do** on a day like today. Read with:
-  `select stored, funnel->'timing', funnel->'attempts', funnel->'promptChars' from pipeline_runs
+- [x] **2026-09-16, THE WHOLE DAY IN ONE TABLE — six runs on the same day's candidates, deployed
+  code is `7c66a52`.** Every gate and number below is from `pipeline_runs` (`funnel.attempts`,
+  `rejectedDetail`, `timing`, `titleRepeats`, `candidates` all persist now).
+
+  | run | code | stored / would | what it showed |
+  |---|---|---|---|
+  | cron 800 | old | **3** | attempt 2 went to gpt-4o-mini; attempts 3-6 cut by a fixed 50 s deadline |
+  | dry 803 | C/A/B `be54721` | 9 | 3 Gemini attempts; 12 of 24 raw were pool repeats at Jaccard 1.00 |
+  | dry 804 | + do-not-pick list, break at 18 (`91126c8`) | 9 | list had **no effect** — same five repeats; no renaming backfire yet |
+  | **real 805** | same | **10 LIVE** | 84 s; tail after the model: 1.7 s + 9.2 s images (reserve had been 55 s) |
+  | dry 806 | + title filter, copycat/made-of, retune | 14 | **inflated**: 2 same-video pairs, 2 non-dishes, 2 renamed pool dishes |
+  | dry 807 | + dupVideo, containment, notADish (`3fde183`) | 9 | gates right; 8 honest (Tiramisu Bites = 3rd rename of a pool dish, fixed in `7c66a52`) |
+
+- [x] **What is now enforced in code, all deterministic, all unit-tested (696 tests, tsc 135/16):**
+  OpenAI only after a Gemini attempt that returned nothing · tail reserve 5 s + 1 s/recipe, attempt
+  estimate 1.25× slowest (`_shared/attempt-budget.ts`) · union stops at STORE_CAP 18 · **title
+  filter**: a candidate whose title contains every word of a pool name is removed before the model
+  (16-19 of ~460 today, every one checked, all genuine; skips itself over a 40% drop share) ·
+  **one video, one dish** (`dupVideo`) · **containment** name dedup (known name + ≤ 1 word; ball/
+  bite/truffle one word; kebab/kebabs one word) · **notADish** on names and titles (meal plan,
+  what I eat in a day, full day of eating, haul, hair/skin health; hashtags stripped first) ·
+  copycat brands (Low Calorie Nutella) and made-of carriers (Zucchini Tortilla) no longer trip
+  nameGap · pasta shapes and tuna species are synonyms.
+- [x] **nameGap is NOT a lever — closed with data.** With the ingredient list captured on every
+  reject, all three remaining on 807 were correct: the burrito "pasta" video's list has no pasta
+  line, the tuna salad's has no tuna, the Korean beef bowl's is the sauce alone. The creators put
+  the food in the video, not the description. Gate stays.
+- [ ] **PASS: Sep 17 08:00 UTC cron.** HTTP 200, `timing.totalMs` < 150 000, every attempt Google
+  unless one returned nothing, **no two stored rows share a `video_id`**, no name in today's rows
+  contains a pool name. Yield: **8-10 is what this code does on a day like today; ≥ 12 is the goal.**
+  `select stored, funnel->'timing', funnel->'attempts', funnel->'afterTitleDedup' from pipeline_runs
   where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
-- [ ] **THE CEILING, measured on the real run (Logan: "12-18 would be nice"):** 44 candidates → the
-  model touched ~23 distinct dishes in two attempts → 10 stored, 5 pool repeats, ~4 nameGap, 3
-  dropped. 21 candidates were never picked. To reach 12-18 on a day like this: nameGap precision
-  (+2-3, G below), repeats out of the model's reach (+2-3, E below), a third attempt (+0-2).
-  Beyond that it is candidate volume (13 → 26 searches, ~2,600 units/run, 3 runs/day) or a model
-  that follows "return 30-40" — both unmeasured.
-- [ ] **E. REWRITTEN: the model will not skip pool dishes when told — take them out of its reach.**
-  Pre-filter candidates whose TITLE near-dups a pool name (same `wordsOf` Jaccard ≥ 0.7) before the
-  LLM. Measure first, offline: add `funnel.candidates` (title, videoId, views — ~4 KB) so the next
-  cron's row shows how many of the 44 a title match would have removed and which. Then build it.
-  Risk: a clickbait title hides the dish, so this catches only the honestly-titled repeats.
-- [ ] **G. NEW: nameGap false positives by construction.** Today's 9 (≈5 dishes): a protein-Nutella
-  copycat "missing nutella" ×3 (nutella/oreo/biscoff are DEFINING_FOODS and a copycat contains none
-  of them); "Zucchini Tortilla Wraps missing tortilla" (a tortilla MADE of zucchini); "Cheesy Beef
-  Burrito Pasta missing pasta" (rotini — fixed); "Korean Beef Bowls missing beef", "Crispy Pasta Tuna
-  Salad missing tuna" (unknown). Read the `listed:` half of each nameGap note on the Sep 17 row,
-  then decide a copycat rule. Precision, not tolerance — the gate stays; it must stop rejecting
-  dishes named for what they imitate or produce.
-- [x] ~~F. estimate under-predicts~~ — superseded by the 1.25× growth factor in the retune.
-- [x] **"Only 3 meals showing" — no Discover-tab bug.** The tab has no today-only shelf; new recipes
-  get a NEW TODAY badge spread through the shelves, and the pool (233 rows, all with photos) is
-  inside the client's 30-day window. The "3" was the daily report line / three badges. If the tab
-  ever literally shows 3 cards, that is a client bug nobody has seen — screenshot first.
+  `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
+- [ ] **THE CEILING, honest, after today:** ~460 raw → 16-19 repeats and 4-6 non-recipes out by
+  title → view floor → **28-31 candidates with a readable list**. The model picks ~15-18 distinct
+  dishes of those across three rotated attempts (it returns ~30% of what "aim for 30-40" asks and
+  never touches 10-13 of the list); ~9 survive; the losses are real (one cannelloni 12/14, three
+  source lists missing their headline food). **To move past ~10 the levers left are:**
+  (1) **the model** — a `?model=` dry-run override to test the non-Lite tier on the same list; if
+  it returns 25 of 28 raw that is the whole story; pricing unknown, check first (Logan chose Lite
+  because free); (2) **candidate volume** — 13 → 26 searches, ~2,600 units/run, 3 runs/day, fine
+  post-launch; (3) post-launch **rotation**, because the repeat share (16-19 of 460 today) grows
+  with the pool. Do not chase 18 before launch: Discover shows the 30-day pool either way.
+- [x] **"Only 3 meals showing" — no Discover-tab bug.** No today-only shelf; NEW TODAY badges are
+  spread through the shelves; the pool (233 + today's 10, all with photos) is inside the client's
+  30-day window. The "3" was the daily report line or three badges.
 - **Ops notes:** the Supabase MCP role cannot decrypt Vault (`permission denied for function
   _crypto_aead_det_decrypt`); fire runs with `npx supabase db query --linked "select net.http_post(
-  … vault.decrypted_secrets where name = 'cron_secret' …)"`. YouTube quota 2026-09-16: **4 of 7**
-  used (cron, dry 803, dry 804, real 805).
+  … vault.decrypted_secrets where name = 'cron_secret' …)"`. YouTube quota 2026-09-16: **6 of 7**
+  used (cron, 803, 804, real 805, 806, 807); one left, deliberately unspent.
 - [ ] **D. Parser: a method line was counted as an ingredient.** "Veggie Tofu Stir-fry Noodles"
   source list line 21 = "Sauté mushrooms dry till browned. Set aside." — contract 21 vs got 20.
-  The model ALSO dropped "1 tsp hot sauce (for tofu)" and echoed "mushrooms" twice, so it is not
-  clear the reject was wrong. Replay it in a unit test before changing anything; never widen tolerance.
+  On 807 the same video PASSED as "Vegetable Noodles" (21/21), which almost certainly means the
+  model echoed mushrooms twice to meet the count — so the stored row likely carries a duplicate
+  mushrooms entry. Replay the description in a unit test; the fix is the parser not counting a
+  sentence with a verb and a full stop as an ingredient. Never widen tolerance.
 - [x] **AUDIT RERUN — Logan 2026-09-13, top of the list:** once the Sep 14 and Sep 15 crons have run,
       *(CLOSED 2026-09-15 as stale — Logan.)*
   do a full pass on Fable 5.1 over both stored batches and their `pipeline_runs` rows (they persist
