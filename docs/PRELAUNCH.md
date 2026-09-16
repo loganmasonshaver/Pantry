@@ -353,8 +353,8 @@ correctly all along).
       draft.
 - [ ] **Draft Submission holds the group + Monthly + Annual (2026-09-16) — waiting only on the 1.0
       app version (§12).** Started 02:06 with ONLY the "Pantry Premium" GROUP in it.
-      **Tell, not yet checked:** reload Superwall's products page — "Missing required metadata" on
-      both products should be gone now. If it is still there, Apple considers something else missing.
+      **VERIFIED 2026-09-16 (Logan): Superwall's "Missing required metadata" is gone on both
+      products** — Apple now considers both subscriptions complete.
       Apple's two blockers on it: (1) "New subscription groups must be submitted with an
       auto-renewable subscription from within that group" — **CLEARED 2026-09-16** once Monthly
       joined the draft (Items Ready to Submit (2): group + Monthly); (2) "add an app version for
@@ -380,8 +380,8 @@ correctly all along).
 - [x] **Superwall mapping CONFIRMED correct** (2026-09-04). "Pantry Main" paywall: primary =
       `com.kobalabs.pantry.annual` $29.99/year 7d trial, secondary = `com.kobalabs.pantry.monthly`
       $9.99/month 7d trial. Exact ID match with App Store Connect, prices match canonical pricing.
-- [ ] **⚠️ Superwall shows "Missing required metadata" under BOTH products — this is NOT a Superwall
-      problem.** Superwall reads product metadata from Apple, and Apple withholds it until the IAP
+- [x] **RESOLVED 2026-09-16 — cleared by the review screenshots, as predicted.** Was: ⚠️ Superwall
+      shows "Missing required metadata" under BOTH products — this is NOT a Superwall problem. Superwall reads product metadata from Apple, and Apple withholds it until the IAP
       has every required field. It is the SAME gap as the missing review screenshot / group
       localization above, surfacing in a second dashboard. Do not go looking for a fix in
       Superwall. **Use it as the verification signal instead:** once App Store Connect is complete,
