@@ -11,6 +11,7 @@ import { usePremium } from '@/context/SuperwallContext'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import { Shimmer } from '@/components/Shimmer'
 import { MealImage, prefetchMealImages } from '@/components/MealImage'
+import { scanPerfEnd, scanPerfMark } from '@/lib/scanPerf'
 
 // Deck geometry — each card is ~78% of the screen so the neighbours peek in at the edges,
 // which is what sells the "there's more in the deck" feel as you advance.
@@ -148,6 +149,7 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
   useEffect(() => {
     if (revealed.length === 0 || chunksStartedRef.current) return
     chunksStartedRef.current = true
+    scanPerfMark(`reveal: ${revealed.length} meals in hand`)
     if (reduceMotion) {
       chunkAnims.forEach(a => a.setValue(1))
       return
@@ -173,7 +175,10 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
   useEffect(() => {
     if (!photosSettled || photosPainted) return
     let cancelled = false
-    prefetchMealImages(revealed.map(m => m.image)).finally(() => { if (!cancelled) setPhotosPainted(true) })
+    prefetchMealImages(revealed.map(m => m.image)).finally(() => {
+      scanPerfMark('reveal: photos painted')
+      if (!cancelled) setPhotosPainted(true)
+    })
     return () => { cancelled = true }
   }, [photosSettled, photosPainted])
 
@@ -194,6 +199,7 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
   useEffect(() => {
     if (!gateOpen || animatedRef.current) return
     animatedRef.current = true
+    scanPerfEnd('reveal: deck open') // the payoff moment ends a scan's timeline
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
     if (reduceMotion) {
       headerAnim.setValue(1); revealAnim.setValue(1); glowAnim.setValue(0.4)

@@ -7,6 +7,7 @@ import { generateMeals, GeneratedMeal } from './meals'
 import { fetchMealImage } from './mealImages'
 import { imageIngredientNames } from './ingredientDisplay'
 import { prefetchMealImages } from '../components/MealImage'
+import { scanPerfMark, secsSince } from './scanPerf'
 
 // Speculative "cook now" meal generation, kicked off while the user reviews a scan so the
 // cook-reveal screen can reuse the result instead of generating a SECOND time. This removes
@@ -47,6 +48,8 @@ export function takeRevealReady(userId: string, mode: 'cookNow' | 'mealPlan'): P
 }
 
 async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIngredients: string[]): Promise<{ meals: GeneratedMeal[]; images: Promise<void> } | null> {
+  const startedAt = Date.now()
+  scanPerfMark(`meals: prefetch start (${extraIngredients.length} scanned items)`)
   try {
     const { data: profile } = await supabase
       .from('profiles')
@@ -96,6 +99,9 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     } catch {}
 
     const maxPrep = profile?.max_prep_minutes || 30
+    // Profile, pantry and ratings are three sequential round trips before generation even starts.
+    scanPerfMark(`meals: profile + pantry + ratings read in ${secsSince(startedAt)}s, generate-meals sent`)
+    const sentAt = Date.now()
     const generated = await generateMeals({
       ingredients,
       calorieGoal: profile?.calorie_goal || 2400,
@@ -112,6 +118,7 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
       mode,
       staplesExcluded: profile?.staples_excluded || [],
     })
+    scanPerfMark(`meals: generate-meals back in ${secsSince(sentAt)}s (${generated?.length ?? 0} meals)`)
     if (!generated || generated.length === 0) return null
 
     // Write the exact cache shape the hook serves from (text only — images filled in on reveal).
@@ -140,7 +147,10 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     const warmable = generated.slice(0, REVEAL_CARDS).filter(m => m?.name)
     const warmOne = async (m: GeneratedMeal) => {
       const url = await fetchMealImage(m.name, imageIngredientNames(m.ingredients), m.steps ?? []).catch(() => null)
-      if (url) await prefetchMealImages([url])
+      if (!url) return
+      const downloadAt = Date.now()
+      await prefetchMealImages([url])
+      scanPerfMark(`photo downloaded in ${secsSince(downloadAt)}s: ${m.name.slice(0, 32)}`)
     }
     const images = (async () => {
       if (warmable.length === 0) return
@@ -149,10 +159,12 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
       // Cards 2-3 get the remainder of the review window as runway instead of the ~2s between
       // "Add all to Pantry" and the reveal mounting, which is what made them lag behind card 1.
       await Promise.all(rest.map(warmOne))
+      scanPerfMark('photos: every reveal photo on the device')
     })().catch(() => {})
 
     return { meals: generated, images }
   } catch {
+    scanPerfMark('meals: prefetch threw')
     return null // best-effort — any failure just means the hook generates normally
   }
 }
@@ -164,6 +176,7 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
 export async function warmMealImages(userId: string, mode: 'cookNow' | 'mealPlan', count: number) {
   try {
     const pre = takeCookNowPrefetch(userId, mode)
+    scanPerfMark(`add all: warm ${count} photos${pre ? ', waiting on meals' : ''}`)
     if (pre) await pre // text may still be generating — its meals are what we're warming
     const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
     if (!raw) return

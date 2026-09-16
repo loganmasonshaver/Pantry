@@ -2030,6 +2030,24 @@ claiming exact wording from the top apps is guessing.
         keep the big-type story running instead of a spinner on a button — does not shorten, changes
         how it feels; (D) generate-meals starts the three photo generations itself the moment the
         meals exist, saving the client round trip — small (~1-2 s), honest about it.
+        - [ ] **(A) BUILT 2026-09-16, UNVERIFIED — needs one scan on device.** `lib/scanPerf.ts`: dev-only
+          `[perf]` marks, wall-clock, printed live and again as one `── scan timeline ──` block when the
+          deck opens (or the modal closes / the scan fails). Marks: scan start → request sent (MB) →
+          response (phone s vs vision s = upload + edge) → review shown → prefetch fired → profile +
+          pantry + ratings read → generate-meals sent / back → each photo requested / URL back (or
+          device cache, or a failed attempt's 3 s gap) / downloaded → add all tapped / pantry saved →
+          plating start / end (ready, or the 25 s cap) → reveal step → meals in hand → photos painted →
+          deck open. App-only, no deploy. **Tell:** scan on device, the Metro log ends with the block;
+          paste it here and replace the estimates in B and D with its numbers. Not covered: the split
+          INSIDE generate-meals (LLM vs its DB reads) — that needs a server log and a redeploy.
+        - **(D) cost of building it, found while answering Logan 2026-09-16:** the client would still
+          call generate-meal-image for the URL, and nothing server-side dedupes an in-flight
+          generation (the dedupe map is per device) — so a server-started photo still generating when
+          the client asks is paid for twice, unless generate-meals waits for the photos (holds the
+          meals back ~8 s for every caller) or a pending marker + polling is added. The image cap must
+          still be charged to the user (a service-role call skips it). Redeploying generate-meals also
+          ships the other session's `7f109c8`. Decide from A's "generate-meals back" → "photo requested"
+          gap, which is the whole of what D can save.
       - [x] **MEASURED 2026-09-16 17:41 — see the item above (vision 39.5 s via gpt-5.4, no fallback).** Was: MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision. scan-pantry
         (deployed) returns `_meta { ms, provider, primaryError, usage }` and the app logs
         `[perf] scan-pantry: vision Xms via …, tokens in/out (reasoning)` to Metro. Suspect, not proven:

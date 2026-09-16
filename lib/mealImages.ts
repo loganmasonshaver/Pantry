@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from './supabase'
 import { imageCacheKey } from './imageCacheKey'
+import { scanPerfMark, secsSince } from './scanPerf'
 
 const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 
@@ -22,7 +23,11 @@ export function fetchMealImage(name: string, ingredientNames: string[] = [], ste
   const localKey = imageCacheKey(name, ingredientNames)
   const running = inflightImages.get(localKey)
   if (running) return running
-  const p = fetchMealImageOnce(localKey, name, ingredientNames, steps).finally(() => { inflightImages.delete(localKey) })
+  const startedAt = Date.now()
+  scanPerfMark(`photo requested: ${name.slice(0, 32)}`)
+  const p = fetchMealImageOnce(localKey, name, ingredientNames, steps)
+    .then(url => { scanPerfMark(`photo URL ${url ? 'back' : 'FAILED'} in ${secsSince(startedAt)}s: ${name.slice(0, 32)}`); return url })
+    .finally(() => { inflightImages.delete(localKey) })
   inflightImages.set(localKey, p)
   return p
 }
@@ -32,7 +37,7 @@ async function fetchMealImageOnce(localKey: string, name: string, ingredientName
     const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
     if (raw) {
       const localCache: Record<string, string> = JSON.parse(raw)
-      if (localCache[localKey]) return localCache[localKey]
+      if (localCache[localKey]) { scanPerfMark(`photo from device cache: ${name.slice(0, 32)}`); return localCache[localKey] }
     }
   } catch {}
 
@@ -59,6 +64,7 @@ async function fetchMealImageOnce(localKey: string, name: string, ingredientName
         return data.image
       }
     } catch (e) { __DEV__ && console.log(`[MealImage] ${name} error:`, e) }
+    scanPerfMark(`photo attempt ${attempt + 1} failed, waiting 3s: ${name.slice(0, 32)}`) // a retry is 3s of dead time in the wait
     await new Promise(r => setTimeout(r, 3000)) // 3s gap between retries
   }
   return null

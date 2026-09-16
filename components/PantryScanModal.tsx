@@ -39,6 +39,7 @@ import { categorizeItem } from '@/lib/categories'
 import { normalizeCategory, PANTRY_ORDER } from '@/lib/categoryMatch'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { prefetchCookNowMeals, takeRevealReady, warmMealImages } from '@/lib/mealPrefetch'
+import { scanPerfEnd, scanPerfMark, scanPerfStart, secsSince } from '@/lib/scanPerf'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
 import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
 import { buildScanStory, type StoryProfile } from '@/lib/scanStory'
@@ -300,6 +301,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
     prefetchFiredRef.current = true
     prefetchOutcomeRef.current = 'pending'
     const token = prefetchTokenRef.current
+    scanPerfMark(`review: prefetch fired, ${names.length} checked items`)
     prefetchCookNowMeals(user.id, names).then(m => {
       if (prefetchTokenRef.current === token) prefetchOutcomeRef.current = m ? 'ok' : 'failed'
     })
@@ -430,6 +432,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
 
     const scanPhotos = async () => {
       const base64Images = photos.filter(p => p.base64).map(p => p.base64!)
+      scanPerfStart(`scan: start, ${base64Images.length} photos`)
+      let sentAt = 0
       if (base64Images.length === 0) {
         if (!current()) return
         scannedFpRef.current = photoFp(photos)
@@ -460,6 +464,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
             // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
             const ok = await requestConsent()
             if (!ok) return { declined: true as const }
+            // Base64 length × 0.75 = bytes on the wire, which is what the upload half of the wait scales with.
+            scanPerfMark(`scan: request sent, ${(base64Images.reduce((n, b) => n + b.length, 0) * 0.75 / 1e6).toFixed(1)} MB`)
+            sentAt = Date.now()
             const { data, error } = await supabase.functions.invoke('scan-pantry', { body: { images: base64Images } })
             if (error) throw error
             return { data }
@@ -473,6 +480,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
         // Where a scan's time goes, readable in the Metro log: the edge function reports the vision
         // call's duration, which provider answered (and why the primary did not), and the tokens.
         const meta = (scanResult.data as any)?._meta
+        // Phone round trip minus the server's vision time = upload + download + edge overhead.
+        if (sentAt) scanPerfMark(`scan: response in ${secsSince(sentAt)}s on the phone${meta?.ms ? `, vision ${(meta.ms / 1000).toFixed(1)}s, so ${((Date.now() - sentAt - meta.ms) / 1000).toFixed(1)}s upload + edge` : ''}`)
         if (__DEV__ && meta) console.log(`[perf] scan-pantry: vision ${meta.ms}ms via ${meta.provider}${meta.primaryError ? ` (gpt-5.4 failed: ${meta.primaryError})` : ''}, ${photos.length} photos, tokens in ${meta.usage?.prompt_tokens ?? '?'} / out ${meta.usage?.completion_tokens ?? '?'} (reasoning ${meta.usage?.completion_tokens_details?.reasoning_tokens ?? '?'})`)
         const result = scanResult.data as { layout: string; photoContainers?: string[]; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
         let itemIndex = 0
@@ -508,7 +517,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
 
         // Dedupe across photos before anything reads the list — so the count, the review list, and
         // the pantry write all agree on ONE honest number (no more "27 found" / "Add all 49").
-        setDetectedItems(dedupeDetected(allItems))
+        const deduped = dedupeDetected(allItems)
+        setDetectedItems(deduped)
+        scanPerfMark(`review: shown, ${deduped.length} items`)
         setZones(zoneGroups)
         // Per-photo container type drives the context-aware quick-add rail in the review.
         setPhotoContainers(Array.isArray(result.photoContainers) ? result.photoContainers.map((c: any) => String(c || '').toLowerCase()) : [])
@@ -527,6 +538,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
           try { const body = await e.context.json(); if (body?.error) msg = body.error; if (body?.code) code = body.code } catch { /* keep generic */ }
         }
         trackAIError('scan-pantry', e, { shown: msg })
+        scanPerfEnd(`scan: failed — ${msg.slice(0, 60)}`)
         if (!current()) return
         // "Retry scan" cannot work for days. The capped screen replaces the error, with the one
         // action that does work.
@@ -733,6 +745,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
 
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
+    scanPerfEnd('closed') // no-op after the reveal opened, which already ended the timeline
     // Drop a scan still in flight. Its results used to land in the closed modal, where the meal
     // prefetch effect could fire a paid generation for items nobody would ever see.
     scanRunIdRef.current += 1
@@ -783,7 +796,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
       platingRef.current = true
       setPlating(true)
       const token = scanRunIdRef.current // a close while waiting bumps this
-      await Promise.race([ready, new Promise(r => setTimeout(r, REVEAL_READY_MAX_MS))])
+      const platingAt = Date.now()
+      scanPerfMark('plating: start')
+      const outcome = await Promise.race([ready.then(() => 'ready'), new Promise(r => setTimeout(() => r('hit the 25s cap'), REVEAL_READY_MAX_MS))])
+      scanPerfMark(`plating: ${outcome} after ${secsSince(platingAt)}s`)
       platingRef.current = false
       setPlating(false)
       if (scanRunIdRef.current !== token) return // closed while plating: never open the reveal on a hidden modal
@@ -791,6 +807,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
     savingRef.current = false
     setSaving(false)
     setShowSaved(false)
+    scanPerfMark('reveal: step shown')
     setStep(REVEAL_STEP)
   }
 
@@ -1709,9 +1726,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                     if (selected.length === 0) { handleClose(); return }
                     savingRef.current = true
                     setSaving(true)
+                    const addAt = Date.now()
+                    scanPerfMark(`add all: tapped, ${selected.length} items, meals ${prefetchOutcomeRef.current}`)
                     // Deduped insert — skips items already in the pantry so a re-scan can't
                     // create a duplicate row; re-stocks any that were previously out.
                     const { error } = await addPantryItemsDeduped(user.id, selected.map(item => ({ name: item.name, category: item.category })))
+                    scanPerfMark(`add all: pantry saved in ${secsSince(addAt)}s${error ? ' (FAILED)' : ''}`)
                     if (error) {
                       setSaving(false)
                       savingRef.current = false
