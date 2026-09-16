@@ -1682,8 +1682,22 @@ claiming exact wording from the top apps is guessing.
       FIXED same day, UNVERIFIED:** the camera button flipped words on its own ("Scan 4 photos" ↔
       "View results") because its label read the in-flight ref during render; now state-driven, with
       three labels — "View results" (results exist), "Back to scan" (still running), "Scan N photos".
-- [ ] **PLAN, awaiting Logan's go — the weekly-scan-limit screen offers "Retry scan", which cannot work
-      for days** (Logan 2026-09-16). His proposal: primary "add items manually" (keyboard up), second
+- [ ] **BUILT + DEPLOYED 2026-09-16, UNVERIFIED on device — the weekly scan limit is told up front, with
+      one action.** `scan-pantry` accepts `{ checkOnly: true }` and answers `{ allowed, used, cap }`
+      without spending (`readScanWindow` in `_shared/scan-cap.ts`, same window as the RPC); the modal
+      asks on open and, at the limit, shows "You've used this week's scans" + **Add items by hand**
+      over the camera, ✕ as the only exit. A scan refused with `scan_cap_reached` lands on the same
+      screen instead of "Scan failed / Retry scan". Add by hand closes the scanner and focuses the
+      Pantry tab's "Search or add…" field (from Home: navigates with `?add=1`, consumed on focus).
+      Unknown fails open — the real call still decides. Deployed: scan-pantry only; the other
+      scan-cap importers (generate-meals, generate-recipe, extract-recipe-from-url,
+      estimate-meal-macros, parse-receipt, generate-meal-image) were NOT redeployed — the change is
+      an additive helper they do not call, and another session has work in progress in that tree,
+      so preflight will list them as newer-than-deploy until their next real deploy. Tells:
+      (1) at 7/7 open the scanner from the Pantry tab → the capped screen, no camera; Add items by
+      hand → Pantry tab with the keyboard up; (2) same from Home → lands on the Pantry tab, keyboard
+      up; (3) under the limit the camera opens as before. **Plan as proposed:** the weekly-scan-limit
+      screen offers "Retry scan", which cannot work for days (Logan 2026-09-16). His proposal: primary "add items manually" (keyboard up), second
       option "go Home". Claude's counter: (1) agree on manual add as the ONE action — close the scanner
       and focus the Pantry tab's "Search or add…" field (via a route param when opened from Home);
       (2) no Home button: the top-left ‹ becomes ✕ close on this error (the camera is a dead end when

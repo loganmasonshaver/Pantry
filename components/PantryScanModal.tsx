@@ -245,11 +245,14 @@ type Props = {
   // (the magic moment); later scans get a "See meals / Maybe later" choice. Omit it (e.g.
   // the Home entry) to keep the old close-immediately behavior and run a different flow.
   onSeeMeals?: () => void
+  // Where "Add items by hand" goes when the week's scans are used up. The modal closes first; the
+  // host screen opens its own add field. Absent → the button just closes.
+  onAddByHand?: () => void
 }
 
 const COOK_REVEAL_SEEN_KEY = 'cook_reveal_seen_v1'
 
-export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeMeals }: Props) {
+export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeMeals, onAddByHand }: Props) {
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
   const { isPremium, triggerUpgrade } = usePremium()
@@ -508,11 +511,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         // real server body ({ error, code }) on e.context (a Response) — unwrap it
         // so the user sees the actual reason (daily cap, OpenAI timeout, etc.).
         let msg = e?.message || 'Something went wrong analyzing your photos.'
+        let code: string | null = null
         if (e?.context && typeof e.context.json === 'function') {
-          try { const body = await e.context.json(); if (body?.error) msg = body.error } catch { /* keep generic */ }
+          try { const body = await e.context.json(); if (body?.error) msg = body.error; if (body?.code) code = body.code } catch { /* keep generic */ }
         }
         trackAIError('scan-pantry', e, { shown: msg })
         if (!current()) return
+        // "Retry scan" cannot work for days. The capped screen replaces the error, with the one
+        // action that does work.
+        if (code === 'scan_cap_reached') { setWeekCapped(true); return }
         setScanError(msg)
       }
     }
@@ -628,6 +635,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // Show the "how scanning works" prep screen on the user's FIRST scan only (re-openable via
   // the ? on the camera). Sets the expectation that hidden items aren't seen + coaches the
   // photo behaviors that actually move vision accuracy.
+  // The week's scans are used up. Asked when the scanner opens, so the user is told BEFORE taking
+  // photos that could never be scanned (Logan took a full set and only then hit the limit), and set
+  // again if a scan is refused for the same reason. Unknown fails open: the real call still decides.
+  const [weekCapped, setWeekCapped] = useState(false)
+  useEffect(() => {
+    if (!visible || !user) return
+    let cancelled = false
+    supabase.functions.invoke('scan-pantry', { body: { checkOnly: true } })
+      .then(({ data }) => { if (!cancelled && data && data.allowed === false) setWeekCapped(true) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [visible, user?.id])
+
   const SCAN_PREP_SEEN_KEY = 'scan_prep_seen_v1'
   useEffect(() => {
     if (!visible) return
@@ -705,6 +725,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setAddingMissed(false)
       setShowSaved(false)
       setSavedReason(null)
+      setWeekCapped(false)
       setZoomUri(null)
       setCurrentPhoto(0)
       nudgedRef.current = false
@@ -1111,6 +1132,30 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   </TouchableOpacity>
                 </>
               )}
+            </View>
+          </View>
+        )}
+
+        {/* Week's scans used up. One action — add by hand — and ✕ as the only exit: the camera behind
+            it is a dead end, and closing already returns to wherever the scan started. */}
+        {weekCapped && (
+          <View style={[styles.savedOverlay, { paddingTop: insets.top + 16 }]}>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => handleClose()} accessibilityLabel="Close scanner">
+              <X size={20} stroke={COLORS.textWhite} strokeWidth={2} />
+            </TouchableOpacity>
+            <View style={styles.savedBody}>
+              <View style={[styles.savedCheck, { backgroundColor: '#1A1A1A' }]}><ScanLine size={34} stroke="#4ADE80" strokeWidth={1.8} /></View>
+              <Text style={[styles.savedTitle, { textAlign: 'center' }]}>You've used this week's scans</Text>
+              <Text style={styles.savedSub}>Your scans refresh in a few days. Until then, you can add what you have by hand.</Text>
+            </View>
+            <View style={[styles.savedActions, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+              <TouchableOpacity
+                style={styles.primaryBtn}
+                activeOpacity={0.85}
+                onPress={() => { handleClose(); onAddByHand?.() }}
+              >
+                <Text style={styles.primaryBtnText}>Add items by hand</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}

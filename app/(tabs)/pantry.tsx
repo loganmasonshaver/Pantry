@@ -16,7 +16,7 @@ import {
 import Reanimated from 'react-native-reanimated'
 import { STATE_FADE } from '@/lib/motion'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { useFocusEffect, useRouter } from 'expo-router'
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { perfMark } from '@/lib/perf'
 import { Plus, X, Search, ScanLine, Package, Camera, Receipt, Apple, Wheat, Beef, Egg, Snowflake, Cookie, Coffee, Droplet, Bean, Nut, CakeSlice, Soup, Croissant, Flame, Ham } from 'lucide-react-native'
 import { Swipeable } from 'react-native-gesture-handler'
@@ -211,6 +211,15 @@ export default function PantryScreen() {
   const addingRef = useRef(false) // synchronous in-flight guard for addIngredient (double-tap)
   const [disambigChoices, setDisambigChoices] = useState<string[]>([])
   const searchRef = useRef<TextInput>(null)
+  // "Add items by hand" from a capped scanner lands here with the keyboard up. The delay lets the
+  // scan modal finish sliding away first; a focus requested under a dismissing modal is dropped.
+  const focusAddField = useCallback(() => { setTimeout(() => searchRef.current?.focus(), 500) }, [])
+  const { add: addParam } = useLocalSearchParams<{ add?: string }>()
+  useFocusEffect(useCallback(() => {
+    if (addParam !== '1') return
+    focusAddField()
+    router.setParams({ add: '' }) // consumed — returning to the tab later must not pop the keyboard again
+  }, [addParam, focusAddField]))
 
 
 
@@ -647,6 +656,7 @@ export default function PantryScreen() {
         // (The old order — close, then push 400 ms later — showed this tab in the gap. The defer
         // existed because UIKit drops a push that starts mid-dismissal.)
         onSeeMeals={() => router.push('/cook-reveal' as any)}
+        onAddByHand={focusAddField}
       />
 
       {/* ── Receipt Scan Modal ── */}

@@ -1963,6 +1963,8 @@ export default function HomeScreen() {
           // Still under the floor → the client refuses again without a round trip.
           if (mealsErrorCode === 'pantry_too_thin') retry()
         }}
+        // Home has no add field of its own — the Pantry tab does, and opens it from this param.
+        onAddByHand={() => router.navigate({ pathname: '/(tabs)/pantry', params: { add: '1' } })}
       />
 
       <DislikeReasonSheet

@@ -87,6 +87,22 @@ export async function checkScanCapWindow(
   return { allowed: data[0].allowed, used: data[0].used }
 }
 
+// How much of a rolling window the caller has used, WITHOUT spending any of it. Same window as
+// check_and_increment_scan_window: today plus the prior days-1 days (Postgres current_date, i.e.
+// UTC). Read with the caller's JWT, so RLS scopes it to their own rows. null = could not read;
+// callers must fail open — the increment on the real call is still the gate.
+export async function readScanWindow(req: Request, scanType: string, days: number): Promise<number | null> {
+  const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().slice(0, 10)
+  const { data, error } = await Promise.race([
+    userClient(req).from("scan_usage").select("count").eq("scan_type", scanType).gte("day", since),
+    new Promise<{ data: null; error: Error }>((resolve) =>
+      setTimeout(() => resolve({ data: null, error: new Error("scan window read timed out") }), 4000)
+    ),
+  ])
+  if (error || !Array.isArray(data)) return null
+  return data.reduce((sum: number, r: { count?: number }) => sum + (Number(r.count) || 0), 0)
+}
+
 // Best-effort: give the slot back after a transient OpenAI failure. Never throws.
 //
 // Deliberately NOT bound to the caller's JWT. When refund_scan derived its target from

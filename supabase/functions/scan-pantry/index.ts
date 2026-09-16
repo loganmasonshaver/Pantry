@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { requirePremium } from '../_shared/premium.ts'
-import { checkScanCapWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
+import { checkScanCapWindow, readScanWindow, refundScan, scanCapResponse } from '../_shared/scan-cap.ts'
 import { rejectOversizeImage } from '../_shared/image.ts'
 import { cleanupResult } from '../_shared/scan-cleanup.ts'
 
@@ -120,8 +120,19 @@ Deno.serve(async (req: Request) => {
 
   try {
     const tBody = Date.now()
-    const { images: rawImages } = await req.json() as { images: string[] }
+    const body = await req.json() as { images?: string[]; checkOnly?: boolean }
     console.log(`[scan-pantry] body read: ${Date.now() - tBody}ms`)
+    // Asked when the scanner OPENS, so a user at the weekly limit is told before walking the
+    // kitchen taking photos that can never be scanned. Spends nothing. The server answers rather
+    // than the app mirroring the number, because SCAN_CAP_WEEK can be overridden for testing.
+    if (body?.checkOnly) {
+      const used = await readScanWindow(req, 'pantry', SCAN_WINDOW_DAYS)
+      return new Response(
+        JSON.stringify({ allowed: used === null || used < SCAN_CAP_PER_WEEK, used, cap: SCAN_CAP_PER_WEEK }),
+        { headers: { "Content-Type": "application/json" } },
+      )
+    }
+    const rawImages = body?.images
     if (!rawImages || rawImages.length === 0) {
       return new Response(JSON.stringify({ error: "No images provided" }), { status: 400 })
     }
