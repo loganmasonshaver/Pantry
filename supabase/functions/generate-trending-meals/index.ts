@@ -1940,6 +1940,19 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { 'Content-Type': 'application/json' } })
     }
 
+    // The funnel row is written HERE, before images, and updated after them. Images are the one
+    // stage this function does not control — 10 rows took 9 s once and 9 rows took 30 s an hour
+    // later — and a row written only at the end is the row that goes missing when the gateway
+    // cuts a slow run, which is exactly the run worth reading.
+    let runRowId: number | null = null
+    try {
+      const { data: runRow, error: logErr } = await db.from('pipeline_runs').insert({
+        dry_run: false, provider: (funnel.providerUsed as string | undefined) ?? null, stored: meals.length, funnel: jsonSafe(funnel),
+      }).select('id').single()
+      if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
+      runRowId = runRow?.id ?? null
+    } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
+
     // Generate Flux images via the shared two-stage pipeline (Gemini visual description
     // → Flux render). Parallelized — was sequential, but each image takes 20-60s and 6
     // serially blew past the edge function timeout. Promise.all means the slowest single
@@ -1964,6 +1977,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       // internal 3-retry couldn't recover and meals were left on their YouTube
       // thumbnail. Bounding concurrency keeps FAL un-saturated so retries succeed.
       const IMG_CONCURRENCY = 5
+      // No image call may run past this; the gateway cuts the whole function at 150 s. A row whose
+      // image is skipped or aborted keeps its YouTube thumbnail and is picked up by the self-heal
+      // select above on the next run — a thumbnail for a day beats a 504 with nothing logged.
+      const IMAGE_DEADLINE_MS = 143_000
       const genImage = async (meal: any) => {
         try {
           // Pass the VISUAL hint with the name ("1 slice American cheese", not "American cheese").
@@ -1992,6 +2009,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // Without it the backfill is gap-fill-only and every repair is a no-op on exactly the
             // rows that need one.
             body: JSON.stringify({ mealName: meal.name, ingredients: ingredientNames, steps: meal.steps ?? [], replaceTrending: true }),
+            signal: AbortSignal.timeout(Math.max(1_000, IMAGE_DEADLINE_MS - (Date.now() - fnStart))),
           })
           const imgData = await imgRes.json()
           if (imgData.image) {
@@ -2005,6 +2023,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
         }
       }
       for (let i = 0; i < inserted.length; i += IMG_CONCURRENCY) {
+        // A wave needs ~5-15 s; do not start one that cannot finish.
+        if (Date.now() - fnStart > IMAGE_DEADLINE_MS - 8_000) {
+          funnel.imagesSkippedForTime = inserted.length - i
+          console.log(`[funnel] images: out of time at t+${Date.now() - fnStart}ms, ${inserted.length - i} rows left on their thumbnails for the next run's self-heal`)
+          break
+        }
         await Promise.all(inserted.slice(i, i + IMG_CONCURRENCY).map(genImage))
       }
     }
@@ -2014,12 +2038,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const { data: finalMeals } = await db.from('trending_meals').select('*').eq('generated_at', today()).order('id')
     console.log(`Success: ${meals.length} trending meals from YouTube + Groq`)
     funnel.timing = { ...(funnel.timing as object), imagesMs: Date.now() - imgStart, totalMs: Date.now() - fnStart }
-    try {
-      const { error: logErr } = await db.from('pipeline_runs').insert({
-        dry_run: false, provider: (funnel.providerUsed as string | undefined) ?? null, stored: meals.length, funnel: jsonSafe(funnel),
-      })
-      if (logErr) console.log(`[funnel] pipeline_runs insert REFUSED: ${logErr.message}`)
-    } catch (e) { console.log(`[funnel] pipeline_runs insert threw (ignored): ${(e as Error).message}`) }
+    if (runRowId != null) {
+      try {
+        const { error: logErr } = await db.from('pipeline_runs').update({ funnel: jsonSafe(funnel) }).eq('id', runRowId)
+        if (logErr) console.log(`[funnel] pipeline_runs update REFUSED: ${logErr.message}`)
+      } catch (e) { console.log(`[funnel] pipeline_runs update threw (ignored): ${(e as Error).message}`) }
+    }
     return new Response(JSON.stringify({ generated: true, count: meals.length, funnel, meals: finalMeals ?? meals }), {
       headers: { 'Content-Type': 'application/json' },
     })

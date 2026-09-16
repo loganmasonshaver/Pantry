@@ -5,9 +5,9 @@ import {
 } from './attempt-budget.ts'
 
 test('the loop end moves earlier as survivors grow, and never lets the tail estimate run past the wall', () => {
-  assert.equal(llmLoopEndMs(0), 122_000)
-  assert.equal(llmLoopEndMs(3), 119_000)
-  assert.equal(llmLoopEndMs(11), 111_000)
+  assert.equal(llmLoopEndMs(0), 117_000)
+  assert.equal(llmLoopEndMs(3), 114_000)
+  assert.equal(llmLoopEndMs(11), 106_000)
   assert.ok(llmLoopEndMs(3) < llmLoopEndMs(0))
   // The recipe ceiling stops the reserve growing without bound.
   assert.equal(llmLoopEndMs(40), llmLoopEndMs(22))
@@ -19,11 +19,11 @@ test('the Sep 16 cron shape gets a third attempt: 3 survivors at 50 s with ~22 s
   assert.equal(d.start, true)
   assert.equal(d.expectedMs, 27_500) // 1.25x the slowest so far
   // And its call is clamped to the loop end, not the old 85 s.
-  assert.equal(d.callTimeoutMs, 69_000)
+  assert.equal(d.callTimeoutMs, 64_000)
 })
 
 test('the Sep 16 real run shape (10 survivors at 73 s, attempts of 27.6 and 36.1 s) does NOT start a third', () => {
-  // 73 s + 1.25 x 36.1 s = 118 s, past the 112 s loop end for 10 survivors. The old estimate would
+  // 73 s + 1.25 x 36.1 s = 118 s, past the 107 s loop end for 10 survivors. The old estimate would
   // have started it and hit the clamp at 39 s with nothing to show.
   const d = decideAttempt(2, 72_990, 10, [27_593, 36_056])
   assert.equal(d.start, false)

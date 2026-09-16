@@ -11,10 +11,11 @@
 // 15 s under the gateway's 150 s.
 export const WALL_BUDGET_MS = 135_000
 // Measured tail after the loop, from funnel.timing on real runs: 10 rows took 1.7 s to rank,
-// look up and insert, then 9.2 s for images (5 at a time, ~4.6 s a wave); 12 rows' images took
-// 17 s. 5 s + 1 s/recipe prices 10 at 23 s and 12 at 25 s — 1.5-2x measured — and the first
-// version's 10 s + 2.5 s/recipe reserved 55 s against an 11 s tail, which cost a third attempt.
-export const TAIL_BASE_MS = 5_000
+// look up and insert, then 9.2 s for images — and 9 rows took 29.8 s for images an hour later,
+// same code, slower FAL. The reserve covers rank + insert + ONE image wave; the image stage is
+// bounded by its own deadline in the function (a row that misses it keeps its thumbnail and the
+// next run's self-heal regenerates it), so a slow FAL day cannot turn into a 504.
+export const TAIL_BASE_MS = 10_000
 export const TAIL_PER_RECIPE_MS = 1_000
 // What the NEXT attempt may add, so the reserve covers the tail the attempt itself creates.
 // Single-attempt yields seen: 1-11.
