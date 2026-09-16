@@ -1060,6 +1060,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   style={StyleSheet.absoluteFill}
                   facing="back"
                   enableTorch={flashOn}
+                  // The app is portrait-locked, so without this every capture is tagged portrait
+                  // whatever way the phone is held: a wide shot of a shelf came out as a portrait
+                  // image with the shelf on its side — in the review, in the zoom, and to the
+                  // model. This reads the accelerometer at shutter time instead (what the iOS
+                  // Camera does with rotation lock on); the viewfinder itself stays put.
+                  responsiveOrientationWhenOrientationLocked
                 />
               ) : (
                 <View style={[StyleSheet.absoluteFill, styles.cameraPermFallback]}>
@@ -1467,13 +1473,14 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
         {/* ── Step 5.5: unified review — one deduped list + a thumbnail strip of the scans ── */}
         {step === 55 && (() => {
-          // Photo grid: 2 across for a typical scan (≤4 shots) so each preview is big; 3 across for
-          // 5+ so a lot of photos don't get too tall. Tiles are uniform and the grid hugs its content
-          // (no floating black space), wrapping to rows and centering any odd last tile.
+          // Photos are ONE row, never a grid. A wrapping grid grew with the photo count — at 14
+          // shots it was five rows tall, which pushed the header under the search bar and left the
+          // list's flex:1 ScrollView with no height at all (nothing to scroll, nothing to read).
+          // Tiles size to fit when few (capped at 120) and settle at 80 and scroll sideways beyond
+          // four, so the photo chrome is at most 120pt for 1 photo or 16.
           const CONTENT_W = SCREEN_W - 48 // step horizontal padding (24 × 2)
           const nPhotos = photos.length
-          const cols = nPhotos <= 2 ? Math.max(1, nPhotos) : nPhotos <= 4 ? 2 : 3
-          const tile = Math.round(Math.min((CONTENT_W - (cols - 1) * 8) / cols, 200))
+          const tile = Math.max(80, Math.min(120, Math.floor((CONTENT_W - (nPhotos - 1) * 8) / Math.max(1, nPhotos))))
           // The add-input doubles as a SEARCH box: typing filters the list live, so checking
           // "did it catch my eggs?" doesn't mean scrolling 50 rows. If nothing matches, the same
           // input adds it — search and add are the same gesture.
@@ -1554,30 +1561,37 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                         <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>
                     </View>
-                    {/* Scan thumbnails as a centered, content-hugging grid (2 across for ≤4 photos,
-                        3 across beyond). Uniform tiles, odd last tile centered. Tap any to zoom. */}
+                    {/* Scan thumbnails in one horizontal strip — centered when they fit, scrolling
+                        when they don't. Bleeds to the screen edges like the camera filmstrip so a
+                        cut-off tile reads as "more this way". Tap any to zoom. */}
                     {photos.length > 0 && !keyboardUp && (
-                      <View style={styles.photoGrid}>
+                      <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={[styles.reviewStrip, { height: tile }]}
+                        contentContainerStyle={styles.reviewStripContent}
+                        keyboardShouldPersistTaps="handled"
+                      >
                         {photos.map((p, idx) => (
                           <TouchableOpacity key={idx} activeOpacity={0.85} onPress={() => p.uri && setZoomUri(p.uri)} style={[styles.photoThumb, { width: tile, height: tile }]}>
                             <Image source={{ uri: p.uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
                           </TouchableOpacity>
                         ))}
-                      </View>
+                      </ScrollView>
                     )}
 
-                    {/* Header — the COUNT is the hero (it continues the count-up reveal and is what
-                        people actually read), with the action instruction right under it. The generic
-                        "Review your scan" is gone; eyes glossed over it. Photo/area context sits right. */}
+                    {/* Header — the hero names the JOB with the count in it ("N items found" alone
+                        read as a result, not as something to act on), and the line under it lists
+                        the three moves: fix, remove, add. */}
                     <View style={styles.reviewHeader}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.reviewCountHero}>
-                          {detectedItems.length === 0 ? 'Nothing found' : `${detectedItems.length} item${detectedItems.length === 1 ? '' : 's'} found`}
+                          {detectedItems.length === 0 ? 'Nothing found' : detectedItems.length === 1 ? 'Check this item' : `Check these ${detectedItems.length} items`}
                         </Text>
                         <Text style={styles.reviewInstruction}>
                           {query
                             ? `${visibleItems.length} match${visibleItems.length === 1 ? '' : 'es'} for "${missedInput.trim()}"`
-                            : 'Tap a name to fix it  ·  ✕ to remove'}
+                            : 'Tap a name to fix it  ·  ✕ to remove  ·  type below to add'}
                         </Text>
                       </View>
                     </View>
@@ -1778,9 +1792,10 @@ const styles = StyleSheet.create({
   // Close on its own row; the thumbnail strip below gets the full width. flexGrow+center makes the
   // strip CENTER its photos when they fit (few/big shots) and left-align + scroll when they don't.
   reviewCloseRow: { paddingBottom: 12 },
-  // Content-hugging wrap grid — centers each row (and any odd last tile). No flexGrow / vertical
-  // centering, so it can't balloon into empty black space the way the old scroll strip did.
-  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8, paddingBottom: 4 },
+  // One-row strip; its height is set inline to the tile size so it can never balloon vertically.
+  // flexGrow here is HORIZONTAL: it lets a short row centre its tiles, and a long row scrolls.
+  reviewStrip: { flexGrow: 0, marginHorizontal: -24, marginBottom: 4 },
+  reviewStripContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', gap: 8, paddingHorizontal: 24 },
   photoThumb: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#1A1A1A' }, // width/height set inline (responsive)
   reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
   // Fullscreen tap-to-zoom overlay.
