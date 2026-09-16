@@ -8,6 +8,50 @@ Ordered by what should be done first. Later items depend on earlier ones.
 
 ---
 
+## ▶ TOMORROW, 2026-09-17 — Discover checks, in this order  *(Logan 2026-09-16: "add to prelaunch at the top")*
+The 08:00 UTC cron (3am CDT) is the FIRST run of everything shipped on Sep 16 on the CURRENT model
+(gemini-3.1-flash-lite): retry-on-untried-tail, compilation + non-recipe + title-repeat filters,
+the parser fixes, the junk-list gate, the image deadline, one shelf rule + the Salads & bowls tag.
+**Do not change the model or fire a manual run before these are read** — the result must be
+attributable. Full reasoning for each item is in §0 below and in the commit bodies.
+
+- [ ] **1. It ran and returned.** PASS = HTTP 200, `timing.totalMs` < 150 000, a row exists.
+  `select id, created_at, stored, funnel->'timing' timing, funnel->'attemptsSkippedForTime' t, funnel->'attemptsSkippedForList' l, funnel->'imagesSkippedForTime' img from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
+  `select id, created, status_code, timed_out, error_msg from net._http_response order by id desc limit 2;` (cron + 08:20 health check)
+  `imagesSkippedForTime` present = FAL was slow and the deadline worked (those rows keep thumbnails
+  until the next run) — note it, not a failure. A 504/`timed_out` = the tail reserve is too small.
+- [ ] **2. Yield.** Goal ≥ 12; **expected 10-13** on this code. Read WHERE they went, not just the count:
+  `select funnel->'llmRaw' raw, funnel->'llmYields' kept, funnel->'attempts' attempts, funnel->'llm_Google'->'rejected' rej from pipeline_runs where id = <id>;`
+  Tells: every attempt `provider` = Google (OpenAI only after a Gemini attempt that returned
+  nothing); `listSize` shrinks attempt to attempt; `dupName` + `dupVideo` ≈ 0 (retry-on-tail working).
+  If later attempts return 0-2 raw on a fresh list, the model has nothing it wants in the tail → the
+  ceiling is candidates/model, go to 7.
+- [ ] **3. The pre-model filters removed the right videos.** Read every entry of
+  `funnel->'titleRepeats'`, `funnel->'compilationTitles'`, `funnel->'nonRecipeTitles'`. A single-dish
+  video in compilationTitles, or a new dish in titleRepeats, is a false positive to fix that day.
+- [ ] **4. The stored rows are clean.** All four return ZERO rows:
+  `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
+  `select name, i->>'name' from trending_meals, jsonb_array_elements(ingredients) i where generated_at = current_date and (i->>'name') ~* '^(high|low)[- ](protein|fib)|^(no|gluten[- ]free|dairy[- ]free)$|^(made|loaded|packed) with|^(perfect|great|good) for|thank you|save this|feedback';`
+  `select t.name, p.name from trending_meals t join trending_meals p on p.generated_at < current_date and lower(t.name) like '%' || lower(p.name) || '%' where t.generated_at = current_date;`
+  `select name from trending_meals where generated_at = current_date and name ~* 'meal plan|what i eat|protein powder$|spice mix$';`
+- [ ] **5. Every new row is on the right shelf** under the order dessert → snack → savoury cuisine →
+  morning → salads-bowls → american-comfort. Read each: `select name, shelf_tag, category from trending_meals where generated_at = current_date order by shelf_tag;`
+  Also the Indian share of the batch (watch line ≤ 15%): `select count(*) filter (where shelf_tag = 'indian' or name ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) total from trending_meals where generated_at = current_date;`
+- [ ] **6. On the phone** (needs a build with `54c7fbc` + `fade012`; the Sep 16 00:01 release build
+  has neither): Discover shows ≤ 4 cheesecakes, ≤ 4 brownies, ≤ 10 pasta on the whole page; search
+  "cheesecake" still finds all ~22; chia puddings + smoothie/yogurt bowls on Breakfast, protein balls
+  + bark on Protein snacks, manchurian + momos on Indian night; **Salads & bowls** shows more than 2
+  salads WHEN it rotates in (6 of 12 shelves render per day — it may not appear on the 17th); NEW
+  TODAY badges on the cron's rows; no re-layout when the pool loads. Daily report line (~9:05)
+  reads "Discover: N new recipes, all have photos".
+- [ ] **7. Model decision — only after 1-5 are read.** Plan with checked prices in §0 ("LEVER 3").
+  Next step on Logan's go: a `?replay=<runId>&model=&shards=` dry-run mode that re-runs only the
+  model stage on a stored run's `funnel.candidates` (~1 YouTube quota unit, not ~1,300), then compare
+  on Sep 17's candidates: Lite as-is · Lite in parallel 6-video shards · gemini-3.8-flash sharded ·
+  an OpenAI mini (gpt-5.4-mini or gpt-4.1-mini) sharded. Pick by recipes stored within 150 s.
+
+---
+
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
 **AUDIT 2026-09-16 (Logan: "only 3 meals showing") — the Sep 16 08:00 UTC cron stored 3.**
 Plumbing held: `net._http_response` 261 = HTTP 200, funnel row 800, 3 rows at 08:00:53, all with
