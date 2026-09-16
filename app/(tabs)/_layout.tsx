@@ -58,6 +58,7 @@ export default function TabLayout() {
     let cancelled = false
     let delay: ReturnType<typeof setTimeout> | null = null
     let idle: number | null = null
+    let idlePantry: number | null = null
     // The warm cache alone still left the SCREEN cold: a lazy tab mounts on the tap, so its disk
     // reads, the shelving of the whole pool and the first photos all ran behind a skeleton the
     // moment Logan opened it ("doesn't start loading till I click on the tab"). So once the feed is
@@ -69,7 +70,18 @@ export default function TabLayout() {
       if (cancelled) return
       delay = setTimeout(() => {
         idle = requestIdleCallback(
-          () => { if (!cancelled) router.prefetch('/(tabs)/discover') },
+          () => {
+            if (cancelled) return
+            router.prefetch('/(tabs)/discover')
+            // Pantry second, in its own idle window, so two screens never mount in one frame. It
+            // paints from its disk mirror, so preloading costs a grouping pass and no network: its
+            // own fetch still runs on first focus. Without this the tab showed an empty list while
+            // Supabase answered, because the screen did not exist until the tap.
+            idlePantry = requestIdleCallback(
+              () => { if (!cancelled) router.prefetch('/(tabs)/pantry') },
+              { timeout: 3000 },
+            )
+          },
           { timeout: 3000 }, // an idle callback alone can wait forever on a busy thread
         )
       }, DISCOVER_PRELOAD_DELAY_MS)
@@ -86,6 +98,7 @@ export default function TabLayout() {
       sub.remove()
       if (delay) clearTimeout(delay)
       if (idle !== null) cancelIdleCallback(idle)
+      if (idlePantry !== null) cancelIdleCallback(idlePantry)
     }
   }, [user])
 

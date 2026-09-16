@@ -31,6 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
 import { ageLabelLong, isPerishable, isStale } from '@/lib/pantryAge'
+import { groupPantryRows, type PantryRow } from '@/lib/pantryGroup'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
@@ -112,6 +113,9 @@ const CATEGORY_CONFIG = PANTRY_ORDER.map(name => ({
 }))
 
 const INSIGHT_ROTATION_KEY = 'pantry_insight_rotation' // visit counter → rotates the insight headline (Step D)
+// The pantry list, mirrored per user so the tab paints before the query answers. Same shape as the
+// query's rows, so one grouping function serves both.
+const pantryCacheKey = (uid: string) => `pantry_items:${uid}`
 const categoryConfigByName = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.name, c]))
 const categoryConfigById   = Object.fromEntries(CATEGORY_CONFIG.map(c => [c.id,   c]))
 
@@ -269,6 +273,23 @@ export default function PantryScreen() {
   useEffect(() => { setInsightAdded(false) }, [pantryInsight.headline]) // reset the CTA when the insight changes
 
 
+  // Rows → the screen's Category[]. Out rows sink to the bottom of their aisle HERE, when the list
+  // loads, never on the tap that marks them Out (see groupPantryRows). Section order is
+  // PANTRY_ORDER, fixed in code: the drag-reorder that used to live here went with the accordions,
+  // and a device-local order nobody set was one more way for two screens to disagree.
+  const toCategories = useCallback((rows: PantryRow[]): Category[] => (
+    groupPantryRows(rows, PANTRY_ORDER).map(g => {
+      const cfg = categoryConfigByName[g.name]
+      return cfg
+        ? { ...cfg, ingredients: g.ingredients }
+        : { id: g.name.toLowerCase(), name: g.name, icon: Package, iconColor: '#888888', ingredients: g.ingredients }
+    })
+  ), [])
+
+  // Painted from the network at least once. Guards the disk hydration below, which must never
+  // overwrite fresher rows if the disk read happens to land second.
+  const fetchedRef = useRef(false)
+
   const fetchItems = useCallback(async () => {
     if (!user) return
     const { data } = await supabase
@@ -277,41 +298,41 @@ export default function PantryScreen() {
       .eq('user_id', user.id)
       .order('created_at', { ascending: true })
     if (!data) return
-
-    // Group by category, preserving config order
-    const grouped = new Map<string, Ingredient[]>()
-    for (const row of data) {
-      const catName = row.category || 'Other'
-      if (!grouped.has(catName)) grouped.set(catName, [])
-      grouped.get(catName)!.push({ id: row.id, name: row.name, inStock: row.in_stock, since: row.last_confirmed_at ?? row.created_at })
-    }
-    // Out rows sink to the bottom of their aisle HERE, when the tab loads — never on the tap that
-    // marks them Out. A tap-time move cannot be animated in this list: Reanimated's layout
-    // transitions do not reach SectionList cells, and the sticky headers would snap while rows
-    // glided. A row that stays put and fades is calmer than one that jumps under the finger.
-    for (const list of grouped.values()) list.sort((a, b) => Number(b.inStock) - Number(a.inStock))
-
-    // Build ordered category list: config order first, then any unknown
-    const result: Category[] = []
-    for (const cfg of CATEGORY_CONFIG) {
-      const ingredients = grouped.get(cfg.name) ?? []
-      if (ingredients.length > 0) {
-        result.push({ ...cfg, ingredients })
-      }
-    }
-    // Any categories not in config
-    for (const [catName, ingredients] of grouped) {
-      if (!categoryConfigByName[catName]) {
-        result.push({ id: catName.toLowerCase(), name: catName, icon: Package, iconColor: '#888888', ingredients })
-      }
-    }
-
-    // Section order is PANTRY_ORDER, fixed in code. The drag-reorder that used to live here went
-    // with the accordions; a device-local order nobody set was one more way for two screens to
-    // disagree.
-    setCategories(result)
+    perfMark(`Pantry items from network (${data.length})`)
+    fetchedRef.current = true
+    setCategories(toCategories(data))
     setLoaded(true)
-  }, [user?.id])
+  }, [user?.id, toCategories])
+
+  // PAINT FROM DISK FIRST. The tab had no local copy of the list at all: every open asked Supabase
+  // and showed an empty list until the answer came back, which is the wait Logan asked about. The
+  // rows are mirrored below on every change, so a cold open paints the last known pantry instantly
+  // and the fetch on focus corrects it a moment later. A stale row can show for that moment — the
+  // same trade Home already makes for the day's log.
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    AsyncStorage.getItem(pantryCacheKey(user.id)).then(raw => {
+      if (cancelled || !raw || fetchedRef.current) return
+      const rows = JSON.parse(raw)
+      if (!Array.isArray(rows) || rows.length === 0) return
+      perfMark(`Pantry items from disk (${rows.length})`)
+      setCategories(toCategories(rows))
+      setLoaded(true)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [user?.id, toCategories])
+
+  // Mirror to disk on every change, not only after a fetch: a toggle, a delete, an add and Clear
+  // pantry all edit state directly, and a cache written only by the fetch would hand the next cold
+  // open a list the user had already changed.
+  useEffect(() => {
+    if (!user || !loaded) return
+    const rows: PantryRow[] = categories.flatMap(c => c.ingredients.map(i => ({
+      id: i.id, name: i.name, category: c.name, in_stock: i.inStock, last_confirmed_at: i.since, created_at: i.since,
+    })))
+    AsyncStorage.setItem(pantryCacheKey(user.id), JSON.stringify(rows)).catch(() => {})
+  }, [categories, loaded, user?.id])
 
   useFocusEffect(useCallback(() => {
     fetchItems()
