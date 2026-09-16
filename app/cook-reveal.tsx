@@ -10,6 +10,7 @@ import { COLORS } from '@/constants/colors'
 import { useAuth } from '@/context/AuthContext'
 import { usePremium } from '@/context/SuperwallContext'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
+import { supabase } from '@/lib/supabase'
 import { Shimmer } from '@/components/Shimmer'
 import { MealImage } from '@/components/MealImage'
 
@@ -153,9 +154,25 @@ export default function CookReveal() {
     return () => clearInterval(id)
   }, [revealed.length, reduceMotion])
 
+  // How big the pantry is right now, for the validation line. A count query rather than the meal
+  // hook's own pantry read: load() serves the scan's prefetch or today's cache, so on this screen
+  // the hook usually never fetches the pantry at all. null until it lands (or if it fails) and the
+  // line falls back to the form without a total.
+  const [pantryCount, setPantryCount] = useState<number | null>(null)
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    supabase.from('pantry_items').select('id', { count: 'exact', head: true }).eq('user_id', user.id).eq('in_stock', true)
+      .then(({ count }) => { if (!cancelled && typeof count === 'number') setPantryCount(count) }, () => {}) // a failed count just keeps the shorter line
+    return () => { cancelled = true }
+  }, [user?.id])
+
   // What the scan actually bought them: distinct ingredients across the revealed meals that they
   // already own (missing_ingredients excluded). Closes the loop between the effort of photographing
-  // areas and the payoff, and restates the promise — no shopping.
+  // areas and the payoff, and restates the promise — nothing to buy. Read as "17 of your 108":
+  // "From 17 things you already have" straight after "108 items found" read as if the scan had only
+  // counted 17. The total is dropped when it would read as nonsense (assumed staples can put the
+  // meals' count above a small pantry's).
   const ownedIngredientCount = (() => {
     const missing = new Set(revealed.flatMap(m => (m.missing_ingredients ?? []).map((s: string) => s.toLowerCase().trim())))
     const owned = new Set<string>()
@@ -303,7 +320,9 @@ export default function CookReveal() {
                   opacity: validationAnim,
                   transform: [{ translateY: validationAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
                 }]}>
-                  From {ownedIngredientCount} things you already have · no shopping
+                  {pantryCount !== null && pantryCount >= ownedIngredientCount
+                    ? `Uses ${ownedIngredientCount} of your ${pantryCount} items · nothing to buy`
+                    : `Uses ${ownedIngredientCount} things you already have · nothing to buy`}
                 </Animated.Text>
               )}
             </View>
@@ -397,8 +416,11 @@ export default function CookReveal() {
               </Animated.View>
             </View>
 
-            {/* Bottom bar: tappable progress dots + the tap-to-cook hint. No Done button — the
-                top-left X is the single dismiss (Done did the exact same thing, a redundant CTA). */}
+            {/* Bottom bar: tappable progress dots only. No Done button — the top-left X is the
+                single dismiss (Done did the exact same thing, a redundant CTA). The "Tap a meal to
+                start cooking" hint that sat under the dots is gone for the same reason: the card
+                already carries "View recipe", and two labels with two different verbs for one tap
+                is exactly the redundancy the Done button was removed for. */}
             <Animated.View style={[styles.bottomBar, { opacity: headerAnim }]}>
             {revealed.length > 1 && (
               <View style={styles.dotsRow}>
@@ -413,9 +435,6 @@ export default function CookReveal() {
                 ))}
               </View>
             )}
-            {/* The END matters as much as the peak (peak-end rule) — this used to trail off on
-                muted grey instruction text. Now it's a firm, white close to the sequence. */}
-            <Text style={styles.hint}>Tap a meal to start cooking</Text>
             </Animated.View>
         </View>
       )}
@@ -477,5 +496,4 @@ const styles = StyleSheet.create({
 
   // Dots + tap-to-cook hint, pinned near the bottom. No Done button — the X is the only dismiss.
   bottomBar: { alignItems: 'center', paddingBottom: 16, gap: 12 },
-  hint: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.92)', textAlign: 'center' },
 })

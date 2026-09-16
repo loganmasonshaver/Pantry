@@ -1432,17 +1432,17 @@ claiming exact wording from the top apps is guessing.
       says "Scan 15 photos" → theatre runs → new list; (3) camera ✕ with results → the new copy.
       **Open edge, not fixed:** ‹ on the THEATRE mid-scan goes to the hub while the call is still in
       flight; Scan again there fires a second call. Pre-existing; the ✕ there closes cleanly.
-- [ ] **Cook reveal — suggestions, PLAN ONLY, Logan to pick** (2026-09-16, from the first full
-      device pass; see `app/cook-reveal.tsx`):
-      - **"From 17 things you already have"** is the count of distinct owned ingredients across the
-        three meals, not the pantry — right after "108 items found" it reads as if the scan only
-        counted 17. Reword to tie scan → payoff ("Uses 17 of your 108 items · nothing to buy"; the
-        pantry count is on disk now in `pantry_items:<uid>`), or drop the number.
-      - **Two labels for one action:** "View recipe ›" on the card and "Tap a meal to start cooking"
-        under the dots. Different verbs for the same tap. Keep one.
-      - **Proof it read YOUR fridge:** the photo is generic AI food art and proves nothing. Show 3–4
-        of the user's own ingredient names on the card ("cottage cheese · grapes · peanut butter").
-        That is the wow; the photo is the garnish. Medium change.
+- [ ] **Cook reveal — Logan picked 1 + 2, tossed 3** (2026-09-16; `app/cook-reveal.tsx`):
+      - [ ] **UNVERIFIED — validation line now "Uses 17 of your 108 items · nothing to buy".** The
+        old "From 17 things you already have" was the distinct-ingredient count across the three
+        meals, and right after "108 items found" read as if the scan had only counted 17. The total
+        is one HEAD count query of in-stock `pantry_items` on mount (the meal hook usually never
+        fetches the pantry on this screen — load() serves the prefetch/cache), and the line drops
+        the total when the count has not landed or is below the meals' count (assumed staples).
+        Tell: open the reveal after a scan and the line names both numbers.
+      - [ ] **UNVERIFIED — "Tap a meal to start cooking" removed;** the card's "View recipe" is the
+        one label. Tell: nothing under the dots.
+      - ~~Ingredient names on the card~~ — TOSSED by Logan 2026-09-16. Do not re-propose.
       - **Meal quality** — Logan: "I need to fix some of these generated meals", separate pass on go.
 
 ## 4. "Skip onboarding" paywall variant
