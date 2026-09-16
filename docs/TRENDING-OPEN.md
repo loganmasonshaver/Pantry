@@ -563,6 +563,12 @@ Run predates the day's deploys, so it exercises the 2026-08-30 generation change
 
 # ⚠️ CONFIRM ON THE NEXT PIPELINE RUN
 
+**CHECKED 2026-09-16** against the 123 rows written since Aug 30: **1 PASS** — steps stating a time
+25% → 64%, a temperature 13% → 24%, 4.2 → 5.8 steps. **2 FALSE POSITIVE** — the guard fired once in
+any run with detail (808) and rejected a German cannelloni because the translated "paprika" is a
+prefix of "Paprikapulver"; tracked in PRELAUNCH ▶ TOMORROW 8. **3 not yet measured** (▶ TOMORROW 9).
+**4 PASS** — the junk-gate query below returns 0 rows.
+
 Everything shipped on 2026-08-30 below affects GENERATION only, so none of it is proven yet — the
 existing pool was written by the old code. **One run confirms all four.** Do this before claiming
 any of them work.

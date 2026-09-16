@@ -8,64 +8,101 @@ Ordered by what should be done first. Later items depend on earlier ones.
 
 ---
 
-## ▶ TOMORROW, 2026-09-17 — Discover checks, in this order  *(Logan 2026-09-16: "add to prelaunch at the top")*
-The 08:00 UTC cron (3am CDT) is the FIRST run of everything shipped on Sep 16 on the CURRENT model
-(gemini-3.1-flash-lite): retry-on-untried-tail, compilation + non-recipe + title-repeat filters,
-the parser fixes, the junk-list gate, the image deadline, one shelf rule + the Salads & bowls tag.
-**Do not change the model or fire a manual run before these are read** — the result must be
-attributable. Full reasoning for each item is in §0 below and in the commit bodies.
+## ▶ TOMORROW, 2026-09-17 — every cron + Discover check, in this order  *(Logan 2026-09-16: "anything left to verify with the cron and Discover goes at the top")*
+The 08:00 UTC cron (3am CDT) is the FIRST scheduled run of everything shipped on Sep 16, on the
+CURRENT model (`gemini-3.1-flash-lite`, shards OFF):
+- **pipeline** (`3deb55d` … `303f098`): retry on the untried tail; compilation, non-recipe and
+  title-repeat filters; parser fixes (emoji macro lines, "= N g protein", oat flour); junk-list gate;
+  attempt budget + image deadline; ONE shelf rule incl. the fusion / stir-fry / parfait / soup lines
+  and the `salads-bowls` tag.
+- **new 08:05 UTC photo step** (cron job 6, `?stage=images`).
+- **app**: page-wide family cap `54c7fbc` · Salads & bowls shelf `fade012` · no recipe before its AI
+  photo `f44eaef`.
+- **data**: 40 shelf moves (24 + 16) and 3 junk-ingredient rows repaired or deleted.
+**Do not change the model, turn shards on, or fire a manual run before 1-5 are read** — the result
+must be attributable. Reasoning for each item: §0 below and the commit bodies. `<id>` below = the
+08:00 run's `pipeline_runs` id (the first query in 1 returns it).
 
-- [ ] **1. It ran and returned.** PASS = HTTP 200, `timing.totalMs` < 150 000, a row exists. Then the
-  NEW 08:05 photo step (cron job 6, `?stage=images`): its `net._http_response` body reads
-  `{"stage":"images","rows":N,...}` with status 200; `rows` 0 means the 08:00 run finished every photo.
-  Since `lib/discoverPublish.ts` a recipe without its AI photo is HIDDEN from Discover, so any row
-  still without one after 08:05 is a recipe nobody can see — zero expected:
-  `select name from trending_meals where generated_at = current_date and (image is null or image not like '%/storage/v1/object/public/%');`
+- [ ] **1. It ran, returned, and every recipe has its photo.** PASS = HTTP 200, `timing.totalMs` < 150 000.
   `select id, created_at, stored, funnel->'timing' timing, funnel->'attemptsSkippedForTime' t, funnel->'attemptsSkippedForList' l, funnel->'imagesSkippedForTime' img from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
-  `select id, created, status_code, timed_out, error_msg from net._http_response order by id desc limit 2;` (cron + 08:20 health check)
-  `imagesSkippedForTime` present = FAL was slow and the deadline worked (those rows keep thumbnails
-  until the next run) — note it, not a failure. A 504/`timed_out` = the tail reserve is too small.
-- [ ] **2. Yield.** Goal ≥ 12; **expected 10-13** on this code. Read WHERE they went, not just the count:
+  `select id, created, status_code, timed_out, error_msg, left(content, 160) from net._http_response order by id desc limit 3;`
+  (08:00 run, 08:05 photo step, 08:20 health check). The photo step's body reads
+  `{"stage":"images","rows":N,...}`; `rows` 0 = the 08:00 run finished every photo. `imagesSkippedForTime`
+  on the 08:00 row = FAL was slow and the deadline worked — not a failure if the 08:05 step finished them.
+  A recipe without its AI photo is HIDDEN from Discover now, so this must return ZERO rows after 08:05:
+  `select name from trending_meals where generated_at = current_date and (image is null or image not like '%/storage/v1/object/public/%');`
+- [ ] **2. Yield, and where the rest went.** Goal ≥ 12; **expected 10-13** on this code.
   `select funnel->'llmRaw' raw, funnel->'llmYields' kept, funnel->'attempts' attempts, funnel->'llm_Google'->'rejected' rej from pipeline_runs where id = <id>;`
-  Tells: every attempt `provider` = Google (OpenAI only after a Gemini attempt that returned
-  nothing); `listSize` shrinks attempt to attempt; `dupName` + `dupVideo` ≈ 0 (retry-on-tail working).
-  If later attempts return 0-2 raw on a fresh list, the model has nothing it wants in the tail → the
-  ceiling is candidates/model, go to 7.
+  `select d->>'attempt' a, d->>'kind' kind, d->>'name' name, d->>'why' why from pipeline_runs, jsonb_array_elements(funnel->'rejectedDetail') d where id = <id> order by 1, 2;`
+  Tells: every attempt `provider` = Google (OpenAI only right after a Gemini attempt that returned
+  nothing); `listSize` shrinks attempt to attempt; `dupName` + `dupVideo` ≈ 0 (retry-on-tail working);
+  no `attempts[].errors` containing "aborted" (one = the 1.25x attempt estimate under-predicted). Read
+  every `nameGap` note's `listed:` half — a copycat ("Low Calorie Nutella") or made-of dish ("Zucchini
+  Tortilla") rejected there is a false positive to fix. Later attempts returning 0-2 raw on a fresh
+  list = the model has nothing it wants in the tail → the ceiling is candidates or model → item 7.
 - [ ] **3. The pre-model filters removed the right videos.** Read every entry of
   `funnel->'titleRepeats'`, `funnel->'compilationTitles'`, `funnel->'nonRecipeTitles'`. A single-dish
   video in compilationTitles, or a new dish in titleRepeats, is a false positive to fix that day.
-- [ ] **4. The stored rows are clean.** All four return ZERO rows:
+- [ ] **4. The stored rows are clean.** Every query returns ZERO rows:
   `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
   `select name, i->>'name' from trending_meals, jsonb_array_elements(ingredients) i where generated_at = current_date and (i->>'name') ~* '^(high|low)[- ](protein|fib)|^(no|gluten[- ]free|dairy[- ]free)$|^(made|loaded|packed) with|^(perfect|great|good) for|thank you|save this|feedback';`
   `select t.name, p.name from trending_meals t join trending_meals p on p.generated_at < current_date and lower(t.name) like '%' || lower(p.name) || '%' where t.generated_at = current_date;`
   `select name from trending_meals where generated_at = current_date and name ~* 'meal plan|what i eat|protein powder$|spice mix$';`
-- [ ] **5. Every new row is on the right shelf** under the order dessert → snack → savoury cuisine →
-  morning → salads-bowls → american-comfort. Read each: `select name, shelf_tag, category from trending_meals where generated_at = current_date order by shelf_tag;`
-  Also the Indian share of the batch (watch line ≤ 15%): `select count(*) filter (where shelf_tag = 'indian' or name ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) total from trending_meals where generated_at = current_date;`
-- [ ] **6. On the phone** (needs a build with `54c7fbc` + `fade012`; the Sep 16 00:01 release build
-  has neither; after a DB change, switch tabs and come back so Discover refetches): Discover shows ≤ 4 cheesecakes, ≤ 4 brownies, ≤ 10 pasta on the whole page; search
-  "cheesecake" still finds all ~22; chia puddings + smoothie/yogurt bowls on Breakfast, protein balls
-  + bark on Protein snacks, manchurian + momos on Indian night; **Salads & bowls** shows more than 2
-  salads WHEN it rotates in (6 of 12 shelves render per day — it may not appear on the 17th); NEW
-  TODAY badges on the cron's rows; no re-layout when the pool loads; no recipe on a YouTube thumbnail
-  anywhere (they now wait for their AI photo). Daily report line (~9:05)
-  reads "Discover: N new recipes, all have photos".
-- [ ] **7. Shards and model — BUILT (`303f098`), measured here, decided by the rule below.**
-  Only after 1-5 are read. Each is a same-list replay of the 08:00 run: ~1 YouTube quota unit,
-  nothing written to Discover, a `pipeline_runs` dry row per replay. Fire in order, one at a time,
-  with `<id>` = the 08:00 run's `pipeline_runs` id:
+  Parser fixes (`6b2fd9c`) — no rejected recipe's SOURCE list still counts a macro line:
+  `select d->>'name', src from pipeline_runs, jsonb_array_elements(funnel->'llm_Google'->'droppedDetail') d, jsonb_array_elements_text(d->'src') src where id = <id> and src ~* '^[^a-z0-9]*[0-9.,]+\s*(g|kcal)?\s*(protein|eiwei|kohlenhydrat|fett|carbs?|fat|calories)\s*$|=\s*[0-9.,]+\s*g\s*protein';`
+- [ ] **5. Every new row is on the right shelf.** The order, stop at the first that fits: dessert →
+  snack (sweet or savoury) → savoury dish with a clear cuisine (a FUSION takes its sauce and staples'
+  cuisine: paneer / schezwan / soya pasta → indian; a stir-fry with no clearer cuisine → asian) →
+  morning food (incl. parfaits) → cuisine-less salad or bowl → american-comfort (incl. soups,
+  sandwiches, lunch wraps). Read each:
+  `select name, shelf_tag, category from trending_meals where generated_at = current_date order by shelf_tag;`
+  Indian share of the batch, watch line ≤ 15%:
+  `select count(*) filter (where shelf_tag = 'indian' or name ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) total from trending_meals where generated_at = current_date;`
+- [ ] **6. On the phone.** Needs a build with `54c7fbc` + `fade012` + `f44eaef` (the Sep 16 00:01 release
+  build has none). After any DB change, switch tabs and come back so Discover refetches.
+  - Whole page: ≤ 4 cheesecakes, ≤ 4 brownies, ≤ 4 paneer dishes, ≤ 10 pasta; search "cheesecake"
+    still finds all ~22. **Sep 18:** the four visible cheesecakes are DIFFERENT ones (daily rotation).
+  - Shelves: Protein snacks has NO salads; Indian night holds Paneer Pasta, Lauki Pasta, Paneer Pizza,
+    Paneer Manchurian, the momos, Green Butter Garlic Chicken, Konjac Noodles, Mexican Inspired Rajma
+    Salad; Breakfast holds the chia puddings, smoothie/yogurt bowls and Greek Yogurt Berry Parfait;
+    Comfort holds Creamy Tomato Tofu Soup, Tofu Sandwich, Ham and Cheese Protein Wrap, Pepperoni Pizza
+    Skillet; **Salads & bowls** shows more than 2 salads WHEN it rotates in (6 of 12 shelves render a
+    day — it may not appear on the 17th).
+  - No card anywhere on a YouTube thumbnail; NEW TODAY badges on the cron's rows; no re-layout when
+    the pool loads.
+  - Daily report (~9:05 CDT) reads "Discover: N new recipes, all have photos".
+- [ ] **7. Shards and model — BUILT (`303f098`), measured here, decided by the rule below.** Only after
+  1-5 are read. Each is a same-list replay of the 08:00 run: ~1 YouTube quota unit, nothing written to
+  Discover, one `pipeline_runs` dry row. Fire ONE AT A TIME (each ~1-2 min):
   `npx supabase db query --linked "select net.http_post(url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true&dryRun=true&replay=<id><EXTRA>', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret' limit 1)), body := '{}'::jsonb, timeout_milliseconds := 200000)"`
-  - A. `<EXTRA>` empty — Lite, no shards: the baseline on this exact list (should land near the cron's count)
-  - B. `&shards=6` — Lite in parallel pieces
-  - C. `&shards=6&model=gemini-3.8-flash`
-  - D. `&shards=6&model=gpt-5.4-mini`
-  Read each: `select id, stored, funnel->'model' model, funnel->'shardSize' shards, funnel->'timing' timing, funnel->'attempts' attempts from pipeline_runs where funnel->>'replayOf' = '<id>' order by id;`
+  - **A** `<EXTRA>` empty — Lite, one call per attempt: the baseline on this exact list
+  - **A2** `<EXTRA>` empty again — the model's own variance on an IDENTICAL list (settles §2's "variance
+    or defect" question for ~1 unit instead of ~10 full runs)
+  - **B** `&shards=6` — Lite in parallel pieces
+  - **C** `&shards=6&model=gemini-3.8-flash`
+  - **D** `&shards=6&model=gpt-5.4-mini`
+  - **E** `&provider=openai` — the real outage fallback (gpt-4o-mini), never exercised on this code
+  Read: `select id, stored, funnel->'model' model, funnel->'shardSize' shards, funnel->'timing' timing, funnel->'attempts' attempts from pipeline_runs where funnel->>'replayOf' = '<id>' order by id;`
+  and for each: `select count(*) filter (where t->>'name' ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) from pipeline_runs, jsonb_array_elements(funnel->'timeSample') t where id = <replay id>;`
   **Decision rule (set in advance, 2026-09-16):** turn shards ON by default (`SHARD_SIZE_DEFAULT`) if B
-  stores ≥ A + 2 and fits well inside 150 s with no rate-limit errors in `attempts[].errors`. Switch
-  the model only if C or D stores ≥ 3 more than B on the same list AND costs ≤ ~$7/month at one run a
-  day (3.8 Flash ~$6 paid, free tier exists; gpt-5.4-mini ~$7+). Otherwise stay on Lite. One day's
-  list is one sample: repeat A-D on Sep 18's run before switching models, not before turning shards on.
-  Pricing checked 2026-09-16: see "LEVER 3" in §0.
+  stores ≥ A + 2 AND that gap is bigger than the A/A2 spread, it finishes well inside 150 s, and no
+  `attempts[].errors` read as rate limits. Switch the model only if C or D stores ≥ 3 more than B on the
+  same list, its Indian share stays ≤ 15%, AND it costs ≤ ~$7/month at one run a day (3.8 Flash ~$6
+  paid, free tier exists; gpt-5.4-mini ~$7+). Otherwise stay on Lite. One day's list is one sample:
+  repeat A-D on Sep 18's run before switching models — not before turning shards on. E passes if it
+  returns 200 with recipes. Pricing checked 2026-09-16: "LEVER 3" in §0.
+- [ ] **8. Known false positive to fix — the truncation guard reads a translation as a cut-off name.**
+  Run 808 rejected "High Protein Cannelloni One-Pot" (3.5M views) because the model translated the
+  German "Paprikapulver, edelsüß" as "paprika", which is a prefix of the German word, so
+  `truncatedAgainstSource` called it truncated. It is the ONLY `truncated` reject in any funnel row
+  that carries detail. Check tomorrow's: `select d->>'name', d->>'why' from pipeline_runs, jsonb_array_elements(funnel->'rejectedDetail') d where id = <id> and d->>'kind' = 'truncated';`
+  Fix, NOT built: skip the check when the video declared a non-English language, or when the source
+  line is one compound word the model translated. It does not widen retention — the ingredient is there.
+- [ ] **9. The last unmeasured Aug 30 generation fix — the decimal parser (`561360e`).** A creator's
+  "1.5 tsp" must not be stored as "5 tsp". On tomorrow's rows, compare any source line with a decimal
+  (the `droppedDetail` `src` arrays and the videos behind stored rows) against the stored amount. Low
+  priority; the other three Aug 30 checks passed on 2026-09-16 (see §2).
+
 ---
 
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
@@ -116,13 +153,13 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   and "most" out of titles (the 6M-view tiramisu balls now filtered before the model). On 808's
   candidates that is **+4 (9 → 13) with no widening of any tolerance.** The row "Homemade Desi
   Protein Powder" was deleted from today's live rows by hand (the new gate would have rejected it).
-- [ ] **PASS: Sep 17 08:00 UTC cron.** HTTP 200 · `timing.totalMs` < 150 000 · every attempt Google
+- [x] **MOVED to ▶ TOMORROW items 1-4.** ~~PASS: Sep 17 08:00 UTC cron.~~ HTTP 200 · `timing.totalMs` < 150 000 · every attempt Google
   unless one returned nothing · no two rows share a `video_id` · no name contains a pool name ·
   `imagesSkippedForTime` absent (present = the deadline did its job on a slow FAL day, not a
   failure). **Yield: 10-13 expected on this code; ≥ 12 is the goal.**
   `select stored, funnel->'timing', funnel->'attempts', funnel->'afterTitleDedup', funnel->'imagesSkippedForTime' from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
   `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
-- [ ] **WHERE 808's 25 CANDIDATES WENT (the `candidates` list makes this readable per run now):**
+- [x] **WHERE 808's 25 CANDIDATES WENT (the `candidates` list makes this readable per run now):**
   9 kept · 3 parser false rejects (fixed above) · 1 oat-flour false reject (fixed) · 4 correct pool
   repeats (2 tiramisu videos, paneer pasta — 2 of them now caught by title before the model) · 1
   correct nameGap (a "Korean beef bowl" whose list is the sauce alone) · **7 never picked, 5 of
@@ -145,11 +182,11 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
      every entry must be a multi-recipe video; a single recipe in it is a false positive to fix.
   3. **DEFERRED — only if Sep 17 still stores < 12:** the model tier (`?model=` dry-run override,
      pricing check first) and candidate volume (13 → 26 searches). Logan's call, in that order.
-- [ ] **THE CEILING, after 808:** ~400-460 raw → 11-19 repeats + 3-6 non-recipes out by title →
+- [x] **THE CEILING, after 808:** ~400-460 raw → 11-19 repeats + 3-6 non-recipes out by title →
   floor → **25-31 candidates with a list**, of which ~5 are compilations. The model picks ~15-18
   distinct; with today's parser fixes ~13 survive on a day like this. 12 is reachable most days;
   18 is not without a bigger list or a model that returns what it is asked for.
-- [ ] **VARIETY AUDIT 2026-09-16 (Logan: "a lot of cheesecake, brownie, paneer, salad bowls").**
+- [x] **VARIETY AUDIT 2026-09-16 (Logan: "a lot of cheesecake, brownie, paneer, salad bowls").**
   Live pool 238 rows. Scripts in the session; classification is by name regex, so ±a few.
   - **Desserts are the imbalance, not any one dish:** sweet-treat is 85 of 238 (36%), and 38% of
     everything added since Aug 31. Four forms are 55 of those 85: cheesecake 20, brownie 14, ice
@@ -175,7 +212,7 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   show 10. Hero + personalised-shelf picks are pinned and counted; NEW TODAY next; the rest rotate
   daily. Search still reaches everything. Simulated on the live pool: 149 of 238 shown, desserts
   36% → 28% of the page, 0 new dishes hidden.
-  - [ ] **UNVERIFIED ON DEVICE.** Tell: scroll Discover to the end of Everything else and count
+  - [x] **MOVED to ▶ TOMORROW item 6.** Tell: scroll Discover to the end of Everything else and count
     cheesecakes (≤ 4 on the whole page) and pasta (≤ 10); search "cheesecake" still finds all of
     them; tomorrow the four visible cheesecakes are different ones.
 - [x] **JUNK INGREDIENT LISTS (`7f109c8`, DEPLOYED).** 3 live rows had benefit bullets or a creator's
@@ -191,11 +228,11 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   savoury cuisine → morning → american-comfort, with named examples for every collision seen.
   24 live rows moved under it with a guard on the old tag (list in the commit body, reversible):
   sweet-treat 85 → 70. Indian rows did not increase — 6 moved onto the Indian shelf from snack/asian.
-  - [ ] **DECISION (Logan): a "Salads & bowls" shelf.** ~20 live dishes (tuna/pasta/egg salads,
+  - [x] **DECIDED + BUILT (`fade012`; Logan: "your call"): a "Salads & bowls" shelf.** ~20 live dishes (tuna/pasta/egg salads,
     cuisine-less protein bowls) have no honest home: 8 sit on mediterranean, the rest on snack and
     comfort, and the rule's catch-all is a shelf titled "Comfort food, minus the guilt". Adding one
     = a 10th SHELF_TAG + title + prompt line + retag of those rows.
-- [ ] **LEVER 3 — measured plan, not built (Logan: "12-18 per day… wait till tomorrow?").**
+- [x] **LEVER 3 — BUILT as replay + `?model=` + shards (`303f098`); the test and its decision rule are ▶ TOMORROW item 7.**
   Pricing checked 2026-09-16 (ai.google.dev/gemini-api/docs/pricing): `gemini-3.1-flash-lite` free
   tier, paid $0.25/$1.50 per 1M in/out (current). `gemini-3.8-flash` free tier, paid $0.75/$3.75
   until Dec 31 then $1.50/$7.50. `gemini-3.1-pro-preview` NO free tier, $2/$12. At ~60k in / 50k out
@@ -206,7 +243,7 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   instead of ~1,300) — same candidates, one variable. (3) Replay 808 and Sep 17 on Lite vs 3.8
   Flash; switch only if raw per attempt roughly doubles and the wall budget still fits.
   (4) Search volume 13 → 26 stays post-launch (halves the runs a day).
-- [ ] **FULL SHELF REVIEW, every dish (Logan 2026-09-16 evening: "why are many salads in protein
+- [x] **FULL SHELF REVIEW, every dish (Logan 2026-09-16 evening: "why are many salads in protein
   snack?").** DB check first: `high-protein-snack` holds ZERO salads (24 rows: balls, bars, bark,
   bites, dips, crackers, Chicken Spread) — the three that were there moved to salads-bowls at
   `fade012`. The phone was showing an older pool: Discover refetches only on a tab return more
@@ -214,7 +251,7 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   until the tab is left. Tell: switch tabs and come back (or relaunch), and salads are gone from snacks.
   Review result, 236 dishes: **sweet-treat, indian, high-protein-snack, american-comfort and
   salads-bowls are right** (the sweet shelf's problem is repeats, not misfiling). 15 still misfiled,
-  PROPOSED, not applied — waiting on Logan:
+  APPLIED 2026-09-16 (Logan: "yes"; guarded on the old tag, 16 of 16 incl. Paneer Pasta) with the 4 rule gaps written into the prompt (`303f098`):
   - sweet-treat → breakfast: Greek Yogurt Berry Parfait · → high-protein-snack: Blueberry Cheesecake
     Yogurt, Strawberry Protein Cloud Bread
   - breakfast → american-comfort: Ham and Cheese Protein Wrap (a lunch wrap) · → mexican: Sweet Potato
@@ -227,14 +264,14 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   - mediterranean → american-comfort: Creamy Tomato Tofu Soup, Tofu Sandwich · → asian: Brown Lentil
     Cabbage Stir-fry
   - mexican → indian: Mexican Inspired Rajma Salad (rajma, paneer, curd, peri peri)
-  Kept on purpose: Paneer Pasta on italian (a tomato-oregano pasta with paneer — the reader sees pasta);
+  Paneer Pasta moved to indian after all (Logan: "your call" — an Indian creator's desi pasta built on paneer);
   Black Bean and Corn Salad on salads-bowls; Chicken Spread on snacks.
   **Rule gaps these expose, for the prompt (same go):** pasta/pizza built on another cuisine's sauce
   or staples (schezwan, masala, paneer + soya) takes THAT cuisine; a stir-fry with no cuisine → asian;
   a soup or sandwich with no cuisine → american-comfort; a parfait → breakfast.
   After the moves: indian 26 → 32. Not more Indian food — the same dishes, off the Italian, Asian and
   Mexican shelves where they read as Indian food everywhere.
-- [ ] **THE 150 s LIMIT IS THE ARCHITECTURE, NOT A LAW (Logan: "can't we just extend that time?").**
+- [x] **THE 150 s LIMIT IS THE ARCHITECTURE, NOT A LAW (Logan: "can't we just extend that time?").**
   The whole pipeline runs as ONE HTTP request to an edge function. Supabase docs (checked
   2026-09-16, supabase.com/docs/guides/functions/limits): request idle timeout 150 s for every plan
   (no response by then = 504, what killed Sep 14/15); wall clock 150 s Free / 400 s paid; CPU 2 s
@@ -245,6 +282,8 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   each run as their own invocation (candidates → model → images) — no overall limit on any plan;
   (c) parallel model shards — shrinks the model step itself. With (a) or (b) the model choice is
   made on quality and cost alone, and the attempt budget + image deadline become safety nets.
+  **DONE (Logan: "your call"):** (c) parallel shards, off until item 7 measures them, and photos as
+  their own 08:05 step (`303f098`, cron job 6). (a)/(b) are not needed while the model step is short.
 - [x] **INDIAN SHARE since the region change (`2d0a374`, Aug 30: keyword search scoped US/English)
   — the change worked.** Same measures before (Aug 17-30, 113 rows) → after (Aug 31-Sep 16, 125):
   Indian dish or creator 26% → **10%** (8% in the last 10 days); needs an Indian grocer (the
@@ -257,6 +296,7 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   non-dishes. Raising yield (lever 3: bigger model, more searches) could let the share climb back.
   Before lever 3 ships, add the day's Indian share to the funnel/daily report, and decide the line
   (e.g. ≤ 15% of a batch, needs-Indian-grocer ranked last, matching `2d0a374`'s pantry-match reason).
+  Measured per batch in ▶ TOMORROW items 5 and 7; the model decision rule includes the ≤ 15% line.
 - [x] **"Only 3 meals showing" — no Discover-tab bug.** No today-only shelf; NEW TODAY badges are
   spread through the shelves; the pool (233 + today's 10, all with photos) is inside the client's
   30-day window. The "3" was the daily report line or three badges.
@@ -617,13 +657,16 @@ significant findings on every pass — 13 fixes on 2026-08-30 alone, including t
 3x and 8x protein overclaims and a gate that had been silently dead for 19 days. Assume more remain.
 - [ ] Keep re-running the cron and re-auditing the pool. Full standing procedure, open items and
       the measurement methods live in **`docs/TRENDING-OPEN.md`** — read it before each pass.
-- [ ] Settle whether daily yield is variance or a defect. Identical code, sequential runs gave raw
+- [ ] **→ ▶ TOMORROW item 7 (replay A and A2 on an identical list, ~1 quota unit each).** Settle whether daily yield is variance or a defect. Identical code, sequential runs gave raw
       24 vs 5 and stored 17 vs 4 — so a once-daily cron takes ONE sample from that spread and the
       swap makes it permanent. Needs ~10 SEQUENTIAL `?dryRun=true` runs. If variance confirms, the
       fix is architectural (run 2-3x, keep the best batch) and no amount of prompt work helps.
-- [ ] Finish the OpenAI fallback verification — one call:
+- [ ] **→ ▶ TOMORROW item 7 E (replay + `&provider=openai`, ~1 unit).** Finish the OpenAI fallback verification — one call:
       `...generate-trending-meals?refresh=true&dryRun=true&provider=openai`
-- [ ] **Four fixes shipped 2026-08-30 affect GENERATION only and are still unproven** — the method
+- [x] **CHECKED 2026-09-16 against the 123 rows written since:** method checklist PASS (steps stating a
+      time 25% → 64%, a temperature 13% → 24%, 4.2 → 5.8 steps); junk gates PASS (0 massless or
+      scaffold rows); truncation guard fired once with detail and it was a FALSE POSITIVE (▶ TOMORROW 8);
+      decimal parser still unmeasured (▶ TOMORROW 9). Original note: **Four fixes shipped 2026-08-30 affect GENERATION only and are still unproven** — the method
       checklist, the truncation guards, the decimal parser fix and the junk gates. One run confirms
       all four; the exact SQL and pass criteria are in the "CONFIRM ON THE NEXT PIPELINE RUN"
       section at the end of `docs/TRENDING-OPEN.md`. Do not claim any of them work until then.
@@ -1012,13 +1055,13 @@ shelves. No "Today's picks" shelf — first-shelf-wins pulled new recipes OUT of
 ## 2k. VERIFY — shipped 2026-09-10, not yet confirmed  *(grouped by what unblocks each)*
 **A. The Sep 11 3am run (08:00 UTC)** — first SCHEDULED run on the fixed cron auth, and the first to
 split time three ways at extraction. Deployed source was diffed byte-for-byte against the repo.
-- [ ] `select count(*) meals, count(rest_time) split, count(time_phases) phased, count(*) filter (where rest_time >= 240) overnight
+- [x] **PASS, checked 2026-09-16: split = phased = meals on every day Sep 4-16 (Sep 11: 9/9/9).** `select count(*) meals, count(rest_time) split, count(time_phases) phased, count(*) filter (where rest_time >= 240) overnight
   from trending_meals where generated_at = '2026-09-11';` — PASS = `meals > 0` AND `split = meals`
   AND `phased = meals` (ordered phases shipped 2026-09-10; a NULL means the extractor's order
   disagreed with its totals — look at which recipe before assuming a bug).
   Then the 08:20 health-check row in `net._http_response` reads `"healthy":true`. The pipeline's own
   row saying `timed_out: true` is EXPECTED (pg_net gives up at 5s, the run takes ~50s).
-- [ ] Does `pipeline_runs` get a row? Sep 6 (12 meals) and Sep 10 (13) wrote none; Sep 7 (2) did.
+- [x] **PASS: every real run writes one (Sep 16: 800, 805, 808), and since `05179ea` it is written before images.** Does `pipeline_runs` get a row? Sep 6 (12 meals) and Sep 10 (13) wrote none; Sep 7 (2) did.
   Hypothesis: big batches exhaust wall-clock after images, before the final log write.
 
 **B. Device reload** — on Discover, SWITCH TABS ONCE after opening (it paints from an old cache).
