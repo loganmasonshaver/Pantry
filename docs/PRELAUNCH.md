@@ -1850,6 +1850,21 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       while focused. Costs to measure: Discover's mount work and its first photos move to every
       launch, a few seconds in, on a phone that logs memory pressure. Tell after the fix: open the app,
       wait ~5 s on Home, tap Discover → the finished page, no skeleton.
+- [ ] **RAISED BY LOGAN 2026-09-15 — the Pantry tab takes a moment to load when tapped, for
+      ingredients already on his list. CAUSE FOUND, FIXED, UNVERIFIED ON DEVICE (`lib/pantryGroup.ts`
+      + `app/(tabs)/pantry.tsx` + `app/(tabs)/_layout.tsx`).** The tab is a lazy route with NO local
+      copy of the list: the tap mounted the screen, which then queried Supabase for every row and
+      rendered an empty list until the answer came back (plus two small profile/meal_logs reads for
+      the notice line). Home caches its day and Discover its feed; the pantry never was. The launch
+      warm read (`prefetchPantryNames`) fetches only in-stock NAMES for Home's readiness line and is
+      consumed once by Home. Fixed both ways: a disk mirror at `pantry_items:<uid>` written on every
+      change (not only after a fetch — toggles, adds, deletes and Clear pantry edit state directly),
+      painted on mount and corrected by the focus fetch; and the tabs layout now preloads the Pantry
+      route in its own idle window after Discover's. Grouping moved to a tested pure function so the
+      cache paint and the network paint build the identical list. Trade accepted, same as Home's log:
+      a row changed on another device can show for the second before the fetch answers. Tells: cold
+      launch, wait ~5 s on Home, tap Pantry → the list is there immediately, no empty gap; toggle an
+      item Out, force-quit, relaunch, tap Pantry → it is still Out and at the bottom of its aisle.
 - [x] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
       Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
       frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI
