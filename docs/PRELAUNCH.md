@@ -1523,7 +1523,7 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
-- [ ] **BUILT + DEPLOYED 2026-09-16, UNVERIFIED on device — ONE pantry matcher on all three surfaces.**
+- [x] **VERIFIED on device 2026-09-16 (Logan) — ONE pantry matcher on all three surfaces.**
       `lib/mealReadiness.ts` now imports `isInPantry` from `_shared/pantry-check.ts` (plain TS, no
       Deno; Metro bundles it — confirmed by building the real entry and finding it in the bundle) and
       the meal screen reads `pantryHas` from there, so Home, the detail and the server's cookability
@@ -1560,7 +1560,7 @@ claiming exact wording from the top apps is guessing.
       was created alongside Bell Peppers and Greek Pepperoncini (a fridge-door jar reading, not the
       bunch). The bananas were MISSED, not mislabelled; scan-pantry keeps no raw output (logs only),
       so the dashboard function log at ~01:49 CDT is the only place to confirm per-photo counts.
-- [ ] **BUILT 2026-09-16, UNVERIFIED on device — the meal screen no longer opens with every ingredient
+- [x] **VERIFIED on device 2026-09-16 (Logan) — the meal screen no longer opens with every ingredient
       under + Add.** `pantryKnown` gate: rows render as one muted list with no chips or labels until
       the pantry has answered; the Pantry tab's disk mirror (`lib/pantryMirror.ts`, key shared with
       the tab) seeds it in a few ms, the network read confirms. Tell: open any meal — no flash of
@@ -1569,7 +1569,7 @@ claiming exact wording from the top apps is guessing.
       (`pantryFetched`); the meal screen never got the gate. Fix: hold the buckets (render rows
       without chips/labels) until the pantry query resolves, and seed from the Pantry tab's disk
       mirror `pantry_items:<uid>` for an instant first paint. Clean bounded fix — ship on next pass.
-- [ ] **BUILT + DEPLOYED 2026-09-16, UNVERIFIED on device — thin pantry.** (a) the server no longer pads
+- [x] **VERIFIED on device 2026-09-16 (Logan) — thin pantry.** (a) the server no longer pads
       the deck with uncookable meals: a deck of one or two is returned as is, and an EMPTY one is
       refused with the slot refunded; (b) floor: under **6** in-stock items Cook Now is refused before
       the model is called (server `MIN_PANTRY_FOR_COOK_NOW`, mirrored client-side so no round trip),
@@ -1601,7 +1601,7 @@ claiming exact wording from the top apps is guessing.
       "Need:" on Home (Logan questioned it):** keep it — after (a)–(d) it only appears when the pantry
       changed AFTER generation (an item toggled Out), which is true and useful; today it also fires
       from the padding and the matcher drift, both of which go away.
-- [ ] **BUILT 2026-09-16, UNVERIFIED on device — Home "Cook from your pantry": two ✓ Ready to cook over
+- [x] **VERIFIED on device 2026-09-16 (Logan: "all is verified") — Home "Cook from your pantry": two ✓ Ready to cook over
       three meals read as partial failure** (Logan 2026-09-16). Shipped as agreed below: Home rows
       are Need or ✓ Ready only; the meal screen has an OPTIONAL group after IN YOUR PANTRY with
       "Not needed for this dish — nice if you have it." and per-row + Add. One definition for both
