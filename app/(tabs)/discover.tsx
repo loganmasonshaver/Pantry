@@ -28,6 +28,7 @@ import {
 import { isNewToday, interleaveNewToday, newTodayReach } from '@/lib/discoverFreshness'
 import { isReadyWithin, formatRestBadge, formatTimeLine, isNearlyThere, countCountableIngredients } from '@/lib/ingredientDisplay'
 import { dishArchetype, spreadByArchetype, ARCHETYPE_PER_SHELF } from '@/lib/dishArchetype'
+import { capFamiliesOnPage } from '@/lib/dishFamily'
 import { dietExcludedStaples } from '@/constants/staples'
 import { todayStr } from '@/lib/localDate'
 import { trackMealViewed, trackMealImpressions, MealSource } from '@/lib/analytics'
@@ -1040,6 +1041,18 @@ export default function DiscoverScreen() {
     // find it. It also keyed on the UTC date, which flips at 7pm US Central while the pipeline runs
     // at 3am, so it vanished for eight hours every evening. Do not re-add it without solving both.
 
+    // ── Page-wide family cap ──
+    // Personalised shelves have claimed by now, and they are exempt: "you can almost cook this" is a
+    // better reason to show a fourth cheesecake than a daily rotation is a reason to hide it. Their
+    // picks and the hero are pinned, so they still count against their families; the intent shelves
+    // and Everything else draw only from what is left. Search still reaches every meal, because it
+    // reads `filtered`, not this.
+    const pageCap = capFamiliesOnPage(
+      featured ? [featured, ...browseGrid] : browseGrid,
+      { day: dayOfYear, isNew: m => isNewToday(m.created_at), pinnedIds: [...(featured ? [featured.id] : []), ...taken] },
+    )
+    const pageGrid = pageCap.shown.filter(m => m.id !== featured?.id)
+
     // ── Intent shelves ──
     // Shelf COUNT scales with the pool. Four shelves over 35 meals leaves two-item sections that
     // read as a broken feed; the same four over 450 leaves everything in the catch-all. 2 / 4 / 6.
@@ -1058,7 +1071,7 @@ export default function DiscoverScreen() {
     const intent: { key: string; title: string; meals: DiscoverMeal[] }[] = []
     for (const shelf of rotatedOrder) {
       if (intent.length >= shelfBudget) break
-      const meals = claim(browseGrid.filter(shelf.match), 12)
+      const meals = claim(pageGrid.filter(shelf.match), 12)
       if (meals.length >= 2) intent.push({ key: shelf.key, title: shelf.title, meals })
       else meals.forEach(m => taken.delete(m.id))
     }
@@ -1066,7 +1079,7 @@ export default function DiscoverScreen() {
     // Everything the shelves did not claim, including everything the archetype cap skipped — which
     // is exactly where the repeats now accumulate, so this section is the one that most needs the
     // spread. Reordered, not filtered: nothing is removed from the page.
-    const leftovers = spreadByArchetype(browseGrid.filter(m => !taken.has(m.id)))
+    const leftovers = spreadByArchetype(pageGrid.filter(m => !taken.has(m.id)))
 
     // DISPLAY ORDER IS NOW DECOUPLED FROM CLAIM ORDER, and that separation is the whole fix.
     //
@@ -1133,7 +1146,7 @@ export default function DiscoverScreen() {
       ...(leftoverSection.meals.length > 0 ? [leftoverSection] : []),
     ]
     // excludedStaples feeds nearlyRanked's missingCount above and arrives after first paint.
-  }, [browseGrid, budget, pantryNames, lastCooked, excludedStaples])
+  }, [browseGrid, featured, budget, pantryNames, lastCooked, excludedStaples])
 
   // MOUNT THE FOLD FIRST, THE REST AFTER INTERACTIONS.
   //
