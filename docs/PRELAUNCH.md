@@ -2011,6 +2011,25 @@ claiming exact wording from the top apps is guessing.
         (button: spinner + "Plating your meals…", capped 25 s, abandoned if the modal closes) before
         showing the reveal. The build-up glow is removed; the reveal opens on the headline read-off and
         the cards follow it. Tell: reveal opens → headline words → cards with photos, nothing empty.
+      - [ ] **MEASURED 2026-09-16 17:41 (Logan's 6-photo scan) — and PLAN for the ~10 s "Plating your
+        meals…" wait, awaiting go.** Vision: **39.5 s via gpt-5.4, no fallback**, 42,356 tokens in /
+        5,479 out / 0 reasoning (so the timeout+fallback suspicion is ruled out for this scan). Save:
+        31 new + 49 restocked in 1.7 s. Timeline from the database: pantry save committed **17:41:00.9**
+        → meals (prefetch text) inserted **17:41:02.6**, i.e. generation was still running when Logan
+        tapped → the three photos generated **17:41:09.7 / 10.0 / 10.3** → downloads → reveal. The
+        plating wait was ~2 s of meal generation + ~7.5 s of photo generation + <1 s download. Not
+        measurable yet: when the meal generation STARTED (so its real duration), and the scan's
+        end-to-end time on the phone (upload + edge overhead on top of the 39.5 s vision call).
+        PLAN: (A) perf marks for the whole chain — scan request start/end, prefetch start, meals back,
+        each photo URL, photos downloaded, plating start/end — so one scan gives every number;
+        (B) parallel per-photo vision calls: the 39.5 s is mostly the model writing 5.5k output tokens
+        in one stream — per-photo calls write ~0.9k each, so wall time becomes about the slowest photo
+        (estimate 10-15 s, to be measured); input tokens rise ~+33% (the ~2.8k-token prompt repeated
+        per photo; image tokens unchanged), output about the same; quality check needed because each
+        call loses cross-photo context (the review's dedupe already merges repeats); (C) while plating,
+        keep the big-type story running instead of a spinner on a button — does not shorten, changes
+        how it feels; (D) generate-meals starts the three photo generations itself the moment the
+        meals exist, saving the client round trip — small (~1-2 s), honest about it.
       - [ ] **MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision.** scan-pantry
         (deployed) returns `_meta { ms, provider, primaryError, usage }` and the app logs
         `[perf] scan-pantry: vision Xms via …, tokens in/out (reasoning)` to Metro. Suspect, not proven:
