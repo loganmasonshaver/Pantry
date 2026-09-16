@@ -1340,6 +1340,26 @@ the limit, rather than generating around it.
   until a floor like 5 distinct cooks. Optionally popularity as a TIEBREAKER inside the hero's pool
   of new, unseen, time-appropriate dishes.
 
+## 2n. POST-LAUNCH — the pantry scan INSIDE onboarding, as a Superwall A/B  *(Logan 2026-09-16: "an important one to test — don't let this slip after I've launched")*
+- [ ] **The test.** Arm B moves the pantry scan (and possibly the cook reveal) into onboarding,
+  BEFORE the paywall, so the ask lands on a user who has just watched "N items found" from their
+  own fridge. Arm A is today's flow (step 7 → createaccount → paywall → scan after). Logan's
+  hypothesis, written 2026-09-16: **B converts better and costs more** — a vision call (plus a meal
+  generation and images if the reveal is included) per onboarding START, paid before anyone has
+  subscribed. Which wins is a number, not a vibe: (paid × LTV − cost per start) per arm.
+- [ ] **Mechanics to confirm before building (use the `superwall` skill / docs — do not assume):**
+  Superwall campaign split assigns the arm; the app has to read the assigned variant before step 7
+  and branch. The scan runs under the user's JWT and the cap is per user, so it must sit AFTER
+  createaccount — or get an anonymous path with its own abuse ceiling (the anon key ships in the
+  bundle; see §6e). Scan cap, scan-cap refund, and the first-run consent prompt all have to hold
+  inside onboarding.
+- [ ] **Measure per arm:** onboarding start → trial start, trial → paid, and OpenAI + fal spend ÷
+  onboarding starts. Needs real traffic — a few hundred starts a week so an arm reads inside a
+  month. Prediction and kill line go in `~/founder-research/MY-EXPERIMENTS.md` **before** it runs
+  (queued there as Q2 with the prediction blank — Logan fills it).
+- [ ] **Do not run it confounded:** §4 (skip-onboarding paywall variant) and §5 (rating prompt)
+  settled first, and not in the same window as a price test.
+
 ## 2h. Also designed, not built — scale instead of regenerating
 Logan asked why a goal change needs a whole new generation when the dish is still fine.
 - [ ] **Scale the existing meals for calorie/protein/macro changes instead of regenerating.**
