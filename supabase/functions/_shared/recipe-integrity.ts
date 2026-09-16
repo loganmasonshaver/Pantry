@@ -330,9 +330,11 @@ const SYNONYMS: Record<string, string[]> = {
 // a video that is not a recipe; on 2026-09-16 the model returned "Daily Meal Plan" and "Hair
 // Health Seed and Date Mix" anyway, and no gate downstream read a name for what it was. Also run
 // on candidate TITLES before the model, so the pick is not spent.
-const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat|full day|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|routine)\b/i
+// Hashtags come off first: a real pumpkin loaf was filtered on "#routine", and "what I eat" alone
+// took an omelet whose title mentioned it in passing — the compilations say "in a day".
+const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin))\b/i
 export function nonDishName(name: string): string | null {
-  const m = NOT_A_DISH_RE.exec(name ?? '')
+  const m = NOT_A_DISH_RE.exec((name ?? '').replace(/#\S+/g, ' '))
   return m ? m[1].toLowerCase() : null
 }
 

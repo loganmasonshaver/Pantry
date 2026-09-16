@@ -24,6 +24,11 @@ const TITLE_STOPWORDS = new Set([
   'no', 'without', 'free', 'style', 'version', 'hack', 'under', 'over', 'per', 'serving', 'fitness', 'gym',
 ])
 
+// Form words the model swaps freely when it renames a dish it was told is in the pool: "Tiramisu
+// Protein Balls" came back as "Tiramisu Snack Balls" and then "Tiramisu Bites". One word for the
+// family, applied after singularising.
+const CANON: Record<string, string> = { ball: 'bite', truffle: 'bite', bliss: 'bite' }
+
 // Same idea as recipe-integrity's singular(): both sides go through it, so only consistency
 // matters, not linguistic correctness.
 function singular(w: string): string {
@@ -39,7 +44,8 @@ function singular(w: string): string {
 export function contentWords(s: string): Set<string> {
   const out = new Set<string>()
   for (const raw of (s ?? '').toLowerCase().match(/[a-zà-ɏ]+/g) ?? []) {
-    const w = singular(raw)
+    const w0 = singular(raw)
+    const w = CANON[w0] ?? w0
     if (w.length > 2 && !TITLE_STOPWORDS.has(w) && !TITLE_STOPWORDS.has(raw)) out.add(w)
   }
   return out

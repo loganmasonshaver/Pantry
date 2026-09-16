@@ -797,8 +797,11 @@ test('nameIngredientGaps: albacore is tuna', () => {
 test('nonDishName: plans, vlogs and health claims are not dishes; food is', () => {
   assert.equal(nonDishName('Daily Meal Plan'), 'meal plan')
   assert.equal(nonDishName('Hair Health Seed and Date Mix'), 'hair health')
-  assert.equal(nonDishName('What I Eat In A Day As A Nurse'), 'what i eat')
-  assert.equal(nonDishName('Full Day of Eating 2500 kcal'), 'full day')
+  assert.equal(nonDishName('What I Eat In A Day As A Nurse'), 'what i eat in a day')
+  assert.equal(nonDishName('Full Day of Eating 2500 kcal'), 'full day of eating')
   assert.equal(nonDishName('Creamy Paneer Pasta'), null)
+  // Hashtags are not the title, and a passing mention is not a compilation.
+  assert.equal(nonDishName('high protein pumpkin loaf | macro friendly #bakewithme #cozy #routine'), null)
+  assert.equal(nonDishName('spinach cottage cheese egg omelet — deconstructed egg bites what I eat'), null)
   assert.equal(nonDishName('Meal Prep Chicken Burrito Bowls'), null)
 })

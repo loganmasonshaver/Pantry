@@ -51,6 +51,8 @@ test('nameContains: a known name plus at most one word is the same dish', () => 
   const w = contentWords
   assert.equal(nameContains(w('Creamy Paneer Pasta'), w('Paneer Pasta')), true)
   assert.equal(nameContains(w('Tiramisu Snack Balls'), w('Tiramisu Protein Balls')), true)
+  assert.equal(nameContains(w('Tiramisu Bites'), w('Tiramisu Protein Balls')), true)
+  assert.equal(nameContains(w('Peanut Butter Energy Truffles'), w('Peanut Butter Balls')), true)
   assert.equal(nameContains(w('Double Chocolate Cheesecake'), w('Chocolate Cheesecake')), true)
   assert.equal(nameContains(w('Chicken Fried Rice with Egg'), w('Chicken Rice')), false)   // two extra words
   assert.equal(nameContains(w('Creamy Vegan Tofu Pasta'), w('Creamy Vegan Mushroom Pasta')), false)
