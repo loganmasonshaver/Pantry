@@ -1760,7 +1760,7 @@ claiming exact wording from the top apps is guessing.
       directly under the strip and the list scrolls to the last item.
 - [x] **VERIFIED on device 2026-09-16 (Logan) — ‹ lands on the camera; no double spend.** Spamming ‹ /
       the camera button left `scan_usage` pantry at 7 (the limit), unchanged. **Found in that test and
-      FIXED same day, UNVERIFIED:** the camera button flipped words on its own ("Scan 4 photos" ↔
+      FIXED same day, VERIFIED (Scan A):** the camera button flipped words on its own ("Scan 4 photos" ↔
       "View results") because its label read the in-flight ref during render; now state-driven, with
       three labels — "View results" (results exist), "Back to scan" (still running), "Scan N photos".
 - [ ] **BUILT + DEPLOYED 2026-09-16, UNVERIFIED on device — the weekly scan limit is told up front, with
@@ -1798,7 +1798,7 @@ claiming exact wording from the top apps is guessing.
       fire a paid generation). Tells: (1) scan → ‹ during the theatre → camera, strip intact, button
       "View results" → theatre continues, `scan_usage` pantry count +1 not +2; (2) same after the
       scan finishes → straight to the review; (3) no route ever shows "More ingredients, tastier meals".
-- [ ] **UNVERIFIED — review ‹ goes to the CAMERA, and the scan is not spent twice** (2026-09-16,
+- [x] **VERIFIED on device 2026-09-16 (Logan, Scan A) — review ‹ goes to the CAMERA, and the scan is not spent twice** (2026-09-16,
       Logan: "get rid of that screen"). ‹ on the review used to reopen the loading theatre, which had
       nothing left to show. Now it lands on the camera with the photos still in the strip AND the
       results kept: the big button reads **"View results"** and reopens the review with no call.
@@ -1841,7 +1841,7 @@ claiming exact wording from the top apps is guessing.
         earlier set with no sign the scan changed nothing — the same silent-stale the flash was.
         Rare (cap or timeout); the right fix is load() forcing a generation when the prefetch it
         awaited resolved null.
-      - [ ] **BUILT 2026-09-16, UNVERIFIED on device — scanning past the meal cap.** Scan stays live.
+      - [x] **VERIFIED on device 2026-09-16 (Logan, Scan A) — scanning past the meal cap.** Scan stays live.
         Add all → if this open's prefetch FAILED and `meal_gen` is at the cap, the success step says
         "You've used today's meal picks. Your next ones will use everything you just added." with one
         Done button, no reveal (COOK_REVEAL_SEEN_KEY not set). The reveal now uses `autoLoad=false`
