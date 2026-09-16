@@ -190,6 +190,45 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   instead of ~1,300) — same candidates, one variable. (3) Replay 808 and Sep 17 on Lite vs 3.8
   Flash; switch only if raw per attempt roughly doubles and the wall budget still fits.
   (4) Search volume 13 → 26 stays post-launch (halves the runs a day).
+- [ ] **FULL SHELF REVIEW, every dish (Logan 2026-09-16 evening: "why are many salads in protein
+  snack?").** DB check first: `high-protein-snack` holds ZERO salads (24 rows: balls, bars, bark,
+  bites, dips, crackers, Chicken Spread) — the three that were there moved to salads-bowls at
+  `fade012`. The phone was showing an older pool: Discover refetches only on a tab return more
+  than 5 min after the last fetch, and a pool that arrives while the tab is on screen is parked
+  until the tab is left. Tell: switch tabs and come back (or relaunch), and salads are gone from snacks.
+  Review result, 236 dishes: **sweet-treat, indian, high-protein-snack, american-comfort and
+  salads-bowls are right** (the sweet shelf's problem is repeats, not misfiling). 15 still misfiled,
+  PROPOSED, not applied — waiting on Logan:
+  - sweet-treat → breakfast: Greek Yogurt Berry Parfait · → high-protein-snack: Blueberry Cheesecake
+    Yogurt, Strawberry Protein Cloud Bread
+  - breakfast → american-comfort: Ham and Cheese Protein Wrap (a lunch wrap) · → mexican: Sweet Potato
+    Chorizo Bowl (chorizo, Chihuahua cheese, pico; no eggs)
+  - italian → indian: Lauki Pasta (paneer, schezwan, peri-peri masala), Paneer Pizza (moong dal crust)
+    · → american-comfort: Pepperoni Pizza Skillet (beef + rice + pizza sauce; its twin Pizza Crunch
+    Steak Skillet is already comfort)
+  - asian → indian: Green Butter Garlic Chicken (paneer, garam masala — Indo-Chinese), Konjac Noodles
+    (paneer + soya chunks) · → salads-bowls: Quinoa Edamame Chicken Bowl (soy sauce is not a cuisine)
+  - mediterranean → american-comfort: Creamy Tomato Tofu Soup, Tofu Sandwich · → asian: Brown Lentil
+    Cabbage Stir-fry
+  - mexican → indian: Mexican Inspired Rajma Salad (rajma, paneer, curd, peri peri)
+  Kept on purpose: Paneer Pasta on italian (a tomato-oregano pasta with paneer — the reader sees pasta);
+  Black Bean and Corn Salad on salads-bowls; Chicken Spread on snacks.
+  **Rule gaps these expose, for the prompt (same go):** pasta/pizza built on another cuisine's sauce
+  or staples (schezwan, masala, paneer + soya) takes THAT cuisine; a stir-fry with no cuisine → asian;
+  a soup or sandwich with no cuisine → american-comfort; a parfait → breakfast.
+  After the moves: indian 26 → 32. Not more Indian food — the same dishes, off the Italian, Asian and
+  Mexican shelves where they read as Indian food everywhere.
+- [ ] **THE 150 s LIMIT IS THE ARCHITECTURE, NOT A LAW (Logan: "can't we just extend that time?").**
+  The whole pipeline runs as ONE HTTP request to an edge function. Supabase docs (checked
+  2026-09-16, supabase.com/docs/guides/functions/limits): request idle timeout 150 s for every plan
+  (no response by then = 504, what killed Sep 14/15); wall clock 150 s Free / 400 s paid; CPU 2 s
+  (network waits do not count). Ways out, smallest first: (a) respond at once and finish in
+  `EdgeRuntime.waitUntil` — escapes the 150 s response limit, still capped by wall clock, so it only
+  buys time on a PAID plan (**plan not known to the agent — dashboard → Organization → Billing**; docs
+  do not state a separate background-task limit, so verify with one run); (b) split into stages that
+  each run as their own invocation (candidates → model → images) — no overall limit on any plan;
+  (c) parallel model shards — shrinks the model step itself. With (a) or (b) the model choice is
+  made on quality and cost alone, and the attempt budget + image deadline become safety nets.
 - [x] **INDIAN SHARE since the region change (`2d0a374`, Aug 30: keyword search scoped US/English)
   — the change worked.** Same measures before (Aug 17-30, 113 rows) → after (Aug 31-Sep 16, 125):
   Indian dish or creator 26% → **10%** (8% in the last 10 days); needs an Indian grocer (the
