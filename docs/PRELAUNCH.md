@@ -9,42 +9,48 @@ Ordered by what should be done first. Later items depend on earlier ones.
 ---
 
 ## 0. DISCOVER PIPELINE — yield collapsing, 13 → 9 → 5 → 2  *(Logan 2026-09-13: solve this with Fable 5.1, top of the list)*
-**AUDIT 2026-09-16 (Logan: "only 3 meals showing", plan only) — the Sep 16 08:00 UTC cron stored 3.**
+**AUDIT 2026-09-16 (Logan: "only 3 meals showing") — the Sep 16 08:00 UTC cron stored 3.**
 Plumbing held: `net._http_response` 261 = HTTP 200, funnel row 800, 3 rows at 08:00:53, all with
 photos, whole run **58 s of the gateway's 150 s**. The pool is intact (233 rows visible in 30 days);
 "3" is today's increment. Funnel: 640 raw → 445 dedup → 180 view floor → **48 sent** (normal-to-high)
 → attempt 1 Gemini **raw 9** → 3 kept (nearDup 3, nameGap 2, dropped 1) → attempt 2 **gpt-4o-mini**
 raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. Variety: all three are
 "Creamy … Pasta". What the audit found, in order of cost:
-- [ ] **A. Half the time budget goes to the provider Logan ruled out.** `attempts = [...selected,
-  ...4 × selected[0]]` = Google, **OpenAI**, Google ×4. The provider comment says Gemini-only by
-  Logan's call, OpenAI only as the outage fallback — but the retry list makes gpt-4o-mini attempt #2
-  on EVERY run. Before the wall budget that was one wasted slot of six; now that ~2 attempts fit, it
-  is half the LLM work, and the rotated Gemini retries built to average out the model's selectivity
-  (19 of 38 on Sep 15, 9 of 48 today) never run. Plan: Gemini retries first; OpenAI only when a
-  Gemini call errors or returns nothing. `?provider=openai` keeps it exercisable.
-- [ ] **B. The 50 s start deadline is sized for a 12-recipe tail and applied to a 3-recipe day.**
-  The code budgets ~40-60 s of tail (ranking, FatSecret, images, insert); today's tail was ~5-8 s
-  (loop broke after 50 s, rows landed at 53 s, funnel row at 58 s), leaving ~90 s unused. The tail
-  grows with survivors, so a thin union is exactly when there is time for more attempts. Plan: derive
-  the start deadline from survivors so far (e.g. keep 50 s at ≥ 12, allow later starts when thin),
-  hard ceiling well under 150 s. **Only after C has measured one real run** — no latency numbers
-  exist yet, and PRELAUNCH already says measure before touching these constants.
-- [ ] **C. Instrument first, no behavior change (0 quota).** The funnel has no timing, so "was
-  Gemini slow today" is unanswerable without the dashboard. Add per-attempt `{provider, offset, ms,
-  raw, kept}`, `loopEndMs`, `tailMs`, `totalMs`. Also: `llm_<provider>` stores the CUMULATIVE
-  counters, so `llm_OpenAI` reads raw 13 with Gemini's droppedDetail copied in — store per-attempt
-  deltas instead. And record WHAT nearDup/nameGap rejected (candidate, matched pool name, Jaccard /
-  missing word): nearDup is 3-14 per run and grows with a 233-row pool, and nothing says whether it
-  is catching real repeats or near-names like "Creamy X Pasta" vs "Creamy Y Pasta".
+- [x] **C + A + B BUILT, DEPLOYED, DRY-RUN 2026-09-16 (`be54721`; Logan: "build C, A and B, then dry
+  run").** A: OpenAI takes a slot only right after a Gemini attempt that returned NOTHING. B: an
+  attempt starts only if this run's slowest attempt so far finishes before a loop end of
+  135 s − (10 s + 2.5 s × (survivors + 8)); arithmetic + 9 tests in `_shared/attempt-budget.ts`.
+  C: `funnel.attempts` (per-attempt provider/ms/raw/kept/rejection deltas/errors), `funnel.timing`,
+  per-provider `llm_<provider>`, `rejectedDetail`. Tail priced from existing timestamps: 12 rows'
+  images landed 17 s after insert (Sep 13), 3 rows 5 s (Sep 16). tsc 135/16, tests 681.
+  **Dry run, row 803, fired via `npx supabase db query --linked` with the cron's Vault secret (the
+  MCP role cannot decrypt Vault): HTTP 200, would store 9 vs the cron's 3 — 4 attempts, all Gemini,**
+  raw [3, 7, 14] kept [2, 3, 4] in 5.9 / 16.5 / 24.2 s; attempt 4 started at 55 s with a 27 s call
+  timeout and was aborted (no yield, reserve intact). Loop ended at 82.5 s. One sample; the model's
+  variance is large, so this is the mechanism working, not the yield fixed.
+- [ ] **PASS: Sep 17 08:00 UTC scheduled run** — `timing.totalMs` < 150 000 with images included
+  (dry runs skip insert and images), `attempts` all Google unless one returned nothing, stored ≥ 12.
+  A 504 or `timed_out` row = the tail reserve is too small; read `timing.insertAtMs`/`imagesMs`.
+  `select stored, funnel->'timing', funnel->'attempts' from pipeline_runs where dry_run = false and
+  funnel ? 'rawCandidates' order by created_at desc limit 1;`
+- [ ] **E. NEW, from `rejectedDetail` on row 803 — the biggest loss is now real repeats, and the
+  model is choosing them.** 12 of 24 raw died in dedup: nearDup 9 (8 at Jaccard 1.00 — Cottage
+  Cheese Flatbread ×3, Strawberry Cheesecake Ice Cream ×2, Banana Bread Pancakes ×2, Tiramisu Chia
+  Pudding; one arguable: Cottage Cheese ZUCCHINI Flatbread 0.75) and dupIngredients 3 (brownies at
+  overlap 1.00). The gates are right. The 90-day video_id guard already excludes the videos behind
+  the pool's rows, so these are OTHER creators' videos of dishes already in Discover. The model spends
+  a third to half of its picks on them. Options, not built: (1) list the pool's dish names in the
+  prompt as "already in Discover, do not pick"; (2) drop candidates whose title near-dups a pool
+  name before the LLM (titles are noisy, so this could drop real variations). (1) is one variable
+  and costs nothing but prompt size; measure with 1-2 dry runs against the same day.
+- [ ] **F. Minor: the slowest-attempt estimate under-predicts.** Gemini's latency tracks OUTPUT size
+  (3 raw 6 s, 7 raw 16 s, 14 raw 24 s), so attempt 4 got 27 s and ran out. Harmless, because the
+  abort keeps the tail reserve, but it spends wall time for nothing. If it keeps happening, estimate
+  at 1.25× the slowest. Do not change it before the Sep 17 real-run timing exists.
 - [ ] **D. Parser: a method line was counted as an ingredient.** "Veggie Tofu Stir-fry Noodles"
   source list line 21 = "Sauté mushrooms dry till browned. Set aside." — contract 21 vs got 20.
   The model ALSO dropped "1 tsp hot sauce (for tofu)" and echoed "mushrooms" twice, so it is not
   clear the reject was wrong. Replay it in a unit test before changing anything; never widen tolerance.
-- **Order:** C (deploy, read the next cron) → A → B → one dry run (1 of 7 YouTube runs) whose tell is
-  `llmAttempts ≥ 3`, `totalMs` < 120 000, HTTP 200. PASS stays ≥ 12 on a SCHEDULED run. Read with:
-  `select stored, funnel->'llmRaw', funnel->'llmYields', funnel->'attemptsSkippedForTime' from
-  pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 3;`
 - [x] **AUDIT RERUN — Logan 2026-09-13, top of the list:** once the Sep 14 and Sep 15 crons have run,
       *(CLOSED 2026-09-15 as stale — Logan.)*
   do a full pass on Fable 5.1 over both stored batches and their `pipeline_runs` rows (they persist
