@@ -368,6 +368,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [permission, requestPermission] = useCameraPermissions()
   const [flashOn, setFlashOn] = useState(false)
 
+  // Which photo set the results in state were computed from. A scan is a paid call (one of seven
+  // a week), so backing out of the review to the camera keeps both the photos and the results;
+  // pressing Scan on the SAME photos reopens the review with no second call, while a changed set
+  // (a shot added or removed) is a genuinely new scan. Without this, results were never cleared
+  // short of closing the modal, so a photo added after backing out was silently never scanned.
+  const scannedFpRef = useRef<string | null>(null)
+  const photoFp = (ps: PhotoEntry[]) => ps.map(p => p.id).join('|')
+  const resultsForThesePhotos = showDone && !scanError && scannedFpRef.current === photoFp(photos)
+
   // Drives the scanning beam that sweeps top→bottom over the viewfinder — same motif as the
   // home "Scan your pantry" hero card, so the loading screen reads as the same scan action.
   const beamAnim = useRef(new Animated.Value(0)).current
@@ -377,10 +386,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // needing them to re-take photos.
   useEffect(() => {
     if (step !== 5) return
-    // Backing out of the review screen lands here again. A scan is a paid call, so results
-    // already in state mean this step is just re-showing them — never re-running them. A retry
-    // after an error still works: showDone is false on that path.
-    if (showDone && !scanError) return
+    // Results that belong to THESE photos are only re-shown, never re-run. A retry after an error
+    // still works: showDone is false on that path. Results for a different photo set are stale:
+    // clear them so the theatre counts from zero and the review cannot show the old list.
+    if (resultsForThesePhotos) return
+    if (showDone) { setShowDone(false); setDetectedItems([]); setZones([]) }
     setScanError(null)
     const loop = Animated.loop(
       Animated.sequence([
@@ -393,6 +403,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     const scanPhotos = async () => {
       const base64Images = photos.filter(p => p.base64).map(p => p.base64!)
       if (base64Images.length === 0) {
+        scannedFpRef.current = photoFp(photos)
         setShowDone(true)
         return
       }
@@ -467,6 +478,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         setZones(zoneGroups)
         // Per-photo container type drives the context-aware quick-add rail in the review.
         setPhotoContainers(Array.isArray(result.photoContainers) ? result.photoContainers.map((c: any) => String(c || '').toLowerCase()) : [])
+        scannedFpRef.current = photoFp(photos) // `photos` here is the set that was uploaded
         setShowDone(true)
       } catch (e: any) {
         // Surface the error inline (loading screen flips to error state with a
@@ -620,11 +632,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     if (savingRef.current) return
     const unscanned = photos.length
     if (unscanned === 0 || step >= 5) { handleClose(); return }
+    // Back on the camera from the review, the photos ARE scanned — what ✕ would throw away is the
+    // paid result that has not been added yet, so the question names that instead.
     Alert.alert(
-      `Discard ${unscanned} photo${unscanned === 1 ? '' : 's'}?`,
-      `You haven't scanned ${unscanned === 1 ? 'it' : 'them'} yet. Closing loses ${unscanned === 1 ? 'it' : 'them'}.`,
+      resultsForThesePhotos ? 'Discard this scan?' : `Discard ${unscanned} photo${unscanned === 1 ? '' : 's'}?`,
+      resultsForThesePhotos
+        ? `${detectedItems.length} item${detectedItems.length === 1 ? ' was' : 's were'} found but not added to your pantry yet.`
+        : `You haven't scanned ${unscanned === 1 ? 'it' : 'them'} yet. Closing loses ${unscanned === 1 ? 'it' : 'them'}.`,
       [
-        { text: 'Keep taking photos', style: 'cancel' },
+        { text: resultsForThesePhotos ? 'Keep' : 'Keep taking photos', style: 'cancel' },
         {
           text: 'Discard',
           style: 'destructive',
@@ -659,6 +675,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setZoomUri(null)
       setCurrentPhoto(0)
       nudgedRef.current = false
+      scannedFpRef.current = null
       setScanError(null)
       setRetryNonce(0)
     }, 350)
@@ -769,17 +786,19 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // the work lands. (It cannot just navigate: scanPhotos() reads `photos` from its step-5 effect
   // closure, so anything unencoded at that instant is silently dropped from the upload.)
   const [pendingScan, setPendingScan] = useState(false)
+  // Same photos already scanned → straight to the review, skipping the theatre and the call.
+  const goScan = () => setStep(resultsForThesePhotos ? 55 : 5)
   const requestScan = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
     if (encoding) { setPendingScan(true); return }
-    setStep(5)
+    goScan()
   }
   useEffect(() => {
     if (!pendingScan) return
     if (photos.length === 0) { setPendingScan(false); return } // every capture failed out from under it
     if (encoding) return
     setPendingScan(false)
-    setStep(5)
+    goScan()
   }, [pendingScan, encoding, photos.length])
 
   // Ride the photo count rather than the capture call, so gallery imports scroll too.
@@ -1248,7 +1267,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       ? <ActivityIndicator size="small" color="#000000" />
                       : <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />}
                     <Text style={styles.cameraScanBtnText}>
-                      {pendingScan || importing ? 'Preparing photos…' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
+                      {pendingScan || importing ? 'Preparing photos…' : resultsForThesePhotos ? 'View results' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1403,7 +1422,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 {pendingScan
                   ? <ActivityIndicator size="small" color="#000000" />
                   : <ScanLine size={18} stroke="#000000" strokeWidth={2.2} />}
-                <Text style={styles.primaryBtnText}>{pendingScan ? 'Preparing photos…' : `Scan ${photos.length} Photo${photos.length !== 1 ? 's' : ''}`}</Text>
+                <Text style={styles.primaryBtnText}>{pendingScan ? 'Preparing photos…' : resultsForThesePhotos ? 'View results' : `Scan ${photos.length} Photo${photos.length !== 1 ? 's' : ''}`}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1550,13 +1569,15 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <>
                     {/* Close on its own row so the thumbnails below get the FULL width to fill. */}
                     <View style={styles.reviewCloseRow}>
-                      {/* With the keyboard up, ✕ closes the KEYBOARD, not the scan. It's the nearest
+                      {/* With the keyboard up, ‹ closes the KEYBOARD, not the review. It's the nearest
                           "get me out of this" target when the keyboard covers the screen, and hitting
                           it used to discard every detected item — unrecoverable (the vision call is
-                          already spent). A second tap, keyboard down, closes the scan as normal. */}
+                          already spent). Keyboard down, it goes back to the CAMERA — not the theatre,
+                          which had nothing left to show — with the photos still in the strip and these
+                          results kept: Scan on the same photos lands back here without a second call. */}
                       <TouchableOpacity
                         style={styles.closeBtn}
-                        onPress={() => { if (keyboardUp) { Keyboard.dismiss(); return } setStep(5) }}
+                        onPress={() => { if (keyboardUp) { Keyboard.dismiss(); return } setStep(1) }}
                       >
                         <ChevronLeft size={20} stroke={COLORS.textWhite} strokeWidth={2} />
                       </TouchableOpacity>

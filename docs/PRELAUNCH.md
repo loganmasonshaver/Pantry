@@ -1406,19 +1406,44 @@ claiming exact wording from the top apps is guessing.
 - [ ] Re-test the camera on device: it has not been checked since the 16-photo cap and the
       full-width scan pill landed, and the bottom bar now carries filmstrip + shutter + full-width
       button. If the viewfinder feels cramped, hide the tips pill after the first photo.
-- [ ] **UNVERIFIED — landscape captures come out upright** (2026-09-16). The app is portrait-locked,
+- [x] **VERIFIED on device 2026-09-16 (Logan) — landscape captures come out upright.** The app is portrait-locked,
       so every in-app capture was tagged portrait however the phone was held; a wide shelf shot
       showed sideways in the theatre, the review, the zoom, and went to the model that way.
       Fix: `responsiveOrientationWhenOrientationLocked` on `CameraView` (reads the accelerometer
       at shutter time; the viewfinder does not rotate). Tell: hold the phone sideways, shoot a
       shelf, the tile in the review is WIDER than tall and the shelf is level. Gallery imports were
       already fine (Photos' EXIF gets baked in by `manipulateAsync`). Needs a DEV BUILD, not a reload.
-- [ ] **UNVERIFIED — review page scrolls with 14+ photos** (2026-09-16). The wrapping photo grid
+- [x] **VERIFIED on device 2026-09-16 (Logan) — review page scrolls with 14+ photos.** The wrapping photo grid
       grew five rows tall at 14 shots, pushed the header under the search bar, and left the list's
       flex:1 ScrollView no height — nothing scrolled. Photos are now ONE horizontal strip (≤120pt,
       80pt tiles scrolling sideways past four) and the headline reads "Check these N items · Tap a
       name to fix it · ✕ to remove · type below to add". Tell: a 14-photo scan shows the headline
       directly under the strip and the list scrolls to the last item.
+- [ ] **UNVERIFIED — review ‹ goes to the CAMERA, and the scan is not spent twice** (2026-09-16,
+      Logan: "get rid of that screen"). ‹ on the review used to reopen the loading theatre, which had
+      nothing left to show. Now it lands on the camera with the photos still in the strip AND the
+      results kept: the big button reads **"View results"** and reopens the review with no call.
+      Add or remove a photo and it reads "Scan N photos" again — a real new scan, and the old list
+      is cleared first (before this, results were never cleared short of closing the modal, so a
+      photo added after backing out was silently never scanned). ✕ on the camera with a kept result
+      asks "Discard this scan? N items were found but not added yet" instead of the unscanned-photos
+      copy. Tells: (1) review → ‹ → camera shows the strip and "View results" → tap → review, same
+      list, no theatre, scan count unchanged (`scan_usage`); (2) then take one more photo → button
+      says "Scan 15 photos" → theatre runs → new list; (3) camera ✕ with results → the new copy.
+      **Open edge, not fixed:** ‹ on the THEATRE mid-scan goes to the hub while the call is still in
+      flight; Scan again there fires a second call. Pre-existing; the ✕ there closes cleanly.
+- [ ] **Cook reveal — suggestions, PLAN ONLY, Logan to pick** (2026-09-16, from the first full
+      device pass; see `app/cook-reveal.tsx`):
+      - **"From 17 things you already have"** is the count of distinct owned ingredients across the
+        three meals, not the pantry — right after "108 items found" it reads as if the scan only
+        counted 17. Reword to tie scan → payoff ("Uses 17 of your 108 items · nothing to buy"; the
+        pantry count is on disk now in `pantry_items:<uid>`), or drop the number.
+      - **Two labels for one action:** "View recipe ›" on the card and "Tap a meal to start cooking"
+        under the dots. Different verbs for the same tap. Keep one.
+      - **Proof it read YOUR fridge:** the photo is generic AI food art and proves nothing. Show 3–4
+        of the user's own ingredient names on the card ("cottage cheese · grapes · peanut butter").
+        That is the wow; the photo is the garnish. Medium change.
+      - **Meal quality** — Logan: "I need to fix some of these generated meals", separate pass on go.
 
 ## 4. "Skip onboarding" paywall variant
 - [ ] Let skeptical users skip onboarding to explore first, then show a paywall tailored to
@@ -1430,6 +1455,12 @@ cannot clone 400 reviews. Must be in the TestFlight build.
 - [ ] Ask at a **success moment**, not on launch or on a timer. Candidates: 3rd meal cooked, first
       pantry scan that returns a full shelf, a meal saved. Must not collide with the paywall or the
       onboarding trailer.
+      **2026-09-16 recommendation (Logan asked whether the post-scan reveal is the moment): not
+      the FIRST reveal.** It is the emotional peak but a promise, not delivered value — nothing has
+      been cooked, and `requestReview` is rationed (Apple shows it at most 3×/365 days per device,
+      and decides whether to show it at all). Spend it on the first completed cook (the meal screen's
+      done/logged moment), with the 2nd reveal as the fallback — a returning scanner is itself the
+      signal. Never inside the trial's first session, where it competes with the paywall.
 - [ ] **Own modal first.** "How's Pantry working out?" → two paths, no App Store branding on it:
       - Loves it → THEN fire the native prompt (`StoreReview.requestReview()`).
       - Doesn't → route to an in-app feedback form, never to the App Store. Bad reviews land in a
