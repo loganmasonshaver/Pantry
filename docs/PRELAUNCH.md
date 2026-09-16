@@ -69,17 +69,22 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   them compilations** ("3 snacks in 5 minutes", "7 ready-to-eat snacks", "6 ladoo", "my
   smoothies", "4 soya recipes" — the last yielded one generic pick). Later attempts spent ~25 of
   39 picks re-asking about videos already kept or terminally rejected.
-- [ ] **SUGGESTIONS, not built (Logan's call):**
-  1. **Retry on the untried tail.** Attempts 2-5 rebuild the prompt anyway (rotation); rebuild it
-     WITHOUT videos already kept or terminally rejected (pool nearDup, dupVideo, notADish,
-     noSrcList — keep `dropped`/`nameGap` retryable, a later attempt completed a tuna salad today).
-     Stops ~25 wasted picks a run, makes later attempts shorter, and points the model at the 7 it
-     never touched. Expected +1-3. Deterministic; the pure part is testable.
-  2. **Compilations out before the model** (title `\b\d+\s+(recipes|snacks|meals|ways|ideas)\b`, "my
-     … smoothies"): 5 of 25 slots today produced 0-1 generic recipe; removing them lets the view
-     floor refill with single-dish videos. Or ask the model for the FIRST recipe of a compilation.
-  3. **The model tier** (`?model=` dry-run override) and **candidate volume** (13 → 26 searches) —
-     unchanged from earlier today; these are what move the ceiling past ~13.
+- [x] **1 + 2 BUILT + DEPLOYED (`3deb55d`; Logan: "lets do 1 and 2 then 3 if theres still problems").
+  NOT RUN — quota spent. Sep 17's cron is the first measurement.**
+  1. **Retry on the untried tail.** A video retires when kept, or rejected as a pool/in-run repeat,
+     duplicate name or ingredient set, not a dish, or a name gap the CREATOR's list shares
+     (`nameIngredientGaps(name, srcList)`); `dropped` and model-caused gaps stay in play. Attempts
+     2-5 build their prompt from what is left (`nextAttemptOrder`, tested), the count/target in the
+     prompt follow the shorter list, and the loop stops under 3 videos
+     (`funnel.attemptsSkippedForList`). `funnel.attempts[].listSize` shows the shrinking list.
+     **Tell on Sep 17:** `dupName` + `dupVideo` ≈ 0 and later attempts' `listSize` well under
+     attempt 1's; if raw counts on later attempts fall to 0-2, the model has nothing it wants in
+     the tail and the ceiling is the candidate list, not the asking.
+  2. **Compilations out before the model** (`compilationTitle`: number + ≤5 words + recipes/snacks/
+     meals/ways/ideas/…, or "my … smoothies"; `funnel.compilationTitles`). Sep 17: read that list —
+     every entry must be a multi-recipe video; a single recipe in it is a false positive to fix.
+  3. **DEFERRED — only if Sep 17 still stores < 12:** the model tier (`?model=` dry-run override,
+     pricing check first) and candidate volume (13 → 26 searches). Logan's call, in that order.
 - [ ] **THE CEILING, after 808:** ~400-460 raw → 11-19 repeats + 3-6 non-recipes out by title →
   floor → **25-31 candidates with a list**, of which ~5 are compilations. The model picks ~15-18
   distinct; with today's parser fixes ~13 survive on a day like this. 12 is reachable most days;
