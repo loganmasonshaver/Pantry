@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, nameTechniqueGaps, dryStapleOverload, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
+import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, nameTechniqueGaps, nonDishName, dryStapleOverload, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
@@ -792,4 +792,13 @@ test('nameIngredientGaps: a carrier made from a listed vegetable is not missing 
 
 test('nameIngredientGaps: albacore is tuna', () => {
   assert.deepEqual(nameIngredientGaps('Crispy Pasta Tuna Salad', [{ name: 'rotini' }, { name: 'canned albacore' }, { name: 'greek yogurt' }]), [])
+})
+
+test('nonDishName: plans, vlogs and health claims are not dishes; food is', () => {
+  assert.equal(nonDishName('Daily Meal Plan'), 'meal plan')
+  assert.equal(nonDishName('Hair Health Seed and Date Mix'), 'hair health')
+  assert.equal(nonDishName('What I Eat In A Day As A Nurse'), 'what i eat')
+  assert.equal(nonDishName('Full Day of Eating 2500 kcal'), 'full day')
+  assert.equal(nonDishName('Creamy Paneer Pasta'), null)
+  assert.equal(nonDishName('Meal Prep Chicken Burrito Bowls'), null)
 })

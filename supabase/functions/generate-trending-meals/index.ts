@@ -1,14 +1,14 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
-import { sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
+import { nonDishName, sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
 import { jsonSafe } from '../_shared/json-safe.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
 import { verifyUser, unauthorizedResponse } from '../_shared/auth.ts'
 import { mapLimit } from '../_shared/concurrency.ts'
 import { decideAttempt, pickProvider, countDelta, addCounts, type Counts } from '../_shared/attempt-budget.ts'
-import { filterTitleRepeats } from '../_shared/title-dedup.ts'
+import { filterTitleRepeats, contentWords, nameContains } from '../_shared/title-dedup.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
 import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
@@ -456,6 +456,7 @@ Deno.serve(async (req: Request) => {
     // 2026-09-16 was dishes already in the pool from other creators' videos (Cottage Cheese
     // Flatbread three times in one run), each rejected downstream at Jaccard 1.00 — the gate was
     // right, the pick was wasted. Sorted so the model can scan it.
+    const prevWordSets = prevNames.map(contentWords)
     const poolNamesForPrompt = (prevMeals || []).map((m: any) => String(m.name ?? '').trim()).filter(Boolean)
       .sort((a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
     // Signatures computed once here rather than per candidate — the inner loop below runs this
@@ -607,7 +608,10 @@ Deno.serve(async (req: Request) => {
     // refills from lower-view videos instead of from repeats. The model kept picking these when
     // asked not to; see _shared/title-dedup.ts.
     const titleDedup = filterTitleRepeats(dedupedByVideo, poolNamesForPrompt)
-    const deduped = titleDedup.kept
+    // "What I eat in a day" and "full day of eating" videos list foods, so they clear the
+    // ingredient gate, and the model turns them into a "recipe" called Daily Meal Plan.
+    const nonRecipeTitles = titleDedup.kept.filter(v => nonDishName(v.title))
+    const deduped = titleDedup.kept.filter(v => !nonDishName(v.title))
     console.log(`[funnel] title repeats: ${titleDedup.dropped.length} of ${dedupedByVideo.length} match a pool dish${titleDedup.skipped ? ' — over the drop share, filter SKIPPED' : ''}`)
 
     // View floor. Target is 100k, but a HARD 100k floor would abort the whole cron on a thin day
@@ -647,6 +651,7 @@ Deno.serve(async (req: Request) => {
     funnel.afterDedup = dedupedByVideo.length
     funnel.afterTitleDedup = deduped.length
     funnel.titleRepeatsSkipped = titleDedup.skipped
+    funnel.nonRecipeTitles = nonRecipeTitles.slice(0, 20).map(v => v.title.slice(0, 100))
     funnel.titleRepeats = titleDedup.dropped.slice(0, 40).map(d => ({ t: d.title.slice(0, 100), m: d.matched }))
     funnel.viewFloorUsed = usedFloor
     funnel.afterViewFloor = beforeGate
@@ -1057,11 +1062,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const seenNames = new Set<string>()
     const seenWordSets: Set<string>[] = []
     const seenWordSetNames: string[] = []  // parallel to seenWordSets, for the nearDup detail
+    // One video, one dish. A later attempt re-picks a kept video under a tweaked name ("Beef" →
+    // "Beefy", "Kebab" → "Kebabs") often enough that both name gates missed two in one dry run.
+    const seenVideoIdx = new Map<number, string>()
     const seenIngredientSigs: Set<string>[] = []
     // Funnel counters — tally exactly why the LLM's raw output shrinks. Cumulative across attempts,
     // so the stored funnel describes the run, not its last call.
-    let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0
-    const rejCounts = (): Counts => ({ noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup,
+    let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0, rejDupVideo = 0, rejNotADish = 0
+    const rejCounts = (): Counts => ({ noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup, dupVideo: rejDupVideo, notADish: rejNotADish,
       fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
       nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName })
     const REJ_KEYS = Object.keys(rejCounts())
@@ -1191,24 +1199,15 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           // and returns two recipes for the same dish (e.g. two oatmeal bowls)
           const normalize = (s: string) => (s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
           // seenNames / seenWordSets / seenIngredientSigs are declared above the attempt loop.
-          const STOPWORDS = new Set(['high', 'protein', 'recipe', 'easy', 'quick', 'best', 'the', 'a', 'an', 'with', 'and', 'of', 'for', 'low', 'macro', 'friendly', 'healthy'])
-          const wordsOf = (s: string) => new Set(
-            s.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2 && !STOPWORDS.has(w))
-          )
+          // Shared with the title filter: singularised, title/marketing words out. Before this,
+          // "Kebab" vs "Kebabs" were different words and "snack" was a content word.
+          const wordsOf = contentWords
           // Sanitize + collect scoring inputs. ONLY hard-reject things that are
           // genuinely invalid (missing name / no macros / exact duplicate in same
           // batch). Everything else — low density, similar to prev day, similar
           // to earlier in this batch — becomes a SCORE input used by the MMR
           // selection further down. This stops the historical whack-a-mole where
           // a single over-aggressive filter could collapse the candidate pool.
-          const precomputeJaccard = (words: Set<string>, vsName: string): number => {
-            const pw = wordsOf(vsName)
-            if (pw.size === 0 || words.size === 0) return 0
-            let overlap = 0
-            words.forEach(w => { if (pw.has(w)) overlap++ })
-            const union = new Set([...words, ...pw]).size
-            return union > 0 ? overlap / union : 0
-          }
           // Funnel counters and droppedDetail are declared above the attempt loop (cumulative).
           const sanitized = parsed.filter((r: any) => {
             const name = (r.name ?? '').trim()
@@ -1218,25 +1217,30 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             if (calories <= 0 || protein <= 0) { rejNoMacros++; note('noMacros', name, `${calories} kcal, ${protein} g protein`); return false }
             const key = normalize(name)
             if (!key || seenNames.has(key)) { rejDupName++; note('dupName', name, 'same name kept earlier this run'); return false }
+            const junk = nonDishName(name)
+            if (junk) { rejNotADish++; note('notADish', name, junk); return false }
+            const vidx = Number(r.video_index) || 0
+            if (vidx && seenVideoIdx.has(vidx)) { rejDupVideo++; note('dupVideo', name, `video ${vidx} already kept as "${seenVideoIdx.get(vidx)}"`); return false }
             const candWords = wordsOf(name)
             // Precompute scoring inputs once so the MMR selection downstream doesn't
             // re-walk the prevNames array for every candidate. The closest name is kept for the funnel.
             r._densityRatio = (protein * 4) / calories
             let closestPrev = ''
+            let containsPrev = ''
             r._maxJaccardPrev = 0
-            for (const prev of prevNames) {
-              const j = precomputeJaccard(candWords, prev)
-              if (j > r._maxJaccardPrev) { r._maxJaccardPrev = j; closestPrev = prev }
-            }
+            prevWordSets.forEach((pw: Set<string>, idx: number) => {
+              const j = setJaccard(candWords, pw)
+              if (j > r._maxJaccardPrev) { r._maxJaccardPrev = j; closestPrev = prevNames[idx] }
+              if (!containsPrev && nameContains(candWords, pw)) containsPrev = prevNames[idx]
+            })
             let closestToday = ''
+            let containsToday = ''
             r._maxJaccardToday = 0
             seenWordSets.forEach((prev: Set<string>, idx: number) => {
               if (prev.size === 0) return
-              let overlap = 0
-              candWords.forEach(w => { if (prev.has(w)) overlap++ })
-              const union = new Set([...candWords, ...prev]).size
-              const j = union > 0 ? overlap / union : 0
+              const j = setJaccard(candWords, prev)
               if (j > r._maxJaccardToday) { r._maxJaccardToday = j; closestToday = seenWordSetNames[idx] }
+              if (!containsToday && nameContains(candWords, prev)) containsToday = seenWordSetNames[idx]
             })
             // Hard reject near-duplicates of anything already in the table. Previously only an
             // EXACT normalized-name match was rejected and similarity was a soft ranking score —
@@ -1247,6 +1251,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
               rejNearDup++
               const inRun = r._maxJaccardToday >= r._maxJaccardPrev
               note('nearDup', name, `${inRun ? `"${closestToday}" (this run)` : `"${closestPrev}" (pool)`} jaccard ${maxJac.toFixed(2)}`)
+              return false
+            }
+            if (containsPrev || containsToday) {
+              rejNearDup++
+              note('nearDup', name, `contains ${containsToday ? `"${containsToday}" (this run)` : `"${containsPrev}" (pool)`} plus at most one word`)
               return false
             }
             // Second, independent duplicate test: same dish, different label. Checked against both
@@ -1441,6 +1450,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             seenNames.add(key)
             seenWordSets.push(candWords)
             seenWordSetNames.push(name)
+            if (vidx) seenVideoIdx.set(vidx, name)
             if (candSig.size >= 3) seenIngredientSigs.push(candSig)
             return true
           }).slice(0, 30)

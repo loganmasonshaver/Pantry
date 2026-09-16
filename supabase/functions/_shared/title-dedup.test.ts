@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { contentWords, preparePool, findTitleRepeat, filterTitleRepeats } from './title-dedup.ts'
+import { contentWords, preparePool, findTitleRepeat, filterTitleRepeats, nameContains } from './title-dedup.ts'
 
 const POOL = [
   'Cottage Cheese Flatbread', 'Strawberry Cheesecake Ice Cream', 'Banana Bread High Protein Pancakes',
@@ -45,4 +45,14 @@ test('filterTitleRepeats splits and reports, and refuses to gut the list', () =>
   const heavy = filterTitleRepeats(videos.slice(0, 3), POOL)
   assert.equal(heavy.skipped, true)
   assert.equal(heavy.kept.length, 3)
+})
+
+test('nameContains: a known name plus at most one word is the same dish', () => {
+  const w = contentWords
+  assert.equal(nameContains(w('Creamy Paneer Pasta'), w('Paneer Pasta')), true)
+  assert.equal(nameContains(w('Tiramisu Snack Balls'), w('Tiramisu Protein Balls')), true)
+  assert.equal(nameContains(w('Double Chocolate Cheesecake'), w('Chocolate Cheesecake')), true)
+  assert.equal(nameContains(w('Chicken Fried Rice with Egg'), w('Chicken Rice')), false)   // two extra words
+  assert.equal(nameContains(w('Creamy Vegan Tofu Pasta'), w('Creamy Vegan Mushroom Pasta')), false)
+  assert.equal(nameContains(w('Fudgy Brownies'), w('Brownies')), false)                    // one-word names never claim
 })

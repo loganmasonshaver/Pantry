@@ -326,6 +326,16 @@ const SYNONYMS: Record<string, string[]> = {
   bread: ['toast', 'sourdough', 'baguette', 'brioche'],
 }
 
+// Names that describe a video, a plan or a health claim rather than a dish. The prompt says to skip
+// a video that is not a recipe; on 2026-09-16 the model returned "Daily Meal Plan" and "Hair
+// Health Seed and Date Mix" anyway, and no gate downstream read a name for what it was. Also run
+// on candidate TITLES before the model, so the pick is not spent.
+const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat|full day|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|routine)\b/i
+export function nonDishName(name: string): string | null {
+  const m = NOT_A_DISH_RE.exec(name ?? '')
+  return m ? m[1].toLowerCase() : null
+}
+
 // Branded products fitness creators remake at home. When the brand is the name's HEAD word
 // ("Low Calorie Nutella", "Protein Oreos") or the head is a form the brand itself is ("Oreo
 // Nutella Spread"), the dish is a copy of the product and cannot contain it — 2026-09-16 rejected

@@ -66,6 +66,16 @@ export function findTitleRepeat(title: string, pool: PoolName[]): string | null 
   return null
 }
 
+// Two dish NAMES (not a title): the candidate carries every word of a known name of two or more
+// words and at most one word of its own. "Creamy Paneer Pasta" is "Paneer Pasta" — Jaccard puts
+// that at 0.67, under the 0.7 gate, and the model produces exactly this shape when it is told a
+// dish is already in the pool ("Tiramisu Snack Balls" for "Tiramisu Protein Balls").
+export function nameContains(cand: Set<string>, known: Set<string>): boolean {
+  if (known.size < 2 || cand.size > known.size + 1) return false
+  for (const w of known) if (!cand.has(w)) return false
+  return true
+}
+
 // If the filter would remove more than this share of the list, something is wrong with the
 // list or the pool (not with the day), and a thin day is worse than a wasted pick.
 export const MAX_DROP_SHARE = 0.4
