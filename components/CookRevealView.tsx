@@ -162,21 +162,6 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
     return () => clearInterval(id)
   }, [revealed.length, reduceMotion])
 
-  // While the meals are known but their photos are not in yet, the deck's space breathes with the
-  // same green bloom the peak lands on — anticipation, not a grey placeholder. Grey cards read as
-  // images that failed to load, which is what Logan saw once the reveal moved inside the scan (the
-  // wait used to happen behind the closing modal). Stopped the moment the gate opens; the peak
-  // animation takes over the same value.
-  useEffect(() => {
-    if (gateOpen || revealed.length === 0 || reduceMotion) return
-    const pulse = Animated.loop(Animated.sequence([
-      Animated.timing(glowAnim, { toValue: 0.32, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-      Animated.timing(glowAnim, { toValue: 0.12, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-    ]))
-    pulse.start()
-    return () => pulse.stop()
-  }, [gateOpen, revealed.length, reduceMotion])
-
   // Every card's photo in hand — or given up on — before ANY meal shows. Holding for the hero alone
   // let cards 2 and 3 open on a shimmer and fill in under the reader's eyes. imageUnavailable is a
   // settled miss (retries exhausted), so a capped user is not held for a picture that will never come.
@@ -306,21 +291,9 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
               ? <HeadlineChunks count={revealed.length} anims={chunkAnims} />
               : <Text style={styles.title}>Plating your meals…</Text>}
           </View>
-          <View style={styles.deckArea}>
-            {/* No placeholder cards: the headline is the build-up, and the meals appear whole when
-                their photos are in. The glow holds the space, and hands straight over to the peak. */}
-            <Animated.View pointerEvents="none" style={[styles.glowWrap, { opacity: glowAnim }]}>
-              <Svg width={GLOW_W} height={GLOW_H}>
-                <Defs>
-                  <RadialGradient id="cookGlowWait" cx="50%" cy="50%" rx="50%" ry="50%">
-                    <Stop offset="0" stopColor="#4ADE80" stopOpacity={0.5} />
-                    <Stop offset="1" stopColor="#4ADE80" stopOpacity={0} />
-                  </RadialGradient>
-                </Defs>
-                <Rect x={0} y={0} width={GLOW_W} height={GLOW_H} fill="url(#cookGlowWait)" />
-              </Svg>
-            </Animated.View>
-          </View>
+          {/* No placeholder cards and no filler: the scan modal opens this only once the meals and
+              their photos are on the device, so this beat is just the headline being read off. */}
+          <View style={styles.deckArea} />
           {/* Same height as the revealed bottom bar (dots), so the deck sits at the same y. */}
           <View style={styles.bottomBar}>
             <View style={styles.dotsRow}>

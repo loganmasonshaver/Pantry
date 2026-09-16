@@ -2003,6 +2003,23 @@ claiming exact wording from the top apps is guessing.
         the pushed screen until the RN <Modal> is fully dismissed, so the Pantry tab is uncovered for
         ~0.9 s between the modal leaving and the push landing. Next step is plan A below (reveal
         inside the modal).
+      - [ ] **THIRD PASS 2026-09-16, UNVERIFIED — photos on the device BEFORE the reveal opens; the waiting
+        glow was wrong (Logan).** The prefetch only ever warmed each photo's URL, never its bytes, so the
+        reveal still had three downloads to do — hidden behind the closing modal before, visible once
+        the reveal moved inside it. Now `lib/mealPrefetch.ts` downloads each photo during the review
+        (`prefetchMealImages`) and exposes `takeRevealReady`; Add all / See what you can cook wait on it
+        (button: spinner + "Plating your meals…", capped 25 s, abandoned if the modal closes) before
+        showing the reveal. The build-up glow is removed; the reveal opens on the headline read-off and
+        the cards follow it. Tell: reveal opens → headline words → cards with photos, nothing empty.
+      - [ ] **MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision.** scan-pantry
+        (deployed) returns `_meta { ms, provider, primaryError, usage }` and the app logs
+        `[perf] scan-pantry: vision Xms via …, tokens in/out (reasoning)` to Metro. Suspect, not proven:
+        gpt-5.4 has a 60 s timeout and then falls back to Gemini Flash-Lite with another 60 s — a scan
+        that times out once takes ~2 min AND is read by the weaker model. If the log shows
+        `gpt-5.4 failed: timed out at 60s`, the first fix is the timeout/fallback, not parallelism.
+        If gpt-5.4 answers slowly, decide parallel per-photo calls from the logged tokens: image
+        tokens are the same either way, the extra cost is the ~2.8k-token prompt repeated per call,
+        and wall time becomes roughly the slowest single-photo call instead of one call writing every item.
       - [ ] **SECOND PASS 2026-09-16, UNVERIFIED — Logan on device after the first build:** (1) Pantry tab
         flash GONE (verified); (2) photo-to-photo and line-to-line felt choppy — the photo was a keyed
         image that unmounted instantly and faded the next up from black, the line was removed then
@@ -2019,8 +2036,9 @@ claiming exact wording from the top apps is guessing.
         rows share one client timestamp, so the database cannot show the loop's duration). Tells: smooth
         photo and line changes; words build; review cards; reveal with no grey cards; Metro log line
         for the next save's restock time. Honest limit recorded: a 7-photo scan taking ~2 min is the
-        vision call itself — the story softens the wait, it does not shorten it; parallel scanning
-        (the scan-import plan's bounded concurrency) is the lever that would.
+        vision call itself — the story softens the wait, it does not shorten it. (Corrected same day:
+        parallel VISION calls are not in any existing plan — the scan-import plan's "bounded
+        concurrency" is the client's photo preparation, not the AI call. See the item below.)
       - [ ] **BUILT 2026-09-16 (Logan: go, lines every 4.5 s, goal reassurance mixed in), UNVERIFIED on
         device.** A: `components/CookRevealView.tsx` is the reveal; the scan modal renders it as step 7
         after Add all (no navigation), `app/cook-reveal.tsx` is a thin route wrapper, `[handoff]` logs

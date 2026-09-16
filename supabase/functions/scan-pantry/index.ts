@@ -43,7 +43,7 @@ const SCAN_CONFIDENCE_FLOOR = Number(Deno.env.get('SCAN_CONFIDENCE_FLOOR') ?? 30
 // opts.temperature: null omits it entirely — gpt-5.4 is a newer-gen model that rejects a forced
 // non-default temperature, so we don't send one (its reads are stable enough at the ingredient
 // level per the eval); the Gemini fallback still pins temperature 0.
-async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, opts: { tokenParam?: string; temperature?: number | null; timeoutMs?: number } = {}): Promise<string> {
+async function visionCall(endpoint: string, apiKey: string, model: string, messages: any[], maxTokens: number, opts: { tokenParam?: string; temperature?: number | null; timeoutMs?: number } = {}): Promise<{ content: string; usage: unknown }> {
   // 60s (was 30s): gpt-5.4 at 'original' detail is slower per call, and a real scan batches
   // several photos into ONE call — a 6-8 photo scan can take 30-45s. Single-pass now, so even
   // primary(60s)+fallback(60s) stays under Supabase's ~150s edge wall-clock limit.
@@ -63,7 +63,7 @@ async function visionCall(endpoint: string, apiKey: string, model: string, messa
     if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error))
     const content = data.choices?.[0]?.message?.content?.trim()
     if (!content) throw new Error("empty content")
-    return content
+    return { content, usage: data.usage ?? null }
   } finally {
     clearTimeout(timer)
   }
@@ -75,13 +75,18 @@ async function visionCall(endpoint: string, apiKey: string, model: string, messa
 // already out-recalls gpt-4.1's old two-pass, which is why this function is single-pass — see the
 // note above the density log. Halved scan cost to ~$0.10.
 // Fallback: Gemini 3.1 Flash-Lite keeps the paid scan alive during an OpenAI outage.
-async function scanVision(messages: any[], maxTokens: number): Promise<string> {
+// Returns which provider answered and why the primary did not, so a slow scan can be told apart
+// from a primary that timed out and fell back (60 s + another call) — the two need opposite fixes.
+async function scanVision(messages: any[], maxTokens: number): Promise<{ content: string; usage: unknown; provider: string; primaryError: string | null }> {
   try {
-    return await visionCall(OPENAI_URL, openaiApiKey!, "gpt-5.4", messages, maxTokens, { tokenParam: "max_completion_tokens", temperature: null })
+    const r = await visionCall(OPENAI_URL, openaiApiKey!, "gpt-5.4", messages, maxTokens, { tokenParam: "max_completion_tokens", temperature: null })
+    return { ...r, provider: "gpt-5.4", primaryError: null }
   } catch (e) {
     if (!googleAiKey) throw e
-    console.log(`[scan-pantry] gpt-5.4 failed (${(e as Error).message}); falling back to Gemini Flash-Lite`)
-    return await visionCall(GEMINI_URL, googleAiKey, "gemini-3.1-flash-lite", messages, maxTokens)
+    const primaryError = (e as Error).name === "AbortError" ? "timed out at 60s" : (e as Error).message
+    console.log(`[scan-pantry] gpt-5.4 failed (${primaryError}); falling back to Gemini Flash-Lite`)
+    const r = await visionCall(GEMINI_URL, googleAiKey, "gemini-3.1-flash-lite", messages, maxTokens)
+    return { ...r, provider: "gemini-3.1-flash-lite", primaryError }
   }
 }
 
@@ -265,8 +270,12 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     // gpt-4.1 primary (best recall in eval), Gemini Flash-Lite fallback. Each call has a 90s
     // ceiling (vision can hang past the edge runtime's ~150s limit and force-kill the function).
     let text: string
+    let visionMeta: { provider: string; primaryError: string | null; usage: unknown } = { provider: "", primaryError: null, usage: null }
     try {
-      text = await scanVision(scanMessages, 10000) // 10k: gpt-5.4 max_completion_tokens covers reasoning + a dense multi-photo JSON without truncating (you only pay for tokens actually generated)
+      // 10k: gpt-5.4 max_completion_tokens covers reasoning + a dense multi-photo JSON without truncating (you only pay for tokens actually generated)
+      const v = await scanVision(scanMessages, 10000)
+      text = v.content
+      visionMeta = { provider: v.provider, primaryError: v.primaryError, usage: v.usage }
     } catch (e) {
       const msg = (e as Error).name === 'AbortError'
         ? 'Scan timed out. Try again with fewer or smaller photos.'
@@ -315,7 +324,8 @@ Return ONLY the raw JSON object, no markdown, no explanation.`
     // item arrived photo-less → orphaned). Keep photo in the response.
     console.log(`[scan-pantry] total: ${Date.now() - t0}ms`)
 
-    return new Response(JSON.stringify(result), {
+    // _meta: timing and tokens for the app's dev log. No user data, nothing the client acts on.
+    return new Response(JSON.stringify({ ...result, _meta: { ms: scanMs, ...visionMeta } }), {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {

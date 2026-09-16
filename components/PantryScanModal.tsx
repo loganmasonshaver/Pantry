@@ -38,7 +38,7 @@ import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 import { normalizeCategory, PANTRY_ORDER } from '@/lib/categoryMatch'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
-import { prefetchCookNowMeals, warmMealImages } from '@/lib/mealPrefetch'
+import { prefetchCookNowMeals, takeRevealReady, warmMealImages } from '@/lib/mealPrefetch'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
 import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
 import { buildScanStory, type StoryProfile } from '@/lib/scanStory'
@@ -470,6 +470,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
         ])
         if (!current()) return // superseded while the call ran — a newer photo set, or the scan was closed
         if ('declined' in scanResult) { onClose(); return }
+        // Where a scan's time goes, readable in the Metro log: the edge function reports the vision
+        // call's duration, which provider answered (and why the primary did not), and the tokens.
+        const meta = (scanResult.data as any)?._meta
+        if (__DEV__ && meta) console.log(`[perf] scan-pantry: vision ${meta.ms}ms via ${meta.provider}${meta.primaryError ? ` (gpt-5.4 failed: ${meta.primaryError})` : ''}, ${photos.length} photos, tokens in ${meta.usage?.prompt_tokens ?? '?'} / out ${meta.usage?.completion_tokens ?? '?'} (reasoning ${meta.usage?.completion_tokens_details?.reasoning_tokens ?? '?'})`)
         const result = scanResult.data as { layout: string; photoContainers?: string[]; zones: { zone: string; items: { name: string; category: string; photo?: number }[] }[] }
         let itemIndex = 0
         const allItems: DetectedItem[] = []
@@ -763,8 +767,27 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
   // Hand-off to the cook reveal: a STEP of this modal, not a navigation. Pushed as a route it waited
   // for the modal to finish dismissing — measured: the push landed 1.2 s after the close — and the
   // Pantry tab showed through that gap at the payoff. In place, nothing can show between the two.
+  //
+  // And only once the reveal can open COMPLETE. The meals and their photos are prepared during the
+  // review; a user who taps before that finishes waits here, on the button they pressed, with words
+  // saying what is happening — not on the reveal staring at an empty deck. Capped, so a stuck photo
+  // delays the reveal rather than holding the user; the reveal's own gate covers anything left.
   const REVEAL_STEP = 7
-  const goToReveal = () => {
+  const REVEAL_READY_MAX_MS = 25000
+  const [plating, setPlating] = useState(false)
+  const platingRef = useRef(false)
+  const goToReveal = async () => {
+    if (platingRef.current) return
+    const ready = user ? takeRevealReady(user.id, 'cookNow') : null
+    if (ready) {
+      platingRef.current = true
+      setPlating(true)
+      const token = scanRunIdRef.current // a close while waiting bumps this
+      await Promise.race([ready, new Promise(r => setTimeout(r, REVEAL_READY_MAX_MS))])
+      platingRef.current = false
+      setPlating(false)
+      if (scanRunIdRef.current !== token) return // closed while plating: never open the reveal on a hidden modal
+    }
     savingRef.current = false
     setSaving(false)
     setShowSaved(false)
@@ -1142,9 +1165,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                 </TouchableOpacity>
               ) : (
                 <>
-                  <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={goToReveal}>
-                    <Text style={styles.primaryBtnText}>See what you can cook</Text>
-                    <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />
+                  <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={goToReveal} disabled={plating}>
+                    {plating && <ActivityIndicator color="#000000" />}
+                    <Text style={styles.primaryBtnText}>{plating ? 'Plating your meals…' : 'See what you can cook'}</Text>
+                    {!plating && <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />}
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.savedLater} activeOpacity={0.7} onPress={() => handleClose()}>
                     <Text style={styles.savedLaterText}>Maybe later</Text>
@@ -1743,7 +1767,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                   }}
                 >
                   {saving
-                    ? <ActivityIndicator color="#000000" />
+                    ? (plating
+                      ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color="#000000" /><Text style={styles.primaryBtnText}>Plating your meals…</Text></View>
+                      : <ActivityIndicator color="#000000" />)
                     : <Text style={styles.primaryBtnText}>Add all {detectedItems.length} to Pantry</Text>
                   }
                 </TouchableOpacity>

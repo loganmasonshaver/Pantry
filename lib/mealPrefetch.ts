@@ -6,6 +6,7 @@ import { suppressesDish } from './dislikeReasons'
 import { generateMeals, GeneratedMeal } from './meals'
 import { fetchMealImage } from './mealImages'
 import { imageIngredientNames } from './ingredientDisplay'
+import { prefetchMealImages } from '../components/MealImage'
 
 // Speculative "cook now" meal generation, kicked off while the user reviews a scan so the
 // cook-reveal screen can reuse the result instead of generating a SECOND time. This removes
@@ -26,7 +27,10 @@ const REVEAL_CARDS = 3
 
 // Single in-flight slot — only one prefetch runs at a time, and the latest scan wins (a new
 // scan changes the pantry, so its meals should replace an earlier scan's this session).
-let inflight: { userId: string; mode: string; promise: Promise<GeneratedMeal[] | null> } | null = null
+// `ready` settles when the reveal could open complete: the meals written AND each card's photo
+// downloaded to the device, not just its URL known. Settles on failure too — it is a wait signal,
+// never an error.
+let inflight: { userId: string; mode: string; promise: Promise<GeneratedMeal[] | null>; ready: Promise<void> } | null = null
 
 // Returns the in-flight prefetch promise for this user+mode, or null. The hook awaits this to
 // avoid a double-generation race when cook-reveal mounts before the prefetch has finished.
@@ -35,7 +39,14 @@ export function takeCookNowPrefetch(userId: string, mode: 'cookNow' | 'mealPlan'
   return null
 }
 
-async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIngredients: string[]): Promise<GeneratedMeal[] | null> {
+// The scan modal waits on this before it shows the reveal, so the deck opens with its photos on
+// the device. null when no prefetch ran for this user.
+export function takeRevealReady(userId: string, mode: 'cookNow' | 'mealPlan'): Promise<void> | null {
+  if (inflight && inflight.userId === userId && inflight.mode === mode) return inflight.ready
+  return null
+}
+
+async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIngredients: string[]): Promise<{ meals: GeneratedMeal[]; images: Promise<void> } | null> {
   try {
     const { data: profile } = await supabase
       .from('profiles')
@@ -121,20 +132,26 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     //
     // NOTE: must not call warmMealImages() here — it awaits the in-flight prefetch, which is this
     // very promise, and would deadlock. Hence the direct fetchMealImage calls.
+    //
+    // And DOWNLOAD each photo, not only fetch its URL. The URL was all this used to warm, so the
+    // reveal still had three downloads to do when it opened — a wait that used to happen behind the
+    // closing scan modal and became visible once the reveal moved inside it (Logan: "before, the
+    // photos would be there when I click reveal").
     const warmable = generated.slice(0, REVEAL_CARDS).filter(m => m?.name)
-    if (warmable.length > 0) {
-      ;(async () => {
-        const [hero, ...rest] = warmable
-        await fetchMealImage(hero.name, imageIngredientNames(hero.ingredients), hero.steps ?? []).catch(() => null)
-        // Cards 2-3 get the remainder of the review window as runway instead of the ~2s between
-        // "Add all to Pantry" and the reveal mounting, which is what made them lag behind card 1.
-        await Promise.all(rest.map(m =>
-          fetchMealImage(m.name, imageIngredientNames(m.ingredients), m.steps ?? []).catch(() => null)
-        ))
-      })()
+    const warmOne = async (m: GeneratedMeal) => {
+      const url = await fetchMealImage(m.name, imageIngredientNames(m.ingredients), m.steps ?? []).catch(() => null)
+      if (url) await prefetchMealImages([url])
     }
+    const images = (async () => {
+      if (warmable.length === 0) return
+      const [hero, ...rest] = warmable
+      await warmOne(hero)
+      // Cards 2-3 get the remainder of the review window as runway instead of the ~2s between
+      // "Add all to Pantry" and the reveal mounting, which is what made them lag behind card 1.
+      await Promise.all(rest.map(warmOne))
+    })().catch(() => {})
 
-    return generated
+    return { meals: generated, images }
   } catch {
     return null // best-effort — any failure just means the hook generates normally
   }
@@ -164,7 +181,9 @@ export async function warmMealImages(userId: string, mode: 'cookNow' | 'mealPlan
 
 // Fire-and-forget. Safe to call more than once; the latest call replaces the in-flight slot.
 export function prefetchCookNowMeals(userId: string, extraIngredients: string[], mode: 'cookNow' | 'mealPlan' = 'cookNow') {
-  const promise = runPrefetch(userId, mode, extraIngredients)
-  inflight = { userId, mode, promise }
+  const run = runPrefetch(userId, mode, extraIngredients)
+  const promise = run.then(r => r?.meals ?? null)
+  const ready = run.then(r => r?.images).then(() => {}, () => {})
+  inflight = { userId, mode, promise, ready }
   return promise
 }
