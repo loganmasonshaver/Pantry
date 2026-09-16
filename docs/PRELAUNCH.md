@@ -1453,15 +1453,35 @@ claiming exact wording from the top apps is guessing.
       **Open edge, not fixed:** ‹ on the THEATRE mid-scan goes to the hub while the call is still in
       flight; Scan again there fires a second call. Pre-existing; the ✕ there closes cleanly.
 - [ ] **Cook reveal — Logan picked 1 + 2, tossed 3** (2026-09-16; `app/cook-reveal.tsx`):
-      - [ ] **UNVERIFIED — validation line now "Uses 17 of your 108 items · nothing to buy".** The
-        old "From 17 things you already have" was the distinct-ingredient count across the three
-        meals, and right after "108 items found" read as if the scan had only counted 17. The total
-        is one HEAD count query of in-stock `pantry_items` on mount (the meal hook usually never
-        fetches the pantry on this screen — load() serves the prefetch/cache), and the line drops
-        the total when the count has not landed or is below the meals' count (assumed staples).
-        Tell: open the reveal after a scan and the line names both numbers.
-      - [ ] **UNVERIFIED — "Tap a meal to start cooking" removed;** the card's "View recipe" is the
-        one label. Tell: nothing under the dots.
+      - [x] ~~"Uses 17 of your 108 items"~~ — seen on device 2026-09-16 (Logan) and REJECTED: "19 of
+        your 119" read as 100 items unused. Superseded by the line below.
+      - [ ] **UNVERIFIED — validation line is now "Picked from your 119 items · nothing to buy"**
+        (falls back to "Picked from your pantry" until the count lands). The total proves the scan
+        counted everything; no used-count over it, so nothing invites the subtraction. Tell: the
+        line under the headline, no fraction.
+      - [x] **VERIFIED on device 2026-09-16 (Logan) — "Tap a meal to start cooking" removed.**
+      - [ ] **UNVERIFIED — the previous scan's meals no longer flash before this scan's** (Logan,
+        second scan of the day: the 12:29 set showed for a beat, then shimmer, then the 01:01 set).
+        Root cause: the reveal passes `enabled=false` believing that skips the hook's cache paint;
+        the paint was later un-gated so Home could paint from disk before its pantry arrives, so the
+        reveal read today's cache BEFORE the scan's prefetch had written it, then load() swapped in
+        the new set. Fix in `lib/useMealSuggestions.ts`: the cache paint awaits the in-flight
+        prefetch first (settled → a tick). Tell: do two scans in one day, the reveal's first frame is
+        the new set. `generated_meals` timestamps show which set was which.
+      - [ ] **UNVERIFIED — no meal shows until every card's photo has settled** (Logan: "all of the
+        images need to be generated or pulled from cache before any meals pop up"). The gate held
+        for the hero only (2.6 s cap); now all three, capped at 20 s, `imageUnavailable` counts as
+        settled. Tell: swipe straight to card 3 on open — it has its photo. Watch the worst case: a
+        fast reviewer on a cold image cache sits on "3 meals you can make right now" + shimmer cards
+        for up to ~20 s. If that reads as a hang, the fix is copy on the build-up, not a shorter cap.
+      - [ ] **UNVERIFIED — one image fetch per photo at a time** (`lib/mealImages.ts`): the prefetch's
+        warm and the reveal's backfill both missed the URL cache and both invoked
+        generate-meal-image for the same meal. Callers now share the in-flight promise. Tell: the
+        function logs show one generate-meal-image per meal per reveal, not two.
+      - **Open edge, not fixed:** if the scan's prefetch FAILS (null), the reveal serves today's
+        earlier set with no sign the scan changed nothing — the same silent-stale the flash was.
+        Rare (cap or timeout); the right fix is load() forcing a generation when the prefetch it
+        awaited resolved null.
       - ~~Ingredient names on the card~~ — TOSSED by Logan 2026-09-16. Do not re-propose.
       - **Meal quality** — Logan: "I need to fix some of these generated meals", separate pass on go.
 

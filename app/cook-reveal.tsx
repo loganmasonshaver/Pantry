@@ -28,7 +28,11 @@ const GLOW_H = Math.round(CARD_H * 1.15)
 // Reveal pacing. Dopamine fires during ANTICIPATION, not delivery — so even when the meals are
 // already cached we hold a short build-up floor rather than snapping straight to the payoff.
 const MIN_BUILD_MS = 1400       // anticipation floor before the reveal is allowed to open
-const HERO_IMG_GRACE_MS = 2600  // extra hold for the hero photo (capped — never stalls)
+// Longest the reveal holds for the cards' photos. In the normal case they were warmed during the
+// scan review and this never engages; a fast reviewer or a slow image can push into it. Sized to
+// the hook's own hero wait (22 s) and past fetchMealImage's three tries, so a photo that is never
+// coming has been marked imageUnavailable well before this expires.
+const IMAGES_WAIT_MS = 20000
 const DWELL_MS = 3000           // auto-advance dwell when the next photo is ready
 const IMG_GRACE_MS = 2000       // extra dwell when the next photo hasn't landed yet
 const CHUNK_STEP_MS = 200       // gap between headline chunks landing (each fires a haptic tick)
@@ -91,13 +95,13 @@ export default function CookReveal() {
   const router = useRouter()
   const { user } = useAuth()
   const { isPremium } = usePremium()
-  // enabled=false: we drive the fetch manually (below) instead of via the hook's auto effect, which
-  // reads cache-FIRST and could serve a stale today-cache before the scan's prefetch lands. load()
-  // awaits the scan's prefetch, so the reveal reuses the exact set the pantry tab serves.
+  // enabled=false keeps the hook from GENERATING on its own; it does not stop its cache paint (that
+  // runs for every instance so Home can paint from disk before its pantry arrives). Both that paint
+  // and load() below now wait for the scan's prefetch before reading the cache, so the first set
+  // this screen ever holds is the scan's own — it used to paint the previous set and swap.
   const { meals, error, errorCode, retry, load } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
   const triggeredRef = useRef(false)
   const revealed = meals.slice(0, 3)
-  const heroImage = revealed[0]?.image
 
   const [reduceMotion, setReduceMotion] = useState(false)
   useEffect(() => { AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => {}) }, [])
@@ -167,33 +171,22 @@ export default function CookReveal() {
     return () => { cancelled = true }
   }, [user?.id])
 
-  // What the scan actually bought them: distinct ingredients across the revealed meals that they
-  // already own (missing_ingredients excluded). Closes the loop between the effort of photographing
-  // areas and the payoff, and restates the promise — nothing to buy. Read as "17 of your 108":
-  // "From 17 things you already have" straight after "108 items found" read as if the scan had only
-  // counted 17. The total is dropped when it would read as nonsense (assumed staples can put the
-  // meals' count above a small pantry's).
-  const ownedIngredientCount = (() => {
-    const missing = new Set(revealed.flatMap(m => (m.missing_ingredients ?? []).map((s: string) => s.toLowerCase().trim())))
-    const owned = new Set<string>()
-    revealed.forEach(m => (m.ingredients ?? []).forEach((ing: any) => {
-      const n = String(ing?.name ?? '').toLowerCase().trim()
-      if (n && !missing.has(n)) owned.add(n)
-    }))
-    return owned.size
-  })()
+  // Every card's photo in hand — or given up on — before ANY meal shows. Holding for the hero alone
+  // let cards 2 and 3 open on a shimmer and fill in under the reader's eyes. imageUnavailable is a
+  // settled miss (retries exhausted), so a capped user is not held for a picture that will never come.
+  const photosSettled = revealed.length > 0 && revealed.every(m => m.image || m.imageUnavailable)
 
-  // The gate: hold the reveal until (a) the anticipation floor has elapsed AND (b) the hero photo
-  // is in hand — so the peak lands on a real image, not a skeleton. The photo wait is capped, so a
-  // slow/failed image delays the reveal by at most HERO_IMG_GRACE_MS instead of stalling it.
+  // The gate: hold the reveal until (a) the anticipation floor has elapsed AND (b) every card's
+  // photo has settled — so the peak lands on three finished cards, never a skeleton that fills in.
+  // The photo wait is capped at IMAGES_WAIT_MS so a stuck image delays the reveal, not stalls it.
   useEffect(() => {
     if (gateOpen || revealed.length === 0) return
     const elapsed = Date.now() - mountedAtRef.current
     const floorLeft = Math.max(0, MIN_BUILD_MS - elapsed)
-    const wait = heroImage ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + HERO_IMG_GRACE_MS - elapsed)
+    const wait = photosSettled ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + IMAGES_WAIT_MS - elapsed)
     const t = setTimeout(() => setGateOpen(true), wait)
     return () => clearTimeout(t)
-  }, [revealed.length, heroImage, gateOpen])
+  }, [revealed.length, photosSettled, gateOpen])
 
   // THE PEAK — fires once, when the gate opens: success haptic + the deck springing in + a green
   // glow blooming behind the hero card, all on the same beat. One stacked moment, then it settles.
@@ -315,16 +308,18 @@ export default function CookReveal() {
             <View style={styles.header}>
               <Text style={styles.eyebrow}>FROM YOUR PANTRY</Text>
               <HeadlineChunks count={revealed.length} anims={chunkAnims} />
-              {ownedIngredientCount > 0 && (
-                <Animated.Text style={[styles.validation, {
-                  opacity: validationAnim,
-                  transform: [{ translateY: validationAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
-                }]}>
-                  {pantryCount !== null && pantryCount >= ownedIngredientCount
-                    ? `Uses ${ownedIngredientCount} of your ${pantryCount} items · nothing to buy`
-                    : `Uses ${ownedIngredientCount} things you already have · nothing to buy`}
-                </Animated.Text>
-              )}
+              {/* The validation line: what the scan bought. "Picked from" and the pantry total, never
+                  a used-count over a total — "19 of your 119" invited the reader to compute the 100
+                  it did not use, when three dinners were never going to use a whole pantry. The
+                  total proves the scan counted everything; three good meals is the job. */}
+              <Animated.Text style={[styles.validation, {
+                opacity: validationAnim,
+                transform: [{ translateY: validationAnim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
+              }]}>
+                {pantryCount !== null && pantryCount > 0
+                  ? `Picked from your ${pantryCount} items · nothing to buy`
+                  : 'Picked from your pantry · nothing to buy'}
+              </Animated.Text>
             </View>
 
             <View style={styles.deckArea}>

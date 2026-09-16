@@ -10,11 +10,24 @@ const IMAGE_URL_CACHE_KEY = 'pantry_image_urls_v1'
 //
 // Device cache is checked first — that's what makes a pre-warmed image resolve instantly (and for
 // free) when the reveal later asks for it.
-export async function fetchMealImage(name: string, ingredientNames: string[] = [], steps: any[] = []): Promise<string | null> {
+// One fetch per image at a time. The scan's prefetch warms the reveal's photos while the reveal's
+// own backfill asks for the same ones seconds later; both missed the URL cache and both invoked
+// generate-meal-image — two paid generations for one picture. Later callers share the promise.
+const inflightImages = new Map<string, Promise<string | null>>()
+
+export function fetchMealImage(name: string, ingredientNames: string[] = [], steps: any[] = []): Promise<string | null> {
   // Name + mains, never the name alone: the server stopped keying images by name for the same
   // reason (a same-name recipe with different mains was served the older photo), and a name-keyed
   // device cache would have kept serving it after the server was fixed.
   const localKey = imageCacheKey(name, ingredientNames)
+  const running = inflightImages.get(localKey)
+  if (running) return running
+  const p = fetchMealImageOnce(localKey, name, ingredientNames, steps).finally(() => { inflightImages.delete(localKey) })
+  inflightImages.set(localKey, p)
+  return p
+}
+
+async function fetchMealImageOnce(localKey: string, name: string, ingredientNames: string[], steps: any[]): Promise<string | null> {
   try {
     const raw = await AsyncStorage.getItem(IMAGE_URL_CACHE_KEY)
     if (raw) {

@@ -449,6 +449,13 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // whose photo does not exist yet would get two concurrent fetchImage calls — two cache
       // misses racing into two FAL generations for one meal. That is real money, not just noise.
       if (servedFromCacheRef.current === runKey) { setCacheChecked(true); return }
+      // A scan's prefetch writes THIS cache. Reading it before the prefetch lands paints the
+      // previous set and swaps it for the new one seconds later — on the cook reveal that was the
+      // last scan's meals flashing up as this scan's result. The reveal passes enabled=false
+      // believing that skips this paint; it does not (the gate moved down to the miss branch so
+      // Home paints from disk before its pantry arrives). A settled prefetch resolves in a tick.
+      const pre = takeCookNowPrefetch(userId, mode)
+      if (pre) { await pre; if (cancelled) return }
       perfMark(`cache read start (${mode})`)
       const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
       // WHY a miss happened, not just THAT one did. Four different branches below discard the cache
