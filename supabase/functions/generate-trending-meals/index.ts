@@ -451,6 +451,12 @@ Deno.serve(async (req: Request) => {
       .neq('generated_at', today())
       .gte('generated_at', nameWindowCutoff)
     const prevNames = (prevMeals || []).map((m: any) => m.name.toLowerCase())
+    // The same names go INTO the prompt as a do-not-pick list. Half of the model's raw output on
+    // 2026-09-16 was dishes already in the pool from other creators' videos (Cottage Cheese
+    // Flatbread three times in one run), each rejected downstream at Jaccard 1.00 — the gate was
+    // right, the pick was wasted. Sorted so the model can scan it.
+    const poolNamesForPrompt = (prevMeals || []).map((m: any) => String(m.name ?? '').trim()).filter(Boolean)
+      .sort((a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
     // Signatures computed once here rather than per candidate — the inner loop below runs this
     // against every survivor, and re-deriving them there would be O(candidates x history).
     // Sets under 3 entries are dropped: a two-ingredient recipe matches too much by chance.
@@ -874,7 +880,10 @@ OUTPUT TARGET: Return a recipe for EVERY video below that is genuinely a recipe 
 Do NOT self-filter for density, variety, appeal or balance. Downstream code stores up to 18 and ranks by density, source-video like rate, uniqueness and macro agreement, so a bigger pool directly produces a better feed and a small one silently starves it — returning ~17 is how a day ends up showing 11. Skipping on quality grounds does not raise the bar, it just hands the ranker fewer options.
 
 Never invent a recipe to pad, and never merge two videos into one entry. If a video genuinely is not food, skip it and move on.
-
+${poolNamesForPrompt.length ? `
+ALREADY IN DISCOVER — skip these. Each dish below is live in the feed from an earlier video. A video of the same dish or a close variant (one ingredient swapped, a zucchini version of a listed flatbread, a strawberry version of a listed ice cream) is rejected downstream by name and ingredient matching, so returning it wastes a pick. Skip the VIDEO — never rename the dish to make it look new; a renamed duplicate is still caught by ingredient matching and still wasted. Spend every pick on a dish that is NOT here:
+${poolNamesForPrompt.join('; ')}
+` : ''}
 SHELF_TAG — REQUIRED, and it must be copied EXACTLY from this list. Any other value is discarded
 and the recipe loses its shelf, so never invent one, never leave it out, and never pluralise or
 rephrase (not "desserts", not "asian-inspired", not "snack"):
@@ -1026,6 +1035,10 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Gemini retries never ran. OpenAI now takes a slot only after a Gemini attempt returns nothing.
     const LLM_RETRIES = 4
     const MAX_ATTEMPTS = 1 + LLM_RETRIES
+    // Also the attempt loop's stop line. It used to stop at 12 ("pool large enough for MMR to pick
+    // 6") — from when Discover WAS today's batch. Discover is a 30-day pool now and the cap is what
+    // bounds the day's image cost, so a good day should fill it rather than stop two-thirds full.
+    const STORE_CAP = 18
     const primary = selected[0]
     const fallback = selected[1] ?? null
     // Cross-attempt state. Names and word sets guard the same-dish-twice case; ingredient
@@ -1055,6 +1068,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     type AttemptLog = { n: number; provider: string; offset: number; startMs: number; loopEndMs: number; callTimeoutMs: number; ms: number; raw: number; kept: number; rejected?: Counts; errors?: string[] }
     const attemptLog: AttemptLog[] = []
     funnel.attempts = attemptLog
+    funnel.poolNamesInPrompt = poolNamesForPrompt.length
     // Per PROVIDER, summed from its own attempts. These were the run's cumulative counters written
     // under whichever provider ran last, so llm_OpenAI read raw 13 with Gemini's drops inside it.
     const providerTotals: Record<string, { raw: number; sanitized: number; rejected: Counts }> = {}
@@ -1438,7 +1452,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
           funnel.llmAttempts = ((funnel.llmAttempts as number | undefined) ?? 0) + 1
           funnel.llmYields = [...((funnel.llmYields as number[]) ?? []), sanitized.length]
           funnel.llmRaw = [...((funnel.llmRaw as number[]) ?? []), parsed.length]
-          if ((recipes?.length ?? 0) >= 12) break // pool large enough for MMR to pick 6 with strong variety
+          if ((recipes?.length ?? 0) >= STORE_CAP) break // the union has filled the cap; more would only be overflow
         }
       } catch (e) {
         stageLog(`LLM call threw: ${(e as Error).message}`)
@@ -1602,8 +1616,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // per-user feed from this shared pool — filtering by the user's diet_type +
     // allergen tags and applying variety per user — so the old MMR-to-6 narrowing
     // moved client-side. We keep baseScore for ranking and cap at STORE_CAP to
-    // bound the daily image-generation cost.
-    const STORE_CAP = 18
+    // bound the daily image-generation cost. Declared above the attempt loop, which reads it.
 
     // Base-dish format cap. The LLM prompt already says "don't return two pancake recipes" and it
     // gets ignored — one day's pool came back with FIVE pancake variants out of fifteen, two of
