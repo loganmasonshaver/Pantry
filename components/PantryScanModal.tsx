@@ -611,6 +611,32 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [step, photos.length])
 
+  // What ✕ and the modal's own dismiss go through. Photos taken but not yet scanned are real work —
+  // you were stood in front of the shelf — and closing threw them away silently (the live edge noted
+  // on the ✕ below). So it asks, but ONLY when there is something to lose: with no photos yet, or
+  // once the scan has produced results, ✕ closes straight away. The app's usual rule is no
+  // confirmation for reversible actions; this one cannot be undone.
+  const requestClose = () => {
+    if (savingRef.current) return
+    const unscanned = photos.length
+    if (unscanned === 0 || step >= 5) { handleClose(); return }
+    Alert.alert(
+      `Discard ${unscanned} photo${unscanned === 1 ? '' : 's'}?`,
+      `You haven't scanned ${unscanned === 1 ? 'it' : 'them'} yet. Closing loses ${unscanned === 1 ? 'it' : 'them'}.`,
+      [
+        { text: 'Keep taking photos', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {})
+            handleClose()
+          },
+        },
+      ],
+    )
+  }
+
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
     onClose()
@@ -927,8 +953,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     return () => { s.remove(); h.remove() }
   }, [])
 
+  // onRequestClose is the system dismiss (hardware/gesture): same question as ✕, same answer.
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={requestClose}>
       {/* A React Native <Modal> is its own WINDOW, and react-native-safe-area-context cannot read
           that window's insets from the app root — so inside here every useSafeAreaInsets() returned
           0 and every <SafeAreaView> applied no padding. This is the documented remedy: a provider
@@ -1055,11 +1082,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <SafeAreaView edges={['top']} style={styles.cameraTopSafe} pointerEvents="box-none">
               <View style={styles.cameraTopBar}>
                 {/* ✕ always, photos or not — Logan's call. This briefly swapped to a Back chevron
-                    once a photo existed (to the areas hub) because ✕ here calls handleClose, which
-                    resets photos with no confirmation. That trade is accepted: one control with one
-                    meaning beats a control that changes what it does under you. NOTE the live edge —
-                    ✕ with photos in hand discards them silently. */}
-                <TouchableOpacity style={styles.cameraCloseBtn} onPress={handleClose}>
+                    once a photo existed (to the areas hub); one control with one meaning beats a
+                    control that changes what it does under you. The live edge that used to sit here
+                    — ✕ discarding photos silently — is gone: requestClose asks first, and only when
+                    there are unscanned photos to lose. */}
+                <TouchableOpacity style={styles.cameraCloseBtn} onPress={requestClose} accessibilityLabel="Close scanner">
                   <X size={20} stroke="#FFFFFF" strokeWidth={2} />
                 </TouchableOpacity>
                 {/* The photo count lived here. It duplicated the filmstrip below — which shows the
