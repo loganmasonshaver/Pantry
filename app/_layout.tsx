@@ -192,10 +192,9 @@ function RootLayoutNav() {
             drill-in-from-right of detail pushes, so the nav reads intentionally. */}
         <Stack.Screen name="delivery-webview" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="food-preferences" options={{ animation: 'slide_from_bottom' }} />
-        {/* Post-scan payoff screen. Pushed while the scan modal is still presented (the modal then
-            dismisses onto it). 'none' is under test: if the Pantry tab stops showing in the
-            hand-off, the push had been landing late and FADING over the tab. */}
-        <Stack.Screen name="cook-reveal" options={{ animation: 'none' }} />
+        {/* The cook reveal as a route. The scan modal renders the same view as its own last step
+            (components/CookRevealView), so nothing in the app pushes here after a scan. */}
+        <Stack.Screen name="cook-reveal" options={{ animation: 'fade' }} />
       </Stack>
       {/* Branded splash overlay — covers any partial Stack render during cold start.
           Positioned AFTER the Stack so it floats above. */}

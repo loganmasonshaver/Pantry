@@ -41,6 +41,8 @@ import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { prefetchCookNowMeals, warmMealImages } from '@/lib/mealPrefetch'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
 import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
+import { buildScanStory, type StoryProfile } from '@/lib/scanStory'
+import { CookRevealView } from '@/components/CookRevealView'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
@@ -245,7 +247,11 @@ type Props = {
   // When provided, a saved scan offers the cook-reveal payoff. First scan auto-reveals
   // (the magic moment); later scans get a "See meals / Maybe later" choice. Omit it (e.g.
   // the Home entry) to keep the old close-immediately behavior and run a different flow.
-  onSeeMeals?: () => void
+  // This host shows the cook reveal after a save (the Pantry tab does; Home does not). The reveal is
+  // rendered INSIDE this modal as its last step — see CookRevealView for why it is not a route.
+  showReveal?: boolean
+  // Opening a meal from the reveal: the modal closes, then the host navigates.
+  onOpenMeal?: (meal: any) => void
   // Where "Add items by hand" goes when the week's scans are used up. The modal closes first; the
   // host screen opens its own add field. Absent → the button just closes.
   onAddByHand?: () => void
@@ -253,7 +259,7 @@ type Props = {
 
 const COOK_REVEAL_SEEN_KEY = 'cook_reveal_seen_v1'
 
-export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeMeals, onAddByHand }: Props) {
+export default function PantryScanModal({ visible, onClose, onItemsAdded, showReveal, onOpenMeal, onAddByHand }: Props) {
   const { user } = useAuth()
   const { requestConsent } = useAIConsent()
   const { isPremium, triggerUpgrade } = usePremium()
@@ -278,7 +284,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([])
 
   // Prefetch cook-now meals the moment a scan produces items and we're heading toward the
-  // cook-reveal (onSeeMeals wired) — NOT the Home-entry path. Runs during the user's review
+  // cook reveal (showReveal) — NOT the Home-entry path. Runs during the user's review
   // window so the reveal is instant instead of a second loading screen. Text only; fires once
   // per modal-open (reset below) so a review re-render doesn't re-trigger it.
   const prefetchFiredRef = useRef(false)
@@ -288,7 +294,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const prefetchTokenRef = useRef(0)
   useEffect(() => { if (visible) { prefetchFiredRef.current = false; prefetchOutcomeRef.current = 'none'; prefetchTokenRef.current += 1 } }, [visible])
   useEffect(() => {
-    if (prefetchFiredRef.current || !user || !onSeeMeals) return
+    if (prefetchFiredRef.current || !user || !showReveal) return
     const names = detectedItems.filter(i => i.checked).map(i => i.name)
     if (names.length === 0) return
     prefetchFiredRef.current = true
@@ -297,7 +303,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     prefetchCookNowMeals(user.id, names).then(m => {
       if (prefetchTokenRef.current === token) prefetchOutcomeRef.current = m ? 'ok' : 'failed'
     })
-  }, [detectedItems, user, onSeeMeals, visible])
+  }, [detectedItems, user, showReveal, visible])
   // Per-photo container type from the scan (fridge/freezer/pantry/counter) → context-aware quick-adds.
   const [photoContainers, setPhotoContainers] = useState<string[]>([])
   // Friendly area name per photo from its classified container ("Fridge"/"Freezer"/…). Lifted to
@@ -647,6 +653,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // photos that could never be scanned (Logan took a full set and only then hit the limit), and set
   // again if a scan is refused for the same reason. Unknown fails open: the real call still decides.
   const [weekCapped, setWeekCapped] = useState(false)
+  // The scan wait's big-type story is built from these onboarding answers (lib/scanStory). Read once
+  // per open; until it lands the theatre shows its generic captions.
+  const [storyProfile, setStoryProfile] = useState<StoryProfile | null>(null)
+  useEffect(() => {
+    if (!visible || !user) return
+    let cancelled = false
+    supabase.from('profiles')
+      .select('calorie_goal, protein_goal, meals_per_day, fitness_goal, diet_type, dietary_restrictions, food_dislikes, cooking_skill, max_prep_minutes')
+      .eq('id', user.id).single()
+      .then(({ data }) => { if (!cancelled && data) setStoryProfile(data as StoryProfile) }, () => {})
+    return () => { cancelled = true }
+  }, [visible, user?.id])
   useEffect(() => {
     if (!visible || !user) return
     let cancelled = false
@@ -709,10 +727,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     )
   }
 
-  const handoffRef = useRef(false) // one push to the reveal per save; the success step's button is not bound to `saving`
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
-    __DEV__ && console.log('[handoff] close', Date.now())
     // Drop a scan still in flight. Its results used to land in the closed modal, where the meal
     // prefetch effect could fire a paid generation for items nobody would ever see.
     scanRunIdRef.current += 1
@@ -741,23 +757,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setScanError(null)
       setRetryNonce(0)
       setSaving(false) // kept true through the reveal hand-off; savingRef was cleared before the close
-      handoffRef.current = false
     }, 350)
   }
 
-  // Hand-off to the cook reveal: PUSH FIRST, close the modal only after the push has settled.
-  // UIKit drops a push that starts while the modal is mid-dismissal — the old order closed first
-  // and deferred the push 400 ms to dodge that, which showed the Pantry tab for the whole gap.
-  // With the reveal already mounted underneath, the modal slides down onto it. 500 ms covers the
-  // fade push; the Add-all button keeps its spinner through it, so the pause reads as work.
-  const REVEAL_HANDOFF_MS = 500
+  // Hand-off to the cook reveal: a STEP of this modal, not a navigation. Pushed as a route it waited
+  // for the modal to finish dismissing — measured: the push landed 1.2 s after the close — and the
+  // Pantry tab showed through that gap at the payoff. In place, nothing can show between the two.
+  const REVEAL_STEP = 7
   const goToReveal = () => {
-    if (handoffRef.current) return
-    handoffRef.current = true
-    __DEV__ && console.log('[handoff] push', Date.now())
-    onSeeMeals?.()
-    savingRef.current = false // handleClose refuses to run mid-save; the insert is long done
-    setTimeout(handleClose, REVEAL_HANDOFF_MS)
+    savingRef.current = false
+    setSaving(false)
+    setShowSaved(false)
+    setStep(REVEAL_STEP)
   }
 
   // Parse comma- or newline-separated names, categorize each via the LLM-backed
@@ -1418,7 +1429,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>{scanError}</Text>
               </View>
             ) : (
-              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} areaLabel={areaLabel} itemCount={spottedCount} />
+              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} areaLabel={areaLabel} itemCount={spottedCount} story={storyProfile ? buildScanStory(storyProfile, photos.length) : undefined} />
             )}
 
             {/* Footer button — state-aware: View Results / Retry / nothing (still scanning) */}
@@ -1447,6 +1458,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                 </TouchableOpacity>
               </View>
             )}
+          </View>
+        )}
+
+        {/* ── Step 7: the cook reveal, in place ── */}
+        {step === REVEAL_STEP && (
+          <View style={StyleSheet.absoluteFill}>
+            <CookRevealView
+              edges={['top']} // this modal's own SafeAreaView already pads the bottom
+              onClose={() => handleClose()}
+              onOpenMeal={meal => { handleClose(); onOpenMeal?.(meal) }}
+            />
           </View>
         )}
 
@@ -1672,7 +1694,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     // The items are in. With no reveal to follow, this is the flow's end: success.
                     // With the cook reveal next, only a light tick — the reveal has its own success
                     // peak a moment later, and two in a row would blur into one buzz.
-                    if (!onSeeMeals) { setSaving(false); savingRef.current = false; Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); handleClose(); return }
+                    if (!showReveal) { setSaving(false); savingRef.current = false; Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); handleClose(); return }
                     // Past today's meal cap the prefetch was refused, and the reveal could only show
                     // the deck from before the scan. Checked only when the prefetch FAILED: 'ok' means
                     // new meals exist, and 'pending' may be the very generation that used the last
@@ -1707,7 +1729,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     const seen = await AsyncStorage.getItem(COOK_REVEAL_SEEN_KEY)
                     if (!seen) {
                       await AsyncStorage.setItem(COOK_REVEAL_SEEN_KEY, '1')
-                      goToReveal() // `saving` stays true — the spinner covers the hand-off
+                      goToReveal()
                       return
                     }
                     setSaving(false)

@@ -1950,14 +1950,27 @@ claiming exact wording from the top apps is guessing.
         that. `prefetchMealImages` now returns expo-image's prefetch promise and the reveal opens on
         it (still capped at 20 s). Tell: card 1 has its photo on the first frame after the spring.
       - [x] **VERIFIED on device 2026-09-16 (Logan): no image loading problems** after the download gate.
-      - [ ] **DIAGNOSED 2026-09-16 with timings — the flash cannot be fixed by ordering.** One Add-all
+      - [x] **DIAGNOSED 2026-09-16 with timings — the flash cannot be fixed by ordering.** (Fixed by A below.) One Add-all
         on device, `animation: 'none'`: push t=0 → reveal React mount +0.70 s → modal close +0.80 s →
         native transitionStart/End **+2.02 s** (same ms: no animation). The stack does not attach
         the pushed screen until the RN <Modal> is fully dismissed, so the Pantry tab is uncovered for
         ~0.9 s between the modal leaving and the push landing. Next step is plan A below (reveal
         inside the modal).
-      - [ ] **PLAN, awaiting Logan's go (2026-09-16) — reveal inside the scan, the wait tells a story,
-        the reveal top says one thing.**
+      - [ ] **BUILT 2026-09-16 (Logan: go, lines every 4.5 s, goal reassurance mixed in), UNVERIFIED on
+        device.** A: `components/CookRevealView.tsx` is the reveal; the scan modal renders it as step 7
+        after Add all (no navigation), `app/cook-reveal.tsx` is a thin route wrapper, `[handoff]` logs
+        removed, route animation back to fade. View recipe closes the modal then pushes the meal
+        (`onOpenMeal` from pantry.tsx). B: `lib/scanStory.ts` (+6 tests) builds the story — profile
+        facts interleaved with goal lines (lose / gain / maintain get three each, everyone gets
+        consistency lines; no goal → consistency only), every line ≤ 46 chars, empty fields skipped;
+        `ScanTheater` shows it in 26 pt, two lines reserved, fade-up, photo and line advance together
+        every 4.5 s. C: the reveal header is FROM YOUR PANTRY + headline only; `lib/revealLine.ts`
+        deleted (unused). Tells: (1) Add all → the reveal appears with NO Pantry tab in between;
+        (2) scan wait: "Reading every shelf in your N photos" → "Consistency beats perfect. This makes
+        it easy" → "Built around your 2,200-calorie day" → … one every 4.5 s, big; (3) reveal shows
+        only the eyebrow and headline over the cards; (4) View recipe → modal closes, meal opens
+        (expect a short Pantry-tab beat here — accepted in the plan). **Plan as approved:** reveal
+        inside the scan, the wait tells a story, the reveal top says one thing.
         **A. Reveal inside the scan modal.** Extract the reveal body into `components/CookRevealView.tsx`;
         the modal renders it as its last step after Add all, so there is no navigation at the peak and
         no tab can show. `app/cook-reveal.tsx` stays as a thin wrapper. ✕ closes the modal. View recipe

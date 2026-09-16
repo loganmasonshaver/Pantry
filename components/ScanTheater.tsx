@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react'
 import { Dimensions, StyleSheet, Text, View } from 'react-native'
-import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn, ZoomIn } from 'react-native-reanimated'
+import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn, FadeInUp, ZoomIn } from 'react-native-reanimated'
 import { Check } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 const GREEN = '#4ADE80'
 const SWEEP_MS = 950            // one pass of the scan line (top→bottom or back)
-const STEP_MS = 5000            // multi-photo: photo + caption advance together on this shared tick
-const SINGLE_MS = 3000          // single photo (~10s of AI): no photo to switch, so rotate the
-                               // caption a bit faster → ~3 lines over the scan instead of ~2
+// One beat for the story line AND the photo (Logan: 4.5 s). Long enough to read a two-line sentence
+// in big type; a scan of 40-60 s tells about ten of them.
+const STORY_MS = 4500
 // Ordered as a natural read→identify→sort→build arc so the rotation still reads like progress even
 // though it cycles. Long list at a calm 3s pace (≈66s for a full loop) so even a slow multi-photo
 // scan makes roughly ONE pass instead of looping 3×. Honest to what the scan does; no emoji.
@@ -44,12 +44,15 @@ type Photo = { uri?: string; label?: string }
 // bracket treatment as the onboarding trailer: a teal line sweeps up and down a couple of times
 // over each photo, then it crossfades to the next in a carousel. (Replaces the earlier "drone"
 // animation — the simple sweep reads better and matches the trailer's look.)
-export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount }: {
+export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount, story }: {
   photos: Photo[]
   photoDims: Record<string, { w: number; h: number }>
   showDone: boolean
   areaLabel?: (idx: number) => string
   itemCount?: number // live count ramped by the modal; rendered as the payoff on completion
+  // The user's own story (lib/scanStory): their targets and their goal, told in big type while the
+  // photos are read. Falls back to the generic scan captions until the profile has loaded.
+  story?: string[]
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
   const [statusIdx, setStatusIdx] = useState(0)
@@ -69,17 +72,16 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount 
     return () => cancelAnimation(sweep)
   }, [])
 
-  // One tick advances the photo AND caption together so the line matches the photo on screen.
-  // Multi-photo runs at 5s (a photo feels substantial before it flips); a single photo has nothing
-  // to switch, so it runs at 3s to show ~3 lines over the ~10s scan instead of a slow ~2. Photo
-  // only cycles with 2+ shots; the caption rotates regardless. Stops once results land.
+  const lines = story && story.length > 0 ? story : STATUS
+
+  // One tick advances the photo AND the story line together. Photo only cycles with 2+ shots; the
+  // line always does, looping if the scan outlasts the story. Stops once results land.
   useEffect(() => {
     if (showDone) return
-    const tickMs = photos.length <= 1 ? SINGLE_MS : STEP_MS
     const t = setInterval(() => {
-      setStatusIdx(i => (i + 1) % STATUS.length)
+      setStatusIdx(i => i + 1)
       if (photos.length > 1) setActiveIdx(i => (i + 1) % photos.length)
-    }, tickMs)
+    }, STORY_MS)
     return () => clearInterval(t)
   }, [showDone, photos.length])
 
@@ -125,7 +127,14 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount 
         </Animated.View>
       ) : (
         <>
-          <Text style={styles.section}>{STATUS[statusIdx]}</Text>
+          {/* Big type, because this is what gets read during a minute of waiting — the small
+              status caption it replaces was skimmed past. Keyed by index so each line fades up
+              fresh; the box always holds two lines so the dots below never jump. */}
+          <View style={styles.storyBox}>
+            <Animated.Text key={statusIdx} entering={FadeInUp.duration(450)} style={styles.story} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {lines[statusIdx % lines.length]}
+            </Animated.Text>
+          </View>
           {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
           {photos.length > 1 && (
             <View style={styles.dots}>{photos.map((_, i) => <View key={i} style={[styles.dot, i === activeIdx && styles.dotActive]} />)}</View>
@@ -149,7 +158,8 @@ const styles = StyleSheet.create({
   cTR: { top: 8, right: 8, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 6 },
   cBL: { bottom: 8, left: 8, borderBottomWidth: 2.5, borderLeftWidth: 2.5, borderBottomLeftRadius: 6 },
   cBR: { bottom: 8, right: 8, borderBottomWidth: 2.5, borderRightWidth: 2.5, borderBottomRightRadius: 6 },
-  section: { marginTop: 26, fontSize: 17, fontWeight: '700', color: COLORS.textWhite, letterSpacing: -0.2 },
+  storyBox: { marginTop: 22, height: 68, justifyContent: 'center', alignSelf: 'stretch', paddingHorizontal: 6 },
+  story: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5, textAlign: 'center' },
   area: { marginTop: 6, fontSize: 13, fontWeight: '600', color: COLORS.textMuted, textTransform: 'capitalize' },
   dots: { flexDirection: 'row', gap: 6, marginTop: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#333' },
