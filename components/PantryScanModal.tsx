@@ -307,6 +307,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
+  // A gallery import is in flight. Set BEFORE the picker opens, so the moment the system sheet
+  // dismisses there is already something on screen saying the photos are being prepared: iOS hands
+  // the whole selection back in one go, only after it has copied every photo out of the library, so
+  // the filmstrip has nothing to show for seconds and the tap looked ignored.
+  const [importing, setImporting] = useState(false)
   const [showPrep, setShowPrep] = useState(false) // first-run "how scanning works" overlay (sets expectations + coaches better photos)
 
   // The capture instruction opens BIG in the middle of the frame so it can't be missed, holds, then
@@ -810,6 +815,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   }
 
   const launchGallery = async (label: string, next: number) => {
+    if (importing) return // one import at a time; the button is disabled too, this covers a fast double-tap
     if (photos.length >= MAX_PHOTOS_PER_SCAN) {
       Alert.alert('Photo limit', `You can include up to ${MAX_PHOTOS_PER_SCAN} photos per scan.`)
       return
@@ -823,12 +829,24 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     // photo. selectionLimit is what is LEFT of the scan's cap, so the system picker stops the user
     // at the limit rather than this code rejecting photos after they chose them.
     const remaining = MAX_PHOTOS_PER_SCAN - photos.length
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 1,
-      allowsMultipleSelection: true,
-      selectionLimit: remaining,
-    })
+    // quality 1 is not "best quality" here, it is SPEED: expo-image-picker only takes its fast path —
+    // copy the original file — at quality >= 1. Lower it and every photo is decoded and re-encoded
+    // one by one, which makes this slower, not faster.
+    setImporting(true)
+    let result: ImagePicker.ImagePickerResult
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 1,
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
+      })
+    } catch (e) {
+      setImporting(false)
+      Alert.alert('Could not open your library', 'Please try again.')
+      return
+    }
+    setImporting(false) // the rows below land in the same beat, so the spinner hands straight over to tiles
     if (!result.canceled && result.assets.length > 0) {
       // Belt and braces: selectionLimit is iOS 14+ and ignored on older pickers, so trim here too.
       const picked = result.assets.slice(0, remaining)
@@ -837,6 +855,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       const stamp = Date.now()
       const rows = picked.map((asset, i) => ({ id: `${stamp}-${i}`, label, uri: asset.uri, base64: undefined }))
       setPhotos(prev => [...prev, ...rows])
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}) // they landed — the tiles arrive on this beat
       // SEQUENTIALLY, not Promise.all: each downscale decodes a full-size photo, and sixteen at once
       // is a memory spike on a device that already logs pressure. The tiles fill in one by one.
       let failed = 0
@@ -1106,6 +1125,17 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     Tap the image to check the shot full-screen; ✕ drops it. Removal is silent, the
                     same as the hub's — and a mis-tap here is cheap in a way it usually isn't,
                     because you're stood in front of the thing with the camera already open. */}
+                {/* Shown from the instant the picker's sheet closes until the photos arrive. iOS copies
+                    the whole selection out of the library one photo at a time and returns them
+                    together, so without this the screen looks unchanged for seconds and the tap
+                    reads as ignored. It sits where the tiles will land, so nothing jumps. */}
+                {importing && (
+                  <View style={styles.importingRow}>
+                    <ActivityIndicator size="small" color="#4ADE80" />
+                    <Text style={styles.importingText}>Preparing photos…</Text>
+                  </View>
+                )}
+
                 {photos.length > 0 && (
                   <ScrollView
                     ref={filmstripRef}
@@ -1153,8 +1183,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     <View style={styles.shutterInner} />
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={styles.flashBtn}
+                    style={[styles.flashBtn, importing && { opacity: 0.4 }]}
                     onPress={() => launchGallery(captureLabel, 0)}
+                    disabled={importing}
                     activeOpacity={0.7}
                     accessibilityLabel="Choose photos from your library"
                   >
@@ -1173,16 +1204,18 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     the upload silently drops photos that haven't. */}
                 {photos.length > 0 && (
                   <TouchableOpacity
-                    style={[styles.cameraScanBtn, pendingScan && styles.cameraScanBtnBusy]}
+                    style={[styles.cameraScanBtn, (pendingScan || importing) && styles.cameraScanBtnBusy]}
                     onPress={requestScan}
-                    disabled={pendingScan}
+                    // Also while a gallery import is in flight: the count on this button is about to
+                    // change, and a scan started now would leave the incoming photos out.
+                    disabled={pendingScan || importing}
                     activeOpacity={0.85}
                   >
-                    {pendingScan
+                    {pendingScan || importing
                       ? <ActivityIndicator size="small" color="#000000" />
                       : <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />}
                     <Text style={styles.cameraScanBtnText}>
-                      {pendingScan ? 'Preparing photos…' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
+                      {pendingScan || importing ? 'Preparing photos…' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -1981,6 +2014,9 @@ const styles = StyleSheet.create({
   // at Apple's 44pt minimum; the ✕ is pushed outside that square so the two don't overlap.
   // Negative margins cancel cameraBottomOverlay's 24pt padding so the strip bleeds to both screen
   // edges — a row that stops short of the edge reads as a finished list, not a scrollable one.
+  // Same height as a filmstrip tile so the tiles replace it in place rather than pushing the shutter.
+  importingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 64, alignSelf: 'stretch' },
+  importingText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.85)' },
   filmstrip: { alignSelf: 'stretch', maxHeight: 84, marginBottom: 2, marginHorizontal: -24 },
   filmstripContent: { gap: 12, paddingHorizontal: 24, paddingTop: 8 },
   filmItem: { alignItems: 'center', width: 56 },

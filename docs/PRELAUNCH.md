@@ -1878,6 +1878,21 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       Receipt, AI log and creator-recipe pickers are deliberately untouched: those take one photo.
       Tells: tap the gallery icon in the scan camera → select 4 photos → all 4 appear in the
       filmstrip and fill in; with 14 already taken, the picker only lets you pick 2 more.
+      **FOLLOW-UP 2026-09-15 (Logan: "takes a good 5 seconds for all of them to pop up… I didn't even
+      know it had registered"). Step 1 of the plan BUILT, UNVERIFIED ON DEVICE.** Cause, read from
+      expo-image-picker's iOS source: `handleMultipleMedia` walks the selection with `asyncMap`,
+      which is SEQUENTIAL, and the JS promise resolves only after the last photo is copied out of the
+      library — so nothing can be shown until all of them are ready, and an iCloud-only photo adds a
+      download. Not our downscale: that runs after the rows are already on screen. Built now: an
+      `importing` flag set BEFORE the picker opens, so the instant the sheet dismisses the strip
+      shows a spinner and "Preparing photos…" at tile height; the gallery button dims and the Scan
+      button is disabled and says the same, since the count is about to change; a light haptic fires
+      when the tiles land. Also recorded in code: `quality: 1` is a SPEED setting here — the picker
+      only takes its copy-the-original fast path at quality >= 1, so lowering it makes this slower.
+      Steps 2 and 3 of the plan (dev-only timers splitting picker time from downscale time, then
+      bounded concurrency if our step dominates) are NOT built — they wait on Logan seeing step 1.
+      Tell: tap the gallery icon, pick 4 photos, hit Add → the spinner and "Preparing photos…" appear
+      immediately, then the tiles replace them without the row jumping.
 - [x] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
       Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
       frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI
