@@ -28,7 +28,8 @@ import { useAIConsent } from '@/context/AIConsentContext'
 import { supabase } from '@/lib/supabase'
 import { haptic } from '@/lib/haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
-import { STORE_CATEGORIES, autoCategoryMatches, categorizeItem } from '@/lib/categories'
+import { autoCategoryMatches, categorizeItem } from '@/lib/categories'
+import { PANTRY_ORDER } from '@/lib/categoryMatch'
 import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/lib/pantryProfile'
 import { ageLabelLong, isPerishable, isStale } from '@/lib/pantryAge'
 import { groupPantryRows, type PantryRow } from '@/lib/pantryGroup'
@@ -103,9 +104,7 @@ const CATEGORY_ICONS: Record<string, React.ElementType> = {
 }
 
 // The pantry reads in COOK order, the grocery list in STORE order — the same sixteen aisles. The
-// protein source leads here because it is what a meal is built around and the first thing Cook
-// Tonight checks; in a store it is at the back, which is where Grocery keeps it.
-const PANTRY_ORDER = ['Meat & Fish', ...STORE_CATEGORIES.filter(c => c !== 'Meat & Fish')]
+// order is shared with the scan review (lib/categoryMatch).
 const CATEGORY_CONFIG = PANTRY_ORDER.map(name => ({
   id: name.toLowerCase().replace(/[^a-z]/g, ''),
   name,

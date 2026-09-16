@@ -1797,6 +1797,14 @@ claiming exact wording from the top apps is guessing.
       80pt tiles scrolling sideways past four) and the headline reads "Check these N items · Tap a
       name to fix it · ✕ to remove · type below to add". Tell: a 14-photo scan shows the headline
       directly under the strip and the list scrolls to the last item.
+- [ ] **FIXED 2026-09-16, UNVERIFIED — adding an item on the scan review buzzed 5-10 times.** The
+      count-up effect (16 light taps + a Success) re-ran on every change to the list's length, so a
+      hand-added or removed item replayed it. Now once per result set (`countedForRef`). Tell: add an
+      item on the review → one tap at most, no burst.
+- [ ] **BUILT 2026-09-16, UNVERIFIED — the scan review is grouped by aisle like the Pantry tab** (Logan).
+      Same order (`PANTRY_ORDER`, now in `lib/categoryMatch.ts`, shared) and the same mapping the
+      pantry insert applies (`normalizeCategory`), headers styled like the tab's. Search results stay
+      grouped. Tell: MEAT & FISH first, each item under the heading it will have in the pantry.
 - [x] **VERIFIED on device 2026-09-16 (Logan) — ‹ lands on the camera; no double spend.** Spamming ‹ /
       the camera button left `scan_usage` pantry at 7 (the limit), unchanged. **Found in that test and
       FIXED same day, VERIFIED (Scan A):** the camera button flipped words on its own ("Scan 4 photos" ↔
@@ -1930,6 +1938,40 @@ claiming exact wording from the top apps is guessing.
         that. `prefetchMealImages` now returns expo-image's prefetch promise and the reveal opens on
         it (still capped at 20 s). Tell: card 1 has its photo on the first frame after the spring.
       - [x] **VERIFIED on device 2026-09-16 (Logan): no image loading problems** after the download gate.
+      - [ ] **DIAGNOSED 2026-09-16 with timings — the flash cannot be fixed by ordering.** One Add-all
+        on device, `animation: 'none'`: push t=0 → reveal React mount +0.70 s → modal close +0.80 s →
+        native transitionStart/End **+2.02 s** (same ms: no animation). The stack does not attach
+        the pushed screen until the RN <Modal> is fully dismissed, so the Pantry tab is uncovered for
+        ~0.9 s between the modal leaving and the push landing. Next step is plan A below (reveal
+        inside the modal).
+      - [ ] **PLAN, awaiting Logan's go (2026-09-16) — reveal inside the scan, the wait tells a story,
+        the reveal top says one thing.**
+        **A. Reveal inside the scan modal.** Extract the reveal body into `components/CookRevealView.tsx`;
+        the modal renders it as its last step after Add all, so there is no navigation at the peak and
+        no tab can show. `app/cook-reveal.tsx` stays as a thin wrapper. ✕ closes the modal. View recipe
+        closes the modal, then pushes the meal screen — that push has the same ~0.9 s hold, but reads as
+        "sheet closes, page opens" rather than a glitch at the payoff; if it still bothers, the meal
+        screen can become a second layer inside the modal (larger). Then remove the `[handoff]` logs
+        and restore the route animation.
+        **B. The scan wait tells the story, in big type.** Where: the scan theatre (step 5), the ~40-60 s
+        wait — not the reveal build-up, which is short. One sentence at the bottom, ~26-28 pt, two lines
+        max, fading up every ~3.5 s, replacing the small rotating status title ("Decoding labels"); the
+        photo and "Fridge · 7/14" stay. Beats, each SKIPPED when its field is empty: photo count ("Reading
+        every shelf in your 14 photos") · calorie_goal ("Built around your 2,200-calorie day") ·
+        protein_goal ÷ meals_per_day ("About 40 g of protein in every meal") · calorie_goal ÷
+        meals_per_day ("Around 550 calories a plate") · max_prep_minutes ("Nothing over 30 minutes") ·
+        diet_type/restrictions · food_dislikes ("And no mushrooms. Ever.") · fitness_goal ("Every pick
+        moves your cut forward") · cooking_skill · finale when results land: the real item count, big.
+        Rules: these are INTENTIONS from the profile, never claims about meals — the meals do not exist
+        yet during the photo scan (they are generated after results land), so "aiming for / around /
+        built around", never "every meal is under 630". Loop if the scan runs long, no beat twice in a
+        row, never adds wait. Logan's row (2,200 kcal, 160 g, 4 meals, 30 min, Classic, no dislikes,
+        goal and skill NULL) gets photos, calories, protein, per-plate calories, time, finale.
+        **C. Reveal top says one thing.** Keep FROM YOUR PANTRY + "3 meals you can make right now";
+        remove "Picked from your N ingredients" and the goal sentence (the story said it during the
+        wait, and each card's pills show that meal's calories and protein). The deck moves up; the
+        photos get the room. `lib/revealLine.ts` stays for reuse in B. Open question: eyebrow or
+        headline only.
       - [ ] **OPEN — the Pantry tab STILL flashes on the way to the reveal** after push-first (Logan
         2026-09-16, second pass). react-native-screens' `setPushViewControllers` only defers when the
         stack view has no window or a nav transition is in flight (RNSScreenStack.mm:669-700), so a

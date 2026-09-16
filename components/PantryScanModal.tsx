@@ -36,6 +36,7 @@ import { useSuperwall, useSuperwallEvents } from 'expo-superwall'
 import { trackUpgradePromptShown } from '@/lib/analytics'
 import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
+import { normalizeCategory, PANTRY_ORDER } from '@/lib/categoryMatch'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { prefetchCookNowMeals, warmMealImages } from '@/lib/mealPrefetch'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
@@ -564,9 +565,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // Phase 2 — the reveal. Count 0 → real total with a FAST, fixed-duration ramp (~0.6s no matter
   // the item count) the moment results land, so it's always snappy AND accurate — never a slow tick,
   // never a mismatch. Light haptics tick along for a satisfying "brrrt".
+  // ONCE per result set. The effect re-runs whenever the list's length changes, and the review
+  // changes it: adding an item by hand replayed the whole count-up — 16 light taps and a Success —
+  // under the thumb that typed it (Logan: "buzzes 5-10x in a row"). Removing one did the same.
+  const countedForRef = useRef<string | null>(null)
   useEffect(() => {
     const target = detectedItems.length
-    if (!showDone || target === 0) return
+    if (!showDone) { countedForRef.current = null; return }
+    if (target === 0) return
+    if (countedForRef.current === scannedFpRef.current) { setSpottedCount(target); spottedCountRef.current = target; return }
+    countedForRef.current = scannedFpRef.current
     const inc = Math.max(1, Math.ceil(target / 16)) // ~16 frames to the total, whatever it is
     let current = 0
     setSpottedCount(0)
@@ -1569,10 +1577,29 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       </View>
                     </View>
 
-                    {/* One flat, ungrouped list of everything found (deduped across photos). Uniform
-                        rows scan far better than a cloud of ragged-width pills at 20+ items. */}
+                    {/* Grouped by aisle in the Pantry tab's own order and categories (Logan), so the
+                        review reads like the pantry it is about to join. normalizeCategory is the
+                        mapping the pantry insert applies, so an item sits under the same heading
+                        here and there. Uniform rows within each group. */}
                     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.reviewItemsScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-                      {visibleItems.map(renderRow)}
+                      {(() => {
+                        const byAisle = new Map<string, DetectedItem[]>()
+                        for (const item of visibleItems) {
+                          const aisle = normalizeCategory(item.category, item.name)
+                          if (!byAisle.has(aisle)) byAisle.set(aisle, [])
+                          byAisle.get(aisle)!.push(item)
+                        }
+                        const aisles = [...PANTRY_ORDER.filter(a => byAisle.has(a)), ...[...byAisle.keys()].filter(a => !PANTRY_ORDER.includes(a))]
+                        return aisles.map(aisle => (
+                          <View key={aisle}>
+                            <View style={styles.reviewAisleHeader}>
+                              <Text style={styles.reviewAisleTitle}>{aisle.toUpperCase()}</Text>
+                              <Text style={styles.reviewAisleCount}>{byAisle.get(aisle)!.length}</Text>
+                            </View>
+                            {byAisle.get(aisle)!.map(renderRow)}
+                          </View>
+                        ))
+                      })()}
                       {/* Searching for something that isn't there IS the answer — say so, and the
                           + button below adds it. */}
                       {query.length > 0 && visibleItems.length === 0 && (
@@ -1807,7 +1834,11 @@ const styles = StyleSheet.create({
   reviewPhotoPhText: { color: '#888888', fontSize: 13 },
   // No fixed width: the list lives inside the step's 24px horizontal padding, so forcing width
   // SCREEN_W made the content 48px wider than its viewport → sideways scroll + left-clipped chips.
-  reviewItemsScroll: { paddingTop: 8, paddingBottom: 20 },
+  reviewItemsScroll: { paddingTop: 0, paddingBottom: 20 },
+  // Same look as the Pantry tab's section headers (sectionHeader / sectionTitle / sectionCount).
+  reviewAisleHeader: { flexDirection: 'row', alignItems: 'center', paddingTop: 18, paddingBottom: 2, paddingHorizontal: 2 },
+  reviewAisleTitle: { flex: 1, fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2 },
+  reviewAisleCount: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.4)' },
   reviewCountHero: { fontSize: 27, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4 },
   reviewInstruction: { fontSize: 13, color: '#888888', marginTop: 3, fontWeight: '600' },
   // Uniform full-width row per detected item — scans cleanly at 20+ items where ragged pills didn't.

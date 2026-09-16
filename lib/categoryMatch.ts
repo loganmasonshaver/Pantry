@@ -13,6 +13,11 @@ export const STORE_CATEGORIES = [
   'Oils & Vinegars', 'Baking', 'Beverages', 'Other',
 ]
 
+// The pantry reads in COOK order: the protein source leads, because it is what a meal is built
+// around and the first thing Cook Tonight checks. Grocery keeps store order. Shared by the Pantry
+// tab and the scan review, so a scan's list is laid out exactly like the pantry it is about to join.
+export const PANTRY_ORDER: readonly string[] = ['Meat & Fish', ...STORE_CATEGORIES.filter(c => c !== 'Meat & Fish')]
+
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   'Produce': ['apple', 'banana', 'orange', 'lemon', 'lime', 'avocado', 'tomato', 'potato', 'onion', 'garlic', 'ginger', 'bell pepper', 'red pepper', 'green pepper', 'yellow pepper', 'orange pepper', 'sweet pepper', 'banana pepper', 'chili pepper', 'hot pepper', 'jalapeño', 'habanero', 'serrano', 'poblano', 'lettuce', 'spinach', 'kale', 'arugula', 'broccoli', 'cauliflower', 'carrot', 'celery', 'cucumber', 'zucchini', 'squash', 'corn', 'mushroom', 'asparagus', 'green bean', 'pea', 'edamame', 'cabbage', 'beet', 'radish', 'sweet potato', 'yam', 'eggplant', 'artichoke', 'berry', 'blueberry', 'strawberry', 'raspberry', 'grape', 'melon', 'watermelon', 'mango', 'pineapple', 'peach', 'pear', 'plum', 'kiwi', 'papaya', 'coconut', 'fig', 'date', 'basil', 'cilantro', 'parsley', 'mint', 'rosemary', 'thyme', 'dill', 'scallion', 'green onion', 'chive', 'salad', 'fruit', 'vegetable', 'fennel', 'leek', 'shallot', 'turnip', 'bok choy', 'watercress'],
   'Bakery': ['bread', 'bagel', 'roll', 'bun', 'croissant', 'muffin', 'tortilla', 'pita', 'naan', 'wrap', 'english muffin', 'baguette', 'sourdough', 'ciabatta', 'flatbread', 'pancake mix', 'waffle mix'],
