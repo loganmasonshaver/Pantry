@@ -1860,7 +1860,7 @@ claiming exact wording from the top apps is guessing.
       count-up effect (16 light taps + a Success) re-ran on every change to the list's length, so a
       hand-added or removed item replayed it. Now once per result set (`countedForRef`). Tell: add an
       item on the review → one tap at most, no burst.
-- [ ] **BUILT 2026-09-16, UNVERIFIED — the scan review is grouped by aisle like the Pantry tab** (Logan).
+- [ ] **BUILT 2026-09-16, UNVERIFIED — the scan review is grouped by aisle like the Pantry tab, each aisle a card** (Logan; cards added in cc3a3da).
       Same order (`PANTRY_ORDER`, now in `lib/categoryMatch.ts`, shared) and the same mapping the
       pantry insert applies (`normalizeCategory`), headers styled like the tab's. Search results stay
       grouped. Tell: MEAT & FISH first, each item under the heading it will have in the pantry.
@@ -1977,7 +1977,7 @@ claiming exact wording from the top apps is guessing.
         Testing note: resetting only `meal_gen` leaves `image_gen` at 22/24, so the next reveal's
         third card shows no photo — that is the image cap, not the download gate regressing. Reset
         both (`reference_scan_cap_reset_sql` in memory).
-      - [ ] **UNVERIFIED — no Pantry-tab flash between "Add all" and the reveal** (Logan 2026-09-16,
+      - [x] **SUPERSEDED 2026-09-16 — the reveal moved inside the scan modal; the flash is gone (Logan, on device).** Was: UNVERIFIED — no Pantry-tab flash between "Add all" and the reveal (Logan 2026-09-16,
         second pass). The modal used to close FIRST and push the reveal 400 ms later because UIKit
         drops a push that starts mid-dismissal — so the Pantry tab showed for the gap. Now the push
         happens while the modal is still fully presented and the modal dismisses 500 ms later onto
@@ -1987,7 +1987,7 @@ claiming exact wording from the top apps is guessing.
         fails to appear at all, the push is being dropped under the presented modal — revert to
         close-then-push and cover the gap another way.** Known trade-off: the headline's chunk
         ticks now fire while the modal is still sliding away (the reveal mounts underneath).
-      - [ ] **UNVERIFIED — build-up and revealed states share one layout.** The build-up was
+      - [x] **SUPERSEDED 2026-09-16 — the build-up no longer draws placeholder cards; it is the headline read-off only.** Was: UNVERIFIED — build-up and revealed states share one layout. The build-up was
         vertically centred (`centerRegion`) and the revealed state top-aligned, so the headline
         jumped a third of the screen upward when the cards arrived (Logan's screenshots 2 → 1).
         Same header / deckArea / bottom-bar skeleton in both now; the gate only changes card content.
@@ -2003,7 +2003,7 @@ claiming exact wording from the top apps is guessing.
         the pushed screen until the RN <Modal> is fully dismissed, so the Pantry tab is uncovered for
         ~0.9 s between the modal leaving and the push landing. Next step is plan A below (reveal
         inside the modal).
-      - [ ] **THIRD PASS 2026-09-16, UNVERIFIED — photos on the device BEFORE the reveal opens; the waiting
+      - [x] **VERIFIED on device 2026-09-16 17:41 (Logan: "the reveals look a lot better"; the Plating path seen) — THIRD PASS: photos on the device BEFORE the reveal opens; the waiting
         glow was wrong (Logan).** The prefetch only ever warmed each photo's URL, never its bytes, so the
         reveal still had three downloads to do — hidden behind the closing modal before, visible once
         the reveal moved inside it. Now `lib/mealPrefetch.ts` downloads each photo during the review
@@ -2030,7 +2030,7 @@ claiming exact wording from the top apps is guessing.
         keep the big-type story running instead of a spinner on a button — does not shorten, changes
         how it feels; (D) generate-meals starts the three photo generations itself the moment the
         meals exist, saving the client round trip — small (~1-2 s), honest about it.
-      - [ ] **MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision.** scan-pantry
+      - [x] **MEASURED 2026-09-16 17:41 — see the item above (vision 39.5 s via gpt-5.4, no fallback).** Was: MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision. scan-pantry
         (deployed) returns `_meta { ms, provider, primaryError, usage }` and the app logs
         `[perf] scan-pantry: vision Xms via …, tokens in/out (reasoning)` to Metro. Suspect, not proven:
         gpt-5.4 has a 60 s timeout and then falls back to Gemini Flash-Lite with another 60 s — a scan
@@ -2039,7 +2039,7 @@ claiming exact wording from the top apps is guessing.
         If gpt-5.4 answers slowly, decide parallel per-photo calls from the logged tokens: image
         tokens are the same either way, the extra cost is the ~2.8k-token prompt repeated per call,
         and wall time becomes roughly the slowest single-photo call instead of one call writing every item.
-      - [ ] **SECOND PASS 2026-09-16, UNVERIFIED — Logan on device after the first build:** (1) Pantry tab
+      - [x] **VERIFIED 2026-09-16 17:41 (Logan: "the loading story looks a lot better"; restocks measured 49 in 1.7 s) EXCEPT (5) the review cards, still unverified — tracked on the review-grouping item.** SECOND PASS — Logan on device after the first build: (1) Pantry tab
         flash GONE (verified); (2) photo-to-photo and line-to-line felt choppy — the photo was a keyed
         image that unmounted instantly and faded the next up from black, the line was removed then
         faded up from nothing. Now: one expo-image cross-dissolving natively (700 ms), and the outgoing
@@ -2058,7 +2058,7 @@ claiming exact wording from the top apps is guessing.
         vision call itself — the story softens the wait, it does not shorten it. (Corrected same day:
         parallel VISION calls are not in any existing plan — the scan-import plan's "bounded
         concurrency" is the client's photo preparation, not the AI call. See the item below.)
-      - [ ] **BUILT 2026-09-16 (Logan: go, lines every 4.5 s, goal reassurance mixed in), UNVERIFIED on
+      - [x] **VERIFIED 2026-09-16 (flash gone; story and reveal approved) EXCEPT tell (4) View recipe from the in-scan reveal, still unverified.** BUILT 2026-09-16 (Logan: go, lines every 4.5 s, goal reassurance mixed in), UNVERIFIED on
         device.** A: `components/CookRevealView.tsx` is the reveal; the scan modal renders it as step 7
         after Add all (no navigation), `app/cook-reveal.tsx` is a thin route wrapper, `[handoff]` logs
         removed, route animation back to fade. View recipe closes the modal then pushes the meal
@@ -2119,7 +2119,7 @@ claiming exact wording from the top apps is guessing.
            native-stack `presentation: 'fullScreenModal'` route instead of an RN <Modal>; the reveal
            is then a `router.replace` inside one navigator, and the whole SafeAreaProvider-inside-
            Modal class of bugs retires with it.
-      - [ ] **BUILT 2026-09-16, UNVERIFIED on device — validation line rewrite** (Logan: drop
+      - [x] **SUPERSEDED 2026-09-16 — both lines removed; the reveal header is the headline only.** Was: BUILT, UNVERIFIED on device — validation line rewrite (Logan: drop
         "nothing to buy", say "ingredients", a sentence tied to THIS user's goal). `lib/revealLine.ts`
         (+9 tests) builds line 2 from the three cards' own numbers. Tells: line 1 "Picked from your
         100 ingredients"; line 2 e.g. "Each one is under 630 calories with at least 48 g of protein."
@@ -3124,7 +3124,7 @@ What that sweep left open:
       the first set is made.
 
 ## 9. Unset SCAN_CAP_WEEK  *(after the trailer and screenshots are shot)*
-- [ ] `npx supabase secrets unset SCAN_CAP_WEEK` — unset is correct; scan-pantry falls back to 7.
+- [x] **DONE — already unset as of 2026-09-16** (preflight: "SCAN_CAP_WEEK unset"; Logan's scans were refused at 7/7 that day). Raise it again only if filming needs more than 7 scans a week. Was: `npx supabase secrets unset SCAN_CAP_WEEK` — unset is correct; scan-pantry falls back to 7.
       Held raised deliberately until app fixes and filming are done. Preflight fails until reverted.
 
 ## 10. Clean git history of leaked secrets  *(DOWNGRADED 2026-09-04 — not a blocker)*
