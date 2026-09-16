@@ -109,6 +109,43 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
     a dessert share ceiling — the real fix, but it COSTS yield on dessert-heavy days while yield is
     already 9-13, so it wants lever 3 first; (3) do nothing on cheesecake, which ages out by Oct 7,
     but brownies, pasta and salads are still arriving.
+- [x] **OPTION 1 SHIPPED (`54c7fbc`; Logan: "lets do 1"): page-wide family cap.** `lib/dishFamily.ts`
+  (7 tests): a family is any family word in the name; narrow families (cheesecake, brownie,
+  tiramisu, ice cream, bites, paneer…) show 4, broad ones (pasta, salad, rice, wrap, pizza, soup…)
+  show 10. Hero + personalised-shelf picks are pinned and counted; NEW TODAY next; the rest rotate
+  daily. Search still reaches everything. Simulated on the live pool: 149 of 238 shown, desserts
+  36% → 28% of the page, 0 new dishes hidden.
+  - [ ] **UNVERIFIED ON DEVICE.** Tell: scroll Discover to the end of Everything else and count
+    cheesecakes (≤ 4 on the whole page) and pasta (≤ 10); search "cheesecake" still finds all of
+    them; tomorrow the four visible cheesecakes are different ones.
+- [x] **JUNK INGREDIENT LISTS (`7f109c8`, DEPLOYED).** 3 live rows had benefit bullets or a creator's
+  sign-off as ingredients; 2 came from real run 808. New whole-line claim rules; scanned against
+  every stored ingredient name: exactly the 20 junk lines, zero false positives. Gelatin dessert
+  (Sep 13) repaired in place.
+  - [ ] **LOGAN: delete the two Sep 16 rows** (no real ingredient list to recover; the agent does
+    not hard-delete):
+    `delete from trending_meals where id in ('d794e444-ac90-4fae-999e-4238ab387985', '0b2f069e-705e-41cc-8003-808536413708');`
+    ("Oats and Paneer Savory Breakfast", "Soya and Corn Protein Breakfast")
+- [x] **SHELF RULE (`a321d98`, DEPLOYED, unexercised until Sep 17).** The prompt had two rules that
+  disagreed ("a cuisine wins" vs "cuisine first, otherwise…"). Now one order: dessert → snack →
+  savoury cuisine → morning → american-comfort, with named examples for every collision seen.
+  24 live rows moved under it with a guard on the old tag (list in the commit body, reversible):
+  sweet-treat 85 → 70. Indian rows did not increase — 6 moved onto the Indian shelf from snack/asian.
+  - [ ] **DECISION (Logan): a "Salads & bowls" shelf.** ~20 live dishes (tuna/pasta/egg salads,
+    cuisine-less protein bowls) have no honest home: 8 sit on mediterranean, the rest on snack and
+    comfort, and the rule's catch-all is a shelf titled "Comfort food, minus the guilt". Adding one
+    = a 10th SHELF_TAG + title + prompt line + retag of those rows.
+- [ ] **LEVER 3 — measured plan, not built (Logan: "12-18 per day… wait till tomorrow?").**
+  Pricing checked 2026-09-16 (ai.google.dev/gemini-api/docs/pricing): `gemini-3.1-flash-lite` free
+  tier, paid $0.25/$1.50 per 1M in/out (current). `gemini-3.8-flash` free tier, paid $0.75/$3.75
+  until Dec 31 then $1.50/$7.50. `gemini-3.1-pro-preview` NO free tier, $2/$12. At ~60k in / 50k out
+  a run: Lite ~$0.09, 3.8 Flash ~$0.23 (~$7/mo, ~$14/mo from Jan), Pro ~$0.72 (~$22/mo).
+  **Order:** (1) Sep 17 cron on the CURRENT model measures everything shipped today — switching the
+  model tonight would make that result unattributable. (2) A `?replay=<runId>&model=` dry-run mode
+  that re-runs only the LLM stage on a stored run's `funnel.candidates` (videos.list, ~1 quota unit
+  instead of ~1,300) — same candidates, one variable. (3) Replay 808 and Sep 17 on Lite vs 3.8
+  Flash; switch only if raw per attempt roughly doubles and the wall budget still fits.
+  (4) Search volume 13 → 26 stays post-launch (halves the runs a day).
 - [x] **INDIAN SHARE since the region change (`2d0a374`, Aug 30: keyword search scoped US/English)
   — the change worked.** Same measures before (Aug 17-30, 113 rows) → after (Aug 31-Sep 16, 125):
   Indian dish or creator 26% → **10%** (8% in the last 10 days); needs an Indian grocer (the
