@@ -1677,8 +1677,23 @@ claiming exact wording from the top apps is guessing.
       80pt tiles scrolling sideways past four) and the headline reads "Check these N items · Tap a
       name to fix it · ✕ to remove · type below to add". Tell: a 14-photo scan shows the headline
       directly under the strip and the list scrolls to the last item.
-- [ ] **UNVERIFIED — the SCANNING screen's ‹ goes to the camera; the "More ingredients" areas hub is
-      DELETED** (2026-09-16, second pass). Logan's original ask was about the THEATRE's ‹, which went
+- [x] **VERIFIED on device 2026-09-16 (Logan) — ‹ lands on the camera; no double spend.** Spamming ‹ /
+      the camera button left `scan_usage` pantry at 7 (the limit), unchanged. **Found in that test and
+      FIXED same day, UNVERIFIED:** the camera button flipped words on its own ("Scan 4 photos" ↔
+      "View results") because its label read the in-flight ref during render; now state-driven, with
+      three labels — "View results" (results exist), "Back to scan" (still running), "Scan N photos".
+- [ ] **PLAN, awaiting Logan's go — the weekly-scan-limit screen offers "Retry scan", which cannot work
+      for days** (Logan 2026-09-16). His proposal: primary "add items manually" (keyboard up), second
+      option "go Home". Claude's counter: (1) agree on manual add as the ONE action — close the scanner
+      and focus the Pantry tab's "Search or add…" field (via a route param when opened from Home);
+      (2) no Home button: the top-left ‹ becomes ✕ close on this error (the camera is a dead end when
+      you cannot scan), and closing already returns where the scan started — two exits is the
+      redundant-CTA rule; (3) the bigger fix: say it BEFORE the camera. Logan took photos and only then
+      learned the week was spent. Read the rolling-7-day `scan_usage` pantry count when the scanner
+      opens and, at the limit, open on "You've used this week's scans" + the same manual-add action.
+      Server code is `scan_cap_reached` (`_shared/scan-cap.ts`); the client currently drops the code
+      and keeps only the message. **Original finding:** the SCANNING screen's ‹ goes to the camera; the
+      "More ingredients" areas hub is DELETED (2026-09-16, second pass). Logan's original ask was about the THEATRE's ‹, which went
       to the hub (a second screen of the same photos); the build below changed the REVIEW's ‹ instead,
       so on device he still landed on the hub. Now: theatre ‹ → camera with the filmstrip, the hub
       block + its state/styles/icons are gone (it had no other way in), and a scan still in flight is

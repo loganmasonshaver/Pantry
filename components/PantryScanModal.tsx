@@ -383,7 +383,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // superseded run's results are dropped instead of overwriting the newer state.
   const scanRunRef = useRef<{ fp: string; id: number } | null>(null)
   const scanRunIdRef = useRef(0)
-  const scanRunningForThesePhotos = scanRunRef.current?.fp === photoFp(photos)
+  // The same fact as STATE, for rendering. Reading the ref during render made the camera button
+  // flip words on its own: a refused scan rendered while the ref was still set ("View results"),
+  // the ref then cleared without a render, and the next unrelated render said "Scan 4 photos".
+  const [scanRunningFp, setScanRunningFp] = useState<string | null>(null)
+  const scanRunningForThesePhotos = scanRunningFp !== null && scanRunningFp === photoFp(photos)
 
   // Drives the scanning beam that sweeps top→bottom over the viewfinder — same motif as the
   // home "Scan your pantry" hero card, so the loading screen reads as the same scan action.
@@ -411,6 +415,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
 
     const runId = ++scanRunIdRef.current
     scanRunRef.current = { fp: photoFp(photos), id: runId }
+    setScanRunningFp(scanRunRef.current.fp)
     const current = () => scanRunIdRef.current === runId
 
     const scanPhotos = async () => {
@@ -511,7 +516,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
         setScanError(msg)
       }
     }
-    scanPhotos().finally(() => { if (scanRunRef.current?.id === runId) scanRunRef.current = null })
+    scanPhotos().finally(() => {
+      if (scanRunRef.current?.id !== runId) return
+      scanRunRef.current = null
+      setScanRunningFp(null)
+    })
 
     return () => { loop.stop() }
   }, [step, retryNonce])
@@ -680,6 +689,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     // prefetch effect could fire a paid generation for items nobody would ever see.
     scanRunIdRef.current += 1
     scanRunRef.current = null
+    setScanRunningFp(null)
     onClose()
     // Defer the reset until after the slide-out animation (~300ms) so the current
     // screen — e.g. the results view — collapses straight down instead of flashing
@@ -1309,7 +1319,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                       ? <ActivityIndicator size="small" color="#000000" />
                       : <ScanLine size={17} stroke="#000000" strokeWidth={2.2} />}
                     <Text style={styles.cameraScanBtnText}>
-                      {pendingScan || importing ? 'Preparing photos…' : resultsForThesePhotos || scanRunningForThesePhotos ? 'View results' : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
+                      {pendingScan || importing ? 'Preparing photos…'
+                        // Three states, three words. "View results" only when results exist; a scan still
+                        // running is something to go back to, not results to view.
+                        : resultsForThesePhotos ? 'View results'
+                        : scanRunningForThesePhotos ? 'Back to scan'
+                        : `Scan ${photos.length} photo${photos.length !== 1 ? 's' : ''}`}
                     </Text>
                   </TouchableOpacity>
                 )}
