@@ -102,7 +102,7 @@ function setJaccard(a: Set<string>, b: Set<string>): number {
 // Fixed shelf vocabulary. Mixed cuisine + format on purpose: cuisine alone covers only 43% of the
 // catalog because half of it is fitness-food constructs with no cuisine, and format alone loses the
 // evocative pull of "Indian night" over "Chicken".
-const SHELF_TAGS = ['mexican', 'indian', 'asian', 'italian', 'mediterranean', 'american-comfort', 'sweet-treat', 'high-protein-snack', 'breakfast']
+const SHELF_TAGS = ['mexican', 'indian', 'asian', 'italian', 'mediterranean', 'american-comfort', 'sweet-treat', 'high-protein-snack', 'breakfast', 'salads-bowls']
 
 
 // How much of a YouTube description we KEEP, and how much of it the model is SHOWN.
@@ -906,7 +906,7 @@ ${poolNamesForPrompt.join('; ')}
 SHELF_TAG — REQUIRED, and it must be copied EXACTLY from this list. Any other value is discarded
 and the recipe loses its shelf, so never invent one, never leave it out, and never pluralise or
 rephrase (not "desserts", not "asian-inspired", not "snack"):
-  mexican | indian | asian | italian | mediterranean | american-comfort | sweet-treat | high-protein-snack | breakfast
+  mexican | indian | asian | italian | mediterranean | american-comfort | sweet-treat | high-protein-snack | breakfast | salads-bowls
 Each shelf answers what someone browsing is in the mood for. Decide IN THIS ORDER and stop at the
 first that fits:
   1. A DESSERT, from any cuisine → sweet-treat. Cakes, cheesecakes, brownies, cookies, ice cream and
@@ -923,10 +923,13 @@ first that fits:
      buffalo chicken pasta) → american-comfort.
   4. MORNING FOOD → breakfast. Pancakes, waffles, crepes, oats, chia pudding, smoothies, smoothie and
      yogurt bowls, egg dishes, breakfast wraps, toast.
-  5. Anything else → american-comfort.
-A salad or bowl is decided by the same order: a Greek salad is mediterranean, a burrito bowl is
-mexican. Do not use mediterranean for a salad just because it is fresh. Every recipe gets exactly
-one — there is no "none".
+  5. A SAVOURY SALAD OR BOWL with no clear cuisine → salads-bowls. Tuna, egg, chicken and pasta
+     salads, bean salads, protein and grain bowls, sweet potato bowls, lettuce wraps of a salad.
+     A salad or bowl WITH a clear cuisine was already decided at step 3: a Greek salad is
+     mediterranean, a burrito bowl is mexican, a poke bowl is asian. Never use mediterranean for a
+     salad just because it is fresh.
+  6. Anything else → american-comfort.
+Every recipe gets exactly one — there is no "none".
 
 ${TIME_RULES}
 

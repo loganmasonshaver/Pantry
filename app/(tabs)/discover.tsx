@@ -164,7 +164,18 @@ const SHELF_TITLES: Record<string, string> = {
   'sweet-treat': 'Sweet, and it still fits',
   'high-protein-snack': 'Protein snacks',
   'breakfast': 'Breakfast, sorted',
+  // Added 2026-09-16. ~15 cuisine-less salads and bowls had no honest shelf: 8 sat on
+  // "Mediterranean table" and the rest on snacks and "Comfort food, minus the guilt".
+  'salads-bowls': 'Salads & bowls',
 }
+
+// The per-shelf form cap reads the LAST noun, and on a shelf that is all salads and bowls every
+// card's last noun is salad or bowl — the cap would show two of each and push the rest into
+// Everything else. Here the form is the word before it (tuna, egg, pasta, sweet potato), which is
+// what actually differs between two salads.
+const SALAD_BOWL_TAIL = /\s*\b(?:salads?|bowls?)\b\s*$/i
+const saladShelfForm = (m: DiscoverMeal) =>
+  dishArchetype({ id: m.id, name: m.name.replace(SALAD_BOWL_TAIL, '').replace(SALAD_BOWL_TAIL, '') })
 
 // Kept as regex because these are genuinely FACTS about a meal, not interpretations — the thing a
 // regex is actually good at. "Five ingredients or fewer" was deleted rather than kept: it matched
@@ -935,7 +946,7 @@ export default function DiscoverScreen() {
     //
     // A skipped meal is NOT consumed: `taken` is only marked for meals actually kept, so it stays
     // available to every later shelf instead of vanishing from the page entirely.
-    const claim = (meals: DiscoverMeal[], limit: number) => {
+    const claim = (meals: DiscoverMeal[], limit: number, formOf: (m: DiscoverMeal) => string = dishArchetype) => {
       const out: DiscoverMeal[] = []
       const sigs: Set<string>[] = []
       const forms = new Map<string, number>()
@@ -944,7 +955,7 @@ export default function DiscoverScreen() {
         if (taken.has(m.id)) continue
         // Dish form is checked BEFORE ingredients: it is the cheaper test and the one that catches
         // the case ingredient overlap structurally cannot (see dishArchetype).
-        const form = dishArchetype(m)
+        const form = formOf(m)
         if (form && (forms.get(form) ?? 0) >= ARCHETYPE_PER_SHELF) continue
         const sig = ingredientSignature(m)
         // Under 3 ingredients the overlap score is noise — a two-item recipe matches too much by
@@ -1063,15 +1074,18 @@ export default function DiscoverScreen() {
     // short releases its meals back — claiming for a shelf nobody sees would orphan those meals
     // out of Everything else too.
     const tagShelves = Object.keys(SHELF_TITLES)
-      .map(tag => ({ key: `tag-${tag}`, title: SHELF_TITLES[tag], match: (m: DiscoverMeal) => shelfTagOf(m) === tag }))
-    const allShelves = [...tagShelves, ...FACT_SHELVES]
+      .map(tag => ({
+        key: `tag-${tag}`, title: SHELF_TITLES[tag], match: (m: DiscoverMeal) => shelfTagOf(m) === tag,
+        formOf: tag === 'salads-bowls' ? saladShelfForm : undefined,
+      }))
+    const allShelves: (FactShelf & { formOf?: (m: DiscoverMeal) => string })[] = [...tagShelves, ...FACT_SHELVES]
     const rot = dayOfYear % allShelves.length
     const rotatedOrder = [...allShelves.slice(rot), ...allShelves.slice(0, rot)]
 
     const intent: { key: string; title: string; meals: DiscoverMeal[] }[] = []
     for (const shelf of rotatedOrder) {
       if (intent.length >= shelfBudget) break
-      const meals = claim(pageGrid.filter(shelf.match), 12)
+      const meals = claim(pageGrid.filter(shelf.match), 12, shelf.formOf)
       if (meals.length >= 2) intent.push({ key: shelf.key, title: shelf.title, meals })
       else meals.forEach(m => taken.delete(m.id))
     }
