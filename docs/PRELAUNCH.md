@@ -2046,8 +2046,10 @@ claiming exact wording from the top apps is guessing.
           the client asks is paid for twice, unless generate-meals waits for the photos (holds the
           meals back ~8 s for every caller) or a pending marker + polling is added. The image cap must
           still be charged to the user (a service-role call skips it). Redeploying generate-meals also
-          ships the other session's `7f109c8`. Decide from A's "generate-meals back" → "photo requested"
-          gap, which is the whole of what D can save.
+          ships the other session's `7f109c8`. What D can save = the meals' trip back to the phone (the
+          `generated_meals.created_at` row vs A's "generate-meals back") + the phone's gap to "photo
+          requested" + the photo request's own trip and auth/cache/cap checks. Build it only if that
+          sum is over ~2 s; the phone already asks for the photos the moment meals land.
       - [x] **MEASURED 2026-09-16 17:41 — see the item above (vision 39.5 s via gpt-5.4, no fallback).** Was: MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision. scan-pantry
         (deployed) returns `_meta { ms, provider, primaryError, usage }` and the app logs
         `[perf] scan-pantry: vision Xms via …, tokens in/out (reasoning)` to Metro. Suspect, not proven:
