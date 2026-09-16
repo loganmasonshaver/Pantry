@@ -10,11 +10,12 @@
 
 // 15 s under the gateway's 150 s.
 export const WALL_BUDGET_MS = 135_000
-// Measured tail after the loop: 3 survivors reached insert within ~3 s and finished 5 s later
-// (Sep 16); 12 rows' images all landed 17 s after insert (Sep 13). FatSecret runs 3 recipes at a
-// time before insert. 10 s + 2.5 s/recipe prices 12 at 40 s — above the ~30 s measured.
-export const TAIL_BASE_MS = 10_000
-export const TAIL_PER_RECIPE_MS = 2_500
+// Measured tail after the loop, from funnel.timing on real runs: 10 rows took 1.7 s to rank,
+// look up and insert, then 9.2 s for images (5 at a time, ~4.6 s a wave); 12 rows' images took
+// 17 s. 5 s + 1 s/recipe prices 10 at 23 s and 12 at 25 s — 1.5-2x measured — and the first
+// version's 10 s + 2.5 s/recipe reserved 55 s against an 11 s tail, which cost a third attempt.
+export const TAIL_BASE_MS = 5_000
+export const TAIL_PER_RECIPE_MS = 1_000
 // What the NEXT attempt may add, so the reserve covers the tail the attempt itself creates.
 // Single-attempt yields seen: 1-11.
 export const NEXT_ATTEMPT_YIELD = 8
@@ -23,6 +24,10 @@ const TAIL_RECIPE_CEILING = 30
 // Floor on how long an attempt is assumed to take before this run has measured one. Gemini
 // answered in ~17 s on Sep 13 and ~45-50 s on Sep 15.
 export const MIN_ATTEMPT_MS = 20_000
+// Each attempt has run longer than the one before it on every run so far (5.9 → 16.5 → 24.2 s;
+// 27.6 → 36.1 s): latency tracks output size and the rotation changes what the model returns.
+// Predicting from the slowest so far under-shot and started an attempt that only hit its clamp.
+export const ATTEMPT_GROWTH = 1.25
 // A call's own abort. The floor stops a first attempt after a slow YouTube stage being aborted
 // before the model has produced anything; the cap is the old per-call hard timeout.
 const CALL_TIMEOUT_FLOOR_MS = 15_000
@@ -40,7 +45,7 @@ export type StartDecision = { start: boolean; loopEndMs: number; expectedMs: num
 // if this run's slowest attempt so far would still finish before the loop's end.
 export function decideAttempt(attemptNo: number, elapsedMs: number, survivors: number, completedMs: number[]): StartDecision {
   const loopEndMs = llmLoopEndMs(survivors)
-  const expectedMs = Math.max(MIN_ATTEMPT_MS, ...completedMs)
+  const expectedMs = Math.round(Math.max(MIN_ATTEMPT_MS, ...completedMs.map(ms => ms * ATTEMPT_GROWTH)))
   const start = attemptNo === 0 || elapsedMs + expectedMs <= loopEndMs
   const callTimeoutMs = Math.max(CALL_TIMEOUT_FLOOR_MS, Math.min(CALL_TIMEOUT_CAP_MS, loopEndMs - elapsedMs))
   return { start, loopEndMs, expectedMs, callTimeoutMs }

@@ -762,3 +762,11 @@ test('"combine all ingredients" vouches for every ingredient, and half a recipe 
   const bolognese = [{ name: 'ground beef', grams: '140g' }, { name: 'tomato sauce', grams: '120g' }, { name: 'all-purpose flour', grams: '42g' }, { name: 'onion', grams: '40g' }]
   assert.deepEqual(unusedIngredients([{ title: 'Cook', detail: 'Brown the beef with the onion, add the tomato sauce and simmer.' }], bolognese).map((i: any) => i.name), ['all-purpose flour'])
 })
+
+test('nameIngredientGaps: a pasta dish made with a named shape is not missing pasta', () => {
+  assert.deepEqual(nameIngredientGaps('Cheesy Beef Burrito Pasta', [{ name: 'rotini' }, { name: 'ground beef' }, { name: 'cheddar' }]), [])
+  assert.deepEqual(nameIngredientGaps('Chicken Alfredo Pasta', [{ name: 'tortellini' }, { name: 'chicken breast' }]), [])
+  assert.deepEqual(nameIngredientGaps('Beef Burrito Pasta', [{ name: 'egg noodles' }, { name: 'ground beef' }]), [])
+  // Still a gap when nothing pasta-shaped is listed at all.
+  assert.deepEqual(nameIngredientGaps('Beef Burrito Pasta', [{ name: 'ground beef' }, { name: 'cheddar' }, { name: 'salsa' }]), ['pasta'])
+})

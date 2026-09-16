@@ -292,7 +292,11 @@ const DEFINING_FOODS = [
 // them is promising that one.
 const SYNONYMS: Record<string, string[]> = {
   chocolate: ['cocoa', 'cacao', 'choc', 'chocolat'],
-  pasta: ['fettuccine', 'spaghetti', 'penne', 'macaroni', 'linguine', 'rigatoni', 'bowtie', 'farfalle', 'orzo', 'lasagna'],
+  // Every shape here names pasta and nothing else. 'shell' and 'elbow' are left out on purpose:
+  // taco shells satisfy the first and "elbow macaroni" already carries macaroni. Rotini is the
+  // 2026-09-16 case — the same burrito pasta passed one run and failed the next on the shape word.
+  pasta: ['fettuccine', 'spaghetti', 'penne', 'macaroni', 'linguine', 'rigatoni', 'bowtie', 'farfalle', 'orzo', 'lasagna', 'lasagne',
+    'rotini', 'fusilli', 'ziti', 'cavatappi', 'tortellini', 'ravioli', 'gnocchi', 'pappardelle', 'tagliatelle', 'bucatini', 'gemelli', 'ditalini', 'orecchiette', 'cannelloni', 'manicotti', 'noodle'],
   noodle: ['ramen', 'udon', 'soba', 'fettuccine', 'spaghetti'],
   oat: ['oatmeal', 'porridge', 'haferflocken'],
   coffee: ['espresso', 'mocha', 'flexpresso'],

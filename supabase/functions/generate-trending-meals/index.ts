@@ -1069,6 +1069,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const attemptLog: AttemptLog[] = []
     funnel.attempts = attemptLog
     funnel.poolNamesInPrompt = poolNamesForPrompt.length
+    funnel.promptChars = prompt.length
     // Per PROVIDER, summed from its own attempts. These were the run's cumulative counters written
     // under whichever provider ran last, so llm_OpenAI read raw 13 with Gemini's drops inside it.
     const providerTotals: Record<string, { raw: number; sanitized: number; rejected: Counts }> = {}
@@ -1338,7 +1339,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             const gaps = nameIngredientGaps(name, counted)
             if (gaps.length > 0) {
               rejNameGap++
-              note('nameGap', name, `missing ${gaps.join(', ')}`)
+              // The model's own list rides along: a "missing nutella" on a protein-Nutella copycat and a
+              // "missing pasta" on a rotini dish read as real drops from the count alone.
+              note('nameGap', name, `missing ${gaps.join(', ')} — listed: ${counted.map((i: any) => i?.name ?? i).join(', ').slice(0, 240)}`)
               console.log(`[funnel] rejected "${name}" — named for ${gaps.join(', ')}, absent from ingredients`)
               return false
             }

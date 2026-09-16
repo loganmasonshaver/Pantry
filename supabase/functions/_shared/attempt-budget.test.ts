@@ -5,21 +5,32 @@ import {
 } from './attempt-budget.ts'
 
 test('the loop end moves earlier as survivors grow, and never lets the tail estimate run past the wall', () => {
-  assert.equal(llmLoopEndMs(0), 105_000)
-  assert.equal(llmLoopEndMs(3), 97_500)
-  assert.equal(llmLoopEndMs(11), 77_500)
+  assert.equal(llmLoopEndMs(0), 122_000)
+  assert.equal(llmLoopEndMs(3), 119_000)
+  assert.equal(llmLoopEndMs(11), 111_000)
   assert.ok(llmLoopEndMs(3) < llmLoopEndMs(0))
   // The recipe ceiling stops the reserve growing without bound.
   assert.equal(llmLoopEndMs(40), llmLoopEndMs(22))
   assert.ok(llmLoopEndMs(40) > 0 && llmLoopEndMs(40) < WALL_BUDGET_MS)
 })
 
-test('the Sep 16 run shape now gets a third attempt: 3 survivors at 50 s with ~22 s attempts', () => {
+test('the Sep 16 cron shape gets a third attempt: 3 survivors at 50 s with ~22 s attempts', () => {
   const d = decideAttempt(2, 50_000, 3, [22_000, 18_000])
   assert.equal(d.start, true)
-  assert.equal(d.expectedMs, 22_000)
+  assert.equal(d.expectedMs, 27_500) // 1.25x the slowest so far
   // And its call is clamped to the loop end, not the old 85 s.
-  assert.equal(d.callTimeoutMs, 47_500)
+  assert.equal(d.callTimeoutMs, 69_000)
+})
+
+test('the Sep 16 real run shape (10 survivors at 73 s, attempts of 27.6 and 36.1 s) does NOT start a third', () => {
+  // 73 s + 1.25 x 36.1 s = 118 s, past the 112 s loop end for 10 survivors. The old estimate would
+  // have started it and hit the clamp at 39 s with nothing to show.
+  const d = decideAttempt(2, 72_990, 10, [27_593, 36_056])
+  assert.equal(d.start, false)
+})
+
+test('a fast-model day (17 s attempts, Sep 13) keeps getting attempts deep into the run', () => {
+  assert.equal(decideAttempt(3, 60_000, 6, [17_000, 17_000, 17_000]).start, true)
 })
 
 test('a slow model day still stops: one 50 s attempt, 10 survivors at 55 s', () => {
