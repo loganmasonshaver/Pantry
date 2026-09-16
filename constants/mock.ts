@@ -34,4 +34,7 @@ export type MealDetail = {
   servings?: number
   ingredients: Ingredient[]
   steps: string[]
+  // Cook Now only: ingredients the server judged not needed for the dish (a garnish). Absent on
+  // saved, Discover and pre-split meals — every gap then reads as needed. See isOptionalGap.
+  garnish_missing?: string[]
 }

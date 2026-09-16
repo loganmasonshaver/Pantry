@@ -1492,8 +1492,15 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
-- [ ] **OPEN — Home "Cook from your pantry": two ✓ Ready to cook over three meals reads as partial
-      failure** (Logan 2026-09-16). All three were cookable; the third showed "Better with: fresh lime
+- [ ] **BUILT 2026-09-16, UNVERIFIED on device — Home "Cook from your pantry": two ✓ Ready to cook over
+      three meals read as partial failure** (Logan 2026-09-16). Shipped as agreed below: Home rows
+      are Need or ✓ Ready only; the meal screen has an OPTIONAL group after IN YOUR PANTRY with
+      "Not needed for this dish — nice if you have it." and per-row + Add. One definition for both
+      screens: `isOptionalGap` / `neededMissing` in `lib/mealReadiness.ts` (+3 tests) — optional
+      only when the server listed it in `garnish_missing`, exact name; anything else is needed.
+      Tells: (1) today's three Home cards all show ✓ Ready to cook; (2) open the turkey salad →
+      fresh lime juice under OPTIONAL at the bottom, not under YOU'LL NEED; (3) a saved or Discover
+      meal's detail is unchanged (no garnish list → everything missing is needed). All three were cookable; the third showed "Better with: fresh lime
       juice" instead of the check (`PantryMealRow` in `app/(tabs)/index.tsx`: Need → Better with →
       Ready, first match wins). **Direction agreed 2026-09-16 (Logan's idea):** the Home row shows
       only ✓ Ready to cook or Need: — no garnish line — and the garnish is mentioned ONLY on the meal

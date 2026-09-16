@@ -41,7 +41,7 @@ import { useSuperwall } from 'expo-superwall'
 import { trackMealsGenerated, trackDiscoverNudgeTapped } from '../../lib/analytics'
 import { trackCookTonightUsed } from '@/lib/engagement'
 import { discoverNudge } from '@/lib/discoverNudge'
-import { missingIngredients, structuralMissing } from '@/lib/mealReadiness'
+import { neededMissing } from '@/lib/mealReadiness'
 import { loadFood } from '@/lib/foodCache'
 import { loadOverrideMap } from '@/hooks/useMacroOverrides'
 import { dietExcludedStaples } from '@/constants/staples'
@@ -302,7 +302,7 @@ function MealCardResting({ pantryCount, onPress, error, errorCode }: { pantryCou
 // `known` is false until the pantry has loaded. Meals come from the disk cache faster than the
 // pantry query answers, so for that beat every ingredient read as missing and all three rows said
 // "Better with: <the whole recipe>" before flipping to "Ready to cook". Say nothing until it is known.
-function PantryMealRow({ meal, missing, structural, known, onPress }: { meal: GeneratedMeal; missing: string[]; structural: string[]; known: boolean; onPress: () => void }) {
+function PantryMealRow({ meal, structural, known, onPress }: { meal: GeneratedMeal; structural: string[]; known: boolean; onPress: () => void }) {
   // Cap the list at three names — the line is one row, and the detail screen has the full list.
   const list = (xs: string[]) => `${xs.slice(0, 3).join(', ')}${xs.length > 3 ? ` +${xs.length - 3}` : ''}`
   return (
@@ -345,14 +345,14 @@ function PantryMealRow({ meal, missing, structural, known, onPress }: { meal: Ge
             </View>
           )}
         </View>
-        {/* Only a STRUCTURAL gap is a trip to the store; a missing garnish is "Better with", not a
-            blocker — "Need:" over a dish short only of cilantro made a cookable meal look impossible. */}
+        {/* Two states only: Need, or Ready. A missing garnish is not mentioned here at all — "Better
+            with: lime juice" took the check off a meal that IS cookable, and two checks over three
+            meals read as the feature half-failing. The garnish lives on the meal screen, under
+            OPTIONAL, where you are actually reaching for ingredients. */}
         {!known ? (
           <View style={{ height: 14 }} />
         ) : structural.length > 0 ? (
           <Text style={styles.pantryRowNeed} numberOfLines={1}>Need: {list(structural)}</Text>
-        ) : missing.length > 0 ? (
-          <Text style={styles.pantryRowBetter} numberOfLines={1}>Better with: {list(missing)}</Text>
         ) : (
           <View style={styles.pantryRowReady}>
             <Check size={11} stroke="#4ADE80" strokeWidth={3} />
@@ -492,8 +492,7 @@ export default function HomeScreen() {
   // that tab — the generator already spreads the three across occasions.
   const pantryMeals = useMemo(() => meals.slice(0, 3).map(meal => ({
     meal,
-    missing: missingIngredients(meal.ingredients, pantryNames, excludedStaples),
-    structural: structuralMissing(meal, pantryNames, excludedStaples),
+    structural: neededMissing(meal, pantryNames, excludedStaples),
   })).sort((a, b) => a.structural.length - b.structural.length), [meals, pantryNames, excludedStaples])
 
   // Prefetch the three photos so the rows fill together rather than one beat apart.
@@ -1588,11 +1587,10 @@ export default function HomeScreen() {
               </View>
             ) : pantryMeals.length > 0 ? (
               <View style={{ marginHorizontal: 20, gap: 8 }}>
-                {pantryMeals.map(({ meal, missing, structural }) => (
+                {pantryMeals.map(({ meal, structural }) => (
                   <PantryMealRow
                     key={meal.id || meal.name}
                     meal={meal}
-                    missing={missing}
                     structural={structural}
                     known={pantryFetched}
                     onPress={() => {
@@ -2301,7 +2299,6 @@ const styles = StyleSheet.create({
   pantryRowReady: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   pantryRowReadyText: { fontSize: 11, color: '#4ADE80', fontWeight: '700' },
   pantryRowNeed: { fontSize: 11, color: '#F59E0B', fontWeight: '600' },
-  pantryRowBetter: { fontSize: 11, color: COLORS.textMuted, fontWeight: '600' },
   discoverNudge: { marginTop: 4, alignSelf: 'center' },
   discoverNudgeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' },
   discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },

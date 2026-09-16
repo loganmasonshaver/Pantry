@@ -38,3 +38,20 @@ export function structuralMissing(meal: { ingredients?: Named[]; structural_miss
     ? missingIngredients(s.map((name: string) => ({ name })), pantryNames, excludedStaples)
     : missingIngredients(meal.ingredients, pantryNames, excludedStaples)
 }
+
+// A gap the dish does not need: one the SERVER listed as a garnish. Exact name only — the server
+// copies the ingredient's own name into garnish_missing — and anything it did not list (a meal
+// cached before the split, or an item that ran out after generation) counts as needed. Fail safe:
+// wrongly calling something optional tells a user to cook without an ingredient they need.
+export function isOptionalGap(name: string, meal: { garnish_missing?: unknown }): boolean {
+  const g = meal.garnish_missing
+  if (!Array.isArray(g)) return false
+  const n = name.trim().toLowerCase()
+  return !!n && g.some(x => String(x).trim().toLowerCase() === n)
+}
+
+// The gaps a meal cannot be cooked without — Home's "Need:" and the meal screen's YOU'LL NEED read
+// this one definition, so Home cannot say Ready while the detail says You'll need.
+export function neededMissing(meal: { ingredients?: Named[]; garnish_missing?: unknown }, pantryNames: Set<string>, excludedStaples: Set<string>): string[] {
+  return missingIngredients(meal.ingredients, pantryNames, excludedStaples).filter(n => !isOptionalGap(n, meal))
+}

@@ -27,6 +27,7 @@ import { MealImage } from '@/components/MealImage'
 import { LinearGradient } from 'expo-linear-gradient'
 import { COLORS } from '@/constants/colors'
 import { isAssumedStaple, dietExcludedStaples, stapleKey } from '@/constants/staples'
+import { isOptionalGap } from '@/lib/mealReadiness'
 import { escapeLike } from '@/lib/sqlLike'
 import { todayStr } from '@/lib/localDate'
 import { DEFAULT_SLOT_LABELS } from '@/lib/mealSlots'
@@ -942,7 +943,12 @@ export default function MealDetailScreen() {
             // editing all read meal.ingredients so they keep the recipe as authored.
             const haveRows = scaledIngredients.filter(inPantry)
             const basicRows = scaledIngredients.filter(isBasic)
-            const needRows = scaledIngredients.filter(i => !inPantry(i) && !isBasic(i))
+            // A gap splits by the SERVER's own call (isOptionalGap — the same definition Home's
+            // "Need:" reads): a listed garnish is OPTIONAL, anything else is needed. Lime juice used
+            // to sit under YOU'LL NEED beside the chicken while Home called the meal ready to cook.
+            const isGap = (i: any) => !inPantry(i) && !isBasic(i)
+            const needRows = scaledIngredients.filter(i => isGap(i) && !isOptionalGap(i.name, meal))
+            const optionalRows = scaledIngredients.filter(i => isGap(i) && isOptionalGap(i.name, meal))
 
             // Renders one ingredient row. Tap does ONE thing per section, and never writes to
             // the pantry by accident (the old whole-row "I have this" tap silently inserted
@@ -963,7 +969,7 @@ export default function MealDetailScreen() {
             )
             const showSections = sectionsPresent.size > 1
 
-            const renderRow = (ing: any, kind: 'need' | 'have' | 'basic') => {
+            const renderRow = (ing: any, kind: 'need' | 'optional' | 'have' | 'basic') => {
               // Whole-unit foods (eggs, avocado, etc.) always display as count regardless of
               // portion mode — "233g eggs" reads weird in both Measured and Eyeball.
               const wholeUnit = getWholeUnitDisplay(ing.name, ing.grams, ing.visual)
@@ -975,12 +981,12 @@ export default function MealDetailScreen() {
               const displayName = wholeUnit ? wholeUnit.name : ing.name
               const isAdded = addedToGrocery.has(ing.name)
               // 'have' (in pantry) and 'basic' (assumed) both render muted vs the actionable NEED rows.
-              const isHaveRow = kind !== 'need'
+              const isHaveRow = kind !== 'need' // OPTIONAL rows are muted too: nothing to act on unless you want it
               // NEED taps toggle the grocery list. HAVE and BASIC rows are inert at the row level —
               // the basic opt-out now lives ONLY on the "assumed" pill (a precise, deliberate target),
               // so a stray row tap never opts a staple out.
               const onRowPress =
-                kind === 'need' ? () => toggleGrocery(ing.name)
+                kind === 'need' || kind === 'optional' ? () => toggleGrocery(ing.name)
                 : undefined
               return (
                 <PressableScale
@@ -988,7 +994,7 @@ export default function MealDetailScreen() {
                   style={[styles.ingredientRow, isHaveRow && styles.ingredientRowHave]}
                   onPress={onRowPress}
                   disabled={!onRowPress}
-                  haptic={kind === 'need'}
+                  haptic={kind === 'need' || kind === 'optional'}
                 >
                   {/* Bullet dot replaces the per-ingredient thumbnail. AI-generated thumbs
                       had a ~5-10% misgeneration rate (wrong food shown) — every comparable
@@ -1054,7 +1060,7 @@ export default function MealDetailScreen() {
                         screen — a third stacked label ("INGREDIENTS", the servings note, then
                         this) above what may be two rows of food. The pantry label below is
                         deliberately NOT conditional: it always contrasts with something. */}
-                    {(haveRows.length > 0 || basicRows.length > 0) && (
+                    {(haveRows.length > 0 || basicRows.length > 0 || optionalRows.length > 0) && (
                       <Text style={styles.ingredientGroupLabel}>YOU'LL NEED</Text>
                     )}
                     <View style={styles.ingredientList}>
@@ -1077,6 +1083,17 @@ export default function MealDetailScreen() {
                     {basicRows.length > 0 && (
                       <Text style={styles.ingredientHint}><Text style={styles.hintStar}>*</Text> a basic we assume you keep (salt, oil…). Tap the <Text style={styles.hintStar}>*</Text> on anything you don't have and we'll stop assuming it.</Text>
                     )}
+                  </>
+                )}
+                {/* OPTIONAL comes LAST: the first group on the screen is what reads as the requirement.
+                    Muted rows, but "+ Add" stays — you might still grab a lime on the way home. */}
+                {optionalRows.length > 0 && (
+                  <>
+                    <Text style={[styles.ingredientGroupLabel, (needRows.length > 0 || haveRows.length > 0 || basicRows.length > 0) && styles.ingredientGroupLabelSpaced]}>OPTIONAL</Text>
+                    <View style={styles.ingredientList}>
+                      {optionalRows.map(ing => renderRow(ing, 'optional'))}
+                    </View>
+                    <Text style={styles.ingredientHint}>Not needed for this dish — nice if you have it.</Text>
                   </>
                 )}
               </>
