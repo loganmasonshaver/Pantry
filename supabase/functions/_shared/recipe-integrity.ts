@@ -58,6 +58,18 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   /(składniki|makroskładniki|łap\s+przepis|zutaten|przepis)/i,
   /https?:\/\/|www\.|\B@\w+/i,                                            // links and handles
   /\b(description tag|ingredients? label|full recipe|subscribe|follow me|link in bio|shop my|use code)\b/i,
+  // A video's BENEFITS list read as its ingredient list. Two recipes shipped on 2026-09-16 whose
+  // "ingredients" were "No Bread / Gluten-Free / High Protein / Made with Oats & Paneer / Loaded
+  // with Vegetables / Perfect for Breakfast & Lunchbox / Save this recipe and share it with
+  // someone", and one on Sep 13 opened with "thank you for watching my healthy recipes." The
+  // retention contract then REQUIRED the model to echo each line with invented grams. Every
+  // pattern is whole-line or a phrase no food name carries: "high protein greek yogurt" and
+  // "gluten-free oats" survive, "High Protein" and "Gluten-Free" alone do not.
+  /^[^\p{L}\p{N}]*(?:(?:high|low)[- ](?:protein|fib(?:er|re)|carbs?|calories?|fat|sugar)|(?:gluten|dairy|sugar|egg|nut|oil|refined[- ]sugar)[- ]free|no (?:bread|flour|sugar|oven|oil|maida|added sugar)|(?:super |very )?(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple)(?:\s*(?:&|and|,)\s*(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple))*)[\s.!]*$/iu,
+  /^[^\p{L}\p{N}]*(?:made with|loaded with|packed with|rich in|perfect for|great for|good for|ideal for|best for|thank you|thanks for|your feedback|save this|share (?:it|this)|don'?t forget|let me know)\b/iu,
+  /\b(?:combination|for plant[- ]based protein|breakfast recipe|lunchbox|evening snack|weight loss|kids (?:&|and) adults)\b/iu,
+  // A claim naming the MEAL rather than a food: "High-protein vegetarian breakfast".
+  /^[^\p{L}\p{N}]*(?:high|low)[- ]\p{L}+\s+(?:\p{L}+\s+)?(?:breakfast|lunch|dinner|snack|meal|recipe|dessert|option|idea)s?[\s.!]*$/iu,
   // The same boilerplate in the languages this pool actually carries. "Speicher dir das Rezept"
   // ("save this recipe") was being stored as an ingredient.
   /\b(speicher dir|folge mir|abonnier\w*|rezept ab|guarda esta receta|s[ií]gueme|salva questa ricetta)\b/i,

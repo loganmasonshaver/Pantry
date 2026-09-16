@@ -827,3 +827,16 @@ test('nonDishName: a homemade protein powder is a pantry staple, not a dish', ()
   assert.equal(nonDishName('Homemade Desi Protein Powder'), 'protein powder')
   assert.equal(nonDishName('Protein Powder Pancakes'), null)
 })
+
+test('isNonIngredientLine: a benefits list or a sign-off is not an ingredient list', () => {
+  const oats = ['No Bread', 'Gluten-Free', 'High Protein', 'High Fiber', 'Made with Oats & Paneer', 'Loaded with Vegetables', 'Healthy & Filling', 'Great for Kids & Adults', 'Perfect for Breakfast & Lunchbox', 'Save this recipe and share it with someone']
+  const soya = ['High-protein vegetarian breakfast', 'Soya chunks for plant-based protein', 'Delicious corn & soya combination', 'Easy and quick breakfast recipe', 'Filling and satisfying', 'Perfect for healthy eating', 'Great for lunchbox or evening snack too']
+  const signoff = ['thank you for watching my healthy recipes.', 'your feedback means a lot to me.', 'thank you for your support!']
+  for (const l of [...oats, ...soya, ...signoff]) assert.equal(isNonIngredientLine(l), true, l)
+  assert.equal(realIngredients(oats).length, 0)
+  assert.equal(realIngredients(soya).length, 0)
+  // Real foods that carry the same words.
+  for (const l of ['high protein greek yogurt', 'gluten-free oats', 'low fat paneer', 'sugar-free maple syrup', 'high-protein pasta', 'no-added-sugar dark chocolate', 'easy-cook rice', 'quick oats', '120 ml milk', 'gelatin', 'fat-free cottage cheese']) {
+    assert.equal(isNonIngredientLine(l), false, l)
+  }
+})
