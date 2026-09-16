@@ -89,6 +89,38 @@ raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. 
   floor → **25-31 candidates with a list**, of which ~5 are compilations. The model picks ~15-18
   distinct; with today's parser fixes ~13 survive on a day like this. 12 is reachable most days;
   18 is not without a bigger list or a model that returns what it is asked for.
+- [ ] **VARIETY AUDIT 2026-09-16 (Logan: "a lot of cheesecake, brownie, paneer, salad bowls").**
+  Live pool 238 rows. Scripts in the session; classification is by name regex, so ±a few.
+  - **Desserts are the imbalance, not any one dish:** sweet-treat is 85 of 238 (36%), and 38% of
+    everything added since Aug 31. Four forms are 55 of those 85: cheesecake 20, brownie 14, ice
+    cream 13, mousse/pudding 8.
+  - **Cheesecake 22** (blueberry ×6: plain, mini, lemon, donuts, yogurt, chia pudding; chocolate ×4;
+    peanut butter ×3). Mostly OLD: 6/9/6/1 added per week over the last four. 12 left by Sep 30,
+    1 by Oct 7. **Brownie 16**, still arriving at ~4/week. **Pasta/noodles 31 (13%)**, the biggest
+    form and still growing (8 this week). **Salads 17 + ~12 savory bowls**; the pasta-salad family is
+    7, and two near-identical tuna pasta salads came in TODAY.
+  - **Why no gate stops it:** the dedup gates block the SAME dish, and correctly do not call
+    Raspberry Cheesecake a duplicate of Chocolate Cheesecake. Replaying today's name gates over the
+    whole pool blocks only 4 of 238. FORMAT_CAP is 2 per form PER DAY and nothing caps the 30-day
+    pool; the client's ARCHETYPE_PER_SHELF spaces forms apart but never shows fewer of them.
+  - **Options, unbuilt, Logan's call:** (1) client cap per form across the WHOLE page (e.g. 3
+    cheesecakes visible, newest first, rest via search) — immediate, reversible, costs no yield;
+    (2) pipeline form quota against the live pool (a form with ≥ 6 live rows goes to overflow) plus
+    a dessert share ceiling — the real fix, but it COSTS yield on dessert-heavy days while yield is
+    already 9-13, so it wants lever 3 first; (3) do nothing on cheesecake, which ages out by Oct 7,
+    but brownies, pasta and salads are still arriving.
+- [x] **INDIAN SHARE since the region change (`2d0a374`, Aug 30: keyword search scoped US/English)
+  — the change worked.** Same measures before (Aug 17-30, 113 rows) → after (Aug 31-Sep 16, 125):
+  Indian dish or creator 26% → **10%** (8% in the last 10 days); needs an Indian grocer (the
+  commit's own measure: besan/poha/suji/atta/chana dal/methi/maida) 12% → **3%**; `indian` shelf
+  12% → 6%. **"A lot of paneer" is the old rows:** 15 of the 24 paneer rows predate the change and
+  all leave Discover by Sep 29; the live pool reads 18% Indian today only because they are still in
+  it, ~10% by Sep 30 at the current rate.
+- [ ] **Watch: Indian creators are still ~9-10 of 25 CANDIDATES** (run 808: Hindi titles, "desi",
+  ladoo, sattu/ragi, soya compilations). Region is a bias, not a filter; most die as compilations or
+  non-dishes. Raising yield (lever 3: bigger model, more searches) could let the share climb back.
+  Before lever 3 ships, add the day's Indian share to the funnel/daily report, and decide the line
+  (e.g. ≤ 15% of a batch, needs-Indian-grocer ranked last, matching `2d0a374`'s pantry-match reason).
 - [x] **"Only 3 meals showing" — no Discover-tab bug.** No today-only shelf; NEW TODAY badges are
   spread through the shelves; the pool (233 + today's 10, all with photos) is inside the client's
   30-day window. The "3" was the daily report line or three badges.
