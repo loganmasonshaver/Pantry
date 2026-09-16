@@ -1518,6 +1518,54 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
+- [ ] **RAISED BY LOGAN 2026-09-16 — three pantry matchers disagree, and the two loose ones are why
+      Home said "Ready to cook" for a smoothie whose banana he does not have.** Proven by running all
+      three on the same inputs (scratch script, 2026-09-16):
+      | ingredient | pantry | server `isInPantry` | Home `missingIngredients` | detail `isAlreadyInList` |
+      |---|---|---|---|---|
+      | banana | banana peppers, banana cream pudding mix | present | present | **missing** |
+      | chicken | chicken breast | present | present | missing |
+      | milk | coconut milk | present | present | missing |
+      | onion | yellow onions | present | present | missing |
+      | oats | oat milk | missing | missing | missing |
+      Server and Home use two-way substring ("banana peppers" ⊃ "banana" → present); the detail uses
+      exact-after-adjective-strip ("chicken breast" ≠ "chicken" → missing). So the cookability gate
+      passed the smoothie at generation, Home showed ✓, and the detail showed YOU'LL NEED banana — all
+      from ONE pantry. **Plan (needs go):** (1) `lib/mealReadiness.ts` imports `isInPantry`/`findMissing`
+      from `supabase/functions/_shared/pantry-check.ts` (pure TS, no Deno, node already runs it) and the
+      meal screen reads mealReadiness — one matcher on all three surfaces by construction; (2) fix the
+      shared matcher's false positive: a pantry item whose last word is itself a FOOD (peppers) does
+      not cover a different food (banana), while a CUT/FORM last word (breast, thigh, fillet, florets…)
+      still lets "chicken breast" cover "chicken" — small word list + tests beside the 19 existing;
+      (3) keep the strict matcher for grocery dedupe, where it was written. `pantry_items` has NO
+      banana, pineapple or avocado row although the counter photo showed all three; "Banana Peppers"
+      was created alongside Bell Peppers and Greek Pepperoncini (a fridge-door jar reading, not the
+      bunch). The bananas were MISSED, not mislabelled; scan-pantry keeps no raw output (logs only),
+      so the dashboard function log at ~01:49 CDT is the only place to confirm per-photo counts.
+- [ ] **RAISED BY LOGAN 2026-09-16 — the meal screen opens with EVERY ingredient under + Add, then
+      corrects itself a beat later.** `pantryNames` starts as an empty Set and is fetched on mount;
+      until it lands every row is a NEED row. Home had the identical bug and gates on `known`
+      (`pantryFetched`); the meal screen never got the gate. Fix: hold the buckets (render rows
+      without chips/labels) until the pantry query resolves, and seed from the Pantry tab's disk
+      mirror `pantry_items:<uid>` for an instant first paint. Clean bounded fix — ship on next pass.
+- [ ] **RAISED BY LOGAN 2026-09-16 — thin pantry: what happens, what should.** Today: 0 items → Home's
+      scan hero, no generation (`empty_pantry` when the ingredient list is empty); ≥ 1 item →
+      generation runs against the item(s) + assumed staples. Server drops macro-band failures and
+      meals needing a structural item the pantry lacks — BUT when fewer than 3 cookable candidates
+      survive it KEEPS the uncookable ones "rather than showing a short deck"
+      (generate-meals ~L987). So a thin pantry produces normal-looking recipes the user cannot make,
+      the reveal still says "3 meals you can make right now" (it never reads `structural_missing`),
+      and Home's "Need: …" is the only true line on screen. The one thin-pantry message that exists is
+      the protein-ceiling note ("Your pantry can't reach Xg of protein a meal — add a protein
+      source"). **Plan (product calls for Logan, then go):** (a) server returns a SHORT deck instead of
+      padding (or pads but the response says how many are cookable); (b) reveal headline counts
+      cookable meals only — at 0: "Your pantry's a little thin — N ingredients found. Scan another
+      area or add a few basics." with Scan as the one action; (c) Home shows that same line once above
+      the deck instead of three Need cards; (d) a minimum before auto-generating (proposal: 6
+      non-staple in-stock items) so a 3-item pantry is told, not charged a generation. **Decision on
+      "Need:" on Home (Logan questioned it):** keep it — after (a)–(d) it only appears when the pantry
+      changed AFTER generation (an item toggled Out), which is true and useful; today it also fires
+      from the padding and the matcher drift, both of which go away.
 - [ ] **BUILT 2026-09-16, UNVERIFIED on device — Home "Cook from your pantry": two ✓ Ready to cook over
       three meals read as partial failure** (Logan 2026-09-16). Shipped as agreed below: Home rows
       are Need or ✓ Ready only; the meal screen has an OPTIONAL group after IN YOUR PANTRY with
