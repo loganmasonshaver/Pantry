@@ -16,37 +16,57 @@ photos, whole run **58 s of the gateway's 150 s**. The pool is intact (233 rows 
 → attempt 1 Gemini **raw 9** → 3 kept (nearDup 3, nameGap 2, dropped 1) → attempt 2 **gpt-4o-mini**
 raw 4 → 0 kept (noMacros 3, nearDup 1) → **attempts 3-6 skipped for time**. Variety: all three are
 "Creamy … Pasta". What the audit found, in order of cost:
-- [x] **C + A + B BUILT, DEPLOYED, DRY-RUN 2026-09-16 (`be54721`; Logan: "build C, A and B, then dry
-  run").** A: OpenAI takes a slot only right after a Gemini attempt that returned NOTHING. B: an
-  attempt starts only if this run's slowest attempt so far finishes before a loop end of
-  135 s − (10 s + 2.5 s × (survivors + 8)); arithmetic + 9 tests in `_shared/attempt-budget.ts`.
-  C: `funnel.attempts` (per-attempt provider/ms/raw/kept/rejection deltas/errors), `funnel.timing`,
-  per-provider `llm_<provider>`, `rejectedDetail`. Tail priced from existing timestamps: 12 rows'
-  images landed 17 s after insert (Sep 13), 3 rows 5 s (Sep 16). tsc 135/16, tests 681.
-  **Dry run, row 803, fired via `npx supabase db query --linked` with the cron's Vault secret (the
-  MCP role cannot decrypt Vault): HTTP 200, would store 9 vs the cron's 3 — 4 attempts, all Gemini,**
-  raw [3, 7, 14] kept [2, 3, 4] in 5.9 / 16.5 / 24.2 s; attempt 4 started at 55 s with a 27 s call
-  timeout and was aborted (no yield, reserve intact). Loop ended at 82.5 s. One sample; the model's
-  variance is large, so this is the mechanism working, not the yield fixed.
-- [ ] **PASS: Sep 17 08:00 UTC scheduled run** — `timing.totalMs` < 150 000 with images included
-  (dry runs skip insert and images), `attempts` all Google unless one returned nothing, stored ≥ 12.
-  A 504 or `timed_out` row = the tail reserve is too small; read `timing.insertAtMs`/`imagesMs`.
-  `select stored, funnel->'timing', funnel->'attempts' from pipeline_runs where dry_run = false and
-  funnel ? 'rawCandidates' order by created_at desc limit 1;`
-- [ ] **E. NEW, from `rejectedDetail` on row 803 — the biggest loss is now real repeats, and the
-  model is choosing them.** 12 of 24 raw died in dedup: nearDup 9 (8 at Jaccard 1.00 — Cottage
-  Cheese Flatbread ×3, Strawberry Cheesecake Ice Cream ×2, Banana Bread Pancakes ×2, Tiramisu Chia
-  Pudding; one arguable: Cottage Cheese ZUCCHINI Flatbread 0.75) and dupIngredients 3 (brownies at
-  overlap 1.00). The gates are right. The 90-day video_id guard already excludes the videos behind
-  the pool's rows, so these are OTHER creators' videos of dishes already in Discover. The model spends
-  a third to half of its picks on them. Options, not built: (1) list the pool's dish names in the
-  prompt as "already in Discover, do not pick"; (2) drop candidates whose title near-dups a pool
-  name before the LLM (titles are noisy, so this could drop real variations). (1) is one variable
-  and costs nothing but prompt size; measure with 1-2 dry runs against the same day.
-- [ ] **F. Minor: the slowest-attempt estimate under-predicts.** Gemini's latency tracks OUTPUT size
-  (3 raw 6 s, 7 raw 16 s, 14 raw 24 s), so attempt 4 got 27 s and ran out. Harmless, because the
-  abort keeps the tail reserve, but it spends wall time for nothing. If it keeps happening, estimate
-  at 1.25× the slowest. Do not change it before the Sep 17 real-run timing exists.
+- [x] **C + A + B BUILT + DEPLOYED 2026-09-16 (`be54721`).** A: OpenAI only after a Gemini attempt that
+  returned NOTHING. B: attempts start only while this run's slowest (×1.25) fits before a loop end
+  that reserves the tail for the survivors so far (`_shared/attempt-budget.ts`, 12 tests). C:
+  `funnel.attempts`, `funnel.timing`, per-provider `llm_<provider>`, `rejectedDetail`, `promptChars`.
+- [x] **LEVERS 1 + 2 BUILT + DEPLOYED (`91126c8`; Logan: "build the first two levers").** The prompt
+  names every pool dish (230) as do-not-pick; the retry union stops at STORE_CAP 18, not 12.
+  **Dry run 804: no backfire** — `dupIngredients` 0, none of the 9 survivors is a renamed pool dish —
+  **and no effect on repeats:** nearDup 9 again, the SAME five dishes (Cottage Cheese Flatbread,
+  Strawberry Cheesecake Ice Cream, Banana Bread Pancakes, Tiramisu Chia Pudding, the brownies).
+  Flash Lite reads the list the way it reads "aim for 30-40": not at all. Raw went up ([11,19] vs
+  [3,7,14]) — two samples, not evidence.
+- [x] **REAL RUN 805 (Logan: "then the real run"): stored 10, 10 AI photos, 10 source-verified, HTTP
+  200 in 84 s.** raw [17, 22] kept [9, 1], both Gemini. `timing`: loop 73.0 s, insert 74.7 s, images
+  9.2 s. Replaced today's 3. Today's daily line reads "only 10 (expected 12+)" — correct.
+  **Attempt 2 kept 1 of 22:** 7 were re-picks of attempt 1's dishes, 5 pool repeats, 5 nameGap.
+  The rotation is not producing new picks; a third attempt is worth ~+1 on a day like this.
+- [x] **RETUNE + PRECISION SHIPPED (`0233ee8`):** reserve 5 s + 1 s/recipe (was 10 + 2.5, i.e. 55 s
+  against a measured 11 s tail); estimate 1.25× slowest; pasta synonyms rotini/fusilli/ziti/
+  tortellini/gnocchi/…; every nameGap note now carries the model's ingredient list. Tests 684.
+- [ ] **PASS: Sep 17 08:00 UTC scheduled run.** `timing.totalMs` < 150 000, every attempt Google
+  unless one returned nothing, no 504 / `timed_out` row. Yield: ≥ 12 is the goal; **9-12 is what the
+  current code should do** on a day like today. Read with:
+  `select stored, funnel->'timing', funnel->'attempts', funnel->'promptChars' from pipeline_runs
+  where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
+- [ ] **THE CEILING, measured on the real run (Logan: "12-18 would be nice"):** 44 candidates → the
+  model touched ~23 distinct dishes in two attempts → 10 stored, 5 pool repeats, ~4 nameGap, 3
+  dropped. 21 candidates were never picked. To reach 12-18 on a day like this: nameGap precision
+  (+2-3, G below), repeats out of the model's reach (+2-3, E below), a third attempt (+0-2).
+  Beyond that it is candidate volume (13 → 26 searches, ~2,600 units/run, 3 runs/day) or a model
+  that follows "return 30-40" — both unmeasured.
+- [ ] **E. REWRITTEN: the model will not skip pool dishes when told — take them out of its reach.**
+  Pre-filter candidates whose TITLE near-dups a pool name (same `wordsOf` Jaccard ≥ 0.7) before the
+  LLM. Measure first, offline: add `funnel.candidates` (title, videoId, views — ~4 KB) so the next
+  cron's row shows how many of the 44 a title match would have removed and which. Then build it.
+  Risk: a clickbait title hides the dish, so this catches only the honestly-titled repeats.
+- [ ] **G. NEW: nameGap false positives by construction.** Today's 9 (≈5 dishes): a protein-Nutella
+  copycat "missing nutella" ×3 (nutella/oreo/biscoff are DEFINING_FOODS and a copycat contains none
+  of them); "Zucchini Tortilla Wraps missing tortilla" (a tortilla MADE of zucchini); "Cheesy Beef
+  Burrito Pasta missing pasta" (rotini — fixed); "Korean Beef Bowls missing beef", "Crispy Pasta Tuna
+  Salad missing tuna" (unknown). Read the `listed:` half of each nameGap note on the Sep 17 row,
+  then decide a copycat rule. Precision, not tolerance — the gate stays; it must stop rejecting
+  dishes named for what they imitate or produce.
+- [x] ~~F. estimate under-predicts~~ — superseded by the 1.25× growth factor in the retune.
+- [x] **"Only 3 meals showing" — no Discover-tab bug.** The tab has no today-only shelf; new recipes
+  get a NEW TODAY badge spread through the shelves, and the pool (233 rows, all with photos) is
+  inside the client's 30-day window. The "3" was the daily report line / three badges. If the tab
+  ever literally shows 3 cards, that is a client bug nobody has seen — screenshot first.
+- **Ops notes:** the Supabase MCP role cannot decrypt Vault (`permission denied for function
+  _crypto_aead_det_decrypt`); fire runs with `npx supabase db query --linked "select net.http_post(
+  … vault.decrypted_secrets where name = 'cron_secret' …)"`. YouTube quota 2026-09-16: **4 of 7**
+  used (cron, dry 803, dry 804, real 805).
 - [ ] **D. Parser: a method line was counted as an ingredient.** "Veggie Tofu Stir-fry Noodles"
   source list line 21 = "Sauté mushrooms dry till browned. Set aside." — contract 21 vs got 20.
   The model ALSO dropped "1 tsp hot sauce (for tofu)" and echoed "mushrooms" twice, so it is not
