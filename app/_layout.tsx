@@ -192,8 +192,8 @@ function RootLayoutNav() {
             drill-in-from-right of detail pushes, so the nav reads intentionally. */}
         <Stack.Screen name="delivery-webview" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="food-preferences" options={{ animation: 'slide_from_bottom' }} />
-        {/* Post-scan payoff screen. Registered explicitly + fade so the push from the pantry
-            scan reliably lands instead of being dropped under the closing scan modal. */}
+        {/* Post-scan payoff screen. Pushed while the scan modal is still presented (the modal then
+            dismisses onto it), so the fade is only ever seen on the way back out. */}
         <Stack.Screen name="cook-reveal" options={{ animation: 'fade' }} />
       </Stack>
       {/* Branded splash overlay — covers any partial Stack render during cold start.

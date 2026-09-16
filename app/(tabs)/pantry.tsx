@@ -642,9 +642,11 @@ export default function PantryScreen() {
         onClose={() => setShowScanModal(false)}
         onItemsAdded={() => fetchItems()}
         // The modal owns the post-save flow (first scan auto-reveals; later scans offer a
-        // choice). onSeeMeals is the cook-reveal payoff — deferred ~400ms so the scan <Modal>
-        // slides away first, otherwise the nav is swallowed under the presented native modal.
-        onSeeMeals={() => setTimeout(() => router.push('/cook-reveal' as any), 400)}
+        // choice). onSeeMeals is the cook-reveal payoff. Pushed IMMEDIATELY, while the modal is
+        // still fully presented; the modal dismisses itself ~500 ms later onto the mounted reveal.
+        // (The old order — close, then push 400 ms later — showed this tab in the gap. The defer
+        // existed because UIKit drops a push that starts mid-dismissal.)
+        onSeeMeals={() => router.push('/cook-reveal' as any)}
       />
 
       {/* ── Receipt Scan Modal ── */}

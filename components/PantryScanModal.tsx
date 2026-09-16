@@ -653,6 +653,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
     )
   }
 
+  const handoffRef = useRef(false) // one push to the reveal per save; the success step's button is not bound to `saving`
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
     onClose()
@@ -678,7 +679,23 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       scannedFpRef.current = null
       setScanError(null)
       setRetryNonce(0)
+      setSaving(false) // kept true through the reveal hand-off; savingRef was cleared before the close
+      handoffRef.current = false
     }, 350)
+  }
+
+  // Hand-off to the cook reveal: PUSH FIRST, close the modal only after the push has settled.
+  // UIKit drops a push that starts while the modal is mid-dismissal — the old order closed first
+  // and deferred the push 400 ms to dodge that, which showed the Pantry tab for the whole gap.
+  // With the reveal already mounted underneath, the modal slides down onto it. 500 ms covers the
+  // fade push; the Add-all button keeps its spinner through it, so the pause reads as work.
+  const REVEAL_HANDOFF_MS = 500
+  const goToReveal = () => {
+    if (handoffRef.current) return
+    handoffRef.current = true
+    onSeeMeals?.()
+    savingRef.current = false // handleClose refuses to run mid-save; the insert is long done
+    setTimeout(handleClose, REVEAL_HANDOFF_MS)
   }
 
   // Parse comma- or newline-separated names, categorize each via the LLM-backed
@@ -1043,7 +1060,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
               <Text style={styles.savedSub}>Now the good part — we've lined up meals you can cook right now with what you have. No shopping.</Text>
             </View>
             <View style={styles.savedActions}>
-              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={() => { handleClose(); onSeeMeals?.() }}>
+              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={goToReveal}>
                 <Text style={styles.primaryBtnText}>See what you can cook</Text>
                 <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />
               </TouchableOpacity>
@@ -1683,9 +1700,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     // Deduped insert — skips items already in the pantry so a re-scan can't
                     // create a duplicate row; re-stocks any that were previously out.
                     const { error } = await addPantryItemsDeduped(user.id, selected.map(item => ({ name: item.name, category: item.category })))
-                    setSaving(false)
-                    savingRef.current = false
                     if (error) {
+                      setSaving(false)
+                      savingRef.current = false
                       Alert.alert('Save failed', error.message)
                       return
                     }
@@ -1693,7 +1710,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     // The items are in. With no reveal to follow, this is the flow's end: success.
                     // With the cook reveal next, only a light tick — the reveal has its own success
                     // peak a moment later, and two in a row would blur into one buzz.
-                    if (!onSeeMeals) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); handleClose(); return }
+                    if (!onSeeMeals) { setSaving(false); savingRef.current = false; Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); handleClose(); return }
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
                     // Committed to the reveal → warm the remaining meal images now, a few seconds
                     // before it mounts, so the deck doesn't out-run them. (The hero was warmed
@@ -1705,10 +1722,11 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     const seen = await AsyncStorage.getItem(COOK_REVEAL_SEEN_KEY)
                     if (!seen) {
                       await AsyncStorage.setItem(COOK_REVEAL_SEEN_KEY, '1')
-                      handleClose()
-                      onSeeMeals()
+                      goToReveal() // `saving` stays true — the spinner covers the hand-off
                       return
                     }
+                    setSaving(false)
+                    savingRef.current = false
                     setSavedCount(selected.length)
                     setShowSaved(true)
                   }}

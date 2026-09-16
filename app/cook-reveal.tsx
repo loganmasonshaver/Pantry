@@ -12,7 +12,7 @@ import { usePremium } from '@/context/SuperwallContext'
 import { useMealSuggestions } from '@/lib/useMealSuggestions'
 import { supabase } from '@/lib/supabase'
 import { Shimmer } from '@/components/Shimmer'
-import { MealImage } from '@/components/MealImage'
+import { MealImage, prefetchMealImages } from '@/components/MealImage'
 
 // Deck geometry — each card is ~78% of the screen so the neighbours peek in at the edges,
 // which is what sells the "there's more in the deck" feel as you advance.
@@ -175,18 +175,28 @@ export default function CookReveal() {
   // let cards 2 and 3 open on a shimmer and fill in under the reader's eyes. imageUnavailable is a
   // settled miss (retries exhausted), so a capped user is not held for a picture that will never come.
   const photosSettled = revealed.length > 0 && revealed.every(m => m.image || m.imageUnavailable)
+  // ...and PAINTED. A URL in hand still renders as a flat dark card until expo-image has the bytes,
+  // which is what opened the gate onto a blank hero. The download is awaited; a failed one falls
+  // through to the placeholder rather than holding the screen.
+  const [photosPainted, setPhotosPainted] = useState(false)
+  useEffect(() => {
+    if (!photosSettled || photosPainted) return
+    let cancelled = false
+    prefetchMealImages(revealed.map(m => m.image)).finally(() => { if (!cancelled) setPhotosPainted(true) })
+    return () => { cancelled = true }
+  }, [photosSettled, photosPainted])
 
   // The gate: hold the reveal until (a) the anticipation floor has elapsed AND (b) every card's
-  // photo has settled — so the peak lands on three finished cards, never a skeleton that fills in.
-  // The photo wait is capped at IMAGES_WAIT_MS so a stuck image delays the reveal, not stalls it.
+  // photo is downloaded — so the peak lands on three finished cards, never a skeleton that fills
+  // in. The photo wait is capped at IMAGES_WAIT_MS so a stuck image delays the reveal, not stalls it.
   useEffect(() => {
     if (gateOpen || revealed.length === 0) return
     const elapsed = Date.now() - mountedAtRef.current
     const floorLeft = Math.max(0, MIN_BUILD_MS - elapsed)
-    const wait = photosSettled ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + IMAGES_WAIT_MS - elapsed)
+    const wait = photosPainted ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + IMAGES_WAIT_MS - elapsed)
     const t = setTimeout(() => setGateOpen(true), wait)
     return () => clearTimeout(t)
-  }, [revealed.length, photosSettled, gateOpen])
+  }, [revealed.length, photosPainted, gateOpen])
 
   // THE PEAK — fires once, when the gate opens: success haptic + the deck springing in + a green
   // glow blooming behind the hero card, all on the same beat. One stacked moment, then it settles.
@@ -276,30 +286,44 @@ export default function CookReveal() {
           )}
         </View>
       ) : !gateOpen ? (
-        <View style={styles.centerRegion}>
+        <View style={styles.body}>
           {/* Build-up. Once the meals land the headline starts assembling chunk by chunk (with
               haptic ticks) right here — so the anticipation beat is the sentence itself, and it
-              carries straight through into the revealed state below without re-animating. */}
+              carries straight through into the revealed state below without re-animating.
+              SAME skeleton as the revealed state — header at the top, deck in the same deckArea,
+              a bottom bar of the same height — so opening the gate changes what is IN the slots
+              and nothing moves. It used to be vertically centred, and the headline jumped a third
+              of the screen upward at the exact moment the cards arrived. */}
           <View style={styles.header}>
             <Text style={styles.eyebrow}>FROM YOUR PANTRY</Text>
             {revealed.length > 0
               ? <HeadlineChunks count={revealed.length} anims={chunkAnims} />
               : <Text style={styles.title}>Plating your meals…</Text>}
+            {/* Reserves the validation line's height; the real one fades in on open. */}
+            <Text style={[styles.validation, { opacity: 0 }]}>·</Text>
           </View>
-          <ScrollView
-            horizontal
-            scrollEnabled={false}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: SIDE, alignItems: 'center' }}
-            style={styles.deck}
-          >
-            {[0, 1, 2].map(i => (
-              <View key={i} style={[styles.cardWrap, i !== 0 && { opacity: 0.5 }]}>
-                {/* Slow sweep — a fast shimmer reads as shuddering, not loading. */}
-                <Shimmer style={styles.card} durationMs={1600} />
-              </View>
-            ))}
-          </ScrollView>
+          <View style={styles.deckArea}>
+            <ScrollView
+              horizontal
+              scrollEnabled={false}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: SIDE, alignItems: 'center' }}
+              style={styles.deck}
+            >
+              {[0, 1, 2].map(i => (
+                <View key={i} style={[styles.cardWrap, i !== 0 && { opacity: 0.5 }]}>
+                  {/* Slow sweep — a fast shimmer reads as shuddering, not loading. */}
+                  <Shimmer style={styles.card} durationMs={1600} />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+          {/* Same height as the revealed bottom bar (dots), so the deck sits at the same y. */}
+          <View style={styles.bottomBar}>
+            <View style={styles.dotsRow}>
+              {[0, 1, 2].map(i => <View key={i} style={[styles.dot, { opacity: 0 }]} />)}
+            </View>
+          </View>
         </View>
       ) : (
         <View style={styles.body}>
@@ -445,7 +469,6 @@ const styles = StyleSheet.create({
   // Loader uses centerRegion (a simple vertical center). The loaded screen uses body → deckArea →
   // bottomBar so the title anchors at the top, the card centers in the middle, and the dots/hint
   // sit at the bottom — the empty space is distributed as even margins instead of one dead gap.
-  centerRegion: { flex: 1, justifyContent: 'center' },
   body: { flex: 1 },
   deckArea: { flex: 1, justifyContent: 'center' },
   glowWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },

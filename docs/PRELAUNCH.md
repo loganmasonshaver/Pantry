@@ -1482,6 +1482,25 @@ claiming exact wording from the top apps is guessing.
         earlier set with no sign the scan changed nothing — the same silent-stale the flash was.
         Rare (cap or timeout); the right fix is load() forcing a generation when the prefetch it
         awaited resolved null.
+      - [ ] **UNVERIFIED — no Pantry-tab flash between "Add all" and the reveal** (Logan 2026-09-16,
+        second pass). The modal used to close FIRST and push the reveal 400 ms later because UIKit
+        drops a push that starts mid-dismissal — so the Pantry tab showed for the gap. Now the push
+        happens while the modal is still fully presented and the modal dismisses 500 ms later onto
+        the mounted reveal (`goToReveal` in PantryScanModal; `onSeeMeals` in pantry.tsx pushes at
+        once). The Add-all spinner stays up through the hand-off. Tell: tap Add all → spinner →
+        modal slides down straight onto the reveal, no Pantry tab in between. **If the reveal ever
+        fails to appear at all, the push is being dropped under the presented modal — revert to
+        close-then-push and cover the gap another way.** Known trade-off: the headline's chunk
+        ticks now fire while the modal is still sliding away (the reveal mounts underneath).
+      - [ ] **UNVERIFIED — build-up and revealed states share one layout.** The build-up was
+        vertically centred (`centerRegion`) and the revealed state top-aligned, so the headline
+        jumped a third of the screen upward when the cards arrived (Logan's screenshots 2 → 1).
+        Same header / deckArea / bottom-bar skeleton in both now; the gate only changes card content.
+        Tell: nothing on screen moves when the cards spring in.
+      - [ ] **UNVERIFIED — the gate waits for the photos to be DOWNLOADED, not just known.** A URL in
+        hand still painted a flat #1A1A1A card until expo-image fetched it — Logan's screenshot 1 is
+        that. `prefetchMealImages` now returns expo-image's prefetch promise and the reveal opens on
+        it (still capped at 20 s). Tell: card 1 has its photo on the first frame after the spring.
       - ~~Ingredient names on the card~~ — TOSSED by Logan 2026-09-16. Do not re-propose.
       - **Meal quality** — Logan: "I need to fix some of these generated meals", separate pass on go.
 

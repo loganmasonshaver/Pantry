@@ -47,7 +47,10 @@ export function MealImage({
 
 // Warm the cache for the first few visible photos before the user scrolls, so the rail feels
 // "already loaded." Safe to call with junk/empty — expo-image ignores non-strings.
-export function prefetchMealImages(urls: (string | null | undefined)[]) {
+// Resolves once the bytes are on disk. The cook reveal holds its gate on this: a URL in hand still
+// paints as a flat #1A1A1A card until the download lands. A failed download resolves false rather
+// than throwing — callers decide whether to wait longer.
+export function prefetchMealImages(urls: (string | null | undefined)[]): Promise<boolean> {
   const valid = urls.filter((u): u is string => typeof u === 'string' && u.length > 0)
-  if (valid.length) Image.prefetch(valid, { cachePolicy: 'memory-disk' })
+  return valid.length ? Image.prefetch(valid, { cachePolicy: 'memory-disk' }).catch(() => false) : Promise.resolve(true)
 }
