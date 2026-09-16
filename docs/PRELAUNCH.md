@@ -1501,6 +1501,40 @@ claiming exact wording from the top apps is guessing.
         hand still painted a flat #1A1A1A card until expo-image fetched it — Logan's screenshot 1 is
         that. `prefetchMealImages` now returns expo-image's prefetch promise and the reveal opens on
         it (still capped at 20 s). Tell: card 1 has its photo on the first frame after the spring.
+      - [x] **VERIFIED on device 2026-09-16 (Logan): no image loading problems** after the download gate.
+      - [ ] **OPEN — the Pantry tab STILL flashes on the way to the reveal** after push-first (Logan
+        2026-09-16, second pass). react-native-screens' `setPushViewControllers` only defers when the
+        stack view has no window or a nav transition is in flight (RNSScreenStack.mm:669-700), so a
+        push under a fully presented RN <Modal> should land at once — yet the tab shows. PLAN, in
+        order, Logan's go needed:
+        1. **Diagnose first (2 min):** `console.log` timestamps at the reveal's mount and at the
+           modal's `handleClose`, read the Metro log (preview_logs) after one Add-all; and try
+           `animation: 'none'` on the cook-reveal route. Flash gone → the push was landing late and
+           FADING over the tab; keep 'none' (the way back snaps). Flash stays → the push is being
+           held until the modal is gone, and a cover cannot help either (the tab's tree may be
+           frozen); go to 2.
+        2. **Reveal inside the modal (medium):** extract `CookReveal` into a component and render
+           it as the scan modal's last step; `app/cook-reveal.tsx` stays as a thin route for other
+           entry points. No navigation at the peak, so no tab can show. Tapping a meal from there
+           closes the modal and pushes the meal screen after the dismissal — the same gap moves to a
+           lower-stakes moment; push the meal screen with `animation: 'none'` to shrink it.
+        3. **Scanner as a route (large, post-launch unless 1-2 fail):** the scanner becomes a
+           native-stack `presentation: 'fullScreenModal'` route instead of an RN <Modal>; the reveal
+           is then a `router.replace` inside one navigator, and the whole SafeAreaProvider-inside-
+           Modal class of bugs retires with it.
+      - [ ] **PLAN — validation line rewrite** (Logan 2026-09-16: drop "nothing to buy", say
+        "ingredients", one or two sentences tied to THIS user's goal). Two lines under the headline:
+        - Line 1 (green, 13 semibold): **"Picked from your 100 ingredients"** ("…from your
+          ingredients" until the count lands).
+        - Line 2 (white/muted, 14 regular, prose): goal word from `profiles.fitness_goal` + numbers
+          computed from the THREE MEALS ON SCREEN (max calories, min protein), so it is true of
+          every card: lose → "Each one is under 620 calories with at least 48 g of protein — built
+          for your cut." · build → "Each one brings at least 48 g of protein — built for your
+          bulk." · maintain (Body Recomp) → "Each one keeps protein high at under 620 calories —
+          built for your recomp." · no goal → the numbers sentence without the goal clause.
+        - Data: one `profiles.select('fitness_goal')` alongside the existing pantry count (parallel,
+          same effect). Layout: header grows ~20pt; deckArea is flex:1 so the deck re-centres; the
+          build-up placeholder reserves two lines so nothing moves at the gate. Not built.
       - ~~Ingredient names on the card~~ — TOSSED by Logan 2026-09-16. Do not re-propose.
       - **Meal quality** — Logan: "I need to fix some of these generated meals", separate pass on go.
 
