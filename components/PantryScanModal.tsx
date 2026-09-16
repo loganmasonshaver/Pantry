@@ -1504,10 +1504,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                 // item sat (top shelf / drawer) is noise for a quick confirm; the user just wants to
                 // scan the list, remove the odd wrong one, and tap Add. The photo strip above is a
                 // visual reference only (tap to zoom); it no longer drives what's listed.
-                const renderRow = (item: DetectedItem) => {
+                const renderRow = (item: DetectedItem, index: number) => {
                   const editing = editingId === item.id
                   return (
                     <View key={item.id} style={styles.reviewRow}>
+                      {/* Inset hairline between rows, the Pantry tab's iOS grouped-list divider. */}
+                      {index > 0 && <View style={styles.reviewRowHairline} pointerEvents="none" />}
                       {editing ? (
                         <TextInput
                           style={styles.reviewRowInput}
@@ -1618,7 +1620,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                               <Text style={styles.reviewAisleTitle}>{aisle.toUpperCase()}</Text>
                               <Text style={styles.reviewAisleCount}>{byAisle.get(aisle)!.length}</Text>
                             </View>
-                            {byAisle.get(aisle)!.map(renderRow)}
+                            {/* Each aisle is a card, exactly as the Pantry tab draws it: the card edge is
+                                what makes a section read as one, not the small heading above it. */}
+                            <View style={styles.reviewAisleCard}>{byAisle.get(aisle)!.map(renderRow)}</View>
                           </View>
                         ))
                       })()}
@@ -1858,23 +1862,24 @@ const styles = StyleSheet.create({
   // SCREEN_W made the content 48px wider than its viewport → sideways scroll + left-clipped chips.
   reviewItemsScroll: { paddingTop: 0, paddingBottom: 20 },
   // Same look as the Pantry tab's section headers (sectionHeader / sectionTitle / sectionCount).
-  reviewAisleHeader: { flexDirection: 'row', alignItems: 'center', paddingTop: 18, paddingBottom: 2, paddingHorizontal: 2 },
+  reviewAisleHeader: { flexDirection: 'row', alignItems: 'center', paddingTop: 16, paddingBottom: 8, paddingHorizontal: 2 },
+  reviewAisleCard: { backgroundColor: '#141414', borderRadius: 14, overflow: 'hidden' },
+  reviewRowHairline: { position: 'absolute', top: 0, left: 14, right: 0, height: 1, backgroundColor: 'rgba(255,255,255,0.06)' },
   reviewAisleTitle: { flex: 1, fontSize: 11, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 1.2 },
   reviewAisleCount: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.4)' },
   reviewCountHero: { fontSize: 27, fontWeight: '800', color: '#FFFFFF', letterSpacing: -0.4 },
   reviewInstruction: { fontSize: 13, color: '#888888', marginTop: 3, fontWeight: '600' },
   // Uniform full-width row per detected item — scans cleanly at 20+ items where ragged pills didn't.
+  // The Pantry tab's row: same padding, same card, divider drawn as an inset hairline, not a border.
   reviewRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    paddingVertical: 15,
-    paddingHorizontal: 2,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
   },
-  reviewRowText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
+  reviewRowText: { fontSize: 16, fontWeight: '500', color: '#FFFFFF' },
   reviewRowInput: { flex: 1, fontSize: 15, fontWeight: '600', color: '#FFFFFF', padding: 0, borderBottomWidth: 1, borderBottomColor: '#4ADE80' },
   staplesBar: { paddingTop: 6, paddingBottom: 2 },
   staplesLabel: { fontSize: 12, color: '#888888', fontWeight: '600', paddingHorizontal: 20, marginBottom: 8 },

@@ -33,11 +33,12 @@ const MIN_BUILD_MS = 1400       // anticipation floor before the reveal is allow
 const IMAGES_WAIT_MS = 20000
 const DWELL_MS = 3000           // auto-advance dwell when the next photo is ready
 const IMG_GRACE_MS = 2000       // extra dwell when the next photo hasn't landed yet
-const CHUNK_STEP_MS = 200       // gap between headline chunks landing (each fires a haptic tick)
-// The headline assembles in these pieces. Rendered as separate Texts (not one string) so each can
-// animate independently, and all slots hold their layout from the start — the sentence fades in
-// place instead of reflowing as words arrive. Slot 0 is the count and gets the pop.
-const CHUNK_SLOTS = ['count', 'meals you', 'can make', 'right now'] as const
+const CHUNK_STEP_MS = 170       // gap between headline words landing: read off, one word at a time
+// The headline is read off WORD BY WORD (Logan: "3 meals you can make right now", then the meals).
+// Separate Texts so each word animates on its own, and every slot holds its layout from the start —
+// the sentence appears in place instead of reflowing as words arrive. Slot 0 is the count and gets
+// the pop, and the only tick: one per word was a buzz run, the kind Logan already flagged on the review.
+const CHUNK_SLOTS = ['count', 'meals', 'you', 'can', 'make', 'right', 'now'] as const
 
 // Animated count-up — the dopamine beat. Rolls 0→value the FIRST time its card becomes active,
 // then holds forever — it must NOT re-roll when the user swipes back to a card they've already seen
@@ -66,7 +67,7 @@ function CountUp({ value, active, reduceMotion, style }: { value: number; active
 // that spring overshoot on a whole line of text reads cheap, but on one small accent it reads good.
 function HeadlineChunks({ count, anims }: { count: number; anims: Animated.Value[] }) {
   // The deck is no longer padded to three, so one meal is a real case: "1 meal you can make".
-  const pieces = [String(count), count === 1 ? 'meal you' : 'meals you', 'can make', 'right now']
+  const pieces = [String(count), count === 1 ? 'meal' : 'meals', 'you', 'can', 'make', 'right', 'now']
   return (
     <View style={styles.headlineRow}>
       {pieces.map((piece, i) => (
@@ -154,12 +155,27 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
     let i = 0
     const id = setInterval(() => {
       Animated.spring(chunkAnims[i], { toValue: 1, damping: 14, stiffness: 210, mass: 0.9, useNativeDriver: true }).start()
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+      if (i === 0) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
       i += 1
       if (i >= chunkAnims.length) clearInterval(id)
     }, CHUNK_STEP_MS)
     return () => clearInterval(id)
   }, [revealed.length, reduceMotion])
+
+  // While the meals are known but their photos are not in yet, the deck's space breathes with the
+  // same green bloom the peak lands on — anticipation, not a grey placeholder. Grey cards read as
+  // images that failed to load, which is what Logan saw once the reveal moved inside the scan (the
+  // wait used to happen behind the closing modal). Stopped the moment the gate opens; the peak
+  // animation takes over the same value.
+  useEffect(() => {
+    if (gateOpen || revealed.length === 0 || reduceMotion) return
+    const pulse = Animated.loop(Animated.sequence([
+      Animated.timing(glowAnim, { toValue: 0.32, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      Animated.timing(glowAnim, { toValue: 0.12, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+    ]))
+    pulse.start()
+    return () => pulse.stop()
+  }, [gateOpen, revealed.length, reduceMotion])
 
   // Every card's photo in hand — or given up on — before ANY meal shows. Holding for the hero alone
   // let cards 2 and 3 open on a shimmer and fill in under the reader's eyes. imageUnavailable is a
@@ -291,20 +307,19 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
               : <Text style={styles.title}>Plating your meals…</Text>}
           </View>
           <View style={styles.deckArea}>
-            <ScrollView
-              horizontal
-              scrollEnabled={false}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: SIDE, alignItems: 'center' }}
-              style={styles.deck}
-            >
-              {[0, 1, 2].map(i => (
-                <View key={i} style={[styles.cardWrap, i !== 0 && { opacity: 0.5 }]}>
-                  {/* Slow sweep — a fast shimmer reads as shuddering, not loading. */}
-                  <Shimmer style={styles.card} durationMs={1600} />
-                </View>
-              ))}
-            </ScrollView>
+            {/* No placeholder cards: the headline is the build-up, and the meals appear whole when
+                their photos are in. The glow holds the space, and hands straight over to the peak. */}
+            <Animated.View pointerEvents="none" style={[styles.glowWrap, { opacity: glowAnim }]}>
+              <Svg width={GLOW_W} height={GLOW_H}>
+                <Defs>
+                  <RadialGradient id="cookGlowWait" cx="50%" cy="50%" rx="50%" ry="50%">
+                    <Stop offset="0" stopColor="#4ADE80" stopOpacity={0.5} />
+                    <Stop offset="1" stopColor="#4ADE80" stopOpacity={0} />
+                  </RadialGradient>
+                </Defs>
+                <Rect x={0} y={0} width={GLOW_W} height={GLOW_H} fill="url(#cookGlowWait)" />
+              </Svg>
+            </Animated.View>
           </View>
           {/* Same height as the revealed bottom bar (dots), so the deck sits at the same y. */}
           <View style={styles.bottomBar}>

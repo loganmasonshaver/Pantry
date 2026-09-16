@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Dimensions, StyleSheet, Text, View } from 'react-native'
-import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn, FadeInUp, ZoomIn } from 'react-native-reanimated'
+import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn, FadeInUp, FadeOut, ZoomIn } from 'react-native-reanimated'
+import { Image as ExpoImage } from 'expo-image'
 import { Check } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
 
@@ -10,6 +11,14 @@ const SWEEP_MS = 950            // one pass of the scan line (top→bottom or ba
 // One beat for the story line AND the photo (Logan: 4.5 s). Long enough to read a two-line sentence
 // in big type; a scan of 40-60 s tells about ten of them.
 const STORY_MS = 4500
+// Words land one after another, like the line is being said. Fast enough that a two-line sentence
+// is whole within ~1 s of its 4.5 s, so the reading time is not spent waiting for words.
+const WORD_STAGGER_MS = 110
+const WORD_IN_MS = 380
+const LINE_OUT_MS = 260
+// Photo to photo is a cross-dissolve on the UI thread (expo-image), long enough to feel like one
+// image becoming the next rather than a cut.
+const PHOTO_XFADE_MS = 700
 // Ordered as a natural read→identify→sort→build arc so the rotation still reads like progress even
 // though it cycles. Long list at a calm 3s pace (≈66s for a full loop) so even a slow multi-photo
 // scan makes roughly ONE pass instead of looping 3×. Honest to what the scan does; no emoji.
@@ -93,13 +102,14 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount,
     <View style={styles.wrap}>
       <View style={[styles.photoBox, { width: boxW, height: boxH }]}>
         {uri && (
-          // key by uri so a new photo remounts and crossfades in (the carousel transition).
-          <Animated.Image
-            key={uri}
-            entering={FadeIn.duration(420)}
+          // ONE image whose source changes, cross-dissolved natively. Keying a fresh image per photo
+          // unmounted the old one instantly and faded the new one up from black, so every change
+          // dipped to dark first — the choppiness Logan saw.
+          <ExpoImage
             source={{ uri }}
             style={StyleSheet.absoluteFill}
-            resizeMode="cover"
+            contentFit="cover"
+            transition={{ duration: PHOTO_XFADE_MS, effect: 'cross-dissolve', timing: 'ease-in-out' }}
           />
         )}
         <View style={styles.scrim} pointerEvents="none" />
@@ -131,9 +141,22 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount,
               status caption it replaces was skimmed past. Keyed by index so each line fades up
               fresh; the box always holds two lines so the dots below never jump. */}
           <View style={styles.storyBox}>
-            <Animated.Text key={statusIdx} entering={FadeInUp.duration(450)} style={styles.story} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>
-              {lines[statusIdx % lines.length]}
-            </Animated.Text>
+            {/* The outgoing line fades out while the next one is spoken in over it — both are
+                absolutely positioned in the same box, so neither pushes the other. The old version
+                removed the line instantly and faded the next up from nothing, a hard cut each time. */}
+            <Animated.View key={statusIdx} exiting={FadeOut.duration(LINE_OUT_MS)} style={styles.storyLine}>
+              {(lines[statusIdx % lines.length] ?? '').split(' ').map((word, i) => (
+                <Animated.Text
+                  key={i}
+                  entering={FadeInUp.delay(i * WORD_STAGGER_MS).duration(WORD_IN_MS)}
+                  // Numbers carry the personal part of a line ("2,200", "40g", "30"), so they land
+                  // in the accent colour — the eye goes to what is about THEM.
+                  style={[styles.story, /\d/.test(word) && styles.storyNumber]}
+                >
+                  {word}{' '}
+                </Animated.Text>
+              ))}
+            </Animated.View>
           </View>
           {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
           {photos.length > 1 && (
@@ -158,8 +181,10 @@ const styles = StyleSheet.create({
   cTR: { top: 8, right: 8, borderTopWidth: 2.5, borderRightWidth: 2.5, borderTopRightRadius: 6 },
   cBL: { bottom: 8, left: 8, borderBottomWidth: 2.5, borderLeftWidth: 2.5, borderBottomLeftRadius: 6 },
   cBR: { bottom: 8, right: 8, borderBottomWidth: 2.5, borderRightWidth: 2.5, borderBottomRightRadius: 6 },
-  storyBox: { marginTop: 22, height: 68, justifyContent: 'center', alignSelf: 'stretch', paddingHorizontal: 6 },
-  story: { fontSize: 26, lineHeight: 32, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.5, textAlign: 'center' },
+  storyBox: { marginTop: 22, height: 72, alignSelf: 'stretch' },
+  storyLine: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', paddingHorizontal: 4 },
+  story: { fontSize: 27, lineHeight: 34, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.6 },
+  storyNumber: { color: GREEN },
   area: { marginTop: 6, fontSize: 13, fontWeight: '600', color: COLORS.textMuted, textTransform: 'capitalize' },
   dots: { flexDirection: 'row', gap: 6, marginTop: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#333' },

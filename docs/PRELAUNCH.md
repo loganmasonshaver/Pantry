@@ -1960,6 +1960,24 @@ claiming exact wording from the top apps is guessing.
         the pushed screen until the RN <Modal> is fully dismissed, so the Pantry tab is uncovered for
         ~0.9 s between the modal leaving and the push landing. Next step is plan A below (reveal
         inside the modal).
+      - [ ] **SECOND PASS 2026-09-16, UNVERIFIED — Logan on device after the first build:** (1) Pantry tab
+        flash GONE (verified); (2) photo-to-photo and line-to-line felt choppy — the photo was a keyed
+        image that unmounted instantly and faded the next up from black, the line was removed then
+        faded up from nothing. Now: one expo-image cross-dissolving natively (700 ms), and the outgoing
+        line fades out while the next is laid over it (both absolute in one box); (3) lines are spoken
+        in word by word (110 ms apart), numbers in green, 27 pt; (4) grey placeholder cards were back
+        on the reveal — not new image logic: the same wait used to happen behind the closing modal,
+        now it is on screen. Placeholders removed: the headline reads off word by word ("3 meals you
+        can make right now", one tick on the number, not seven), the deck space breathes with the
+        green glow, cards appear whole at the peak; (5) review sections now look like the Pantry tab —
+        rows inside a #141414 card, radius 14, inset hairline, 16 pt rows — the headings alone did not
+        read as sections; (6) the Add-all spinner: that save restocked 42 existing items one round trip
+        at a time — now eight in parallel, with a `[perf] pantry save` log (NOT measured before: the
+        rows share one client timestamp, so the database cannot show the loop's duration). Tells: smooth
+        photo and line changes; words build; review cards; reveal with no grey cards; Metro log line
+        for the next save's restock time. Honest limit recorded: a 7-photo scan taking ~2 min is the
+        vision call itself — the story softens the wait, it does not shorten it; parallel scanning
+        (the scan-import plan's bounded concurrency) is the lever that would.
       - [ ] **BUILT 2026-09-16 (Logan: go, lines every 4.5 s, goal reassurance mixed in), UNVERIFIED on
         device.** A: `components/CookRevealView.tsx` is the reveal; the scan modal renders it as step 7
         after Add all (no navigation), `app/cook-reveal.tsx` is a thin route wrapper, `[handoff]` logs

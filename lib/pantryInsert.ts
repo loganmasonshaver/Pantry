@@ -48,10 +48,19 @@ export async function addPantryItemsDeduped(userId: string, rows: PantryInsertRo
   // stale clock — without this a user who rescans every fortnight was still asked "still have
   // them?" about everything that was already on the shelf.
   const now = new Date().toISOString()
-  for (const name of restockNames) {
-    // escapeLike: a raw "2% Milk" here is a wildcard pattern that also re-stocks other rows.
-    await supabase.from('pantry_items').update({ in_stock: true, last_confirmed_at: now }).eq('user_id', userId).ilike('name', escapeLike(name))
+  // Eight at a time, not one after another. A scan of a stocked kitchen is mostly restocks — 42 of
+  // one 84-item save on 2026-09-16 — and each is its own round trip, so the sequential loop kept the
+  // Add-all spinner up for the sum of all of them. Each update targets different rows, so order does
+  // not matter and parallel writes cannot collide.
+  const RESTOCK_CONCURRENCY = 8
+  const tRestock = Date.now()
+  for (let i = 0; i < restockNames.length; i += RESTOCK_CONCURRENCY) {
+    await Promise.all(restockNames.slice(i, i + RESTOCK_CONCURRENCY).map(name =>
+      // escapeLike: a raw "2% Milk" here is a wildcard pattern that also re-stocks other rows.
+      supabase.from('pantry_items').update({ in_stock: true, last_confirmed_at: now }).eq('user_id', userId).ilike('name', escapeLike(name))
+    ))
   }
+  __DEV__ && restockNames.length > 0 && console.log(`[perf] pantry save: ${newRows.length} new, ${restockNames.length} restocked in ${Date.now() - tRestock}ms`)
 
   return { error: null }
 }
