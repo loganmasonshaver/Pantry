@@ -1866,7 +1866,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       launch, wait ~5 s on Home, tap Pantry → the list is there immediately, no empty gap; toggle an
       item Out, force-quit, relaunch, tap Pantry → it is still Out and at the bottom of its aisle.
       *(VERIFIED ON DEVICE 2026-09-15 — Logan: the tab paints instantly and an Out row survives a relaunch.)*
-- [ ] **RAISED BY LOGAN 2026-09-15 — pick MULTIPLE gallery photos in one go for a pantry scan.
+- [x] **RAISED BY LOGAN 2026-09-15 — pick MULTIPLE gallery photos in one go for a pantry scan.
       BUILT, UNVERIFIED ON DEVICE (`components/PantryScanModal.tsx`).** The gallery button opened a
       single-pick picker, so five shelf photos meant five trips. Now `allowsMultipleSelection` with
       `selectionLimit` set to what is LEFT of the 16-photo cap, so the system picker stops the user at
@@ -1893,7 +1893,8 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       bounded concurrency if our step dominates) are NOT built — they wait on Logan seeing step 1.
       Tell: tap the gallery icon, pick 4 photos, hit Add → the spinner and "Preparing photos…" appear
       immediately, then the tiles replace them without the row jumping.
-- [ ] **RAISED BY LOGAN 2026-09-16 — ✕ during a scan discarded photos silently. BUILT, UNVERIFIED
+      *(VERIFIED ON DEVICE 2026-09-16 — Logan: multi-select and the "Preparing photos…" spinner both work. The ~5 s wait itself is Apple's picker; plan steps 2-3 remain unbuilt.)*
+- [x] **RAISED BY LOGAN 2026-09-16 — ✕ during a scan discarded photos silently. BUILT, UNVERIFIED
       ON DEVICE.** "If I have photos taken showing up on the mini sliding bar below and I click x,
       have a popup saying are you sure… but don't have it say are you sure if I hadn't taken a photo
       yet." ✕ and the system dismiss now go through `requestClose`: with unscanned photos it asks
@@ -1903,6 +1904,7 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       carried that live edge as a known risk since `721217b`. Tells: take one photo → ✕ → the
       question; Keep taking → still on the camera with the photo; Discard → closed; reopen with no
       photos → ✕ closes with no question.
+      *(VERIFIED ON DEVICE 2026-09-16 — Logan.)*
 - [x] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
       Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
       frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI
