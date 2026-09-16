@@ -345,13 +345,16 @@ correctly all along).
       parent app, availability is all countries.
       **"Prepare for Submission" is NOT an error** — it is the normal pre-submission state and does
       not mean anything is wrong. Two genuinely missing fields, below.
-- [ ] **Review screenshot is EMPTY on both products.** Review Information -> Screenshot -> "Choose
+- [x] **Review screenshot — DONE on both products 2026-09-16 (Logan).** Was: EMPTY on both products. Review Information -> Screenshot -> "Choose
       File" with nothing uploaded. Apple requires a shot of the purchase UI per auto-renewable
       subscription; this is the usual cause of a product sitting in Missing Metadata. Upload a
       screenshot of the Superwall paywall showing both prices — the same image serves both products.
-      **Monthly DONE 2026-09-16 12:46** — paywall screenshot uploaded, added to the draft. **Annual
-      still to do** (same screenshot, Add for Review → Draft Submission (1)).
-- [ ] **Draft Submission started 2026-09-16 02:06 with ONLY the "Pantry Premium" GROUP in it.**
+      **Both DONE 2026-09-16** — the same paywall screenshot on Monthly and Annual, both added to the
+      draft.
+- [ ] **Draft Submission holds the group + Monthly + Annual (2026-09-16) — waiting only on the 1.0
+      app version (§12).** Started 02:06 with ONLY the "Pantry Premium" GROUP in it.
+      **Tell, not yet checked:** reload Superwall's products page — "Missing required metadata" on
+      both products should be gone now. If it is still there, Apple considers something else missing.
       Apple's two blockers on it: (1) "New subscription groups must be submitted with an
       auto-renewable subscription from within that group" — **CLEARED 2026-09-16** once Monthly
       joined the draft (Items Ready to Submit (2): group + Monthly); (2) "add an app version for
