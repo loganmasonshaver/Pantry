@@ -1865,6 +1865,18 @@ Not a bug list. The layout of these two tabs is unresolved and item 7 films them
       a row changed on another device can show for the second before the fetch answers. Tells: cold
       launch, wait ~5 s on Home, tap Pantry → the list is there immediately, no empty gap; toggle an
       item Out, force-quit, relaunch, tap Pantry → it is still Out and at the bottom of its aisle.
+- [ ] **RAISED BY LOGAN 2026-09-15 — pick MULTIPLE gallery photos in one go for a pantry scan.
+      BUILT, UNVERIFIED ON DEVICE (`components/PantryScanModal.tsx`).** The gallery button opened a
+      single-pick picker, so five shelf photos meant five trips. Now `allowsMultipleSelection` with
+      `selectionLimit` set to what is LEFT of the 16-photo cap, so the system picker stops the user at
+      the limit instead of this code rejecting photos after they were chosen (and the count is
+      trimmed again in code, because selectionLimit is iOS 14+). The chosen photos become filmstrip
+      rows immediately and are downscaled SEQUENTIALLY — sixteen full-size decodes at once is a
+      memory spike on a phone that already logs pressure — so tiles fill in one by one. A failed
+      photo drops its row and the batch reports once ("2 photos skipped"), never one alert per photo.
+      Receipt, AI log and creator-recipe pickers are deliberately untouched: those take one photo.
+      Tells: tap the gallery icon in the scan camera → select 4 photos → all 4 appear in the
+      filmstrip and fill in; with 14 already taken, the picker only lets you pick 2 more.
 - [x] **FOUND 2026-09-15 — a launch can stick on the splash. UNEXPLAINED, not yet attributable to
       Phase 1.** Logan's second motion walkthrough: the Phase 1 Release build launched (initial
       frame at 1.16 s, foreground and active for 18 s, main thread never hung) but pushed only 4 UI

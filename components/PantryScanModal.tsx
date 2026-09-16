@@ -819,22 +819,44 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       Alert.alert('Photo access needed', 'Please allow photo library access in Settings.')
       return
     }
+    // Multi-select: one trip to the gallery for a whole shelf, instead of reopening the picker per
+    // photo. selectionLimit is what is LEFT of the scan's cap, so the system picker stops the user
+    // at the limit rather than this code rejecting photos after they chose them.
+    const remaining = MAX_PHOTOS_PER_SCAN - photos.length
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
     })
-    if (!result.canceled && result.assets[0]) {
-      // Row first, encode second — same reason as capturePhoto. The picker hands back a usable
-      // uri immediately, so this one shows the real image rather than a placeholder tile.
-      const id = String(Date.now())
-      const picked = result.assets[0].uri
-      setPhotos(prev => [...prev, { id, label, uri: picked, base64: undefined }])
-      try {
-        const out = await downscaleToBase64(picked)
-        setPhotos(prev => prev.map(p => p.id === id ? { ...p, uri: out.uri, base64: out.base64 } : p))
-      } catch {
-        setPhotos(prev => prev.filter(p => p.id !== id))
-        Alert.alert('Photo not usable', 'That photo could not be prepared. Try another.')
+    if (!result.canceled && result.assets.length > 0) {
+      // Belt and braces: selectionLimit is iOS 14+ and ignored on older pickers, so trim here too.
+      const picked = result.assets.slice(0, remaining)
+      // Rows first, encode second — same reason as capturePhoto. The picker hands back usable uris
+      // immediately, so these show the real images rather than placeholder tiles.
+      const stamp = Date.now()
+      const rows = picked.map((asset, i) => ({ id: `${stamp}-${i}`, label, uri: asset.uri, base64: undefined }))
+      setPhotos(prev => [...prev, ...rows])
+      // SEQUENTIALLY, not Promise.all: each downscale decodes a full-size photo, and sixteen at once
+      // is a memory spike on a device that already logs pressure. The tiles fill in one by one.
+      let failed = 0
+      for (const r of rows) {
+        try {
+          const out = await downscaleToBase64(r.uri)
+          setPhotos(prev => prev.map(p => p.id === r.id ? { ...p, uri: out.uri, base64: out.base64 } : p))
+        } catch {
+          failed += 1
+          setPhotos(prev => prev.filter(p => p.id !== r.id))
+        }
+      }
+      // One alert for the batch, naming how many dropped — an alert per photo would stack modals.
+      if (failed > 0) {
+        Alert.alert(
+          failed === picked.length ? 'Photos not usable' : `${failed} photo${failed === 1 ? '' : 's'} skipped`,
+          failed === picked.length
+            ? 'Those photos could not be prepared. Try different ones.'
+            : 'The rest were added. The skipped ones could not be prepared.',
+        )
       }
       if (next !== 0) {
         setPendingLabel(null)
@@ -1130,7 +1152,12 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                   <TouchableOpacity style={styles.shutterBtn} onPress={() => capturePhoto(captureLabel, 0)} activeOpacity={0.85}>
                     <View style={styles.shutterInner} />
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.flashBtn} onPress={() => launchGallery(captureLabel, 0)} activeOpacity={0.7}>
+                  <TouchableOpacity
+                    style={styles.flashBtn}
+                    onPress={() => launchGallery(captureLabel, 0)}
+                    activeOpacity={0.7}
+                    accessibilityLabel="Choose photos from your library"
+                  >
                     <ImageIcon size={20} stroke="#FFFFFF" strokeWidth={2} />
                   </TouchableOpacity>
                 </View>
