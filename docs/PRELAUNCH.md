@@ -1511,7 +1511,7 @@ claiming exact wording from the top apps is guessing.
 - [ ] **Cook reveal — Logan picked 1 + 2, tossed 3** (2026-09-16; `app/cook-reveal.tsx`):
       - [x] ~~"Uses 17 of your 108 items"~~ — seen on device 2026-09-16 (Logan) and REJECTED: "19 of
         your 119" read as 100 items unused. Superseded by the line below.
-      - [ ] **UNVERIFIED — validation line is now "Picked from your 119 items · nothing to buy"**
+      - [x] ~~SUPERSEDED 2026-09-16 by the two-line rewrite below.~~ Was: validation line "Picked from your 119 items · nothing to buy"
         (falls back to "Picked from your pantry" until the count lands). The total proves the scan
         counted everything; no used-count over it, so nothing invites the subtraction. Tell: the
         line under the headline, no fraction.
@@ -1524,7 +1524,7 @@ claiming exact wording from the top apps is guessing.
         the new set. Fix in `lib/useMealSuggestions.ts`: the cache paint awaits the in-flight
         prefetch first (settled → a tick). Tell: do two scans in one day, the reveal's first frame is
         the new set. `generated_meals` timestamps show which set was which.
-      - [ ] **UNVERIFIED — no meal shows until every card's photo has settled** (Logan: "all of the
+      - [x] **VERIFIED 2026-09-16 (Logan: "there isn't any image loading problems now")** — no meal shows until every card's photo has settled (Logan: "all of the
         images need to be generated or pulled from cache before any meals pop up"). The gate held
         for the hero only (2.6 s cap); now all three, capped at 20 s, `imageUnavailable` counts as
         settled. Tell: swipe straight to card 3 on open — it has its photo. Watch the worst case: a
@@ -1583,7 +1583,7 @@ claiming exact wording from the top apps is guessing.
         jumped a third of the screen upward when the cards arrived (Logan's screenshots 2 → 1).
         Same header / deckArea / bottom-bar skeleton in both now; the gate only changes card content.
         Tell: nothing on screen moves when the cards spring in.
-      - [ ] **UNVERIFIED — the gate waits for the photos to be DOWNLOADED, not just known.** A URL in
+      - [x] **VERIFIED 2026-09-16 (same report)** — the gate waits for the photos to be DOWNLOADED, not just known. A URL in
         hand still painted a flat #1A1A1A card until expo-image fetched it — Logan's screenshot 1 is
         that. `prefetchMealImages` now returns expo-image's prefetch promise and the reveal opens on
         it (still capped at 20 s). Tell: card 1 has its photo on the first frame after the spring.
