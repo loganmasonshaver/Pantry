@@ -33,11 +33,28 @@ const RECENT_MEALS_KEY_PREFIX = 'pantry_recent_meal_names'  // last N gens of me
 // REFILLED the client's allowance. It also lived in AsyncStorage, so a second device kept its own
 // copy of one server number. The symptom: the Pantry refresh button said 0 of 3 used and was
 // guaranteed to fail, because the server had counted 6 of 6.
-const MEAL_GEN_CAP_PER_DAY = 6
+export const MEAL_GEN_CAP_PER_DAY = 6
 
 // The quota row is keyed by Postgres current_date, i.e. UTC — NOT todayStr(), which is local and
 // keys the meal cache. Using the local date here would read the wrong row for several hours a day.
 function utcDayKey(): string { return new Date().toISOString().slice(0, 10) }
+
+// The server's meal-generation count for today. null = could not read it; callers must treat
+// unknown as "not capped", because the server still decides and a wrong "capped" hides meals.
+export async function fetchMealGenUsedToday(userId: string): Promise<number | null> {
+  try {
+    const { data } = await supabase
+      .from('scan_usage')
+      .select('count')
+      .eq('user_id', userId)
+      .eq('scan_type', 'meal_gen')
+      .eq('day', utcDayKey())
+      .maybeSingle()
+    return Number(data?.count ?? 0) // no row = nothing generated yet today
+  } catch {
+    return null
+  }
+}
 
 // How long the hero's own photo is waited for before today's meals are shown anyway. Only applies
 // when meals are ALREADY on screen — see the block that uses it.
@@ -60,7 +77,9 @@ const HERO_IMAGE_WAIT_MS = 22000
 type CachedMeals = SharedCachedMeals
 
 
-export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true) {
+// autoLoad=false turns off the mount effect entirely — no cache paint, no generation — for a caller
+// that drives load() itself and must never show a deck it did not ask for (the cook reveal).
+export function useMealSuggestions(userId: string | undefined, isPremium: boolean, mode: 'cookNow' | 'mealPlan' = 'cookNow', enabled = true, autoLoad = true) {
   const { requestConsent } = useAIConsent()
   const [meals, setMeals] = useState<GeneratedMeal[]>([])
   // Whether anything is currently on screen. Decides whether a finished generation may swap in
@@ -316,13 +335,17 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
       // If a scan kicked off a background prefetch of these meals, wait for it to finish — it
       // writes the SAME cache we read just below, so we serve its result instead of paying to
       // generate a second time (prevents a double-spend race when cook-reveal mounts early).
+      // A prefetch that resolved null never wrote the cache, so what is in it is the deck from
+      // BEFORE the scan. Serving it would present the old meals as this scan's result — the silent
+      // stale the reveal used to show. Generate instead; if that fails too, the caller shows the error.
+      let prefetchFailed = false
       if (!forceGenerate) {
         const pre = takeCookNowPrefetch(userId, mode)
-        if (pre) { setLoading(true); await pre }
+        if (pre) { setLoading(true); prefetchFailed = (await pre) === null }
       }
 
       // Serve cached meals instantly (no loading state)
-      if (!forceGenerate) {
+      if (!forceGenerate && !prefetchFailed) {
         const raw = await AsyncStorage.getItem(`${CACHE_KEY_PREFIX}_${mode}`)
         if (raw) {
           const cached: CachedMeals = JSON.parse(raw)
@@ -440,7 +463,7 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // the pantry, and firing early would both pick wrong meals and burn a GPT call. So the gate
   // moved down to the cache MISS branch rather than being removed.
   useEffect(() => {
-    if (!userId) return
+    if (!userId || !autoLoad) return
     let cancelled = false // prevents setMeals on an unmounted component if the user navigates away
     const runKey = `${userId}_${mode}_${todayStr()}`
     ;(async () => {
@@ -605,20 +628,10 @@ export function useMealSuggestions(userId: string | undefined, isPremium: boolea
   // including a failed one, since a cap rejection is exactly when the button must go quiet.
   const refreshQuota = useCallback(async () => {
     if (!userId) return
-    try {
-      const { data } = await supabase
-        .from('scan_usage')
-        .select('count')
-        .eq('user_id', userId)
-        .eq('scan_type', 'meal_gen')
-        .eq('day', utcDayKey())
-        .maybeSingle()
-      // No row simply means nothing generated yet today; the row is created on first use.
-      setGenUsedToday(Number(data?.count ?? 0))
-    } catch {
-      // Leave it null — unknown must not disable the button. Never surfaced to the user: the
-      // authoritative answer arrives from generate-meals itself.
-    }
+    const used = await fetchMealGenUsedToday(userId)
+    // Unknown leaves it null — unknown must not disable the button. Never surfaced to the user: the
+    // authoritative answer arrives from generate-meals itself.
+    if (used !== null) setGenUsedToday(used)
   }, [userId])
 
   useEffect(() => { refreshQuota() }, [refreshQuota])

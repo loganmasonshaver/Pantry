@@ -38,6 +38,7 @@ import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
 import { prefetchCookNowMeals, warmMealImages } from '@/lib/mealPrefetch'
+import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
 
@@ -288,13 +289,21 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   // window so the reveal is instant instead of a second loading screen. Text only; fires once
   // per modal-open (reset below) so a review re-render doesn't re-trigger it.
   const prefetchFiredRef = useRef(false)
-  useEffect(() => { if (visible) prefetchFiredRef.current = false }, [visible])
+  // How this open's prefetch ended. 'failed' is what the Add-all handler checks against the meal cap:
+  // past it, the reveal would have nothing new to show. The token drops a result from an earlier open.
+  const prefetchOutcomeRef = useRef<'none' | 'pending' | 'ok' | 'failed'>('none')
+  const prefetchTokenRef = useRef(0)
+  useEffect(() => { if (visible) { prefetchFiredRef.current = false; prefetchOutcomeRef.current = 'none'; prefetchTokenRef.current += 1 } }, [visible])
   useEffect(() => {
     if (prefetchFiredRef.current || !user || !onSeeMeals) return
     const names = detectedItems.filter(i => i.checked).map(i => i.name)
     if (names.length === 0) return
     prefetchFiredRef.current = true
-    prefetchCookNowMeals(user.id, names)
+    prefetchOutcomeRef.current = 'pending'
+    const token = prefetchTokenRef.current
+    prefetchCookNowMeals(user.id, names).then(m => {
+      if (prefetchTokenRef.current === token) prefetchOutcomeRef.current = m ? 'ok' : 'failed'
+    })
   }, [detectedItems, user, onSeeMeals, visible])
   // Per-photo container type from the scan (fridge/freezer/pantry/counter) → context-aware quick-adds.
   const [photoContainers, setPhotoContainers] = useState<string[]>([])
@@ -349,6 +358,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
   const [addingMissed, setAddingMissed] = useState(false)
   // Post-save success step (returning scanners only) — offers the cook-reveal vs "maybe later".
   const [showSaved, setShowSaved] = useState(false)
+  const [savedCapped, setSavedCapped] = useState(false) // success step with no reveal: today's meal picks are used up
   const [savedCount, setSavedCount] = useState(0)
   // Tapped review photo → fullscreen pinch-to-zoom overlay (in-tree, not a nested Modal).
   const [zoomUri, setZoomUri] = useState<string | null>(null)
@@ -674,6 +684,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
       setMissedInput('')
       setAddingMissed(false)
       setShowSaved(false)
+      setSavedCapped(false)
       setZoomUri(null)
       setCurrentPhoto(0)
       nudgedRef.current = false
@@ -1059,16 +1070,31 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
             <View style={styles.savedBody}>
               <View style={styles.savedCheck}><Check size={40} stroke="#000000" strokeWidth={3} /></View>
               <Text style={styles.savedTitle}>{savedCount} item{savedCount !== 1 ? 's' : ''} added</Text>
-              <Text style={styles.savedSub}>Now the good part — we've lined up meals you can cook right now with what you have. No shopping.</Text>
+              {/* Capped: no time is promised. The quota resets at UTC midnight while the meal cache
+                  turns over at LOCAL midnight, so "tomorrow" would be wrong for part of the day. */}
+              <Text style={styles.savedSub}>
+                {savedCapped
+                  ? "You've used today's meal picks. Your next ones will use everything you just added."
+                  : "Now the good part — we've lined up meals you can cook right now with what you have. No shopping."}
+              </Text>
             </View>
             <View style={styles.savedActions}>
-              <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={goToReveal}>
-                <Text style={styles.primaryBtnText}>See what you can cook</Text>
-                <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.savedLater} activeOpacity={0.7} onPress={() => handleClose()}>
-                <Text style={styles.savedLaterText}>Maybe later</Text>
-              </TouchableOpacity>
+              {savedCapped ? (
+                // One action. "See what you can cook" would open the deck from before the scan.
+                <TouchableOpacity style={styles.primaryBtn} activeOpacity={0.85} onPress={() => handleClose()}>
+                  <Text style={styles.primaryBtnText}>Done</Text>
+                </TouchableOpacity>
+              ) : (
+                <>
+                  <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={goToReveal}>
+                    <Text style={styles.primaryBtnText}>See what you can cook</Text>
+                    <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.savedLater} activeOpacity={0.7} onPress={() => handleClose()}>
+                    <Text style={styles.savedLaterText}>Maybe later</Text>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         )}
@@ -1713,6 +1739,25 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, onSeeM
                     // With the cook reveal next, only a light tick — the reveal has its own success
                     // peak a moment later, and two in a row would blur into one buzz.
                     if (!onSeeMeals) { setSaving(false); savingRef.current = false; Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}); handleClose(); return }
+                    // Past today's meal cap the prefetch was refused, and the reveal could only show
+                    // the deck from before the scan. Checked only when the prefetch FAILED: 'ok' means
+                    // new meals exist, and 'pending' may be the very generation that used the last
+                    // slot (the reveal awaits it and shows the server's own message if it is refused).
+                    // An unreadable count counts as not capped — the server still decides.
+                    if (prefetchOutcomeRef.current === 'failed' || prefetchOutcomeRef.current === 'none') {
+                      const used = await fetchMealGenUsedToday(user.id)
+                      if (used !== null && used >= MEAL_GEN_CAP_PER_DAY) {
+                        setSaving(false)
+                        savingRef.current = false
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}) // the flow ends here
+                        // COOK_REVEAL_SEEN_KEY is deliberately NOT set: a first scanner who hits this
+                        // still gets the auto-reveal on their next scan.
+                        setSavedCount(selected.length)
+                        setSavedCapped(true)
+                        setShowSaved(true)
+                        return
+                      }
+                    }
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
                     // Committed to the reveal → warm the remaining meal images now, a few seconds
                     // before it mounts, so the deck doesn't out-run them. (The hero was warmed

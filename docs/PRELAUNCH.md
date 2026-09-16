@@ -1526,7 +1526,14 @@ claiming exact wording from the top apps is guessing.
         earlier set with no sign the scan changed nothing — the same silent-stale the flash was.
         Rare (cap or timeout); the right fix is load() forcing a generation when the prefetch it
         awaited resolved null.
-      - [ ] **PLAN (Logan 2026-09-16) — Home says generations are done for today, Pantry still offers
+      - [ ] **BUILT 2026-09-16, UNVERIFIED on device — scanning past the meal cap.** Scan stays live.
+        Add all → if this open's prefetch FAILED and `meal_gen` is at the cap, the success step says
+        "You've used today's meal picks. Your next ones will use everything you just added." with one
+        Done button, no reveal (COOK_REVEAL_SEEN_KEY not set). The reveal now uses `autoLoad=false`
+        (no mount paint), and `load()` generates instead of serving the cache when the prefetch it
+        awaited resolved null. Tells: (1) at 6/6 meal_gen, scan → Add all → that success step;
+        (2) under the cap, the reveal is unchanged. Original plan below.
+      - **(plan, as written) Home says generations are done for today, Pantry still offers
         Scan.** Both are true: two separate server caps. Logan's row that day: `meal_gen` 6/6 (daily),
         `pantry` 6 in the rolling week (cap = `SCAN_CAP_WEEK`, overridden for testing — §9),
         `image_gen` 22/24. The HARM is what a scan does next: it spends a scan slot, saves the items,

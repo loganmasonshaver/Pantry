@@ -96,11 +96,11 @@ export default function CookReveal() {
   const router = useRouter()
   const { user } = useAuth()
   const { isPremium } = usePremium()
-  // enabled=false keeps the hook from GENERATING on its own; it does not stop its cache paint (that
-  // runs for every instance so Home can paint from disk before its pantry arrives). Both that paint
-  // and load() below now wait for the scan's prefetch before reading the cache, so the first set
-  // this screen ever holds is the scan's own — it used to paint the previous set and swap.
-  const { meals, error, errorCode, retry, load } = useMealSuggestions(user?.id, isPremium, 'cookNow', false)
+  // autoLoad=false: no mount paint at all. The hook's mount effect paints today's cache for every
+  // instance (so Home can paint from disk before its pantry arrives), and here that painted the deck
+  // from BEFORE the scan. load() below is this screen's only source: it awaits the scan's prefetch,
+  // and when that failed it generates rather than serving the earlier deck.
+  const { meals, error, errorCode, retry, load } = useMealSuggestions(user?.id, isPremium, 'cookNow', false, false)
   const triggeredRef = useRef(false)
   const revealed = meals.slice(0, 3)
 
