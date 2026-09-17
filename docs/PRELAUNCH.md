@@ -2167,7 +2167,11 @@ claiming exact wording from the top apps is guessing.
         later median 0.26 s. So the server is slow on the FIRST burst after a quiet spell, then fast —
         the same release-together shape as the 7.8 s launch stall, now reproduced without the phone.
         Leading explanation (not proven): idle service memory is swapped to disk on a 0.5 GB box and
-        paged back in on the next burst; a cold connection pool is the other candidate. **Tell:**
+        paged back in on the next burst; a cold connection pool is the other candidate. **Baseline
+        repeated 01:32 after 15 quiet min: median 3.83 s, FASTEST 3.75 s**, then 0.26 s and 0.20 s —
+        every one of the 50 waited the same ~3.5 s, which reads as one fixed wake-up delay, not
+        connections opening one by one. **Keep-warm cron enabled 01:33** (`20260917063311`, every 2 min,
+        one anon read of trending_meals, key from Vault `anon_key`); result below when measured. **Tell:**
         upgrade compute, rerun the same three bursts after 15 min quiet — if burst 1 is ~0.3 s, done.
         Free plan is a launch problem anyway: no backups, pauses after a week inactive, 1 GB file
         storage (photos already 351 MB) and 5 GB egress (every photo download). Pro is $25/mo with
