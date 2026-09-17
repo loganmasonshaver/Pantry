@@ -8,100 +8,84 @@ Ordered by what should be done first. Later items depend on earlier ones.
 
 ---
 
-## ▶ TOMORROW, 2026-09-17 — every cron + Discover check, in this order  *(Logan 2026-09-16: "anything left to verify with the cron and Discover goes at the top")*
-The 08:00 UTC cron (3am CDT) is the FIRST scheduled run of everything shipped on Sep 16, on the
-CURRENT model (`gemini-3.1-flash-lite`, shards OFF):
-- **pipeline** (`3deb55d` … `303f098`): retry on the untried tail; compilation, non-recipe and
-  title-repeat filters; parser fixes (emoji macro lines, "= N g protein", oat flour); junk-list gate;
-  attempt budget + image deadline; ONE shelf rule incl. the fusion / stir-fry / parfait / soup lines
-  and the `salads-bowls` tag.
-- **new 08:05 UTC photo step** (cron job 6, `?stage=images`).
-- **app**: page-wide family cap `54c7fbc` · Salads & bowls shelf `fade012` · no recipe before its AI
-  photo `f44eaef`.
-- **data**: 40 shelf moves (24 + 16) and 3 junk-ingredient rows repaired or deleted.
-**Do not change the model, turn shards on, or fire a manual run before 1-5 are read** — the result
-must be attributable. Reasoning for each item: §0 below and the commit bodies. `<id>` below = the
-08:00 run's `pipeline_runs` id (the first query in 1 returns it).
+## ▶ TOMORROW, 2026-09-18 — the first SHARDED cron  *(and what 2026-09-17 settled)*
+**Read this first.** Everything shipped 2026-09-16 was measured on the 2026-09-17 08:00 UTC cron and
+six same-list replays; results are in the table right below. What changed on the 17th and is NOT yet
+measured on a scheduled run: **parallel model shards ON by default** (`fb283df`, deployed 18:2x UTC),
+and the parser/filter rules from that run's junk rows. Replay 824 on the deployed build: one attempt,
+33 raw, 24 kept, 18 stored, **17.7 s**.
 
-- [ ] **1. It ran, returned, and every recipe has its photo.** PASS = HTTP 200, `timing.totalMs` < 150 000.
-  `select id, created_at, stored, funnel->'timing' timing, funnel->'attemptsSkippedForTime' t, funnel->'attemptsSkippedForList' l, funnel->'imagesSkippedForTime' img from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by created_at desc limit 1;`
-  `select id, created, status_code, timed_out, error_msg, left(content, 160) from net._http_response order by id desc limit 3;`
-  (08:00 run, 08:05 photo step, 08:20 health check). The photo step's body reads
-  `{"stage":"images","rows":N,...}`; `rows` 0 = the 08:00 run finished every photo. `imagesSkippedForTime`
-  on the 08:00 row = FAL was slow and the deadline worked — not a failure if the 08:05 step finished them.
-  A recipe without its AI photo is HIDDEN from Discover now, so this must return ZERO rows after 08:05:
-  `select name from trending_meals where generated_at = current_date and (image is null or image not like '%/storage/v1/object/public/%');`
-- [ ] **2. Yield, and where the rest went.** Goal ≥ 12; **expected 10-13** on this code.
-  `select funnel->'llmRaw' raw, funnel->'llmYields' kept, funnel->'attempts' attempts, funnel->'llm_Google'->'rejected' rej from pipeline_runs where id = <id>;`
-  `select d->>'attempt' a, d->>'kind' kind, d->>'name' name, d->>'why' why from pipeline_runs, jsonb_array_elements(funnel->'rejectedDetail') d where id = <id> order by 1, 2;`
-  Tells: every attempt `provider` = Google (OpenAI only right after a Gemini attempt that returned
-  nothing); `listSize` shrinks attempt to attempt; `dupName` + `dupVideo` ≈ 0 (retry-on-tail working);
-  no `attempts[].errors` containing "aborted" (one = the 1.25x attempt estimate under-predicted). Read
-  every `nameGap` note's `listed:` half — a copycat ("Low Calorie Nutella") or made-of dish ("Zucchini
-  Tortilla") rejected there is a false positive to fix. Later attempts returning 0-2 raw on a fresh
-  list = the model has nothing it wants in the tail → the ceiling is candidates or model → item 7.
-- [ ] **3. The pre-model filters removed the right videos.** Read every entry of
-  `funnel->'titleRepeats'`, `funnel->'compilationTitles'`, `funnel->'nonRecipeTitles'`. A single-dish
-  video in compilationTitles, or a new dish in titleRepeats, is a false positive to fix that day.
-- [ ] **4. The stored rows are clean.** Every query returns ZERO rows:
+- [ ] **1. It ran, returned, and every recipe has its photo.** `net._http_response` is USELESS for
+  this now: pg_net purges it after ~6 h, and another session's `api-keep-warm` cron (job 7, every
+  2 min) fills it. Use the cron ledger and the funnel row:
+  `select j.jobname, d.start_time, d.status, left(d.return_message, 60) from cron.job_run_details d join cron.job j on j.jobid = d.jobid where d.start_time >= current_date and j.jobname like 'trending-%' order by d.start_time;`
+  `select id, stored, funnel->'shardSize' shards, funnel->'timing' timing, funnel->'attemptsSkippedForTime' t, funnel->'attemptsSkippedForList' l, funnel->'imagesSkippedForTime' img from pipeline_runs where dry_run = false and funnel ? 'rawCandidates' order by id desc limit 1;`
+  PASS = `timing.totalMs` < 150 000 (expect ~60-90 s now: loop ~20-30 s + images), `shards` 6, and
+  this returns ZERO rows after 08:05: `select name from trending_meals where generated_at = current_date and (image is null or image not like '%/storage/v1/object/public/%');`
+- [ ] **2. Yield and shards.** Goal ≥ 12. `select funnel->'llmRaw' raw, funnel->'llmYields' kept, funnel->'attempts' attempts from pipeline_runs where id = <id>;`
+  Tells: `attempts[].shardMs` present (5 numbers per attempt); **no `errors` containing 429 / rate /
+  quota** — 5 concurrent Gemini calls per attempt is the new load and Google does not publish the
+  per-minute limit; one such error = drop `MAX_PARALLEL_SHARDS` to 3. `dupName` + `dupVideo` ≈ 0.
+- [ ] **3. Rows are clean — the 17th's failure, re-checked.** ZERO rows from each:
+  `select name, i->>'name' from trending_meals, jsonb_array_elements(ingredients) i where generated_at = current_date and ((i->>'name') ~* '^\D*\d{1,2}:\d{2}|\b(recipes?|ideas?|alternatives?|tips?|options?|diet)\s*$|\bfriendly\b|\btiffin\b|^(breakfast|lunch|dinner|snack)s?\s*(\(|$)|[⬇👇]|^(high|low)[- ](protein|fib)|^(made|loaded|packed) with|^(perfect|great|good) for|thank you|save this' or lower(regexp_replace(i->>'name','[^a-zA-Z0-9]','','g')) = lower(regexp_replace(name,'[^a-zA-Z0-9]','','g')));`
   `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
-  `select name, i->>'name' from trending_meals, jsonb_array_elements(ingredients) i where generated_at = current_date and (i->>'name') ~* '^(high|low)[- ](protein|fib)|^(no|gluten[- ]free|dairy[- ]free)$|^(made|loaded|packed) with|^(perfect|great|good) for|thank you|save this|feedback';`
   `select t.name, p.name from trending_meals t join trending_meals p on p.generated_at < current_date and lower(t.name) like '%' || lower(p.name) || '%' where t.generated_at = current_date;`
-  `select name from trending_meals where generated_at = current_date and name ~* 'meal plan|what i eat|protein powder$|spice mix$';`
-  Parser fixes (`6b2fd9c`) — no rejected recipe's SOURCE list still counts a macro line:
-  `select d->>'name', src from pipeline_runs, jsonb_array_elements(funnel->'llm_Google'->'droppedDetail') d, jsonb_array_elements_text(d->'src') src where id = <id> and src ~* '^[^a-z0-9]*[0-9.,]+\s*(g|kcal)?\s*(protein|eiwei|kohlenhydrat|fett|carbs?|fat|calories)\s*$|=\s*[0-9.,]+\s*g\s*protein';`
-- [ ] **5. Every new row is on the right shelf.** The order, stop at the first that fits: dessert →
-  snack (sweet or savoury) → savoury dish with a clear cuisine (a FUSION takes its sauce and staples'
-  cuisine: paneer / schezwan / soya pasta → indian; a stir-fry with no clearer cuisine → asian) →
-  morning food (incl. parfaits) → cuisine-less salad or bowl → american-comfort (incl. soups,
-  sandwiches, lunch wraps). Read each:
-  `select name, shelf_tag, category from trending_meals where generated_at = current_date order by shelf_tag;`
-  Indian share of the batch, watch line ≤ 15%:
-  `select count(*) filter (where shelf_tag = 'indian' or name ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) total from trending_meals where generated_at = current_date;`
-- [ ] **6. On the phone.** Needs a build with `54c7fbc` + `fade012` + `f44eaef` (the Sep 16 00:01 release
-  build has none). After any DB change, switch tabs and come back so Discover refetches.
-  - Whole page: ≤ 4 cheesecakes, ≤ 4 brownies, ≤ 4 paneer dishes, ≤ 10 pasta; search "cheesecake"
-    still finds all ~22. **Sep 18:** the four visible cheesecakes are DIFFERENT ones (daily rotation).
-  - Shelves: Protein snacks has NO salads; Indian night holds Paneer Pasta, Lauki Pasta, Paneer Pizza,
-    Paneer Manchurian, the momos, Green Butter Garlic Chicken, Konjac Noodles, Mexican Inspired Rajma
-    Salad; Breakfast holds the chia puddings, smoothie/yogurt bowls and Greek Yogurt Berry Parfait;
-    Comfort holds Creamy Tomato Tofu Soup, Tofu Sandwich, Ham and Cheese Protein Wrap, Pepperoni Pizza
-    Skillet; **Salads & bowls** shows more than 2 salads WHEN it rotates in (6 of 12 shelves render a
-    day — it may not appear on the 17th).
-  - No card anywhere on a YouTube thumbnail; NEW TODAY badges on the cron's rows; no re-layout when
-    the pool loads.
-  - Daily report (~9:05 CDT) reads "Discover: N new recipes, all have photos".
-- [ ] **7. Shards and model — BUILT (`303f098`), measured here, decided by the rule below.** Only after
-  1-5 are read. Each is a same-list replay of the 08:00 run: ~1 YouTube quota unit, nothing written to
-  Discover, one `pipeline_runs` dry row. Fire ONE AT A TIME (each ~1-2 min):
-  `npx supabase db query --linked "select net.http_post(url := 'https://fdafjnkqqtpsjtddbfdz.supabase.co/functions/v1/generate-trending-meals?refresh=true&dryRun=true&replay=<id><EXTRA>', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cron_secret' limit 1)), body := '{}'::jsonb, timeout_milliseconds := 200000)"`
-  - **A** `<EXTRA>` empty — Lite, one call per attempt: the baseline on this exact list
-  - **A2** `<EXTRA>` empty again — the model's own variance on an IDENTICAL list (settles §2's "variance
-    or defect" question for ~1 unit instead of ~10 full runs)
-  - **B** `&shards=6` — Lite in parallel pieces
-  - **C** `&shards=6&model=gemini-3.8-flash`
-  - **D** `&shards=6&model=gpt-5.4-mini`
-  - **E** `&provider=openai` — the real outage fallback (gpt-4o-mini), never exercised on this code
-  Read: `select id, stored, funnel->'model' model, funnel->'shardSize' shards, funnel->'timing' timing, funnel->'attempts' attempts from pipeline_runs where funnel->>'replayOf' = '<id>' order by id;`
-  and for each: `select count(*) filter (where t->>'name' ~* 'paneer|soya|dal|masala|dosa|paratha|chilla|vada|momos') indian, count(*) from pipeline_runs, jsonb_array_elements(funnel->'timeSample') t where id = <replay id>;`
-  **Decision rule (set in advance, 2026-09-16):** turn shards ON by default (`SHARD_SIZE_DEFAULT`) if B
-  stores ≥ A + 2 AND that gap is bigger than the A/A2 spread, it finishes well inside 150 s, and no
-  `attempts[].errors` read as rate limits. Switch the model only if C or D stores ≥ 3 more than B on the
-  same list, its Indian share stays ≤ 15%, AND it costs ≤ ~$7/month at one run a day (3.8 Flash ~$6
-  paid, free tier exists; gpt-5.4-mini ~$7+). Otherwise stay on Lite. One day's list is one sample:
-  repeat A-D on Sep 18's run before switching models — not before turning shards on. E passes if it
-  returns 200 with recipes. Pricing checked 2026-09-16: "LEVER 3" in §0.
-- [ ] **8. Known false positive to fix — the truncation guard reads a translation as a cut-off name.**
-  Run 808 rejected "High Protein Cannelloni One-Pot" (3.5M views) because the model translated the
-  German "Paprikapulver, edelsüß" as "paprika", which is a prefix of the German word, so
-  `truncatedAgainstSource` called it truncated. It is the ONLY `truncated` reject in any funnel row
-  that carries detail. Check tomorrow's: `select d->>'name', d->>'why' from pipeline_runs, jsonb_array_elements(funnel->'rejectedDetail') d where id = <id> and d->>'kind' = 'truncated';`
-  Fix, NOT built: skip the check when the video declared a non-English language, or when the source
-  line is one compound word the model translated. It does not widen retention — the ingredient is there.
-- [ ] **9. The last unmeasured Aug 30 generation fix — the decimal parser (`561360e`).** A creator's
-  "1.5 tsp" must not be stored as "5 tsp". On tomorrow's rows, compare any source line with a decimal
-  (the `droppedDetail` `src` arrays and the videos behind stored rows) against the stored amount. Low
-  priority; the other three Aug 30 checks passed on 2026-09-16 (see §2).
+  Then READ every row's first six ingredients by eye — the 17th's junk was obvious at a glance and
+  invisible to the counters: `select name, shelf_tag, (select string_agg(i->>'name', ', ') from (select i from jsonb_array_elements(ingredients) i limit 6) x) from trending_meals where generated_at = current_date order by shelf_tag;`
+- [ ] **4. Filters.** Read `funnel->'titleRepeats'`, `'compilationTitles'`, `'nonRecipeTitles'` (query
+  as on the 17th). Every compilation entry must be a multi-recipe video; every non-recipe a vlog,
+  plan, haul, diet or budget challenge.
+- [ ] **5. Shelves + Indian share** (query as on the 17th; watch line ≤ 15% of the batch by
+  ingredients, not just the `indian` tag — the 17th read 5 of 18 by ingredients, 1 by tag).
+- [ ] **6. On the phone** — unchanged from the 17th's list (cap ≤ 4 cheesecakes / ≤ 10 pasta; the 40
+  shelf moves; no thumbnails; NEW TODAY badges; Salads & bowls when it rotates in). Needs a build
+  with `54c7fbc` + `fade012` + `f44eaef`; switch tabs and back after any DB change.
+- [ ] **7. Logan: the four junk rows from the 17th** (no real ingredient list to recover; the agent
+  does not hard-delete): `delete from trending_meals where generated_at = '2026-09-17' and name in ('Chia Breakfast Pots', 'Semolina Pizza Pockets', 'Vegetarian Superfoods', 'Tray-Bake Meal Prep');`
+- [ ] **8. Daily report email.** The 9:05 desktop task FAILED on the 17th ("Unable to connect to API:
+  SSL certificate has expired" — the Mac's connection at that moment; the report row itself was
+  built). Check the task's Runs pane on the 18th; two failures in a row = look at the Mac's clock /
+  network at 9am, not the SQL.
+- [ ] **9. Still open from the 17th's list:** truncation-guard false positive on translated names
+  ("paprika" ⊂ "Paprikapulver", run 808; unbuilt) · decimal parser measurement · 3.8 Flash's
+  thinking tokens as a speed lever (each shard took 59-69 s; `reasoning_effort`/thinking budget
+  untested) · the STORE_CAP question (26 and 30 kept on the 17th were cut to 18; the cap bounds
+  image cost at ~$0.003/photo — Logan's 12-18 range says leave it).
+
+### 2026-09-17 RESULTS — one cron, six replays, all on the same 52 candidates
+| run | what | raw / attempt | kept | stored | time |
+|---|---|---|---|---|---|
+| **cron 815** | Lite, one call/attempt (Sep 16 code) | 4 / 10 / 12 / 14 | 26 | **18** | 129.5 s (images 43.6 s) |
+| 818 A | same, replayed | 21 / 8 / 4 | 19 | 18 | 61 s |
+| 819 A2 | same again (variance) | 21 / 11 | 15 | 15 | 60 s |
+| **820 B** | **Lite, 6-video shards** | 21 / 26 | **30** | 18 | **26 s** |
+| 821 C | 3.8 Flash, shards | 17 | 15 | 15 | 92 s (shards 59-69 s, one hit the 90 s cap) |
+| 822 D | gpt-5.4-mini, shards | 38 / 26 / 37 / 38 | 11 | 11 | 90 s (116 of 139 had zero macros) |
+| 823 E | gpt-4o-mini outage fallback | 12 / 7 | 7 | 7 | 84 s — **fallback works** |
+| **824 F** | **deployed build (shards default + junk rules)** | 33 | 24 | 18 | **17.7 s** |
+- **Decision (rule set 2026-09-16, applied):** shards ON — every attempt returned more than its
+  unsharded twin, a third of the time, no rate-limit errors. The stored count could not show it
+  (both capped); kept-before-cap and time did. **Model stays Lite:** 3.8 Flash keeps the highest
+  share of what it returns (15 of 17) but cannot fit a second attempt; gpt-5.4-mini returns
+  everything and fills no macros. **A vs A2 on an identical list = 19 vs 15:** the model's own
+  variance is ~4 recipes.
+- **Checks 1-5 on cron 815:** ran, 200, photos all present, `dupName`/`dupVideo` 0, all attempts
+  Gemini, `listSize` 52 → 48 → 40 → 31, filters all genuine (24 title repeats, 13 compilations, 4
+  non-recipes) except ONE false positive ("High Protein Smoothies without protein powder" as a
+  non-recipe — fixed), nameGap false positive "palak" = spinach (fixed). **Check 3 FAILED: 5 of 18
+  rows had junk ingredient lists** — video chapters, an SEO tag block, "Breakfast (2 portions)", a
+  compilation's dish names, a heading echoed as ingredient #1. All the same hole: the bulleted-list
+  parser reads on past the last real ingredient, then the retention contract makes the model echo
+  every line. Rules for each shipped in `fb283df` (scan of all 247 rows: exactly the 24 junk lines,
+  nothing real); Makhana ice cream and Mango Habanero repaired in place; four rows for Logan (7).
+- **Compilation filter misses on the 17th, now caught:** "5 Cheap High-Protein Foods", "25 Favorite
+  Dinner & Snack Recipes" (the & broke the word run), "TOP 3 Salads", "2-Day Meal Prep", "The
+  high-protein breakfasts I prep". **Non-recipe misses:** "Easy Diet", "Bodybuilding Diet for
+  $100", "$10 a Day", premix.
+- **Ops:** the Sep 16 assumption that `net._http_response` holds the cron's status is wrong past
+  ~6 h (pg_net TTL) and the `api-keep-warm` job (another session, every 2 min, one REST hit) buries
+  it within minutes anyway. `cron.job_run_details` + `pipeline_runs` are the record. YouTube quota
+  on the 17th: cron ~1,300 + 7 replays at ~1 each.
 
 ---
 
