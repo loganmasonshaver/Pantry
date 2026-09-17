@@ -1770,6 +1770,17 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
+- [ ] **FOUND 2026-09-17 (reading the generation path for the phantom check): a pantry over 200 items
+      drops the NEWEST items from the prompt.** Both reads that feed GPT — `lib/mealPrefetch.ts:86`
+      (the scan's own plating generation) and `lib/useMealSuggestions.ts:154` (Home) — are
+      `.order('created_at', { ascending: true }).limit(200)`, so they take the 200 OLDEST in-stock
+      rows. Logan's pantry is **267 in-stock rows**: 67 never reach the model, and they are exactly
+      the ones most recently added. A scan of 20 new items can therefore produce meals that use none
+      of them, which reads as "the scan changed nothing" — and it gets worse with every scan. The
+      limit is deliberate (prompt size, truncation risk); the ORDER is the defect — oldest-first was
+      meant to use up old food and quietly became a cut of the newest. Not yet decided: take the cap
+      newest-first, or split it (e.g. the newest 120 + the oldest 80). Does NOT affect the phantom
+      check itself — that runs with the pantry emptied, far under 200.
 - [x] **VERIFIED on device 2026-09-16 (Logan) — ONE pantry matcher on all three surfaces.**
       `lib/mealReadiness.ts` now imports `isInPantry` from `_shared/pantry-check.ts` (plain TS, no
       Deno; Metro bundles it — confirmed by building the real entry and finding it in the bundle) and
