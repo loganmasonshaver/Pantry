@@ -2293,6 +2293,15 @@ claiming exact wording from the top apps is guessing.
         Tested as Logan's account inside a rolled-back transaction: 'BUTTER ', 'eggs', 'Large Eggs',
         'Salted Butter' matched the 3 rows visible, a made-up name matched nothing. **Tell:** next
         scan's `[perf] pantry save: … restocked in` reads well under 1 s.
+      - [ ] **BUILT 2026-09-17 (Logan), UNVERIFIED on device — Home polish.** (1) Daily meal log rows show the
+        dish photo from `meal_data.image` (44 pt square, radius 10; entries with no photo — food search,
+        typed — get a quiet utensils tile so names align), rows 2 pt taller, entry text 13→15, numbers
+        12→14, slot label 15→17, slot totals 12→14. Meal photos are square, so the square slot shows the
+        whole plate; an older Discover log holding a 16:9 YouTube thumbnail would be centre-cropped —
+        look for one. (2) "Browse Discover" no longer sits beside New picks; it appears only at the
+        generation cap (the existing "That's today's new picks" block). The line is now "Not feeling
+        these?  ↻ New picks", centred with a 10 pt gap. **Tell:** Home → meal log photos + larger text;
+        the nudge shows one green action until the cap.
       - [x] **DONE 2026-09-17 (Logan): the "Fridge · 5/5" caption under the scan story is gone.** The
         dots stay. `areaLabel` and `CONTAINER_LABEL` had no other caller and were removed.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: after the plating cap the reveal waited ANOTHER 20 s on a

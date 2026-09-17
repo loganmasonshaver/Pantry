@@ -1631,20 +1631,16 @@ export default function HomeScreen() {
                   }
                   // Real touchables, not nested `Text onPress`: a nested text link gave no press
                   // feedback at all, so tapping New picks looked dead until the shimmer arrived.
+                  // One action while picks remain (Logan): Discover appears only once they run out, above.
+                  // The refresh icon says what New picks does — replaces these three — where an arrow
+                  // would read as going somewhere.
                   return (
                     <View style={[styles.discoverNudge, styles.discoverNudgeRow]}>
-                      <Text style={styles.discoverNudgeText}>Not feeling these? </Text>
-                      <TouchableOpacity onPress={regenerate} activeOpacity={0.5} hitSlop={8}>
+                      <Text style={styles.discoverNudgeText}>Not feeling these?</Text>
+                      <TouchableOpacity onPress={regenerate} activeOpacity={0.5} hitSlop={8} style={styles.discoverNudgeAction}>
+                        <RefreshCw size={13} stroke="#4ADE80" strokeWidth={2.4} />
                         <Text style={[styles.discoverNudgeText, styles.discoverNudgeLink]}>New picks</Text>
                       </TouchableOpacity>
-                      {nudge === 'redo' ? (
-                        <>
-                          <Text style={styles.discoverNudgeText}> · </Text>
-                          <TouchableOpacity onPress={goDiscover} activeOpacity={0.5} hitSlop={8}>
-                            <Text style={[styles.discoverNudgeText, styles.discoverNudgeLink]}>Browse Discover</Text>
-                          </TouchableOpacity>
-                        </>
-                      ) : null}
                     </View>
                   )
                 })()}
@@ -1747,6 +1743,13 @@ export default function HomeScreen() {
                           overshootRight={false}
                         >
                           <TouchableOpacity onPress={() => openEntry(entry)} activeOpacity={0.7} style={[styles.entryRow, idx > 0 && styles.entryRowDivider]}>
+                            {/* The dish's own photo when the log carries one (Cook Now, Discover and saved
+                                meals store it in meal_data); a food-search or typed entry has none and gets a
+                                quiet tile, so every name starts at the same x. Meal photos are square, so a
+                                square cover slot shows the whole plate. */}
+                            {typeof entry.meal_data?.image === 'string' && entry.meal_data.image.startsWith('http')
+                              ? <MealImage uri={entry.meal_data.image} style={styles.entryPhoto} recyclingKey={String(entry.id)} transition={0} />
+                              : <View style={[styles.entryPhoto, styles.entryPhotoEmpty]}><Utensils size={16} stroke={COLORS.textMuted} strokeWidth={1.8} /></View>}
                             <Text style={styles.entryName} numberOfLines={1}>{entry.name}</Text>
                             <Text style={styles.entryNums}>{entry.calories} · <Text style={{ color: '#4ADE80' }}>{Math.round(entry.protein)}P</Text></Text>
                           </TouchableOpacity>
@@ -2316,7 +2319,8 @@ const styles = StyleSheet.create({
   pantryRowReadyText: { fontSize: 11, color: '#4ADE80', fontWeight: '700' },
   pantryRowNeed: { fontSize: 11, color: '#F59E0B', fontWeight: '600' },
   discoverNudge: { marginTop: 4, alignSelf: 'center' },
-  discoverNudgeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' },
+  discoverNudgeRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  discoverNudgeAction: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   discoverNudgeText: { fontSize: 13, color: '#888888', textAlign: 'center' },
   discoverNudgeLink: { color: '#4ADE80', fontWeight: '700' },
   discoverCapWrap: { marginTop: 6, alignItems: 'center', gap: 10, alignSelf: 'stretch' },
@@ -2391,18 +2395,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   mealSlotLabel: {
-    fontSize: 15,
+    fontSize: 17,
     fontWeight: '700',
     color: COLORS.textWhite,
   },
   mealSlotCardEmpty: { paddingVertical: 10 },
   mealSlotHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 34 },
-  mealSlotTotals: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  mealSlotTotals: { fontSize: 14, fontWeight: '600', color: COLORS.textMuted },
   // Opaque, so the red action stays hidden behind the row until it is swiped open.
-  entryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 9, backgroundColor: COLORS.cardElevated },
+  entryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, backgroundColor: COLORS.cardElevated },
+  entryPhoto: { width: 44, height: 44, borderRadius: 10 },
+  entryPhotoEmpty: { backgroundColor: '#262626', alignItems: 'center', justifyContent: 'center' },
   entryRowDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)' },
-  entryName: { flex: 1, fontSize: 13, fontWeight: '500', color: COLORS.textWhite, marginRight: 8 },
-  entryNums: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  entryName: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
+  entryNums: { fontSize: 14, fontWeight: '600', color: COLORS.textMuted },
   entryDelete: { backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, marginLeft: 8, borderRadius: 10 },
   entryDeleteText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
 
