@@ -1769,6 +1769,26 @@ claiming exact wording from the top apps is guessing.
       bets are exactly what that file exists for, and the result is worth more than the teardowns.
 
 ## 3. Pantry scan flow — end to end + UI  *(blocks the trailer)*
+- [ ] **FOUND 2026-09-17 on device (Logan, during phantom scan 1): a tapped review photo opens
+      misaligned — the photo sits off the bottom-right corner, clipped, on black.** It opened and
+      closed correctly a few times first, then every open was wrong. `components/PantryScanModal.tsx`
+      (the `zoomUri` overlay, ~line 1813): the viewer is a ScrollView carrying BOTH `centerContent`
+      and a `flexGrow: 1` + `justifyContent/alignItems: 'center'` content container, around an image
+      already sized exactly SCREEN_W × SCREEN_H, with iOS's default `automaticallyAdjustContentInsets`
+      still on. That is two independent inset sources on a content box that already equals the
+      viewport: `centerContent` inserts (bounds − contentSize)/2 while the image's layout is still 0
+      and UIScrollView keeps that inset after the image lands, and the auto-adjust can add the modal's
+      own safe-area/keyboard inset on top (the review has a text input inside a KeyboardAvoidingView).
+      The offset in Logan's screenshot — about half the screen across, more than half down — is the
+      size of the two stacked. Which one fired is not proven; the fix removes both paths.
+      **Fix, NOT applied yet:** editing this file hot-reloads it, which would reset a review that was
+      open and burn one of the week's 7 scans — so it waits for the scan to be saved. Then: drop
+      `centerContent` and the flex centering, size the content container SCREEN_W × SCREEN_H so it
+      equals the viewport (`resizeMode="contain"` already centres the photo inside it), and set
+      `automaticallyAdjustContentInsets={false}` + `contentInsetAdjustmentBehavior="never"`.
+      **Tell:** open a review photo, pinch to 4x, close, reopen — centred and full-screen every time,
+      with the keyboard having been open beforehand too. **Workaround meanwhile:** a small pinch forces
+      a zoom/layout pass and usually snaps it back.
 - [ ] **FOUND 2026-09-17 (reading the generation path for the phantom check): a pantry over 200 items
       drops the NEWEST items from the prompt.** Both reads that feed GPT — `lib/mealPrefetch.ts:86`
       (the scan's own plating generation) and `lib/useMealSuggestions.ts:154` (Home) — are
