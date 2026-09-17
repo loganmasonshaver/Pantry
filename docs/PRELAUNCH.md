@@ -2061,7 +2061,9 @@ claiming exact wording from the top apps is guessing.
           the prompt's COUNT CHECK ("a full fridge holds 20-40 distinct items") is written for a whole
           kitchen and would push each single-photo call to pad its list — rewrite it before any B test;
           upload (14 MB — check what resolution gpt-5.4 actually reads before shrinking photos); the
-          1.5 s of sequential context reads (can run in parallel). **D is DROPPED:** the meals reached
+          1.5 s of sequential context reads — **now parallel (2026-09-17, UNVERIFIED; tell: the next
+          scan's "meals: profile + pantry + ratings read (in parallel)" mark reads ~0.5 s, not 1.5 s;
+          no cost change — same queries, and Supabase does not bill per request)**. **D is DROPPED:** the meals reached
           the phone 0.1 s after their DB insert and the photo request left 0.1 s after that, so
           starting photos server-side saves well under 0.5 s. Hero-first download ordering cost ~0.3 s.
         - **(A) as built, 2026-09-16:** `lib/scanPerf.ts`: dev-only

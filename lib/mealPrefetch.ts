@@ -51,19 +51,33 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
   const startedAt = Date.now()
   scanPerfMark(`meals: prefetch start (${extraIngredients.length} scanned items)`)
   try {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences, staples_excluded')
-      .eq('id', userId)
-      .single()
-
-    const { data: pantryItems } = await supabase
-      .from('pantry_items')
-      .select('name')
-      .eq('user_id', userId)
-      .eq('in_stock', true)
-      .order('created_at', { ascending: true })
-      .limit(200)
+    // All four reads at once. They were sequential round trips — 1.5 s measured on a real scan, time
+    // the plating wait inherits — and none depends on another. Same queries, same bytes: no cost change.
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    const [{ data: profile }, { data: pantryItems }, { data: ratings }, recentMealNames] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('calorie_goal, protein_goal, meals_per_day, cooking_skill, max_prep_minutes, dietary_restrictions, food_dislikes, cuisine_preferences, staples_excluded')
+        .eq('id', userId)
+        .single(),
+      supabase
+        .from('pantry_items')
+        .select('name')
+        .eq('user_id', userId)
+        .eq('in_stock', true)
+        .order('created_at', { ascending: true })
+        .limit(200),
+      supabase
+        .from('meal_ratings')
+        .select('meal_name, rating, reason')
+        .eq('user_id', userId)
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(100),
+      AsyncStorage.getItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`)
+        .then(raw => (raw ? JSON.parse(raw) as string[] : []))
+        .catch(() => [] as string[]),
+    ])
 
     // Merge the freshly-scanned items with the existing pantry (the just-scanned rows may not be
     // persisted yet when we fire during review) and dedupe, so the prefetch matches what the hook
@@ -76,31 +90,16 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     }
     if (ingredients.length === 0) return null // nothing to build from — let the hook handle its own fallback
 
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
-    const { data: ratings } = await supabase
-      .from('meal_ratings')
-      .select('meal_name, rating, reason')
-      .eq('user_id', userId)
-      .gte('created_at', since)
-      .order('created_at', { ascending: false })
-      .limit(100)
     // Only the reasons that are ABOUT THE DISH suppress it. A wrong photo or a broken recipe is
-  // a bug report on a meal the user may well want again — feeding those into the prompt's
-  // "do NOT suggest these or anything similar" line is how one bad image used to delete a good
-  // recipe from someone's future permanently. A reason-less row (everything rated before the
-  // sheet shipped) still suppresses, which is exactly what it does today.
-  const dislikedMeals = ratings?.filter(r => r.rating === -1 && suppressesDish((r as any).reason)).map(r => r.meal_name) ?? []
+    // a bug report on a meal the user may well want again — feeding those into the prompt's
+    // "do NOT suggest these or anything similar" line is how one bad image used to delete a good
+    // recipe from someone's future permanently. A reason-less row (everything rated before the
+    // sheet shipped) still suppresses, which is exactly what it does today.
+    const dislikedMeals = ratings?.filter(r => r.rating === -1 && suppressesDish((r as any).reason)).map(r => r.meal_name) ?? []
     const likedMeals = ratings?.filter(r => r.rating === 1).map(r => r.meal_name) ?? []
 
-    let recentMealNames: string[] = []
-    try {
-      const raw = await AsyncStorage.getItem(`${RECENT_MEALS_KEY_PREFIX}_${mode}`)
-      if (raw) recentMealNames = JSON.parse(raw)
-    } catch {}
-
     const maxPrep = profile?.max_prep_minutes || 30
-    // Profile, pantry and ratings are three sequential round trips before generation even starts.
-    scanPerfMark(`meals: profile + pantry + ratings read in ${secsSince(startedAt)}s, generate-meals sent`)
+    scanPerfMark(`meals: profile + pantry + ratings read (in parallel) in ${secsSince(startedAt)}s, generate-meals sent`)
     const sentAt = Date.now()
     const generated = await generateMeals({
       ingredients,
