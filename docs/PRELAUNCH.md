@@ -2193,7 +2193,11 @@ claiming exact wording from the top apps is guessing.
            main ingredient? "Broken meal rate" is what a user feels.
         4. **Read phantoms by confidence band** (30-59 / 60-79 / 80-100) and by anchor vs extra.
         5. **Decide:** (a) anchor phantoms ≈ 0 and overall ≤ 5 % → remove the review, add "N items
-           added · Edit" on the reveal; (b) phantoms cluster below a confidence line → raise
+           added · Edit" on the reveal, AND a deliberate "Don't have it" on a meal's ingredient that
+           marks it out of stock and turns the meal to Need: (Cal AI's pattern is result-first with
+           optional fixes, but its error sits on screen next to the photo; Pantry's surfaces days later
+           on a meal, and today the meal screen cannot correct the pantry — whole-row taps were
+           removed because stray taps wrote to it); (b) phantoms cluster below a confidence line → raise
            `SCAN_CONFIDENCE_FLOOR` (server setting, no app release) or show ONLY those few items as
            "Double-check these 4" and auto-save the rest; (c) phantoms spread across high confidence →
            keep the review, improve the scan first.
