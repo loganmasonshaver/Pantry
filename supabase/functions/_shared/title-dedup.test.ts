@@ -73,3 +73,16 @@ test('compilationTitle: multi-recipe videos are named; single recipes with numbe
   assert.equal(compilationTitle('Crispy Pasta Chipotle Mayo Tuna Salad'), null)
   assert.equal(compilationTitle('Chicken Rice Bowls (4 servings, 45g protein)'), null)
 })
+
+test('compilationTitle: the 2026-09-17 misses are caught; single recipes with numbers still are not', () => {
+  assert.ok(compilationTitle('5 Cheap High-Protein Foods for Muscle Growth! 💪✨ #shorts'))
+  assert.ok(compilationTitle('25 Favorite Dinner & Snack Recipes (to feed your hungry family!)'))
+  assert.ok(compilationTitle('TOP 3 Salads — I Eat Them Every Day and Lost 10 kg! High-Protein'))
+  assert.ok(compilationTitle('2-Day Meal Prep on ONE tray'))
+  assert.ok(compilationTitle('The high-protein breakfasts I prep in 5 minutes to feel good all morning'))
+  assert.ok(compilationTitle('Easy Homemade Protein Powders | 5 Healthy Options #telugu'))
+  assert.equal(compilationTitle('High-Protein Jalapeño Taco Mac | Easy 54g Protein Meal #highprotein'), null)
+  assert.equal(compilationTitle('I Eat This Avocado Tuna Salad Every Day and Lost 10 kg! 🥒 Easy & Delicious'), null)
+  assert.equal(compilationTitle('Beef Pasta Meal Prep'), null)
+  assert.equal(compilationTitle('2 Ingredient Protein Bagels'), null)
+})

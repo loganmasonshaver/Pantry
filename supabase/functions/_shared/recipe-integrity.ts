@@ -65,9 +65,30 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   // retention contract then REQUIRED the model to echo each line with invented grams. Every
   // pattern is whole-line or a phrase no food name carries: "high protein greek yogurt" and
   // "gluten-free oats" survive, "High Protein" and "Gluten-Free" alone do not.
-  /^[^\p{L}\p{N}]*(?:(?:high|low)[- ](?:protein|fib(?:er|re)|carbs?|calories?|fat|sugar)|(?:gluten|dairy|sugar|egg|nut|oil|refined[- ]sugar)[- ]free|no (?:bread|flour|sugar|oven|oil|maida|added sugar)|(?:super |very )?(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple)(?:\s*(?:&|and|,)\s*(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple))*)[\s.!]*$/iu,
+  /^[^\p{L}\p{N}]*(?:(?:high|low)[- ](?:protein|fib(?:er|re)|carbs?|calories?|fat|sugar)|(?:gluten|dairy|sugar|egg|nut|oil|refined[- ]sugar)[- ]free|no \p{L}+(?:[ -]\p{L}+)?|(?:super |very )?(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple)(?:\s*(?:&|and|,)\s*(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple))*)[\s.!]*$/iu,
   /^[^\p{L}\p{N}]*(?:made with|loaded with|packed with|rich in|perfect for|great for|good for|ideal for|best for|thank you|thanks for|your feedback|save this|share (?:it|this)|don'?t forget|let me know)\b/iu,
   /\b(?:combination|for plant[- ]based protein|breakfast recipe|lunchbox|evening snack|weight loss|kids (?:&|and) adults)\b/iu,
+  // Video chapters read as ingredients. A 1M-view chia compilation's whole "list" was its timestamps:
+  // "0:29 Miso banana chia pudding", "0:52 What's the best chia pudding ratio?" (stored 2026-09-17).
+  /^[^\p{L}\p{N}]*\d{1,2}:\d{2}(?::\d{2})?\b/u,
+  // A description's SEO tag block. The bulleted-list parser reads straight on from the last real
+  // ingredient into "tiffin recipes", "healthy ice cream alternatives", "post-workout snacks",
+  // "kids & family-friendly treats", "weight management / clean eating" — and the retention contract
+  // then makes the model echo every one (a 9-ingredient ice cream shipped with 23). No food ends in
+  // recipe/ideas/alternatives/hacks/tips/options, and no food is "friendly".
+  /\b(?:recipes?|ideas?|alternatives?|hacks?|tips?|options?|diet)\s*$/iu,
+  // Occasion tags: "Evening Snacks", "Kids School Tiffin", "office lunchbox". Tiffin is a lunchbox.
+  /\b(?:evening|morning|midnight|school|office|kids?)\s+(?:snacks?|tiffin|lunch(?:box)?|breakfast)\b|\btiffin\b/iu,
+  /\bfriendly\b/iu,
+  /\b(?:clean eating|weight management|post[- ]workout|pre[- ]workout|fat loss|weight loss|muscle growth|meal prep|(?:easy|quick|simple|instant) to (?:make|cook|prepare)|ready in minutes)\b/iu,
+  // A dish-name tag: a marketing word, then a dish word at the end ("homemade high protein ice
+  // cream", "Indian style protein ice cream", "dark chocolate protein dessert"). Shakes and smoothies
+  // are deliberately not in the tail — "chocolate protein shake" is a real ingredient of a McFlurry.
+  /\b(?:homemade|healthy|no[- ]churn|style|fitness|high[- ]protein|protein)\b.*\b(?:ice cream|dessert|breakfast|treats?|snacks?)\s*$/iu,
+  // Meal slots as list lines: "Breakfast (2 portions)", "Lunch (2 portions)", "Dinner".
+  /^[^\p{L}]*(?:breakfast|lunch|dinner|snack|dessert)s?\s*(?:\(.*\))?\s*$/iu,
+  // A heading with an arrow pointing at the list it introduces: "Mango Habanero Breakfast Bowls⬇️".
+  /[⬇👇]/u,
   // A claim naming the MEAL rather than a food: "High-protein vegetarian breakfast".
   /^[^\p{L}\p{N}]*(?:high|low)[- ]\p{L}+\s+(?:\p{L}+\s+)?(?:breakfast|lunch|dinner|snack|meal|recipe|dessert|option|idea)s?[\s.!]*$/iu,
   // The same boilerplate in the languages this pool actually carries. "Speicher dir das Rezept"
@@ -325,6 +346,7 @@ const SYNONYMS: Record<string, string[]> = {
   steak: ['sirloin', 'ribeye', 'flank', 'beef'],
   beef: ['steak', 'sirloin', 'ribeye', 'chuck', 'brisket'],
   chicken: ['poultry'],
+  spinach: ['palak'],
   // Each names tuna and nothing else; a brand-stripped line ("2 cans albacore") is still tuna.
   tuna: ['albacore', 'skipjack', 'yellowfin', 'ahi'],
   peanut: ['pb'],
@@ -353,7 +375,10 @@ const SYNONYMS: Record<string, string[]> = {
 // on candidate TITLES before the model, so the pick is not spent.
 // Hashtags come off first: a real pumpkin loaf was filtered on "#routine", and "what I eat" alone
 // took an omelet whose title mentioned it in passing — the compilations say "in a day".
-const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|protein powder\s*$|spice mix\s*$|seasoning blend\s*$)/i
+// "protein powder" as a NAME's tail is a staple recipe ("Homemade Desi Protein Powder"); as a title's
+// tail after without/no it is a smoothie. Diet vlogs and budget challenges ("Easy Diet", "$10 a Day")
+// list foods, so they clear the ingredient gate and reach the model as candidates.
+const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|(?<!without |no |sans )protein powders?\s*$|spice mix\s*$|seasoning blend\s*$|premix|(?:easy|full|my|weekly|daily|bodybuilding|cutting|bulking|weight[- ]loss)\s+diet\b|diet\s+(?:plan|for)\b|diet\s*$|\$\s?\d+\s+(?:a|per|this)\s+(?:day|week)|for\s+\$\s?\d+\b)/i
 export function nonDishName(name: string): string | null {
   const m = NOT_A_DISH_RE.exec((name ?? '').replace(/#\S+/g, ' '))
   return m ? m[1].toLowerCase() : null

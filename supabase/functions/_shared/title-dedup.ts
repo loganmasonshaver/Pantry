@@ -89,7 +89,10 @@ export function nameContains(cand: Set<string>, known: Set<string>): boolean {
 // A number, then up to five words, then a plural: "7 Healthy Ready to Eat Snack Recipes",
 // "4 Delicious Soya Recipes", "3 High-Protein Snacks". Or "my … smoothies". "Recipes Every Home
 // Cook Should Know Ep 12 | Korean Beef Bowls" has no number before its plural and stays.
-const COMPILATION_RE = /\b\d+\s+(?:[\p{L}'’-]+\s+){0,5}?(recipes|snacks|meals|ideas|ways|breakfasts|lunches|dinners|desserts|smoothies)\b|\bmy\s+(?:[\p{L}'’-]+\s+){0,2}?(smoothies|recipes|snacks|meals|breakfasts|lunches|dinners)\b/iu
+// 2026-09-17 misses, each of which reached the model: "5 Cheap High-Protein Foods", "25 Favorite
+// Dinner & Snack Recipes" (the & broke the word run), "TOP 3 Salads", "2-Day Meal Prep on ONE tray",
+// "The high-protein breakfasts I prep in 5 minutes" (no number at all).
+const COMPILATION_RE = /\b\d+\s+(?:[\p{L}'’&+-]+\s+){0,5}?(recipes|snacks|meals|ideas|ways|foods|options|salads|bowls|breakfasts|lunches|dinners|desserts|smoothies|treats)\b|\b(?:my|the)\s+(?:[\p{L}'’-]+\s+){0,3}?(smoothies|recipes|snacks|meals|breakfasts|lunches|dinners|salads)\s+(?:i|we)\s+(?:prep|make|eat|cook|have)\b|\bmy\s+(?:[\p{L}'’-]+\s+){0,2}?(smoothies|recipes|snacks|meals|breakfasts|lunches|dinners)\b|\btop\s+\d+\b|\b\d+[- ]day\s+meal\s+prep\b/iu
 export function compilationTitle(title: string): string | null {
   const m = COMPILATION_RE.exec((title ?? '').replace(/#\S+/g, ' '))
   return m ? m[0].trim() : null

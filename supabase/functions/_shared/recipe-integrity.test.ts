@@ -840,3 +840,31 @@ test('isNonIngredientLine: a benefits list or a sign-off is not an ingredient li
     assert.equal(isNonIngredientLine(l), false, l)
   }
 })
+
+test('isNonIngredientLine: chapters, tag blocks, meal slots and arrow headings are not ingredients', () => {
+  const junk = ['0:29 Miso banana chia pudding', '7:09 My matcha and strawberry chia pudding', 'tiffin recipes', 'pizza recipe',
+    'healthy breakfast ideas', 'Healthy ice cream alternatives', 'Post-workout snacks', 'Kids & family-friendly treats',
+    'Weight management / clean eating', 'homemade high protein ice cream', 'Indian style protein ice cream',
+    'dark chocolate protein dessert', 'Breakfast (2 portions)', 'Dinner', 'No Suji', 'Kid-Friendly', 'Easy & Budget Friendly',
+    '️ Mango Habanero Breakfast Bowls⬇️', 'Instant & Easy to Make', 'Diabetes Friendly Breakfast', 'Kids School Tiffin', 'Evening Snacks', 'Vegetarian High Protein Diet']
+  for (const l of junk) assert.equal(isNonIngredientLine(l), true, l)
+  for (const l of ['chocolate protein shake', 'Barebells protein bar', '2 cups oats', 'no salt added chickpeas', 'Makhana (Fox nuts / Lotus seeds)', 'breakfast sausage links', 'high protein greek yogurt', 'vanilla ice cream']) {
+    assert.equal(isNonIngredientLine(l), false, l)
+  }
+})
+
+test('nonDishName: a smoothie "without protein powder" is a dish; diet and budget vlogs are not', () => {
+  assert.equal(nonDishName('High Protein Smoothies without protein powder'), null)
+  assert.equal(nonDishName('Homemade Desi Protein Powder'), 'protein powder')
+  assert.ok(nonDishName('2316 Calories | 143g Protein Easy Diet'))
+  assert.ok(nonDishName('Can I Eat My Bodybuilding Diet for Just $100 a Week?'))
+  assert.ok(nonDishName('I Tried To Eat Healthy for $10 a Day'))
+  assert.ok(nonDishName('Low Budget High Protein ROTI DIET for Weight Loss'))
+  assert.ok(nonDishName('Healthy Breakfast Premix Recipe'))
+  assert.equal(nonDishName('Diet Coke Chicken'), null)
+  assert.equal(nonDishName('Jalapeno Taco Mac'), null)
+})
+
+test('nameIngredientGaps: palak is spinach', () => {
+  assert.deepEqual(nameIngredientGaps('Spinach Egg Dosa', [{ name: 'green gram' }, { name: 'palak leaves' }, { name: 'egg' }]), [])
+})

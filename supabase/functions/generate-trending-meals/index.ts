@@ -1190,11 +1190,14 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       selected.splice(0, selected.length, { url: choice.url, key: choice.key, model: modelParam, name: choice.name, maxTokens: choice.maxTokens })
     }
     funnel.model = selected[0]?.model ?? null
-    // ?shards=<videos per call> — parallel calls per attempt. OFF (0) for the scheduled run until a
-    // same-day replay has measured it; dry runs may set it. See chunkOrder.
-    const SHARD_SIZE_DEFAULT = 0
-    const shardParam = Number(url.searchParams.get('shards') ?? '')
-    const shardSize = dryRun && shardParam > 0 ? Math.floor(shardParam) : SHARD_SIZE_DEFAULT
+    // ?shards=<videos per call> — parallel calls per attempt (see chunkOrder). ON by default since the
+    // 2026-09-17 same-list replays: one call per attempt kept 19 and 15 recipes in ~60 s (runs 818,
+    // 819); six-video shards kept 30 in 26 s (820), no rate-limit errors, and every attempt returned
+    // more than the unsharded one — a short list has no bottom for the model to ignore. Dry runs may
+    // override it, including 0 for the old single call.
+    const SHARD_SIZE_DEFAULT = 6
+    const shardParam = url.searchParams.get('shards')
+    const shardSize = dryRun && shardParam !== null && Number.isFinite(Number(shardParam)) ? Math.max(0, Math.floor(Number(shardParam))) : SHARD_SIZE_DEFAULT
     funnel.shardSize = shardSize
 
     if (forceProvider && selected.length === 0) {
@@ -1624,6 +1627,9 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // row stored the creator's channel tags ("Superhero", "Villain", "Anime", "Band Geeks")
             // as eight 0g ingredients, and those are ordinary words no pattern can separate from food.
             r.ingredients = massBearingIngredients(realIngredients(r.ingredients))
+            // The dish's own name as an ingredient: the source list's heading line echoed back
+            // ("Mango Habanero Breakfast Bowls" was ingredient #1 of that dish on 2026-09-17).
+            r.ingredients = r.ingredients.filter((i: any) => normalize(String(i?.name ?? '')) !== key)
             r._sourceVerified = true
             const frac = hasFractionalIndivisible(r.ingredients)
             if (frac) { rejFractional++; note('fractional', name, String(frac)); console.log(`[funnel] rejected "${name}" — fractional indivisible item: ${frac}`); return false }
