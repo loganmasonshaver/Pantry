@@ -133,7 +133,7 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
   4. **Line rules**: link blocks, hashtags with/without #, CamelCase tags, "-rich"/nutritious/
      non-fried, a line ending in a meal word; "essentials"/"cookbook" as a name.
   - [x] Data: "Breakfast Bowl" → breakfast; the gelato's five names translated in place.
-  - [ ] **LOGAN: delete the three** (no real list to recover): `delete from trending_meals where generated_at = '2026-09-17' and name in ('Remington James Meal Prep Essentials', 'Palak Paneer Stuffed Paratha', 'Power Breakfast Bowls');`
+  - [x] **DELETED by Logan 2026-09-17** (verified: 0 remain; 10 clean rows live for the 17th, pool 239): `delete from trending_meals where generated_at = '2026-09-17' and name in ('Remington James Meal Prep Essentials', 'Palak Paneer Stuffed Paratha', 'Power Breakfast Bowls');`
 - **Ops:** the Sep 16 assumption that `net._http_response` holds the cron's status is wrong past
   ~6 h (pg_net TTL) and the `api-keep-warm` job (another session, every 2 min, one REST hit) buries
   it within minutes anyway. `cron.job_run_details` + `pipeline_runs` are the record. YouTube quota
@@ -2391,6 +2391,34 @@ claiming exact wording from the top apps is guessing.
         generation cap (the existing "That's today's new picks" block). The line is now "Not feeling
         these?  ↻ New picks", centred with a 10 pt gap. **Tell:** Home → meal log photos + larger text;
         the nudge shows one green action until the cap.
+        (3) **Follow-up 2026-09-17 (Logan: "run off sentence … start everything more to the left"),
+        UNVERIFIED:** the entry rows had been living in the same column as the slot label, so every
+        dish photo was indented by the slot icon's width + gap (~48 pt) and "Vanilla Protein Shake
+        with Banana" truncated at one line. The rows now span the card: the icon sits beside the
+        HEADER only, and the name wraps to two lines at `lineHeight: 19`, so two lines measure 38 pt
+        and stay inside the 44 pt photo — the row's height is the photo whether the name wraps or
+        not. **Tell:** that shake logs as two lines, level with its photo, and a short name's row is
+        unchanged.
+      - [ ] **FIXED 2026-09-17, UNVERIFIED — a cold start after the pantry empties flashed the dead
+        deck.** Logan, mid phantom-check: force-quit, reopen, Home showed the previous generation and
+        then snapped to "Unlock recipes built around what you already have". Not a stale-cache
+        artifact of the SQL flip — it is reachable in-app, and would be on current code for any user
+        who marks their last items out of stock, deletes them, or taps Clear pantry and then relaunches.
+        Mechanism: the meal cache is per DAY and only ever invalidated by PROFILE changes (four calls
+        in profile.tsx); nothing about the pantry touched it. Home paints that cache from disk before
+        its pantry read lands — deliberate, since waiting was 2-3 s of blank space (`index.tsx`, the
+        meal block renders while `!pantryFetched`) — and the swap happens when the read returns 0
+        in-stock rows and the Scan hero replaces the block. `staleAllMealCaches()` does NOT fix it:
+        a back-dated entry is still painted as a labelled carryover ("yesterday's meals, still
+        cookable from the same pantry"), which is the one premise an empty pantry breaks. So
+        `dropAllMealCaches()` (new, in the one file that owns the cache) DELETES both entries, wired
+        to the three in-app paths that can reach zero: the out-of-stock toggle, the row delete, and
+        Clear pantry — each checking the count as it will be after the change. Only at zero: with
+        anything left the deck stays and each card's missing list is recomputed against the live
+        pantry, so it never claims food you do not have. An out-of-band change (SQL) still cannot be
+        caught on device. **Tell:** mark the last item out of stock, force-quit, reopen — a brief
+        shimmer then the Scan hero, no meals. **Cost:** that day's deck is gone, so re-adding items
+        spends one of the 6 generations — correct, the old deck was built around food you emptied.
       - [x] **DONE 2026-09-17 (Logan): the "Fridge · 5/5" caption under the scan story is gone.** The
         dots stay. `areaLabel` and `CONTAINER_LABEL` had no other caller and were removed.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: after the plating cap the reveal waited ANOTHER 20 s on a

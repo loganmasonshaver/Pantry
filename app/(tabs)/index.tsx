@@ -1705,14 +1705,16 @@ export default function HomeScreen() {
                 // to the new height while the card around it was still moving.
                 <Reanimated.View key={slot.id} layout={LIST_LAYOUT} exiting={ROW_EXIT} entering={slot.id === justAddedSlotRef.current ? ROW_ENTER : undefined} style={styles.mealSlotShell}>
                 <TouchableOpacity style={[styles.mealSlotCard, !hasEntries && styles.mealSlotCardEmpty]} activeOpacity={0.7} disabled={hasEntries} onPress={openLog}>
-                  {/* flex-start, not center: the icon belongs beside the header, and on a four-entry
-                      card it used to float beside the second row. */}
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14 }}>
-                    <View style={styles.mealSlotIcon}>
-                      <SlotIcon size={18} stroke={hasEntries ? '#4ADE80' : COLORS.textMuted} strokeWidth={1.8} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <View style={styles.mealSlotHeader}>
+                  <View style={{ flex: 1 }}>
+                    {/* The icon belongs to the HEADER row only. The entry rows used to sit in the
+                        same column, which indented every dish photo by the icon's width + gap and
+                        left a long name ~48pt less room before it truncated. Centred rather than
+                        flex-start now that the column below it is gone. */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                      <View style={styles.mealSlotIcon}>
+                        <SlotIcon size={18} stroke={hasEntries ? '#4ADE80' : COLORS.textMuted} strokeWidth={1.8} />
+                      </View>
+                      <View style={[styles.mealSlotHeader, { flex: 1 }]}>
                         <Text style={styles.mealSlotLabel}>{slot.label}</Text>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                           {/* The slot's total — "how big was breakfast" without adding up rows. */}
@@ -1727,36 +1729,40 @@ export default function HomeScreen() {
                           )}
                         </View>
                       </View>
-                      {/* Rows carry protein — a protein-first app's log showed only calories, so you
-                          could not see which entry did the work. Delete is swipe-left, the iOS idiom
-                          the Pantry rows already use; the per-row ✕ was the third way to delete
-                          (the edit screen has one too) and four of them crowded the food. */}
-                      {slot.entries.map((entry, idx) => (
-                        <Reanimated.View key={entry.id} layout={LIST_LAYOUT} exiting={ROW_EXIT}>
-                        <Swipeable
-                          renderRightActions={() => (
-                            <TouchableOpacity style={styles.entryDelete} onPress={() => deleteEntry(slot.id, entry.id)} activeOpacity={0.85}>
-                              <Text style={styles.entryDeleteText}>Delete</Text>
-                            </TouchableOpacity>
-                          )}
-                          friction={2}
-                          overshootRight={false}
-                        >
-                          <TouchableOpacity onPress={() => openEntry(entry)} activeOpacity={0.7} style={[styles.entryRow, idx > 0 && styles.entryRowDivider]}>
-                            {/* The dish's own photo when the log carries one (Cook Now, Discover and saved
-                                meals store it in meal_data); a food-search or typed entry has none and gets a
-                                quiet tile, so every name starts at the same x. Meal photos are square, so a
-                                square cover slot shows the whole plate. */}
-                            {typeof entry.meal_data?.image === 'string' && entry.meal_data.image.startsWith('http')
-                              ? <MealImage uri={entry.meal_data.image} style={styles.entryPhoto} recyclingKey={String(entry.id)} transition={0} />
-                              : <View style={[styles.entryPhoto, styles.entryPhotoEmpty]}><Utensils size={16} stroke={COLORS.textMuted} strokeWidth={1.8} /></View>}
-                            <Text style={styles.entryName} numberOfLines={1}>{entry.name}</Text>
-                            <Text style={styles.entryNums}>{entry.calories} · <Text style={{ color: '#4ADE80' }}>{Math.round(entry.protein)}P</Text></Text>
-                          </TouchableOpacity>
-                        </Swipeable>
-                        </Reanimated.View>
-                      ))}
                     </View>
+                    {/* Rows carry protein — a protein-first app's log showed only calories, so you
+                        could not see which entry did the work. Delete is swipe-left, the iOS idiom
+                        the Pantry rows already use; the per-row ✕ was the third way to delete
+                        (the edit screen has one too) and four of them crowded the food. */}
+                    {slot.entries.map((entry, idx) => (
+                      <Reanimated.View key={entry.id} layout={LIST_LAYOUT} exiting={ROW_EXIT}>
+                      <Swipeable
+                        renderRightActions={() => (
+                          <TouchableOpacity style={styles.entryDelete} onPress={() => deleteEntry(slot.id, entry.id)} activeOpacity={0.85}>
+                            <Text style={styles.entryDeleteText}>Delete</Text>
+                          </TouchableOpacity>
+                        )}
+                        friction={2}
+                        overshootRight={false}
+                      >
+                        <TouchableOpacity onPress={() => openEntry(entry)} activeOpacity={0.7} style={[styles.entryRow, idx > 0 && styles.entryRowDivider]}>
+                          {/* The dish's own photo when the log carries one (Cook Now, Discover and saved
+                              meals store it in meal_data); a food-search or typed entry has none and gets a
+                              quiet tile, so every name starts at the same x. Meal photos are square, so a
+                              square cover slot shows the whole plate. */}
+                          {typeof entry.meal_data?.image === 'string' && entry.meal_data.image.startsWith('http')
+                            ? <MealImage uri={entry.meal_data.image} style={styles.entryPhoto} recyclingKey={String(entry.id)} transition={0} />
+                            : <View style={[styles.entryPhoto, styles.entryPhotoEmpty]}><Utensils size={16} stroke={COLORS.textMuted} strokeWidth={1.8} /></View>}
+                          {/* Two lines, because these names run long ("Vanilla Protein Shake with
+                              Banana") and one line cut them mid-word. entryName's lineHeight keeps
+                              two lines at 38pt, inside the 44pt photo, so the row height is the
+                              photo either way and a one-line row is unchanged. */}
+                          <Text style={styles.entryName} numberOfLines={2}>{entry.name}</Text>
+                          <Text style={styles.entryNums}>{entry.calories} · <Text style={{ color: '#4ADE80' }}>{Math.round(entry.protein)}P</Text></Text>
+                        </TouchableOpacity>
+                      </Swipeable>
+                      </Reanimated.View>
+                    ))}
                   </View>
                 </TouchableOpacity>
                 </Reanimated.View>
@@ -2407,7 +2413,9 @@ const styles = StyleSheet.create({
   entryPhoto: { width: 44, height: 44, borderRadius: 10 },
   entryPhotoEmpty: { backgroundColor: '#262626', alignItems: 'center', justifyContent: 'center' },
   entryRowDivider: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)' },
-  entryName: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.textWhite },
+  // 19, not the default ~21: two lines then measure 38pt and sit inside the 44pt photo, so a
+  // wrapped name never makes the row taller than a one-line one.
+  entryName: { flex: 1, fontSize: 15, fontWeight: '600', color: COLORS.textWhite, lineHeight: 19 },
   entryNums: { fontSize: 14, fontWeight: '600', color: COLORS.textMuted },
   entryDelete: { backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, marginLeft: 8, borderRadius: 10 },
   entryDeleteText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
