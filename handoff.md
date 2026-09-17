@@ -15,7 +15,9 @@ everything planned but not built, and what testing needs.
   preview_start `metro-fresh` (port 8081). The phantom check reads its logs from Metro, so the session
   that analyses the scans must be the one that started Metro.
 - **tsc 139 / app-code 16** (was 135: +4 Deno/esm.sh lines from the new `swap-meal`; CLAUDE.md updated).
-  **Tests 720** (`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`).
+  **Tests 731** as of the Discover session's last commit `6f05b61` (`node --test lib/*.test.ts supabase/functions/_shared/*.test.ts`).
+- **Discover session (2026-09-16 → 17 evening) is in §5 below.** `generate-trending-meals` deployed =
+  `6f05b61`; Discover client changes `54c7fbc` `fade012` `f44eaef` are NOT in any device build yet.
 - **Deployed this session:** `generate-meal-image` (per-phase `[timing]` logs; user requests get the link
   before the cache write), `generate-meals` (`withSpares` → 3 spares in `meal_spares`; also shipped the
   other session's `7f109c8` after its patterns flagged 0 of 180 Cook Now ingredient names), `swap-meal`
@@ -184,3 +186,78 @@ paywall variant · §5 sentiment-gated rating prompt · §6d decided, not built 
 - **A missing `}` took the Metro bundle to 500** for a minute. Bundle-check after every edit (the check caught it).
 - **Asked the user to test before the logging was on:** check the build is live (bundle 200 + reload)
   before handing over a test.
+
+
+---
+
+## 5. Discover pipeline — handoff from the Discover session (2026-09-16 → 2026-09-17 evening)
+
+**Goal Logan set:** 12–18 clean recipes a day from the 08:00 UTC cron, no junk ingredient lists, right
+shelves, repeats capped. **Where it stands:** PRELAUNCH top ("▶ TOMORROW, 2026-09-18") has the checks and
+the results table; §0 has the reasoning; `git log 8417648..6f05b61` has every why. This section is only
+state, tells, levers and decisions.
+
+### 5a. State
+- **Deployed:** `generate-trending-meals` = `6f05b61`. Shards ON (6 videos per parallel call, ≤ 5 calls per
+  attempt; `_shared/attempt-budget.ts`). Model `gemini-3.1-flash-lite` — decided, see 5d. Photo step: 143 s
+  in-run deadline + cron job 6 `trending-images-daily` 08:05 UTC (`?stage=images`, only rows without an AI
+  photo). Cron jobs: 1 recipes 08:00, 6 photos 08:05, 2 health 08:20, 5 ops report 14:00, 7 keep-warm.
+- **Client (needs a build to see):** page-wide family cap (`lib/dishFamily.ts`: 4 of a narrow family
+  such as cheesecake/brownie/paneer, 10 of a broad one such as pasta/salad), `salads-bowls` shelf, and
+  `lib/discoverPublish.ts` — a recipe does not show until its AI photo exists.
+- **Data on the 17th:** cron 815 stored 18 (cap) in 130 s; forced run 827 (first real sharded) 13 in 45 s,
+  3 junk rows deleted by Logan → **10 live for the 17th; pool 239**. 40 shelf moves + 5 repairs done by hand
+  this week; the shelf rule in the prompt is one precedence (dessert → snack → cuisine → morning →
+  salads-bowls → comfort; fusions take their sauce's cuisine).
+- **Daily report email** failed on the 17th ("SSL certificate has expired" on the Mac at 9:06); Logan said
+  ignore for today. The report row itself was built. Runs pane of task `pantry-daily-report-email`.
+
+### 5b. How to run and read a run (exact)
+- Fire (dry or real) with the CLI and the Vault secret — the MCP SQL role cannot decrypt Vault; memory
+  `reference_fire_pipeline_run_from_sql` has the one-liner. Real = `?refresh=true`; dry = `&dryRun=true`;
+  **replay** = `&replay=<pipeline_runs id>&dryRun=true` re-runs only the model stage on that run's stored
+  candidates for ~1 YouTube unit (a full run is ~1,300; 7 a day). `&shards=N` and `&model=` are dry-only.
+  Photos alone: `?stage=images` (no quota).
+- **Read `pipeline_runs`, not `net._http_response`** (pg_net purges it after ~6 h and the keep-warm job
+  buries it in minutes): `timing`, `attempts[]` (shardMs, errors), `llm_Google.rejected`, `rejectedDetail`,
+  `droppedDetail` (src + got), `titleRepeats`, `compilationTitles`, `nonRecipeTitles`, `dishListTitles`,
+  `nameTranslationChecks`, `candidates` (the 18-52 titles the model saw). `cron.job_run_details` says
+  whether a job fired.
+- **A forced same-day run REPLACES the UTC day's rows** (swap-then-cleanup) and sees a THIN list: the
+  morning's video_ids are in the 90-day guard, so the 17th's second run had 18 candidates where the
+  cron had 52. Treat a forced run as a code check, never a yield measurement; yield is measured on the
+  08:00 cron (fresh quota, searches rotate by day of year).
+- **Every audit ends by reading each new row's first six ingredients by eye.** Both days, the counters
+  passed and the junk was obvious to a human. Keep doing it until a week runs clean.
+
+### 5c. Recurring issue classes → the lever, and how to prove a new rule before shipping it
+| Recurs as | Lever | Proof before deploy |
+|---|---|---|
+| Junk ingredient lists (chapters, tag blocks, benefit bullets, link blocks, hashtags, meal slots, dish-name compilations, sauces-only lists) | `_shared/recipe-integrity.ts`: `NON_INGREDIENT_PATTERNS` (whole-line rules), `isDishList`, `quantifiedGhosts`; `_shared/title-dedup.ts`: `compilationTitle`; `nonDishName` for names | Export every stored row's ingredients (`npx supabase db query --linked … trending_meals`), run `isNonIngredientLine` / the new function over all of them: a rule may flag ONLY known junk. The "no quantities = not a list" idea was measured and rejected (3 of 5 real). |
+| Repeats of pool dishes | Title filter before the model (`filterTitleRepeats`), containment name dedup, `dupVideo`, client family cap. The model ignores a do-not-pick list (measured) — remove repeats from its reach, don't ask. | Same-list replay before/after; `nearDup` counts. Repeat share grows with the pool; post-launch rotation is the real fix (memory `project_v2_meal_rotation`). |
+| Thin day (< 12) | Candidates are the ceiling now, not the model: `afterIngredientGate` (52 → 18 stored 18 → 13). Levers left: search volume 13 → 26 (~2× quota, 3 runs/day, post-launch); STORE_CAP 18 (Logan's range; 26 and 30 kept were cut to 18 on the 17th). NOT the model (5d). | `llmRaw`/`llmYields` per attempt; if attempt 1 keeps most of what it sees, the list was the limit. |
+| Wrong shelf / too much of one cuisine | Prompt precedence (index.ts, "SHELF_TAG — REQUIRED"), data moves guarded on the old tag; Indian share ≤ 15 % of a batch by ingredients (region bias `2d0a374` works: 26 % → 10 %) | Read `shelf_tag` per new row; the count query at PRELAUNCH check 5. |
+| Untranslated names or steps | Names net (title OR language field + names copied word-for-word → separate translation call) and steps net; `nameTranslationChecks` shows each decision | Replay: every check with `copied >= 2` appears in `ingredientNamesTranslated` or `untranslatedDropped`. |
+| Slow / 504 | Attempt budget (loop now ~20-30 s), image deadline, 08:05 photo step; a 3.8-Flash-class model does not fit (60-90 s per shard) | `timing.totalMs` < 150 000; `attempts[].errors` free of "aborted"/429. |
+
+### 5d. Decisions not to reopen without new evidence
+- **Model stays Lite; shards on.** Same-list replays 2026-09-17: Lite one call 19/15 kept in ~60 s; Lite
+  sharded 30 kept in 26 s; 3.8 Flash 15 in 92 s (one attempt fits); gpt-5.4-mini 11 (116 of 139 with zero
+  macros); gpt-4o-mini fallback works (7). Model variance on an identical list ≈ 4 recipes — a one-day gap
+  under that is noise. Untested lever if ever needed: 3.8 Flash with thinking off.
+- **100 % ingredient retention stays a product rule** (CLAUDE.md) — never widen it for a thin day.
+- **The dedup gates are right not to call Raspberry Cheesecake a repeat of Chocolate Cheesecake**; variety
+  is the client cap's job, not the pipeline's.
+- **Deletes of junk rows are Logan's** (the agent repairs, never hard-deletes); the SQL is always in
+  PRELAUNCH next to the finding.
+- **`net._http_response` is not the cron's record** (see 5b).
+
+### 5e. Known gaps, deliberately left (all in PRELAUNCH ▶ TOMORROW item 9 / §0)
+- Truncation guard reads a translated name as cut off ("paprika" ⊂ "Paprikapulver"; run 808, unbuilt).
+- Non-Latin benefit lists (Telugu) become the source list and the recipe is lost — correctly rejected,
+  but a 2.7M-view dosa is gone; no rule can read every script.
+- `nearDup` at Jaccard 0.7 is harsh on 3-vs-4-word names ("Chocolate Protein Ice Cream" vs "Chocolate
+  Strawberry Protein Ice Cream", rejected three times); left because the family cap hides a 17th ice cream.
+- Generic names slip the prompt ("Breakfast Bowl", "Salad Bowl" live); variety, not junk.
+- STORE_CAP cut 26 → 18 and 30 → 18 on the 17th; raising it costs ~$0.003 a photo per row — Logan's call.
+- The "Mexican Tuna Salad" title repeat is borderline (a variant of pool "Tuna Salad"), kept as is.
