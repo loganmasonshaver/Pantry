@@ -94,6 +94,22 @@ function goalLines(p: StoryProfile | null): string[] {
   return specific ? [...specific, ...CONSISTENCY_LINES.slice(0, 2)] : [...CONSISTENCY_LINES]
 }
 
+// The plating wait: the user has committed and the meals are generating. Still intentions, because
+// the meals may not exist yet — and nothing counted ("three picks") that a thin deck could make wrong.
+// No "you can cook right now" either: a Cook Now meal can still show a Need: row.
+export function buildPlatingStory(p: StoryProfile | null, itemCount: number): string[] {
+  const out: string[] = []
+  if (itemCount === 1) out.push('Putting your new item to work')
+  else if (itemCount > 1) out.push(`Putting all ${thousands(itemCount)} items to work`)
+  const meals = Number(p?.meals_per_day) > 0 ? Number(p?.meals_per_day) : null
+  const protein = Number(p?.protein_goal) > 0 ? Number(p?.protein_goal) : null
+  if (protein && meals) out.push(`Aiming for ${roundTo(protein / meals, 5)}g of protein a plate`)
+  out.push("Built from what's already in your kitchen")
+  if (Number(p?.max_prep_minutes) > 0) out.push(`Ready in ${Math.round(Number(p?.max_prep_minutes))} minutes or less`)
+  out.push('Plating your picks now')
+  return out
+}
+
 // Fact, goal, fact, goal… starting with the scan itself, then whichever list is longer runs out.
 export function buildScanStory(profile: StoryProfile | null, photoCount: number): string[] {
   const facts = factLines(profile, photoCount)

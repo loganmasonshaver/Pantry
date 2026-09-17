@@ -2060,6 +2060,11 @@ claiming exact wording from the top apps is guessing.
           images come BEFORE the prompt, so the shared prefix differs every call. Bigger risk than cost:
           the prompt's COUNT CHECK ("a full fridge holds 20-40 distinct items") is written for a whole
           kitchen and would push each single-photo call to pad its list — rewrite it before any B test;
+          (CORRECTION 2026-09-17: `scripts/pantry-eval` already runs ONE photo per call with this prompt,
+          so single-photo is how gpt-5.4 was chosen — the padding risk is unmeasured, not new. But the
+          eval can barely score it: `images/` holds 17 photos and only 3 have ground truth, drafted by
+          reading the photos and never verified by Logan. B's eval needs Logan to check those 3 and
+          label more, plus an OPENAI_API_KEY on the Mac — Supabase secrets cannot be read back.)
           upload (14 MB — check what resolution gpt-5.4 actually reads before shrinking photos); the
           1.5 s of sequential context reads — **now parallel (2026-09-17, UNVERIFIED; tell: the next
           scan's "meals: profile + pantry + ratings read (in parallel)" mark reads ~0.5 s, not 1.5 s;
@@ -2085,6 +2090,22 @@ claiming exact wording from the top apps is guessing.
           `generated_meals.created_at` row vs A's "generate-meals back") + the phone's gap to "photo
           requested" + the photo request's own trip and auth/cache/cap checks. Build it only if that
           sum is over ~2 s; the phone already asks for the photos the moment meals land.
+      - [ ] **(C) BUILT 2026-09-17, UNVERIFIED — the plating wait is the scan story, not a button
+        spinner.** `PlatingStory` (components/ScanTheater.tsx) covers the review or saved step while
+        `goToReveal` waits: green PLATING YOUR MEALS eyebrow (the reveal's own eyebrow style) over the
+        scan story's big type, words spoken in, 4.5 s a line, resting on the last line instead of
+        looping. Lines from `buildPlatingStory` (lib/scanStory, tested): "Putting all 80 items to
+        work" → "Aiming for 40g of protein a plate" → "Built from what's already in your kitchen" →
+        "Ready in 30 minutes or less" → "Plating your picks now". Intentions only; nothing that counts
+        the meals or says "cook right now" (a Cook Now meal can still show Need:). The spoken-line
+        renderer was lifted out of ScanTheater unchanged so both use one. Shown ONLY when the meals are
+        not ready yet (`isRevealReady`, read synchronously) — a ready deck opens with no flash.
+        "Maybe later" stays on the saved-step path at the same spot (it was tappable during the old
+        spinner); a close there clears plating so the next open cannot start on it. **Tells:** (1) tap
+        See what you can cook within ~10 s of the review opening → the saved step fades to the story,
+        then the reveal opens with photos; (2) wait 30 s in review first → no plating screen at all;
+        (3) Maybe later during plating closes, and the next scan does not open on the plating screen;
+        (4) first-ever scan (Add all) shows the same story, no Maybe later.
       - [ ] **Tapping Scan right after a launch waited ~3 s for the AI-consent check — FIXED 2026-09-16,
         UNVERIFIED.** Logan: after a reload, the consent prompt took "a solid 3 seconds" to come up.
         Measured (phone log + DB stamp): reload 23:53:32 → Scan tapped ~23:53:37 → `requestConsent`

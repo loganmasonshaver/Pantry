@@ -27,7 +27,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator'
 import { X, ScanLine, Check, Plus, Zap, ImageIcon, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, Maximize2, Refrigerator, Lightbulb, Tag, EyeOff } from 'lucide-react-native'
 import { COLORS } from '@/constants/colors'
-import { ScanTheater } from './ScanTheater'
+import { PlatingStory, ScanTheater } from './ScanTheater'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import { useAIConsent } from '@/context/AIConsentContext'
@@ -38,11 +38,11 @@ import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 import { normalizeCategory, PANTRY_ORDER } from '@/lib/categoryMatch'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
-import { prefetchCookNowMeals, takeRevealReady, warmMealImages } from '@/lib/mealPrefetch'
+import { isRevealReady, prefetchCookNowMeals, takeRevealReady, warmMealImages } from '@/lib/mealPrefetch'
 import { scanPerfEnd, scanPerfMark, scanPerfStart, secsSince } from '@/lib/scanPerf'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
 import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
-import { buildScanStory, type StoryProfile } from '@/lib/scanStory'
+import { buildPlatingStory, buildScanStory, type StoryProfile } from '@/lib/scanStory'
 import { CookRevealView } from '@/components/CookRevealView'
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window')
@@ -747,6 +747,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
   const handleClose = () => {
     if (savingRef.current) return // don't close mid-save — a racing close could orphan a partial insert
     scanPerfEnd('closed') // no-op after the reveal opened, which already ended the timeline
+    // A close from the plating screen: goToReveal is still awaiting, and would otherwise leave the
+    // plating screen up for the next open until its wait ran out.
+    platingRef.current = false
+    setPlating(false)
     // Drop a scan still in flight. Its results used to land in the closed modal, where the meal
     // prefetch effect could fire a paid generation for items nobody would ever see.
     scanRunIdRef.current += 1
@@ -793,7 +797,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
   const goToReveal = async () => {
     if (platingRef.current) return
     const ready = user ? takeRevealReady(user.id, 'cookNow') : null
-    if (ready) {
+    // Ready already: straight to the reveal. Awaiting a settled promise would still flash the plating
+    // screen for a frame.
+    if (ready && user && !isRevealReady(user.id, 'cookNow')) {
       platingRef.current = true
       setPlating(true)
       const token = scanRunIdRef.current // a close while waiting bumps this
@@ -1184,9 +1190,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
               ) : (
                 <>
                   <TouchableOpacity style={[styles.primaryBtn, { flexDirection: 'row', gap: 6, justifyContent: 'center' }]} activeOpacity={0.85} onPress={goToReveal} disabled={plating}>
-                    {plating && <ActivityIndicator color="#000000" />}
-                    <Text style={styles.primaryBtnText}>{plating ? 'Plating your meals…' : 'See what you can cook'}</Text>
-                    {!plating && <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />}
+                    <Text style={styles.primaryBtnText}>See what you can cook</Text>
+                    <ChevronRight size={18} stroke="#000000" strokeWidth={2.6} />
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.savedLater} activeOpacity={0.7} onPress={() => handleClose()}>
                     <Text style={styles.savedLaterText}>Maybe later</Text>
@@ -1196,6 +1201,10 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
             </View>
           </View>
         )}
+
+        {/* The plating wait, in the scan story's big type. Over the review or the saved step, whichever
+            the user committed from; goToReveal clears it in the same render that opens the reveal. */}
+        {plating && <PlatingStory lines={buildPlatingStory(storyProfile, savedCount)} onLater={showSaved ? () => handleClose() : undefined} />}
 
         {/* Week's scans used up. One action — add by hand — and ✕ as the only exit: the camera behind
             it is a dead end, and closing already returns to wherever the scan started. */}
@@ -1778,6 +1787,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                     const seen = await AsyncStorage.getItem(COOK_REVEAL_SEEN_KEY)
                     if (!seen) {
                       await AsyncStorage.setItem(COOK_REVEAL_SEEN_KEY, '1')
+                      setSavedCount(selected.length) // the plating story's item count on this path too
                       goToReveal()
                       return
                     }
@@ -1788,9 +1798,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                   }}
                 >
                   {saving
-                    ? (plating
-                      ? <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><ActivityIndicator color="#000000" /><Text style={styles.primaryBtnText}>Plating your meals…</Text></View>
-                      : <ActivityIndicator color="#000000" />)
+                    ? <ActivityIndicator color="#000000" />
                     : <Text style={styles.primaryBtnText}>Add all {detectedItems.length} to Pantry</Text>
                   }
                 </TouchableOpacity>

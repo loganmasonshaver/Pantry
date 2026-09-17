@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildScanStory, STORY_MAX_CHARS, type StoryProfile } from './scanStory.ts'
+import { buildPlatingStory, buildScanStory, STORY_MAX_CHARS, type StoryProfile } from './scanStory.ts'
 
 // Logan's profile, read from production 2026-09-16.
 const LOGAN: StoryProfile = {
@@ -77,4 +77,32 @@ test('every line fits two lines of the big type', () => {
     const p: StoryProfile = { ...LOGAN, fitness_goal: g, dietary_restrictions: ['Gluten-free', 'Dairy-free'], food_dislikes: ['mushrooms', 'olives'], cooking_skill: 'culinary', diet_type: 'Pescatarian' }
     for (const line of buildScanStory(p, 16)) assert.ok(line.length <= STORY_MAX_CHARS, `${line.length} chars: "${line}"`)
   }
+})
+
+test("plating story: Logan's numbers, in the order a short wait reads them", () => {
+  assert.deepEqual(buildPlatingStory(LOGAN, 80), [
+    'Putting all 80 items to work',
+    'Aiming for 40g of protein a plate',
+    "Built from what's already in your kitchen",
+    'Ready in 30 minutes or less',
+    'Plating your picks now',
+  ])
+})
+
+test('plating story: fits the big type, leaves no holes, and never counts the meals', () => {
+  const profiles: (StoryProfile | null)[] = [LOGAN, null, {}, { protein_goal: 0, meals_per_day: 0, max_prep_minutes: 0 }]
+  for (const p of profiles) {
+    for (const n of [0, 1, 7, 1250]) {
+      const lines = buildPlatingStory(p, n)
+      assert.ok(lines.length >= 2, 'a wait always has something to read')
+      for (const line of lines) {
+        assert.ok(line.length <= STORY_MAX_CHARS, `too long for two lines: "${line}"`)
+        assert.ok(!/undefined|NaN|null|\b0g\b|\b0 items|\b0 minutes/.test(line), `bad line: "${line}"`)
+        // The deck can hold fewer than three, and a Cook Now meal can still need an item.
+        assert.ok(!/\bthree\b|\b3 (meals|picks)|cook right now|no shopping/i.test(line), `claims too much: "${line}"`)
+      }
+    }
+  }
+  assert.equal(buildPlatingStory(null, 1)[0], 'Putting your new item to work')
+  assert.equal(buildPlatingStory(null, 1250)[0], 'Putting all 1,250 items to work')
 })

@@ -31,7 +31,7 @@ const REVEAL_CARDS = 3
 // `ready` settles when the reveal could open complete: the meals written AND each card's photo
 // downloaded to the device, not just its URL known. Settles on failure too — it is a wait signal,
 // never an error.
-let inflight: { userId: string; mode: string; promise: Promise<GeneratedMeal[] | null>; ready: Promise<void> } | null = null
+let inflight: { userId: string; mode: string; promise: Promise<GeneratedMeal[] | null>; ready: Promise<void>; readyDone: boolean } | null = null
 
 // Returns the in-flight prefetch promise for this user+mode, or null. The hook awaits this to
 // avoid a double-generation race when cook-reveal mounts before the prefetch has finished.
@@ -168,6 +168,12 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
   }
 }
 
+// Whether that wait is already over. A settled promise still resolves a microtask late, so a caller
+// that shows a waiting screen only while the wait is real needs to ask synchronously.
+export function isRevealReady(userId: string, mode: 'cookNow' | 'mealPlan'): boolean {
+  return !!inflight && inflight.userId === userId && inflight.mode === mode && inflight.readyDone
+}
+
 // Warm images for the first `count` cached meals into the shared device image cache, so the reveal's
 // own fetch resolves instantly instead of generating on-screen. Called once the user has COMMITTED
 // (tapped "Add all to Pantry") — at that point they're heading to the reveal, so this is the same
@@ -195,7 +201,8 @@ export async function warmMealImages(userId: string, mode: 'cookNow' | 'mealPlan
 export function prefetchCookNowMeals(userId: string, extraIngredients: string[], mode: 'cookNow' | 'mealPlan' = 'cookNow') {
   const run = runPrefetch(userId, mode, extraIngredients)
   const promise = run.then(r => r?.meals ?? null)
-  const ready = run.then(r => r?.images).then(() => {}, () => {})
-  inflight = { userId, mode, promise, ready }
+  const entry: NonNullable<typeof inflight> = { userId, mode, promise, ready: Promise.resolve(), readyDone: false }
+  entry.ready = run.then(r => r?.images).then(() => { entry.readyDone = true }, () => { entry.readyDone = true })
+  inflight = entry
   return promise
 }

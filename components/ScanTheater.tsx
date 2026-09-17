@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Dimensions, StyleSheet, Text, View } from 'react-native'
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import Animated, { Easing, cancelAnimation, useAnimatedStyle, useSharedValue, withRepeat, withTiming, FadeIn, FadeInUp, FadeOut, ZoomIn } from 'react-native-reanimated'
 import { Image as ExpoImage } from 'expo-image'
 import { Check } from 'lucide-react-native'
@@ -144,19 +144,7 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount,
             {/* The outgoing line fades out while the next one is spoken in over it — both are
                 absolutely positioned in the same box, so neither pushes the other. The old version
                 removed the line instantly and faded the next up from nothing, a hard cut each time. */}
-            <Animated.View key={statusIdx} exiting={FadeOut.duration(LINE_OUT_MS)} style={styles.storyLine}>
-              {(lines[statusIdx % lines.length] ?? '').split(' ').map((word, i) => (
-                <Animated.Text
-                  key={i}
-                  entering={FadeInUp.delay(i * WORD_STAGGER_MS).duration(WORD_IN_MS)}
-                  // Numbers carry the personal part of a line ("2,200", "40g", "30"), so they land
-                  // in the accent colour — the eye goes to what is about THEM.
-                  style={[styles.story, /\d/.test(word) && styles.storyNumber]}
-                >
-                  {word}{' '}
-                </Animated.Text>
-              ))}
-            </Animated.View>
+            <SpokenLine key={statusIdx} text={lines[statusIdx % lines.length] ?? ''} />
           </View>
           {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
           {photos.length > 1 && (
@@ -165,6 +153,54 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount,
         </>
       )}
     </View>
+  )
+}
+
+// One story line, spoken in word by word. Keyed by the caller, so each new line mounts fresh while
+// the outgoing one fades out over it (both absolute in the same box, so neither pushes the other).
+function SpokenLine({ text }: { text: string }) {
+  return (
+    <Animated.View exiting={FadeOut.duration(LINE_OUT_MS)} style={styles.storyLine}>
+      {text.split(' ').map((word, i) => (
+        <Animated.Text
+          key={i}
+          entering={FadeInUp.delay(i * WORD_STAGGER_MS).duration(WORD_IN_MS)}
+          // Numbers carry the personal part of a line ("2,200", "40g", "30"), so they land
+          // in the accent colour — the eye goes to what is about THEM.
+          style={[styles.story, /\d/.test(word) && styles.storyNumber]}
+        >
+          {word}{' '}
+        </Animated.Text>
+      ))}
+    </Animated.View>
+  )
+}
+
+// The plating wait, told in the scan story's own voice instead of a spinner on a button: the user
+// has committed, and a minute of big type is followed by the same type, not a smaller UI. Covers the
+// whole modal (review or saved step) until the reveal is ready; the modal unmounts it.
+export function PlatingStory({ lines, onLater }: { lines: string[]; onLater?: () => void }) {
+  const [idx, setIdx] = useState(0)
+  // Stops on the last line rather than looping: "Plating your picks now" is where a long wait
+  // should rest, not a restart of the list.
+  useEffect(() => {
+    const t = setInterval(() => setIdx(i => Math.min(i + 1, lines.length - 1)), STORY_MS)
+    return () => clearInterval(t)
+  }, [lines.length])
+  return (
+    <Animated.View entering={FadeIn.duration(220)} exiting={FadeOut.duration(220)} style={styles.plating}>
+      <Text style={styles.platingEyebrow}>PLATING YOUR MEALS</Text>
+      <View style={styles.storyBox}>
+        <SpokenLine key={idx} text={lines[idx] ?? ''} />
+      </View>
+      {/* The saved step's own off-ramp, kept reachable: it stayed tappable while the old button spun,
+          and covering it would leave no way out for up to the 25 s cap. */}
+      {onLater && (
+        <TouchableOpacity style={styles.platingLater} activeOpacity={0.7} onPress={onLater}>
+          <Text style={styles.platingLaterText}>Maybe later</Text>
+        </TouchableOpacity>
+      )}
+    </Animated.View>
   )
 }
 
@@ -189,6 +225,14 @@ const styles = StyleSheet.create({
   dots: { flexDirection: 'row', gap: 6, marginTop: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#333' },
   dotActive: { backgroundColor: GREEN, width: 20 },
+
+  // Same eyebrow as the reveal's FROM YOUR PANTRY, so the wait and the payoff read as one screen.
+  plating: { ...StyleSheet.absoluteFillObject, zIndex: 70, backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 22 },
+  platingEyebrow: { fontSize: 12, fontWeight: '800', color: GREEN, letterSpacing: 1.5 },
+  // Where the saved step draws its Maybe later (same parent frame, 8 pt up), so it does not move
+  // when this screen fades in over that one.
+  platingLater: { position: 'absolute', bottom: 8, alignSelf: 'center', paddingVertical: 14, paddingHorizontal: 24 },
+  platingLaterText: { fontSize: 15, color: '#888888', fontWeight: '600' },
 
   // Completion payoff — checkmark + hero count + forward-looking line.
   doneBlock: { marginTop: 24, alignItems: 'center' },
