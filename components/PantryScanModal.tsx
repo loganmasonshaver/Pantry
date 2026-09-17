@@ -464,8 +464,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
             // First-run consent gate — discloses that pantry photos are sent to OpenAI Vision
             const ok = await requestConsent()
             if (!ok) return { declined: true as const }
-            // Base64 length × 0.75 = bytes on the wire, which is what the upload half of the wait scales with.
-            scanPerfMark(`scan: request sent, ${(base64Images.reduce((n, b) => n + b.length, 0) * 0.75 / 1e6).toFixed(1)} MB`)
+            // The JSON body carries the base64 TEXT, so its length is the upload size — a third more
+            // than the JPEG bytes. The upload half of the wait scales with this number.
+            scanPerfMark(`scan: request sent, ${(base64Images.reduce((n, b) => n + b.length, 0) / 1e6).toFixed(1)} MB upload`)
             sentAt = Date.now()
             const { data, error } = await supabase.functions.invoke('scan-pantry', { body: { images: base64Images } })
             if (error) throw error

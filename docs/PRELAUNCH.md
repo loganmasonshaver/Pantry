@@ -2038,15 +2038,32 @@ claiming exact wording from the top apps is guessing.
         keep the big-type story running instead of a spinner on a button — does not shorten, changes
         how it feels; (D) generate-meals starts the three photo generations itself the moment the
         meals exist, saving the client round trip — small (~1-2 s), honest about it.
-        - [ ] **(A) BUILT 2026-09-16, UNVERIFIED — needs one scan on device.** `lib/scanPerf.ts`: dev-only
+        - [x] **(A) VERIFIED 2026-09-17 00:00 — Logan's 7-photo scan, cellular, dev build.** Timeline
+          (phone wall clock; server rows agree to ~0.1 s):
+          scan sent 00:00:53.4 (JPEGs 10.5 MB = ~14 MB of base64 on the wire) → response **44.6 s**
+          = vision **37.8 s** (gpt-5.4, 43,124 in / 4,567 out) + **6.8 s** upload + edge → review 77
+          items → prefetch fired at once → profile + pantry + ratings read **1.5 s** (three sequential
+          round trips) → generate-meals sent 00:01:39.5 → Add all tapped 4.9 s into review, saved in
+          1.6 s → plating start 00:01:45.9 → **generate-meals back 12.8 s** after sending (00:01:52.3;
+          `generated_meals` row 05:01:52.21 UTC) → all three photos requested in the same 0.1 s → URLs
+          back in 3.8 / 4.1 / 5.0 s (`image_cache` rows 56.05 / 56.33 / 57.25) → downloads 1.5 / 0.8 /
+          0.8 s → plating ready **12.6 s** (6.4 s of meals still generating + 6.1 s of photos) → deck
+          open 1.5 s later. The reveal's own photo requests all hit the device cache: no double pay.
+          **What it changes:** the old "~2 s of meals" was wrong — generation is 12.8 s and is the
+          biggest part of plating. Levers by size: B (37.8 s vision); the 12.8 s inside generate-meals
+          (unknown split — needs a server log, and a redeploy ships the other session's `7f109c8`);
+          upload (14 MB — check what resolution gpt-5.4 actually reads before shrinking photos); the
+          1.5 s of sequential context reads (can run in parallel). **D is DROPPED:** the meals reached
+          the phone 0.1 s after their DB insert and the photo request left 0.1 s after that, so
+          starting photos server-side saves well under 0.5 s. Hero-first download ordering cost ~0.3 s.
+        - **(A) as built, 2026-09-16:** `lib/scanPerf.ts`: dev-only
           `[perf]` marks, wall-clock, printed live and again as one `── scan timeline ──` block when the
           deck opens (or the modal closes / the scan fails). Marks: scan start → request sent (MB) →
           response (phone s vs vision s = upload + edge) → review shown → prefetch fired → profile +
           pantry + ratings read → generate-meals sent / back → each photo requested / URL back (or
           device cache, or a failed attempt's 3 s gap) / downloaded → add all tapped / pantry saved →
           plating start / end (ready, or the 25 s cap) → reveal step → meals in hand → photos painted →
-          deck open. App-only, no deploy. **Tell:** scan on device, the Metro log ends with the block;
-          paste it here and replace the estimates in B and D with its numbers. Not covered: the split
+          deck open. App-only, no deploy. Not covered: the split
           INSIDE generate-meals (LLM vs its DB reads) — that needs a server log and a redeploy.
         - **(D) cost of building it, found while answering Logan 2026-09-16:** the client would still
           call generate-meal-image for the URL, and nothing server-side dedupes an in-flight
