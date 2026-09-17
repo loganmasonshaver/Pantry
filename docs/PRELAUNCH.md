@@ -2052,6 +2052,14 @@ claiming exact wording from the top apps is guessing.
           **What it changes:** the old "~2 s of meals" was wrong — generation is 12.8 s and is the
           biggest part of plating. Levers by size: B (37.8 s vision); the 12.8 s inside generate-meals
           (unknown split — needs a server log, and a redeploy ships the other session's `7f109c8`);
+          **B COST (priced 2026-09-17, OpenAI pricing page: gpt-5.4 $2.50 / 1M in, $0.25 cached, $15
+          out):** this scan cost ~$0.176 ($0.108 in + $0.069 out). Per-photo calls repeat the ~1.8k-token
+          prompt (7,292 chars) six more times, +~11k input = +$0.027, and output likely rises 10-25%
+          (a JSON envelope per call, no cross-photo "list it once") = +$0.007-0.017 — so ~$0.21-0.22,
+          **+20-25% per scan**; ~+$1.20/month for a user at the 7/week cap. No cache discount as built:
+          images come BEFORE the prompt, so the shared prefix differs every call. Bigger risk than cost:
+          the prompt's COUNT CHECK ("a full fridge holds 20-40 distinct items") is written for a whole
+          kitchen and would push each single-photo call to pad its list — rewrite it before any B test;
           upload (14 MB — check what resolution gpt-5.4 actually reads before shrinking photos); the
           1.5 s of sequential context reads (can run in parallel). **D is DROPPED:** the meals reached
           the phone 0.1 s after their DB insert and the photo request left 0.1 s after that, so
