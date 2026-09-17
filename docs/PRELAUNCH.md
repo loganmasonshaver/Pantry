@@ -2320,6 +2320,12 @@ claiming exact wording from the top apps is guessing.
            → back to its prior in_stock, so the save must record new vs restocked and prior state),
            "Add something we missed", and "Something off? Tell us" (Cal AI's Fix Results: an LLM maps
            the sentence to edits, shown for OK before applying).
+           **When building it:** a remove that takes the in-stock count to zero must drop the meal
+           caches, the way the Pantry tab's toggle / delete / Clear pantry now do (`dropDeckIfPantryEmpty`).
+           Hanging that off the pantry MIRROR write instead — one place, every path — looks tidier and
+           is wrong: the mirror effect also runs for a NEW user whose pantry is legitimately empty, and
+           it would delete the deck onboarding already paid to generate, which is the exact bug
+           lib/mealCache.ts was written to end.
         3. **Swap a phantom meal in place, from generation's spares.** Cook Now asks for 10 candidates
            and shows 3; ~5 pass every filter and are discarded today. generate-meals returns 2-3 spares
            with the deck (cached with it). After an edit or "Don't have it", every shown meal that now
