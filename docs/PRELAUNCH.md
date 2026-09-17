@@ -30,6 +30,11 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
   `select name, i->>'name' from trending_meals, jsonb_array_elements(ingredients) i where generated_at = current_date and ((i->>'name') ~* '^\D*\d{1,2}:\d{2}|\b(recipes?|ideas?|alternatives?|tips?|options?|diet)\s*$|\bfriendly\b|\btiffin\b|^(breakfast|lunch|dinner|snack)s?\s*(\(|$)|[⬇👇]|^(high|low)[- ](protein|fib)|^(made|loaded|packed) with|^(perfect|great|good) for|thank you|save this' or lower(regexp_replace(i->>'name','[^a-zA-Z0-9]','','g')) = lower(regexp_replace(name,'[^a-zA-Z0-9]','','g')));`
   `select video_id, count(*) from trending_meals where generated_at = current_date group by 1 having count(*) > 1;`
   `select t.name, p.name from trending_meals t join trending_meals p on p.generated_at < current_date and lower(t.name) like '%' || lower(p.name) || '%' where t.generated_at = current_date;`
+  New counters to read: `rej.dishList`, `rej.ghostCooked` (both should be small and their
+  `rejectedDetail` notes should read as junk), `funnel->'dishListTitles'`,
+  `funnel->'nameTranslationChecks'` (every entry with `copied >= 2` must show up in
+  `ingredientNamesTranslated` or `untranslatedDropped`), and ZERO rows from:
+  `select name, i->>'name' from trending_meals, jsonb_array_elements(ingredients) i where generated_at = current_date and (i->>'name') ~* 'cookbook|coaching|meal plan|essentials|podcast|^#|^[A-Z][a-z]+([A-Z][a-z]+){2,}$|[- ]rich\M|nutritious|(breakfast|lunch|dinner|dessert|snack|meal)s?\s*$';`
   Then READ every row's first six ingredients by eye — the 17th's junk was obvious at a glance and
   invisible to the counters: `select name, shelf_tag, (select string_agg(i->>'name', ', ') from (select i from jsonb_array_elements(ingredients) i limit 6) x) from trending_meals where generated_at = current_date order by shelf_tag;`
 - [ ] **4. Filters.** Read `funnel->'titleRepeats'`, `'compilationTitles'`, `'nonRecipeTitles'` (query
@@ -64,6 +69,8 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
 | 823 E | gpt-4o-mini outage fallback | 12 / 7 | 7 | 7 | 84 s — **fallback works** |
 | **824 F** | **deployed build (shards default + junk rules)** | 33 | 24 | 18 | **17.7 s** |
 | **826 G** | deployed build + `0000bd3` (👉 bullets, German steps, paired claims) | 29 / 7 | 20 | 18 | 25.5 s |
+| **real 827** | **forced run 18:52 UTC, first REAL sharded run** (Logan: "force another cron run") | 16 / 3 | 13 | **13 LIVE** | **45 s** (loop 26, images 16) |
+| 830-832 | replays of 827 on `9ef964f`/`6f05b61` (dishList, ghostCooked, name translation, link/hashtag rules) | 15 | 10 | 10 | 13-19 s |
 - **Decision (rule set 2026-09-16, applied):** shards ON — every attempt returned more than its
   unsharded twin, a third of the time, no rate-limit errors. The stored count could not show it
   (both capped); kept-before-cap and time did. **Model stays Lite:** 3.8 Flash keeps the highest
@@ -97,6 +104,36 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
   caught only if its title trips the compilation filter. A "no quantities anywhere" rule was
   measured and NOT shipped: 3 of the 5 such lists since Sep 13 are real recipes. So check 3's
   read-by-eye stays in the list every morning until a week passes clean.
+- **REAL RUN 827, audited by eye (Logan: "audit it all").** Plumbing right: 45 s, 13 stored, 13 AI
+  photos, no shared videos, no pool repeats, 1 of 13 Indian, filters all genuine (21 title repeats,
+  20 compilations incl. "TOP 3 Salads", "2-Day Meal Prep"; 16 non-recipes incl. "Easy Diet", "$100
+  a Week", "£4 A Day", "Grocery Haul", "Premix"). **Candidates are the ceiling now:** only 18 videos
+  had readable lists once the morning's 18 and the new filters were out; the model kept 12 of the
+  first 16 it saw. **Three rows were still junk, each a NEW shape:** a creator's link block as
+  ingredients ("anabolic cookbook, meal plans & online coaching, music, kitchen essentials"); twelve
+  hashtags without the # ("InstantHealthyBreakfast"); and ingredients that were the creator's three
+  SAUCES while the steps cooked 3 lbs of beef, 20 eggs and 4 lbs of potatoes (the video nameGap had
+  rejected that morning as "Beef and Potato Power Bowls" — renamed, nothing checked it). Plus one
+  untranslated: Italian ingredient names under an English title.
+- **THE GAP IS CLOSED — four gates, each measured on the pool before shipping (`9ef964f`, `6f05b61`,
+  DEPLOYED; replay 832 verified all four on 827's list):**
+  1. **`dishList`**: ≥ 3 ingredients whose head noun is a dish (bowl, shake, roti, pudding…) and ≥ half
+     the list → the recipe is a compilation. Pool: real recipes max at 2; both junk rows 3+. Runs on
+     the creator's list BEFORE the model (`funnel.dishListTitles`) and on the echo after.
+  2. **`ghostCooked`**: ≥ 2 foods the steps give an AMOUNT of that the list lacks ("Cook 3lbs of beef",
+     "Scramble 20 eggs"). Without the amount it reads serving suggestions ("top with chicken or
+     salmon", "serve on toast": 13 rows carry one, 2 carry two); with it, the pool has exactly the
+     junk row. A "no quantities anywhere = not a list" rule was measured and rejected (3 of 5 such
+     lists are real).
+  3. **Name translation net**: names copied word-for-word from a source whose language field OR title
+     is non-English are translated in a separate call (like the steps net); a failure drops the row.
+     `funnel.nameTranslationChecks` records every foreign-source recipe (lang, copied/of, sample) —
+     replay 832: the gelato was `it`, 5 of 5 copied, translated; a French-audio creator with an
+     English list got a harmless identical-names call.
+  4. **Line rules**: link blocks, hashtags with/without #, CamelCase tags, "-rich"/nutritious/
+     non-fried, a line ending in a meal word; "essentials"/"cookbook" as a name.
+  - [x] Data: "Breakfast Bowl" → breakfast; the gelato's five names translated in place.
+  - [ ] **LOGAN: delete the three** (no real list to recover): `delete from trending_meals where generated_at = '2026-09-17' and name in ('Remington James Meal Prep Essentials', 'Palak Paneer Stuffed Paratha', 'Power Breakfast Bowls');`
 - **Ops:** the Sep 16 assumption that `net._http_response` holds the cron's status is wrong past
   ~6 h (pg_net TTL) and the `api-keep-warm` job (another session, every 2 min, one REST hit) buries
   it within minutes anyway. `cron.job_run_details` + `pipeline_runs` are the record. YouTube quota
