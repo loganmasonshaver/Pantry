@@ -2100,10 +2100,17 @@ claiming exact wording from the top apps is guessing.
         inside generate-meal-image, not the phone or the network, and three independent generations
         finishing within 9 ms points at one shared thing they all waited on — a FAL cold start or
         queue is the leading suspect (the 00:01 run, 25 min earlier, took 3.8-5.0 s with the same
-        code). Nothing in the repo can tell: the FAL fetch has no timeout and logs no timing. **Tell:**
-        Supabase dashboard → Edge Functions → generate-meal-image logs, 05:27:00-05:27:41 UTC — the
-        time between each "[image-cache] MISS" and its "FAL response status" line is FAL. If FAL,
-        options are a keep-warm ping or a timeout + retry; decide after reading the logs.
+        code). **EDGE LOGS READ 2026-09-17 (Management API):** each of the three calls ran 39.8 s —
+        boot 0.04 s → cache MISS 01.13-01.18 → Gemini visual description done 01.76-01.87 (~0.7 s) →
+        **FAL flux-2 answered 35.89 / 35.93 / 36.04 — ~34 s at FAL, all three within 0.15 s** → image
+        fetch + Storage upload → "Cached OK" 40.73 (**~4.7 s** after FAL; the Storage rows were inserted
+        at 37.1, so ~3.6 s of it sits between the upload and the cache write — unexplained, and far
+        above normal: the whole call took 3.8-5.0 s at 00:01). So the stall is FAL, not our code or the
+        edge runtime. Still unknown: queue wait vs slow inference — FAL's body carries `timings`, but
+        the log cuts the body at 300 chars. **Next:** log FAL's `timings.inference` and our own ms per
+        phase (describe / FAL / fetch / upload / cache) in generate-meal-image and redeploy (preflight's
+        "newer than deploy" on it is the additive scan-cap helper — no behaviour change rides along).
+        Then decide: a timeout with one retry, FAL's queue API, or a fallback provider.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: after the plating cap the reveal waited ANOTHER 20 s on a
         blank screen** (Logan's screenshot: FROM YOUR PANTRY + headline, nothing under it). The
         reveal's own photo gate (IMAGES_WAIT_MS 20 s) stacked on plating's 25 s. The scan modal now
