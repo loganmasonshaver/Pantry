@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { saveMealSpares } from './mealSpares'
 import { trackAIError } from './analytics'
 import { edgeErrorInfo, isTransportFailure } from './edgeError'
 
@@ -107,6 +108,9 @@ export async function generateMeals({
       recentMealNames,
       mode,
       staplesExcluded,
+      // Cook Now answers { meals, spares }: the next-best recipes, held for swapping out a meal built on
+      // an item the scan got wrong. Meal Plan does not overgenerate, so it has none to give.
+      withSpares: mode === 'cookNow',
     },
   })
 
@@ -154,6 +158,12 @@ export async function generateMeals({
     // The raw error's .message is the opaque "non-2xx status code" — the real reason (e.g. the
     // daily cap) is in the response body. Surface it so the UI can tell the user WHY.
     throw await toUserFacingMealError(error)
+  }
+  // An object when spares were asked for; the bare array from a server that predates them.
+  if (data && !Array.isArray(data) && Array.isArray((data as any).meals)) {
+    const { meals, spares } = data as { meals: GeneratedMeal[]; spares?: GeneratedMeal[] }
+    saveMealSpares(mode, meals, Array.isArray(spares) ? spares : [])
+    return meals
   }
   return data as GeneratedMeal[]
 }

@@ -218,9 +218,12 @@ npx expo run:ios   # build and run on iOS simulator
   and silently threw away most of the browsable pool.
 
 ## Known baselines
-- **TS baseline = 135** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **16** in
+- **TS baseline = 139** via `npx tsc --noEmit 2>&1 | grep -c "error TS"`. Split: **16** in
   app code (`app/ lib/ components/ hooks/ context/`) and the rest Deno-global noise from
   `supabase/functions` being inside the tsconfig.
+  (Was 135 until 2026-09-17: the new `swap-meal` edge function added four lines — three
+  `Cannot find name 'Deno'` and one esm.sh import — each read individually, none real. App-code
+  stayed 16.)
   (Was 136 until later on 2026-09-10: trending-health-check's push was removed, taking its
   `OPS_USER_ID` `Deno.env.get` line — one `Cannot find name 'Deno'` — with it. App-code stayed 16.)
   (Was 130 until 2026-09-10: the new `backfill-trending-times` edge function added six lines — one

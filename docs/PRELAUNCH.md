@@ -2171,7 +2171,16 @@ claiming exact wording from the top apps is guessing.
         repeated 01:32 after 15 quiet min: median 3.83 s, FASTEST 3.75 s**, then 0.26 s and 0.20 s —
         every one of the 50 waited the same ~3.5 s, which reads as one fixed wake-up delay, not
         connections opening one by one. **Keep-warm cron enabled 01:33** (`20260917063311`, every 2 min,
-        one anon read of trending_meals, key from Vault `anon_key`); result below when measured. **Tell:**
+        one anon read of trending_meals, key from Vault `anon_key`; pings verified HTTP 200). **Result
+        01:48 after 15 quiet min WITH the ping: median 2.71 s, fastest 2.48 s** (vs 3.83 / 3.75 without)
+        — about 1.1 s (~30 %) off the cold wait, not a fix. Kept: it costs nothing. (One request in the
+        third burst took 68 s; it overlapped the meal_spares migration push, whose DDL makes PostgREST
+        reload its schema — treated as an artifact of that, not re-measured.) **Recommendation from the
+        result:** the cold wait is one shared delay, so fewer requests per screen will not shorten it —
+        batch only where a screen makes many round trips in sequence (the restock RPC was that case).
+        Worth doing: return the photo link before the cache write (steady-state −3.4 s per photo, Logan's
+        go needed — image pipeline). Skip smaller photos until egress numbers exist. The real fix remains
+        POST-LAUNCH #1. **Tell:**
         upgrade compute, rerun the same three bursts after 15 min quiet — if burst 1 is ~0.3 s, done.
         Free plan is a launch problem anyway: no backups, pauses after a week inactive, 1 GB file
         storage (photos already 351 MB) and 5 GB egress (every photo download). Pro is $25/mo with
@@ -2211,14 +2220,23 @@ claiming exact wording from the top apps is guessing.
            PostHog split: review vs none, on time-to-meals, 24 h deletions and D7 retention.
       - [ ] **SPEC (Logan + Claude 2026-09-17), build order after the review decision: correcting a
         phantom where it hurts, without leaving the reveal.**
-        1. **"Don't have it" on a meal's HAVE ingredient** — build whether or not the review stays
-           (users rubber-stamp it). A small explicit text button at the row's edge, never a row tap
-           (whole-row taps were removed for stray pantry writes). No alert; the row changes IN PLACE to
-           "Marked missing · Undo" (row-state-stays-in-place rule) and joins NEED on the next open.
-           Marks the pantry item(s) the matcher actually matched OUT OF STOCK (not deleted) — needs
-           `pantry-check` to return the matched rows, not a boolean. Meal → "Need: X" with + Grocery;
-           other meals using it flip too (Home via the bus). Logs `phantom_reported` — the direct
-           post-launch phantom metric.
+        1. **"Missing something?" — ONE grey link under the reveal's deck** (Logan 2026-09-17: not on every
+           Home card, not on the meal screen). Acts on the card currently in view. Build whether or not the
+           review stays (users rubber-stamp it). Earlier drafts put it beside every "✓ Ready to cook" and
+           on each ingredient row; both rejected as clutter. After the reveal closes, corrections go
+           through item 1b, and Home's cards turn to "Need: X" by themselves once an item is out of stock.
+           Tap → one sheet, "What don't you have?", listing only the ingredients the pantry claims
+           (HAVE rows) as tap-to-select chips → Update. No alert (reversible); the sheet shows
+           "Marked missing · Undo". Marks the pantry item(s) the matcher actually matched OUT OF STOCK
+           (not deleted) — needs `pantry-check` to return the matched rows, not a boolean. The meal
+           flips to "Need: X" and the sheet's second state offers "Swap this meal" (when a spare fits,
+           item 3) or "Add to grocery". Other meals using the item flip too (Home via the bus). Logs
+           `phantom_reported` — the direct post-launch phantom metric. Never a whole-row tap (those
+           were removed for stray pantry writes).
+        1b. **Back to the scan's items after the reveal is closed:** a card at the top of the Pantry tab,
+           "From your last scan · 80 items · Review", for 24 h or until opened — the same sheet as
+           item 2's Edit. The Pantry tab is where people already go to fix items, and the card is the
+           one route that does not depend on remembering the reveal's link.
         2. **"N items added · Edit" on the reveal** (and on the capped / thin end screens) — only if the
            review is removed. Sheet in the review's aisle cards: remove (NEW row → delete; RESTOCKED row
            → back to its prior in_stock, so the save must record new vs restocked and prior state),
@@ -2234,7 +2252,28 @@ claiming exact wording from the top apps is guessing.
            nothing. No spare fits → the card keeps "Need: X" and offers "Get new meals" (uses a daily
            generation). A swapped-in meal is written to `generated_meals` history by a small server call
            at swap time — never at generation, or unseen spares would block future days.
-           **Blocked on** the generate-meals redeploy carrying `7f109c8` (other session's change).
+           **SERVER HALF BUILT + DEPLOYED 2026-09-17, UNVERIFIED:** `selectSpares` (rank-deck, tested),
+           generate-meals `withSpares` → `{ meals, spares }` (3 spares, own uuids, stored in `meal_spares`,
+           replaced per generation, never in history), `swap-meal` (claims a spare atomically, then writes
+           generated_meals + recent_meal_names), client `lib/meals.ts` requests + saves spares
+           (`lib/mealSpares.ts`), `lib/spareChoice.ts` picks the spare (tested). `meal_spares`: RLS on, no
+           policies, no anon/authenticated grants (checked). Both functions return 401 without a user.
+           `7f109c8` shipped with it after checking its patterns flag 0 of 180 distinct Cook Now ingredient
+           names. **Tells:** after the next Cook Now generation, `meal_spares` holds up to 3 rows for Logan
+           and the funnel row's `sparesOffered` names them; swap-meal is exercised once the swap UI exists.
+           **Not built:** the Missing-something sheet, Edit sheet, Pantry-tab card, swap UI.
+      - [ ] **FOUND 2026-09-17, UNVERIFIED — photo meal logging may be calling a retired model.**
+        `estimate-meal-macros` uses `gpt-4o` as its PRIMARY model for photos, and `parse-receipt` uses it
+        as the fallback behind Gemini. `scripts/pantry-eval/README.md` records gpt-4o returning 404 from
+        OpenAI's API since 2026-02-16. If true, logging a meal from a photo fails every time, and a receipt
+        scan fails whenever Gemini errors. **Tell:** log one meal from a photo on device; or read
+        estimate-meal-macros' edge logs for a 404 from OpenAI. Fix, if confirmed: a current vision model,
+        checked with a few real meal photos.
+      - [x] **Weekly vision model digest (2026-09-17):** scheduled task `weekly-ai-model-digest`, Mondays
+        ~9:15 local, runs while the Claude desktop app is open. Scope, per Logan: only the pantry scan's
+        models (gpt-5.4, fallback gemini-3.1-flash-lite) and vision models worth adding to
+        `scripts/pantry-eval`; emails loganmasonshaver@gmail.com, including a "nothing new" email so a
+        silent week is visible.
       - [x] **DONE 2026-09-17 01:17: free nightly database backup (Free plan keeps none).**
         `scripts/backup-db.sh` → `~/Backups/pantry-db` (700 dir, 600 files, 14 days kept): roles,
         schema and data via the CLI's own `db dump --dry-run` script piped into Homebrew's pg_dump

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { compareCandidates, isSubstantial, selectDeck, type Candidate } from './rank-deck.ts'
+import { compareCandidates, isSubstantial, selectDeck, selectSpares, type Candidate } from './rank-deck.ts'
 
 // Cook Tonight run 48 (2026-09-10 18:03), from pipeline_runs.rankCandidates: tier, repeat and fit are
 // the recorded values. Slots were recorded only for the three shown; the other seven are read off
@@ -180,4 +180,24 @@ test('two axes and four axes rank the same — the prompt asks for two', () => {
   const a = { name: 'A', _tier: 0, _repeat: false, _fitScore: 0.3, _axes: 2 }
   const b = { name: 'B', _tier: 0, _repeat: false, _fitScore: 0.1, _axes: 4 }
   assert.equal(compareCandidates(a, b) > 0, true, 'fit decides between them, and B fits better')
+})
+
+test('spares: next in deck order, never a deck meal, a clash, an uncookable dish or a second spelling', () => {
+  const c = (name: string, extra: Partial<Candidate> = {}): Candidate => ({ name, _tier: 0, _axes: 2, _fitScore: 0.1, ...extra })
+  const deckA = c('Chicken Rice Bowl', { _fitScore: 0.01 })
+  const deckB = c('Greek Yogurt Parfait', { _fitScore: 0.02 })
+  const pool = [
+    deckA, deckB,
+    c('Beef Tacos', { _fitScore: 0.05 }),
+    c('Rice Bowl with Chicken', { _fitScore: 0.03 }), // same dish as a deck meal, however it is spelled
+    c('Protein Shake Pasta', { _clash: true, _fitScore: 0 }),
+    c('Salmon Salad', { _notCookable: true, _fitScore: 0.04 }),
+    c('Egg Fried Rice', { _fitScore: 0.06 }),
+    c('Turkey Wrap', { _tier: 1, _fitScore: 0 }), // a worse tier ranks after every tier-0 dish
+    c('Oat Pancakes', { _fitScore: 0.09 }),
+  ]
+  const spares = selectSpares(pool, [deckA, deckB], 3)
+  assert.deepEqual(spares.map(m => m.name), ['Beef Tacos', 'Egg Fried Rice', 'Oat Pancakes'])
+  assert.deepEqual(selectSpares(pool, [deckA, deckB], 1).map(m => m.name), ['Beef Tacos'])
+  assert.deepEqual(selectSpares([deckA, deckB], [deckA, deckB], 3), [], 'nothing left over, nothing offered')
 })

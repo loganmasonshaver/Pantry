@@ -126,3 +126,19 @@ export function selectDeck<T extends Candidate>(candidates: T[], n: number): { d
   }
   return { deck: deck.sort(compareCandidates), promoted, duplicates }
 }
+
+// The next-best survivors after the deck, returned alongside it so one shown meal can be swapped
+// out — a meal built on an item the scan got wrong — without spending a generation. Same order as
+// the deck, and the same exclusions the deck applies to anything it pulls in: no savory clash, no
+// dish that is not cookable, and no second spelling of a dish already on screen or already spared.
+export function selectSpares<T extends Candidate>(candidates: T[], deck: T[], n: number): T[] {
+  const spares: T[] = []
+  for (const m of [...candidates].sort(compareCandidates)) {
+    if (spares.length >= n) break
+    if (deck.includes(m) || m._clash || m._notCookable) continue
+    const name = String(m.name ?? '')
+    if ([...deck, ...spares].some(d => isSameDish(String(d.name ?? ''), name))) continue
+    spares.push(m)
+  }
+  return spares
+}

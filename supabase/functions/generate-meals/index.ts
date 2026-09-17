@@ -11,7 +11,7 @@ import { flavourMismatches, flavourOpportunities } from '../_shared/flavour-matc
 import { RECENT_MEMORY, dishKey, matchesRecentDish, clusterDishCounts, isSameDish, isSameDishDetailed, overusedBases, detectBases, dishArchetype, overusedArchetypes, capByDistinctDishes } from '../_shared/dish-key.ts'
 import { verifyMacros, estimateMacros, MACRO_TOLERANCE, tableReference } from '../_shared/macro-estimate.ts'
 import { scaleToTarget, topUpProtein, clampPortions, roundIngredientGrams, fundProtein } from '../_shared/scale-recipe.ts'
-import { selectDeck, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
+import { selectDeck, selectSpares, PROTEIN_FLOOR } from '../_shared/rank-deck.ts'
 import { flavourAxes, flavourShelf, isSweetDish } from '../_shared/flavour-axes.ts'
 import { stepIssues } from '../_shared/step-checks.ts'
 import { findMissing, MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../_shared/pantry-check.ts'
@@ -38,6 +38,9 @@ const fsSecret = Deno.env.get("FATSECRET_SECRET") ?? ""
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const db = createClient(supabaseUrl, supabaseServiceKey)
+// Spares held back with a Cook Now deck. A scan's wrong item usually breaks one or two shown meals, and
+// the same item can disqualify a spare too, so three leaves room for both.
+const SPARE_COUNT = 3
 
 // ── FatSecret OAuth 1.0 helpers ──
 const FS_URL = "https://platform.fatsecret.com/rest/server.api"
@@ -281,6 +284,8 @@ Deno.serve(async (req: Request) => {
       recentMealNames: rawRecent = [],
       mode = "cookNow",
       staplesExcluded: rawStaplesExcluded = [], // basics the user tapped "I don't keep this" on
+      // Opt-in, so a caller that expects the bare array keeps getting one.
+      withSpares = false,
     } = await req.json()
 
     // Sanitize every user-controlled list before it hits the prompt — strips injection
@@ -1325,6 +1330,7 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     meals = meals.map((m: any) => toPerServing(m, servings))
     if (servings > 1) console.log(`Servings: ${servings} per recipe — macros divided to per-serving, ingredients left at batch scale`)
 
+    let spares: any[] = []
     // Overgenerate-then-rank: we asked the LLM for genCount meals (5+) but only display
     // displayCount (3). Rank survivors by macro fit — sum of normalized squared distance
     // from per-meal targets — and slice to the top displayCount. Lower score = better fit.
@@ -1403,6 +1409,13 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       // _shared/rank-deck.ts for the run that moved tier ahead of freshness.
       // Tier = 0 when complete AND over the protein floor, 1 when one of the two, 2 when neither.
       const { deck, promoted, duplicates } = selectDeck(scored, displayCount)
+      // Held back, not shown: the next-best survivors, so a meal built on an item the scan got wrong
+      // can be swapped for one of these instead of spending a generation. Cook Now only — it is the
+      // mode that overgenerates.
+      if (withSpares && mode === 'cookNow') {
+        spares = selectSpares(scored, deck, SPARE_COUNT)
+          .map((m: any) => { const { _fitScore, _complete, _tier, _clash, _proteinOk, _axes, ...rest } = m; return rest })
+      }
       funnel.slotPromoted = promoted
       funnel.duplicateBackfill = duplicates
       meals = deck.map((m: any) => { const { _fitScore, _complete, _tier, _clash, _proteinOk, _axes, ...rest } = m; return rest })
@@ -1434,6 +1447,10 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     // cache, and _macrosCorrected must not reach generated_meals either, since that history is read
     // back as recentDetailed on every later generation.
     meals = meals.map((m: any) => { const { _repeat, _macrosCorrected, _notCookable, ...rest } = m; return rest })
+    // The model numbers its candidates "1".."10", unique only within this batch. A spare can later sit
+    // in a deck beside meals from another batch, and every screen patches photos by id — so each
+    // spare gets its own.
+    spares = spares.map((m: any) => { const { _repeat, _macrosCorrected, _notCookable, _fsTrace, ...rest } = m; return { ...rest, id: crypto.randomUUID(), image: null } })
 
     // If every candidate got filtered out (bad input, impossible macro/prep constraints),
     // refund the slot — the user got nothing usable, so it shouldn't count against their cap.
@@ -1497,9 +1514,27 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
       console.log("generated_meals insert failed:", (e as Error).message)
     }
 
+    // SPARES, kept server-side so a swap can only record a meal this function actually issued — the
+    // client cannot write generated_meals, and must not be able to forge a history row through a swap.
+    // Replaced on every generation: spares belong to the deck they were ranked against. NOT written to
+    // generated_meals here — an unseen spare in the anti-repeat history would block it on later days.
+    try {
+      if (!dryRun && withSpares) {
+        await db.from("meal_spares").delete().eq("user_id", user.id).eq("mode", mode)
+        if (spares.length > 0) {
+          await db.from("meal_spares").insert(spares.map((m: any) => ({
+            user_id: user.id, mode, meal_id: String(m.id), name: String(m?.name ?? "").trim(), meal_data: m,
+          })))
+        }
+      }
+    } catch (e) {
+      console.log("meal_spares write failed:", (e as Error).message)
+    }
+
     // Diagnostics. Own try/catch and never allowed to fail the response — this is instrumentation,
     // and the user already paid for the generation.
     try {
+      funnel.sparesOffered = spares.map((m: any) => String(m?.name ?? ''))
       const traces = meals.map((m: any) => m?._fsTrace).filter(Boolean)
       funnel.shown = meals.length
       funnel.formsShown = meals.map((m: any) => dishArchetype(m?.name))
@@ -1518,7 +1553,8 @@ Respond ONLY with a JSON array, no markdown, no explanation.${servings > 1 ? ` R
     if (dryRun) {
       return new Response(JSON.stringify({ meals, funnel }), { headers: { "Content-Type": "application/json" } })
     }
-    return new Response(JSON.stringify(meals.map((m: any) => { const { _fsTrace, ...rest } = m; return { ...rest, image: null } })), {
+    const shown = meals.map((m: any) => { const { _fsTrace, ...rest } = m; return { ...rest, image: null } })
+    return new Response(JSON.stringify(withSpares ? { meals: shown, spares } : shown), {
       headers: { "Content-Type": "application/json" },
     })
   } catch (error) {
