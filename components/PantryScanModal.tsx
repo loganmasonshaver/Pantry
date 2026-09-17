@@ -513,6 +513,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
         const deduped = dedupeDetected(allItems)
         setDetectedItems(deduped)
         scanPerfMark(`review: shown, ${deduped.length} items`)
+        // Phantom check (PRELAUNCH §3): every item with the model's own confidence, so a scan labelled at
+        // Add all — unchecked = not really there — can be scored by confidence band. Dev-only.
+        if (__DEV__) console.log(`[scan-items] ${JSON.stringify({ at: new Date().toISOString(), photos: photos.length, items: deduped.map(d => [d.name, d.category, d.confidence ?? null, d.photo]) })}`)
         setZones(zoneGroups)
         // Per-photo container type drives the context-aware quick-add rail in the review.
         setPhotoContainers(Array.isArray(result.photoContainers) ? result.photoContainers.map((c: any) => String(c || '').toLowerCase()) : [])
@@ -1726,6 +1729,8 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                     if (!user) return
                     if (savingRef.current) return // synchronous guard — disabled prop updates async
                     const selected = detectedItems.filter(i => i.checked)
+                    // The phantom check's labels: what the user unchecked, and what they typed in as missed.
+                    if (__DEV__) console.log(`[scan-labels] ${JSON.stringify({ at: new Date().toISOString(), shown: detectedItems.length, unchecked: detectedItems.filter(i => !i.checked).map(i => [i.name, i.category, i.confidence ?? null]), addedByHand: detectedItems.filter(i => i.zone === 'Added manually').map(i => i.name) })}`)
                     if (selected.length === 0) { handleClose(); return }
                     savingRef.current = true
                     setSaving(true)
