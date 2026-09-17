@@ -38,7 +38,7 @@ import { trackAIError } from '@/lib/analytics'
 import { categorizeItem } from '@/lib/categories'
 import { normalizeCategory, PANTRY_ORDER } from '@/lib/categoryMatch'
 import { addPantryItemsDeduped } from '@/lib/pantryInsert'
-import { isRevealReady, prefetchCookNowMeals, takeRevealReady, warmMealImages } from '@/lib/mealPrefetch'
+import { commitCookNowPrefetch, isRevealReady, prefetchCookNowMeals, takeRevealReady, warmMealImages } from '@/lib/mealPrefetch'
 import { scanPerfEnd, scanPerfMark, scanPerfStart, secsSince } from '@/lib/scanPerf'
 import { fetchMealGenUsedToday, MEAL_GEN_CAP_PER_DAY } from '@/lib/useMealSuggestions'
 import { MIN_PANTRY_FOR_COOK_NOW, thinPantryMessage } from '../supabase/functions/_shared/pantry-check.ts'
@@ -1517,6 +1517,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
           <View style={StyleSheet.absoluteFill}>
             <CookRevealView
               edges={['top']} // this modal's own SafeAreaView already pads the bottom
+              imagesWaitMs={0} // plating already waited for the photos; never a second, blank wait
               onClose={() => handleClose()}
               onOpenMeal={meal => { handleClose(); onOpenMeal?.(meal) }}
             />
@@ -1749,6 +1750,9 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                       return
                     }
                     onItemsAdded?.()
+                    // Saved: this scan's meals now replace the deck on Home and Pantry, whether or not
+                    // the user opens the reveal (Maybe later still leads to them).
+                    if (showReveal) commitCookNowPrefetch(user.id)
                     // The items are in. With no reveal to follow, this is the flow's end: success.
                     // With the cook reveal next, only a light tick — the reveal has its own success
                     // peak a moment later, and two in a row would blur into one buzz.

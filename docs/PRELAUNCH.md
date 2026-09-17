@@ -2090,6 +2090,34 @@ claiming exact wording from the top apps is guessing.
           `generated_meals.created_at` row vs A's "generate-meals back") + the phone's gap to "photo
           requested" + the photo request's own trip and auth/cache/cap checks. Build it only if that
           sum is over ~2 s; the phone already asks for the photos the moment meals land.
+      - [ ] **PHOTOS TOOK 40 s, NOT 4 s — scan of 2026-09-17 00:26 (5 photos). OPEN, cause unproven.**
+        Timeline: scan 37.6 s (vision 33.3 s) → review → reads 0.6 s (parallel fix works) →
+        generate-meals 13.8 s → photos requested 00:27:00.8 → plating started 00:27:03.5 → **plating hit
+        the 25 s cap** 00:27:28.5 → reveal opened on the headline alone → photo URLs back **40.2 s**
+        after asking → downloads (one took 6.9 s) → deck open 00:27:48.9 — **45 s** after the tap. Server
+        rows: meals inserted 05:27:00.59 UTC; all three `storage.objects` rows at 05:27:37.10-37.11
+        (within 9 ms of each other); all `image_cache` rows at 05:27:40.26-40.31. So the 40 s was
+        inside generate-meal-image, not the phone or the network, and three independent generations
+        finishing within 9 ms points at one shared thing they all waited on — a FAL cold start or
+        queue is the leading suspect (the 00:01 run, 25 min earlier, took 3.8-5.0 s with the same
+        code). Nothing in the repo can tell: the FAL fetch has no timeout and logs no timing. **Tell:**
+        Supabase dashboard → Edge Functions → generate-meal-image logs, 05:27:00-05:27:41 UTC — the
+        time between each "[image-cache] MISS" and its "FAL response status" line is FAL. If FAL,
+        options are a keep-warm ping or a timeout + retry; decide after reading the logs.
+      - [ ] **FIXED 2026-09-17, UNVERIFIED: after the plating cap the reveal waited ANOTHER 20 s on a
+        blank screen** (Logan's screenshot: FROM YOUR PANTRY + headline, nothing under it). The
+        reveal's own photo gate (IMAGES_WAIT_MS 20 s) stacked on plating's 25 s. The scan modal now
+        passes `imagesWaitMs={0}`: plating owns the photo wait, and a deck past the cap opens with
+        photos still arriving rather than an empty screen. **Tell:** only visible when photos are
+        slower than the cap — the deck appears ~1.4 s after the reveal starts, cards fill in.
+      - [ ] **FIXED 2026-09-17, UNVERIFIED: Home showed the PREVIOUS meals after a scan** (Logan: open
+        a recipe from the reveal, back out → "the old generation is taking up the home screen"). The
+        scan's prefetch wrote the cache but never used `mealGenerationBus`, so Home and Pantry kept the
+        deck they held in React state. Now `commitCookNowPrefetch` runs when Add all saves, and from
+        then the scan's meals and each photo are published to every mounted meal screen (also on
+        "Maybe later"). An abandoned review still only writes the cache, as before. **Tells:** (1)
+        scan → reveal → open a recipe → back → Home shows the new meals with photos; (2) scan → Add
+        all → Maybe later → Home shows the new meals.
       - [ ] **(C) BUILT 2026-09-17, UNVERIFIED — the plating wait is the scan story, not a button
         spinner.** `PlatingStory` (components/ScanTheater.tsx) covers the review or saved step while
         `goToReveal` waits: green PLATING YOUR MEALS eyebrow (the reveal's own eyebrow style) over the

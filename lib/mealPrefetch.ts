@@ -8,6 +8,7 @@ import { fetchMealImage } from './mealImages'
 import { imageIngredientNames } from './ingredientDisplay'
 import { prefetchMealImages } from '../components/MealImage'
 import { scanPerfMark, secsSince } from './scanPerf'
+import { generationKey, publishGenerated, publishMealImage, publishMealImageFailed } from './mealGenerationBus'
 
 // Speculative "cook now" meal generation, kicked off while the user reviews a scan so the
 // cook-reveal screen can reuse the result instead of generating a SECOND time. This removes
@@ -31,7 +32,29 @@ const REVEAL_CARDS = 3
 // `ready` settles when the reveal could open complete: the meals written AND each card's photo
 // downloaded to the device, not just its URL known. Settles on failure too — it is a wait signal,
 // never an error.
-let inflight: { userId: string; mode: string; promise: Promise<GeneratedMeal[] | null>; ready: Promise<void>; readyDone: boolean } | null = null
+let inflight: { userId: string; mode: string; promise: Promise<GeneratedMeal[] | null>; ready: Promise<void>; readyDone: boolean; share: Share } | null = null
+
+// What the OTHER mounted meal screens (Home, Pantry) are told. Each holds its own deck in React state
+// and never re-reads the cache after mount, so a prefetch that only wrote the cache left Home on the
+// previous meals: Logan opened a recipe from the reveal, backed out, and Home showed the old set.
+// Told only once the scan is SAVED — an abandoned review's meals stay in the cache, as before, but
+// never replace a deck on screen for items that did not reach the pantry.
+type Share = { committed: boolean; meals: GeneratedMeal[] | null; urls: Record<string, string | null> }
+
+function publishShare(userId: string, mode: 'cookNow' | 'mealPlan', share: Share) {
+  if (!share.meals) return
+  const key = generationKey(userId, mode)
+  // Photos already known ride in with the meals, so Home swaps to whole cards where it can.
+  publishGenerated(key, share.meals.map(m => (share.urls[m.id] ? { ...m, image: share.urls[m.id] } : m)))
+  for (const [id, url] of Object.entries(share.urls)) if (url === null) publishMealImageFailed(key, id)
+}
+
+// The scan's items are saved: from here its meals are the user's meals on every screen.
+export function commitCookNowPrefetch(userId: string, mode: 'cookNow' | 'mealPlan' = 'cookNow') {
+  if (!inflight || inflight.userId !== userId || inflight.mode !== mode || inflight.share.committed) return
+  inflight.share.committed = true
+  publishShare(userId, mode, inflight.share) // a no-op while the meals are still generating
+}
 
 // Returns the in-flight prefetch promise for this user+mode, or null. The hook awaits this to
 // avoid a double-generation race when cook-reveal mounts before the prefetch has finished.
@@ -47,7 +70,7 @@ export function takeRevealReady(userId: string, mode: 'cookNow' | 'mealPlan'): P
   return null
 }
 
-async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIngredients: string[]): Promise<{ meals: GeneratedMeal[]; images: Promise<void> } | null> {
+async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIngredients: string[], share: Share): Promise<{ meals: GeneratedMeal[]; images: Promise<void> } | null> {
   const startedAt = Date.now()
   scanPerfMark(`meals: prefetch start (${extraIngredients.length} scanned items)`)
   try {
@@ -123,6 +146,8 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     // Write the exact cache shape the hook serves from (text only — images filled in on reveal).
     // userId stamps ownership so the cache survives sign-out for this user (see useMealSuggestions).
     await writeMealCache(mode, { meals: generated, maxPrepMinutes: maxPrep, userId })
+    share.meals = generated
+    if (share.committed) publishShare(userId, mode, share) // saved before the meals were back
     try {
       // 24, matching useMealSuggestions — the prefetch drains the same shared window.
       const merged = [...generated.map(m => m.name).filter(Boolean), ...recentMealNames].slice(0, 24)
@@ -146,6 +171,12 @@ async function runPrefetch(userId: string, mode: 'cookNow' | 'mealPlan', extraIn
     const warmable = generated.slice(0, REVEAL_CARDS).filter(m => m?.name)
     const warmOne = async (m: GeneratedMeal) => {
       const url = await fetchMealImage(m.name, imageIngredientNames(m.ingredients), m.steps ?? []).catch(() => null)
+      share.urls[m.id] = url
+      if (share.committed) {
+        const key = generationKey(userId, mode)
+        if (url) publishMealImage(key, String(m.id), url)
+        else publishMealImageFailed(key, String(m.id)) // settled: stop Home shimmering on it
+      }
       if (!url) return
       const downloadAt = Date.now()
       await prefetchMealImages([url])
@@ -199,9 +230,10 @@ export async function warmMealImages(userId: string, mode: 'cookNow' | 'mealPlan
 
 // Fire-and-forget. Safe to call more than once; the latest call replaces the in-flight slot.
 export function prefetchCookNowMeals(userId: string, extraIngredients: string[], mode: 'cookNow' | 'mealPlan' = 'cookNow') {
-  const run = runPrefetch(userId, mode, extraIngredients)
+  const share: Share = { committed: false, meals: null, urls: {} }
+  const run = runPrefetch(userId, mode, extraIngredients, share)
   const promise = run.then(r => r?.meals ?? null)
-  const entry: NonNullable<typeof inflight> = { userId, mode, promise, ready: Promise.resolve(), readyDone: false }
+  const entry: NonNullable<typeof inflight> = { userId, mode, promise, ready: Promise.resolve(), readyDone: false, share }
   entry.ready = run.then(r => r?.images).then(() => { entry.readyDone = true }, () => { entry.readyDone = true })
   inflight = entry
   return promise

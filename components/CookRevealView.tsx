@@ -97,11 +97,14 @@ function HeadlineChunks({ count, anims }: { count: number; anims: Animated.Value
 // route it could not appear until the modal had fully dismissed — measured on device: the push
 // landed 1.2 s after the close, and the Pantry tab showed through the gap at the payoff moment.
 // app/cook-reveal.tsx still wraps it as a route.
-export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] }: {
+export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'], imagesWaitMs = IMAGES_WAIT_MS }: {
   onClose: () => void
   onOpenMeal: (meal: any) => void
   // Inside the scan modal the modal already pads the bottom inset; padding it twice lifts the deck.
   edges?: Edge[]
+  // How long the gate holds for photos. The scan modal passes 0: its plating screen already waited
+  // for them, and a second wait here showed only the headline over an empty screen for 20 s.
+  imagesWaitMs?: number
 }) {
   const { user } = useAuth()
   const { isPremium } = usePremium()
@@ -189,7 +192,7 @@ export function CookRevealView({ onClose, onOpenMeal, edges = ['top', 'bottom'] 
     if (gateOpen || revealed.length === 0) return
     const elapsed = Date.now() - mountedAtRef.current
     const floorLeft = Math.max(0, MIN_BUILD_MS - elapsed)
-    const wait = photosPainted ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + IMAGES_WAIT_MS - elapsed)
+    const wait = photosPainted ? floorLeft : Math.max(floorLeft, MIN_BUILD_MS + imagesWaitMs - elapsed)
     const t = setTimeout(() => setGateOpen(true), wait)
     return () => clearTimeout(t)
   }, [revealed.length, photosPainted, gateOpen])
