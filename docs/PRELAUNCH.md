@@ -2071,6 +2071,19 @@ claiming exact wording from the top apps is guessing.
         acting on the device copy is safe. **Tell:** reload, go straight to Pantry, tap Scan → the
         camera opens with no pause. (The first launch after this change still waits once, to fill
         the cache.)
+      - [ ] **Scan tapped ~4 s after launch: ~1.1 s to the first camera frame, felt "delayed" (Logan
+        2026-09-17 00:00, DEV build).** Phone log, wall clock: Pantry tab 23:59:39.86 → **Discover's
+        background preload mounts 41.05** (`app/(tabs)/_layout.tsx`: feed prefetch + 2.5 s + idle
+        callback) → Scan tapped 41.23 → Discover renders until its first paint at 41.86, and the
+        tap's state change renders only after it (Pantry RENDER logged at 41.86) → `AVCaptureSession
+        init` 42.08 → first camera frame 42.31. So ~0.63 s was the tap queued behind a background
+        render the user never asked for, ~0.2 s the scan screen itself, ~0.23 s the camera starting.
+        It only collides in the first seconds after a launch, and it was measured on a dev bundle,
+        where renders are several times slower — per §2c, do not tune for a Metro number. **Next:** (1) tap
+        Scan with the app open 15+ s — expect ~0.45 s if the preload is the cause; (2) repeat both
+        on a release build. If release still collides, start the preload only after ~2 s without a
+        touch instead of on a fixed delay, so it never lands under a tap. The consent-cache fix above
+        was NOT exercised by this run: the profile read answered in 0.7 s this launch.
       - [ ] **FROZE ONCE, NOT REPRODUCED: Pantry tab unresponsive right after tapping Continue on the
         consent prompt (2026-09-16 23:49, other tabs worked).** The repeat at 23:53 (phone log
         recording, consent cleared first) worked. Suspect, unproven: the scan modal asks iOS to
