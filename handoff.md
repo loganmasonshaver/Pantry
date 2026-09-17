@@ -227,6 +227,10 @@ state, tells, levers and decisions.
   morning's video_ids are in the 90-day guard, so the 17th's second run had 18 candidates where the
   cron had 52. Treat a forced run as a code check, never a yield measurement; yield is measured on the
   08:00 cron (fresh quota, searches rotate by day of year).
+  **Corrected 19:10 UTC:** the thin list holds only for the FIRST forced run. The guard is a read of
+  `trending_meals` and the swap hard-deletes, so replaced rows' videos become eligible again (46 of
+  815's 52 are, right now). A further real run today would re-pick the morning's videos and delete the
+  10 audited live rows. Same-day checks = `&dryRun=true` until append mode exists — PRELAUNCH ▶ item 10.
 - **Every audit ends by reading each new row's first six ingredients by eye.** Both days, the counters
   passed and the junk was obvious to a human. Keep doing it until a week runs clean.
 

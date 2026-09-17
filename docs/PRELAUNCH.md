@@ -56,6 +56,22 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
   thinking tokens as a speed lever (each shard took 59-69 s; `reasoning_effort`/thinking budget
   untested) · the STORE_CAP question (26 and 30 kept on the 17th were cut to 18; the cap bounds
   image cost at ~$0.003/photo — Logan's 12-18 range says leave it).
+- [ ] **10. FOUND 2026-09-17 19:10 UTC — a forced real run un-guards the rows it replaces.** The
+  90-day video guard is a read of `trending_meals` (`index.ts` "Recently-used video IDs"), and the
+  swap hard-deletes the prior run's rows by id. No ledger outlives a row. Measured after 827:
+  **46 of cron 815's 52 candidates are eligible again** (6 still guarded = picked again by 827 and
+  live); 8 of 827's 18 likewise (3 deleted junk + 5 not kept). So:
+  - "A forced same-day run sees a thin list" is true ONLY of the first forced run after the cron.
+    A THIRD run on the 17th would see ~46 minus the title filters (replay 826 put 52 at 34 after
+    them), mostly the morning's videos, store ≤ 18 and DELETE the 10 audited rows now live.
+  - 815's 14 clean rows were not "replaced", they were lost: recoverable only while a search
+    surfaces those videos again, and the searches rotate by day of year.
+  - **The 18th's yield (check 2) can be flattered** by those videos coming back. Before calling it a
+    clean measurement, count the overlap: `select count(*) from jsonb_array_elements((select funnel->'candidates' from pipeline_runs where id = <new id>)) c where c->>'id' in (select c2->>'id' from jsonb_array_elements((select funnel->'candidates' from pipeline_runs where id = 815)) c2);`
+  - **Lever, unbuilt, Logan's call:** `&append=true` for a forced real run — skip the prior-rows
+    delete, put today's live rows into the name/ingredient dedup (`prevMeals` excludes today), and
+    insert at most `STORE_CAP` minus the live count. Opt-in param, so the cron's swap is untouched.
+    Until then a same-day check is a DRY run (`&dryRun=true`, full search) — it writes nothing.
 
 ### 2026-09-17 RESULTS — one cron, six replays, all on the same 52 candidates
 | run | what | raw / attempt | kept | stored | time |
