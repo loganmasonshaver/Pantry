@@ -1817,7 +1817,16 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
               contentContainerStyle={styles.zoomScrollContent}
               maximumZoomScale={4}
               minimumZoomScale={1}
-              centerContent
+              // Nothing here centres anything: the content box IS the viewport and `contain` centres
+              // the photo inside it. `centerContent` plus a flex-centred container used to be here,
+              // and centerContent takes (viewport − contentSize)/2 as an inset at layout time — which
+              // is half a screen while the image's own layout is still 0. UIScrollView keeps that
+              // inset once the image lands, so the photo opened off the bottom-right corner and
+              // snapped back there on every zoom-out. Fast decodes beat the race, which is why it
+              // only appeared once the photos got big. The two auto-inset props are off for the same
+              // reason: a modal's safe-area or keyboard inset must not move the photo either.
+              automaticallyAdjustContentInsets={false}
+              contentInsetAdjustmentBehavior="never"
               showsVerticalScrollIndicator={false}
               showsHorizontalScrollIndicator={false}
             >
@@ -1906,7 +1915,8 @@ const styles = StyleSheet.create({
   reviewHeaderRight: { alignItems: 'flex-end', gap: 4 },
   // Fullscreen tap-to-zoom overlay.
   zoomOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000000', zIndex: 100 },
-  zoomScrollContent: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
+  // Exactly the viewport, so UIScrollView has no inset to compute at any zoom level.
+  zoomScrollContent: { width: SCREEN_W, height: SCREEN_H },
   zoomImage: { width: SCREEN_W, height: SCREEN_H },
   zoomHint: { position: 'absolute', bottom: 8, right: 10, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(0,0,0,0.55)', paddingVertical: 5, paddingHorizontal: 9, borderRadius: 13 },
   zoomHintText: { color: '#FFFFFF', fontSize: 11, fontWeight: '600' },

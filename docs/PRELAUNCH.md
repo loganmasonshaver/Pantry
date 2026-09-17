@@ -1780,15 +1780,22 @@ claiming exact wording from the top apps is guessing.
       and UIScrollView keeps that inset after the image lands, and the auto-adjust can add the modal's
       own safe-area/keyboard inset on top (the review has a text input inside a KeyboardAvoidingView).
       The offset in Logan's screenshot — about half the screen across, more than half down — is the
-      size of the two stacked. Which one fired is not proven; the fix removes both paths.
-      **Fix, NOT applied yet:** editing this file hot-reloads it, which would reset a review that was
-      open and burn one of the week's 7 scans — so it waits for the scan to be saved. Then: drop
-      `centerContent` and the flex centering, size the content container SCREEN_W × SCREEN_H so it
-      equals the viewport (`resizeMode="contain"` already centres the photo inside it), and set
-      `automaticallyAdjustContentInsets={false}` + `contentInsetAdjustmentBehavior="never"`.
+      size of the two stacked.
+      **Second round of evidence (Logan, same session):** pinching works and reaches any part of the
+      photo, but every zoom-out snaps back to the offset, and closing the viewer and reopening it
+      comes back offset too. That kills the first theory — one instance holding a stale inset, since
+      the overlay unmounts with `zoomUri` — and points at the inset being RECOMPUTED identically on
+      every open: `centerContent` reads a contentSize the image has not filled in yet, so a slow
+      decode always loses the race. Early opens were fine because a small, already-decoded photo wins
+      it; this device also logs memory pressure, which pushes decodes later.
+      **FIXED 2026-09-17 13:4x, UNVERIFIED on device:** `centerContent` and the flex centering are
+      gone, `zoomScrollContent` is now exactly SCREEN_W × SCREEN_H so the content box equals the
+      viewport and no inset is ever computed (`resizeMode="contain"` centres the photo inside it), and
+      `automaticallyAdjustContentInsets={false}` + `contentInsetAdjustmentBehavior="never"` close the
+      other inset path. TS 139 / app-code 16, bundle 200.
       **Tell:** open a review photo, pinch to 4x, close, reopen — centred and full-screen every time,
-      with the keyboard having been open beforehand too. **Workaround meanwhile:** a small pinch forces
-      a zoom/layout pass and usually snaps it back.
+      including after the keyboard has been open. If it recurs, log the ScrollView's
+      `onContentSizeChange` and the image's `onLayout` and compare their order.
 - [ ] **FOUND 2026-09-17 (reading the generation path for the phantom check): a pantry over 200 items
       drops the NEWEST items from the prompt.** Both reads that feed GPT — `lib/mealPrefetch.ts:86`
       (the scan's own plating generation) and `lib/useMealSuggestions.ts:154` (Home) — are
