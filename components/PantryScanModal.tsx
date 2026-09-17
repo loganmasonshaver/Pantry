@@ -105,8 +105,6 @@ const COMMON_STAPLES = ['Eggs', 'Milk', 'Butter', 'Cheese', 'Rice', 'Bread', 'On
 
 // Context-aware quick-add suggestions, keyed by the container type the scan classifies each photo as.
 // A fridge photo suggests fridge basics, a pantry photo suggests dry goods, etc. Unknown → COMMON_STAPLES.
-// Maps a scan-classified container type → the display label shown for that photo's review page.
-const CONTAINER_LABEL: Record<string, string> = { fridge: 'Fridge', freezer: 'Freezer', pantry: 'Pantry', counter: 'Counter' }
 
 const STAPLES_BY_CONTAINER: Record<string, string[]> = {
   fridge: ['Eggs', 'Milk', 'Butter', 'Cheese', 'Yogurt', 'Mayonnaise', 'Ketchup', 'Mustard', 'Orange Juice', 'Sour Cream'],
@@ -308,12 +306,6 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
   }, [detectedItems, user, showReveal, visible])
   // Per-photo container type from the scan (fridge/freezer/pantry/counter) → context-aware quick-adds.
   const [photoContainers, setPhotoContainers] = useState<string[]>([])
-  // Friendly area name per photo from its classified container ("Fridge"/"Freezer"/…). Lifted to
-  // component scope so both the loading theatre and the review carousel use the same labels.
-  // Caption label chain: prefer the AI-detected container (only set post-scan), otherwise the label
-  // the photo was captured under (Fridge/Freezer/Pantry/Counter…) so the scan animation shows the
-  // real area instead of a generic "Photo N". The numeric fallback is now effectively unreachable.
-  const areaLabel = (idx: number) => CONTAINER_LABEL[(photoContainers[idx] || '').toLowerCase()] ?? photos[idx]?.label ?? `Photo ${idx + 1}`
   const [zones, setZones] = useState<ZoneGroup[]>([])
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false) // synchronous in-flight guard so a double-tap / close race can't double-insert
@@ -1480,7 +1472,7 @@ export default function PantryScanModal({ visible, onClose, onItemsAdded, showRe
                 <Text style={[styles.subtitle, { textAlign: 'center', marginTop: 8, paddingHorizontal: 12 }]}>{scanError}</Text>
               </View>
             ) : (
-              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} areaLabel={areaLabel} itemCount={spottedCount} story={storyProfile ? buildScanStory(storyProfile, photos.length) : undefined} />
+              <ScanTheater photos={photos} photoDims={photoDims} showDone={showDone} itemCount={spottedCount} story={storyProfile ? buildScanStory(storyProfile, photos.length) : undefined} />
             )}
 
             {/* Footer button — state-aware: View Results / Retry / nothing (still scanning) */}

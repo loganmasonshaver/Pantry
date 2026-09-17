@@ -2120,13 +2120,36 @@ claiming exact wording from the top apps is guessing.
         **Tell:** the next scan's photos → read the [timing] lines (fetch-logs script pattern: CLI
         token from keychain → Management API `function_logs`). A slow one with a small
         `falTimings.inference` = FAL queue; a large one = slow generation.
+      - [ ] **SCAN 2026-09-17 00:42 (5 photos) — the [timing] logs, and what they changed.** Phone: scan
+        40.7 s (vision 35.6 s) → reads 1.2 s → **Add all spinner 8.1 s** → generate-meals 18.2 s (server
+        exec 18.1 s) → photos 8.7 s → plating 9.0 s → deck. Each photo on the server (8.2-8.4 s):
+        lookup 0.3 · describe 0.5-0.7 · **FAL 1.7-1.9 (inference 1.18)** · download 0.6-1.0 · upload
+        1.1-1.5 · **cacheWrite 3.3-3.5 s**. So the 00:27 FAL stall (34 s) was a FAL-side incident, not
+        steady state; at steady state the largest piece of a photo is the two image_cache upserts.
+        `pg_stat_statements` has no image_cache or pantry_items statement anywhere near that slow —
+        the database runs them in milliseconds — and the API gateway logged the 49 restock PATCHes at
+        origin_time p50 373 ms, max 3,403 ms. The latency is in front of Postgres (PostgREST / pooler),
+        not in the queries. **Open, two follow-ups:** (1) find the API-layer latency — compute size and
+        pooler first; the same shape as the 7.8 s release-together burst in §2c; (2) generate-meal-image
+        could return the URL after the upload and finish the cache write with `EdgeRuntime.waitUntil`
+        (-3.4 s per photo) — image pipeline, so only on Logan's go.
+      - [ ] **FIXED 2026-09-17, UNVERIFIED: the Add-all spinner sat 8.1 s on a 57-item save.** `8 new,
+        49 restocked in 6825ms` — one PATCH per restock, eight at a time, each ~370 ms at the API.
+        Migration `20260917054742` adds `restock_pantry_items(text[])` (SECURITY INVOKER, auth.uid()
+        filter, lower(trim()) match; anon cannot execute, authenticated can) and
+        `addPantryItemsDeduped` calls it once, falling back to the per-row path if the call errors.
+        Tested as Logan's account inside a rolled-back transaction: 'BUTTER ', 'eggs', 'Large Eggs',
+        'Salted Butter' matched the 3 rows visible, a made-up name matched nothing. **Tell:** next
+        scan's `[perf] pantry save: … restocked in` reads well under 1 s.
+      - [x] **DONE 2026-09-17 (Logan): the "Fridge · 5/5" caption under the scan story is gone.** The
+        dots stay. `areaLabel` and `CONTAINER_LABEL` had no other caller and were removed.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: after the plating cap the reveal waited ANOTHER 20 s on a
         blank screen** (Logan's screenshot: FROM YOUR PANTRY + headline, nothing under it). The
         reveal's own photo gate (IMAGES_WAIT_MS 20 s) stacked on plating's 25 s. The scan modal now
         passes `imagesWaitMs={0}`: plating owns the photo wait, and a deck past the cap opens with
         photos still arriving rather than an empty screen. **Tell:** only visible when photos are
         slower than the cap — the deck appears ~1.4 s after the reveal starts, cards fill in.
-      - [ ] **FIXED 2026-09-17, UNVERIFIED: Home showed the PREVIOUS meals after a scan** (Logan: open
+      - [x] **VERIFIED 2026-09-17 00:44 (Logan: "the new meals show up on homescreen now"). Home showed the PREVIOUS meals after a scan** (Logan: open
         a recipe from the reveal, back out → "the old generation is taking up the home screen"). The
         scan's prefetch wrote the cache but never used `mealGenerationBus`, so Home and Pantry kept the
         deck they held in React state. Now `commitCookNowPrefetch` runs when Add all saves, and from

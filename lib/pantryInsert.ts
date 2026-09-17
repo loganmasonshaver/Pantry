@@ -42,23 +42,30 @@ export async function addPantryItemsDeduped(userId: string, rows: PantryInsertRo
     if (error) return { error }
   }
 
-  // Re-stock existing rows that may have been out. ilike is case-insensitive — historical rows
-  // have inconsistent casing, so equality would miss them. Seeing an item in a scan or on a
+  // Re-stock existing rows that may have been out. Matched case-insensitively — historical rows
+  // have inconsistent casing, so exact equality would miss them. Seeing an item in a scan or on a
   // receipt is also the strongest "still here" evidence the app ever gets, so it resets the
   // stale clock — without this a user who rescans every fortnight was still asked "still have
   // them?" about everything that was already on the shelf.
-  const now = new Date().toISOString()
-  // Eight at a time, not one after another. A scan of a stocked kitchen is mostly restocks — 42 of
-  // one 84-item save on 2026-09-16 — and each is its own round trip, so the sequential loop kept the
-  // Add-all spinner up for the sum of all of them. Each update targets different rows, so order does
-  // not matter and parallel writes cannot collide.
-  const RESTOCK_CONCURRENCY = 8
+  // ONE request for all of them (restock_pantry_items). A stocked kitchen is mostly restocks — 49 of
+  // a 57-item scan — and as one PATCH each, eight at a time, they kept the Add-all spinner up for
+  // 8.1 s when the API answered each in ~370 ms. The server matches lower(trim(name)), the same key
+  // as existingNames above.
   const tRestock = Date.now()
-  for (let i = 0; i < restockNames.length; i += RESTOCK_CONCURRENCY) {
-    await Promise.all(restockNames.slice(i, i + RESTOCK_CONCURRENCY).map(name =>
-      // escapeLike: a raw "2% Milk" here is a wildcard pattern that also re-stocks other rows.
-      supabase.from('pantry_items').update({ in_stock: true, last_confirmed_at: now }).eq('user_id', userId).ilike('name', escapeLike(name))
-    ))
+  if (restockNames.length > 0) {
+    const { error: rpcError } = await supabase.rpc('restock_pantry_items', { p_names: restockNames })
+    if (rpcError) {
+      // The old per-row path, so a failed call never leaves a scanned item marked out of stock.
+      __DEV__ && console.log('[pantry save] restock_pantry_items failed, per-row fallback:', rpcError.message)
+      const now = new Date().toISOString()
+      const RESTOCK_CONCURRENCY = 8
+      for (let i = 0; i < restockNames.length; i += RESTOCK_CONCURRENCY) {
+        await Promise.all(restockNames.slice(i, i + RESTOCK_CONCURRENCY).map(name =>
+          // escapeLike: a raw "2% Milk" here is a wildcard pattern that also re-stocks other rows.
+          supabase.from('pantry_items').update({ in_stock: true, last_confirmed_at: now }).eq('user_id', userId).ilike('name', escapeLike(name))
+        ))
+      }
+    }
   }
   __DEV__ && restockNames.length > 0 && console.log(`[perf] pantry save: ${newRows.length} new, ${restockNames.length} restocked in ${Date.now() - tRestock}ms`)
 

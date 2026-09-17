@@ -53,11 +53,10 @@ type Photo = { uri?: string; label?: string }
 // bracket treatment as the onboarding trailer: a teal line sweeps up and down a couple of times
 // over each photo, then it crossfades to the next in a carousel. (Replaces the earlier "drone"
 // animation — the simple sweep reads better and matches the trailer's look.)
-export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount, story }: {
+export function ScanTheater({ photos, photoDims, showDone, itemCount, story }: {
   photos: Photo[]
   photoDims: Record<string, { w: number; h: number }>
   showDone: boolean
-  areaLabel?: (idx: number) => string
   itemCount?: number // live count ramped by the modal; rendered as the payoff on completion
   // The user's own story (lib/scanStory): their targets and their goal, told in big type while the
   // photos are read. Falls back to the generic scan captions until the profile has loaded.
@@ -95,8 +94,6 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount,
   }, [showDone, photos.length])
 
   const lineStyle = useAnimatedStyle(() => ({ transform: [{ translateY: sweep.value * boxH }] }))
-
-  const label = areaLabel ? areaLabel(activeIdx) : photos[activeIdx]?.label
 
   return (
     <View style={styles.wrap}>
@@ -146,7 +143,6 @@ export function ScanTheater({ photos, photoDims, showDone, areaLabel, itemCount,
                 removed the line instantly and faded the next up from nothing, a hard cut each time. */}
             <SpokenLine key={statusIdx} text={lines[statusIdx % lines.length] ?? ''} />
           </View>
-          {!!label && <Text style={styles.area}>{label}{photos.length > 1 ? `  ·  ${activeIdx + 1}/${photos.length}` : ''}</Text>}
           {photos.length > 1 && (
             <View style={styles.dots}>{photos.map((_, i) => <View key={i} style={[styles.dot, i === activeIdx && styles.dotActive]} />)}</View>
           )}
@@ -221,7 +217,6 @@ const styles = StyleSheet.create({
   storyLine: { ...StyleSheet.absoluteFillObject, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignContent: 'center', paddingHorizontal: 4 },
   story: { fontSize: 27, lineHeight: 34, fontWeight: '800', color: COLORS.textWhite, letterSpacing: -0.6 },
   storyNumber: { color: GREEN },
-  area: { marginTop: 6, fontSize: 13, fontWeight: '600', color: COLORS.textMuted, textTransform: 'capitalize' },
   dots: { flexDirection: 'row', gap: 6, marginTop: 16 },
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#333' },
   dotActive: { backgroundColor: GREEN, width: 20 },
