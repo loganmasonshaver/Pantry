@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Nightly Supabase backup (scripts/backup-db.sh) while the project is on the Free plan.
+     Install: cp to ~/Library/LaunchAgents, then launchctl bootstrap gui/$(id -u) <that path>.
+     04:30 local sits after the 08:00-08:20 UTC trending crons; a Mac asleep then runs it on wake. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.kobalabs.pantry-db-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>/Users/loganshaver/pantry/scripts/backup-db.sh &gt;&gt; "$HOME/Backups/pantry-db/backup.log" 2&gt;&amp;1</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+</dict>
+</plist>

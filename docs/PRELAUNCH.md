@@ -1026,6 +1026,34 @@ calories, so the log path needs no change — verified, not assumed.
       screen prints "Makes 2 servings · macros are per serving", and the ingredient list is visibly
       a 2-portion batch. Function logs print `Servings: 2 per recipe` when it fires.
 
+## POST-LAUNCH #1 — upgrade Supabase to Pro  *(Logan 2026-09-17: "add upgrading to my first post launch item")*
+- [ ] **Move the org from FREE to Pro ($25/mo; the $10 compute credit covers Micro, 1 GB RAM).**
+      Why, measured 2026-09-17 (details in §3, "SCAN 2026-09-17 00:42"): the project runs on Nano
+      (0.5 GB RAM, shared CPU) with ~250 MB of swap in use, and the first burst of API requests after
+      a quiet spell waits 3.7 s median (8 s once on the phone) before everything is fast. Free also
+      has no backups, pauses after a week inactive, 1 GB file storage (photos 351 MB) and 5 GB egress.
+      Logan's call: stay on Free until launch; the free stopgaps are a keep-warm ping and a nightly
+      local backup (see §3). Claude's recommendation on record: upgrade the day an outside person
+      can install (TestFlight counts), because backups protect the first users, not traction.
+      **Steps:** Billing → Subscription → Pro; then compute size (a few minutes of downtime); rerun the
+      burst test after 15 quiet minutes — burst 1 should read ~0.3 s. If swap still shows on Micro,
+      Small (2 GB) is ~$5/mo over the credit. Then remove the keep-warm cron and keep backups.
+
+## POST-LAUNCH #2 — test parallel per-photo vision (step B): is the time worth the cost?  *(Logan 2026-09-17)*
+- [ ] **Question:** one vision call per photo instead of one call for all of them. Measured today: vision
+      is 33-38 s of a 37-45 s scan wait. Estimate: wall time ≈ the slowest single photo (~8-12 s) +
+      the unchanged upload (4-7 s) → ~15-20 s, i.e. ~20-25 s saved. Cost (§3, priced from OpenAI's
+      page): ~$0.18 → ~$0.21-0.22 per 7-photo scan, **+20-25 %**, ~+$1.20/month for a user at 7/week.
+- [ ] **Before any test:** rewrite the prompt's COUNT CHECK line ("a full fridge holds 20-40 items") for
+      one photo, or each call pads its list; decide how per-photo results merge (the client's
+      `dedupeDetected` already merges repeats across photos).
+- [ ] **Test:** the labelled scans from §3's review-decision plan are the ground truth — run the same
+      photos single-call vs per-photo; compare wall time, phantom rate (items not really there),
+      recall, and $ from each response's `usage`.
+- [ ] **Ship only if:** the scan wait drops ≥ 15 s AND the phantom rate does not rise AND recall drops
+      ≤ 2 points. Post-launch, confirm with PostHog: share of scans abandoned during the wait, before
+      vs after.
+
 ## 2i. POST-LAUNCH — pantry variety unlock  *(designed 2026-09-06, deliberately NOT built)*
 The repeat complaints bottom out in a fact no prompt rule can move. Measured on the live account:
 
@@ -2148,6 +2176,41 @@ claiming exact wording from the top apps is guessing.
         pre-launch, that costs nothing. **Logan's call.** (2) generate-meal-image
         could return the URL after the upload and finish the cache write with `EdgeRuntime.waitUntil`
         (-3.4 s per photo) — image pipeline, so only on Logan's go.
+      - [ ] **DECIDE: keep the review screen or remove it — the plan to decide on evidence (Logan
+        2026-09-17).** Why it matters: every item arrives pre-checked and Logan saved all three scans
+        untouched (57→57, 77→77, 58→58), so the review catches nothing for people who don't read 50-100
+        items — but without it, a PHANTOM item (not really in the kitchen) goes straight into the
+        pantry, and a phantom protein or carb can anchor a "ready to cook" meal the user cannot make.
+        Removal is right only if phantoms, especially anchor phantoms, are rare. Nobody has measured it:
+        the eval scores recall, not phantoms, on 3 photos with unverified ground truth.
+        1. **Capture (dev-only, small):** log each scan's items with `confidence`, `category` and
+           `photo` to the scan timeline, so a scan can be labelled after the fact.
+        2. **Label 5 real scans** across fridge, freezer, pantry shelves and counter, one in poor light:
+           Logan marks each item ✓ right / ~ right food, wrong variant (substitutable) / ✗ not there.
+           ~250 items → a phantom rate to about ±3 %. Add 2-3 other people's kitchens if possible —
+           one kitchen is a biased sample.
+        3. **Measure the harm, not just the error:** for each scan's 3 meals, does any use a ✗ item as a
+           main ingredient? "Broken meal rate" is what a user feels.
+        4. **Read phantoms by confidence band** (30-59 / 60-79 / 80-100) and by anchor vs extra.
+        5. **Decide:** (a) anchor phantoms ≈ 0 and overall ≤ 5 % → remove the review, add "N items
+           added · Edit" on the reveal; (b) phantoms cluster below a confidence line → raise
+           `SCAN_CONFIDENCE_FLOOR` (server setting, no app release) or show ONLY those few items as
+           "Double-check these 4" and auto-save the rest; (c) phantoms spread across high confidence →
+           keep the review, improve the scan first.
+        6. **Post-launch, either way:** PostHog — kept: per-scan uncheck count and time on review
+           (near-zero unchecks across users = remove); removed: scan-added items deleted from the
+           pantry within 24 h, with their confidence (the phantom proxy). With volume, a Superwall/
+           PostHog split: review vs none, on time-to-meals, 24 h deletions and D7 retention.
+      - [x] **DONE 2026-09-17 01:17: free nightly database backup (Free plan keeps none).**
+        `scripts/backup-db.sh` → `~/Backups/pantry-db` (700 dir, 600 files, 14 days kept): roles,
+        schema and data via the CLI's own `db dump --dry-run` script piped into Homebrew's pg_dump
+        (the CLI's dump needs Docker, which this Mac lacks; the dry-run carries a ~5-minute temporary
+        login, piped and never printed). LaunchAgent `com.kobalabs.pantry-db-backup` at 04:30 local;
+        launchd runs a missed time on wake. **Verified:** a manual run and a launchd kickstart both
+        wrote 948 KB compressed / 7.0 MB of data, 55 tables including auth.users, profiles,
+        pantry_items, generated_meals, image_cache. **NOT verified: a restore** — needs a scratch
+        Postgres. Log: `~/Backups/pantry-db/backup.log`. If a Supabase CLI upgrade changes the
+        dry-run format, the log's size check fails the run loudly.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: the Add-all spinner sat 8.1 s on a 57-item save.** `8 new,
         49 restocked in 6825ms` — one PATCH per restock, eight at a time, each ~370 ms at the API.
         Migration `20260917054742` adds `restock_pantry_items(text[])` (SECURITY INVOKER, auth.uid()
