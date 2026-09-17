@@ -2198,8 +2198,10 @@ claiming exact wording from the top apps is guessing.
         pantry, and a phantom protein or carb can anchor a "ready to cook" meal the user cannot make.
         Removal is right only if phantoms, especially anchor phantoms, are rare. Nobody has measured it:
         the eval scores recall, not phantoms, on 3 photos with unverified ground truth.
-        1. **Capture (dev-only, small):** log each scan's items with `confidence`, `category` and
-           `photo` to the scan timeline, so a scan can be labelled after the fact.
+        1. **Capture — BUILT 2026-09-17 (`56fa83c`):** dev builds log `[scan-items]` (every detected item:
+           name, category, confidence, photo) when the review opens and `[scan-labels]` (what was
+           unchecked + typed in) at Add all. Read them from the Metro log of the session that runs Metro.
+           Scan limits were reset for the check; as of the 2026-09-17 handoff no scan had run yet.
         2. **Label 5 real scans** across fridge, freezer, pantry shelves and counter, one in poor light:
            Logan marks each item ✓ right / ~ right food, wrong variant (substitutable) / ✗ not there.
            ~250 items → a phantom rate to about ±3 %. Add 2-3 other people's kitchens if possible —
@@ -2440,7 +2442,7 @@ claiming exact wording from the top apps is guessing.
         wait, and each card's pills show that meal's calories and protein). The deck moves up; the
         photos get the room. `lib/revealLine.ts` stays for reuse in B. Open question: eyebrow or
         headline only.
-      - [ ] **OPEN — the Pantry tab STILL flashes on the way to the reveal** after push-first (Logan
+      - [x] **SUPERSEDED 2026-09-16 — the reveal moved inside the scan modal, and Logan confirmed the flash gone on device (see the SUPERSEDED item above).** Was: OPEN — the Pantry tab STILL flashes on the way to the reveal after push-first (Logan
         2026-09-16, second pass). react-native-screens' `setPushViewControllers` only defers when the
         stack view has no window or a nav transition is in flight (RNSScreenStack.mm:669-700), so a
         push under a fully presented RN <Modal> should land at once — yet the tab shows. PLAN, in
