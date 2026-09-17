@@ -2111,6 +2111,15 @@ claiming exact wording from the top apps is guessing.
         phase (describe / FAL / fetch / upload / cache) in generate-meal-image and redeploy (preflight's
         "newer than deploy" on it is the additive scan-cap helper — no behaviour change rides along).
         Then decide: a timeout with one retry, FAL's queue API, or a fallback provider.
+        **DONE 2026-09-17 00:5x CDT — deployed, boots (cache-hit smoke test 200 in 1.5 s).** Every
+        generation now logs one line: `[timing] OK <key> total=… lookup=… describe=… fal1=…
+        falTimings1={"inference":…} download=… upload=… cacheWrite=… trending=…` (FAILED /
+        FAL-URL-ONLY on the other exits). Before deploying, the live source was downloaded and diffed:
+        index.ts identical; the only other changes shipped were scan-cap's unused `readScanWindow`
+        and dish-key's `overusedBases` (generate-meal-image imports only `dishArchetype`, unchanged).
+        **Tell:** the next scan's photos → read the [timing] lines (fetch-logs script pattern: CLI
+        token from keychain → Management API `function_logs`). A slow one with a small
+        `falTimings.inference` = FAL queue; a large one = slow generation.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: after the plating cap the reveal waited ANOTHER 20 s on a
         blank screen** (Logan's screenshot: FROM YOUR PANTRY + headline, nothing under it). The
         reveal's own photo gate (IMAGES_WAIT_MS 20 s) stacked on plating's 25 s. The scan modal now

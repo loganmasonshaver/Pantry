@@ -279,6 +279,15 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
   let capConsumed = false // track whether we incremented the per-user cap, so we can refund on failure
+  // Wall time per phase of one generation, logged as a single [timing] line. A slow photo could be
+  // traced to FAL from the log timestamps, but not whether FAL was queueing or generating, nor what
+  // the seconds between FAL and "Cached OK" were spent on.
+  const reqAt = Date.now()
+  const timing: Record<string, string | number> = {}
+  let phaseAt = reqAt
+  const phase = (name: string) => { const now = Date.now(); timing[name] = now - phaseAt; phaseAt = now }
+  const logTiming = (key: string, outcome: string) =>
+    console.log(`[timing] ${outcome} ${key} total=${Date.now() - reqAt}ms ${Object.entries(timing).map(([k, v]) => `${k}=${v}`).join(' ')}`)
   try {
     const { mealName, ingredients = [], steps = [], describeOnly = false, imageSize, seed, replaceTrending = false, bypassCache = false, guidanceScale, promptExpansion } = await req.json()
     if (!mealName) return new Response(JSON.stringify({ image: null }), { headers: jsonHeaders })
@@ -407,7 +416,9 @@ Deno.serve(async (req: Request) => {
     // STAGE 1: ask an LLM to visually describe the finished dish. If it succeeds we use
     // that as the basis for the Flux prompt; if it fails we fall back to a static template
     // built from keyword heuristics so image generation never hard-stops.
+    phase('lookup') // body parse, cache lookup, auth and the cap check
     const description = await generateVisualDescription(mealName, ingredients, stepStrings)
+    phase('describe')
 
     let prompt: string
     if (description) {
@@ -502,6 +513,10 @@ Deno.serve(async (req: Request) => {
         })
         const data = await res.json()
         console.log('FAL response status:', res.status, 'body:', JSON.stringify(data).substring(0, 300))
+        // Includes the 2 s pause before a retry. FAL reports its own inference seconds in `timings`
+        // when the endpoint provides them: the fal phase minus that is queue and network.
+        phase(`fal${attempt + 1}`)
+        timing[`falTimings${attempt + 1}`] = JSON.stringify(data?.timings ?? null)
 
         // FAL returns images array
         const imageUrl = data.images?.[0]?.url
@@ -518,6 +533,7 @@ Deno.serve(async (req: Request) => {
         // CDN URLs expire ~24 hr and the cached row would then serve a 404 forever.
         const imageRes = await fetch(imageUrl)
         const blob = await imageRes.blob()
+        phase('download')
         // The fingerprint is part of the object path. Uploads are upsert, so with the bare-name path
         // a second variant of "egg white vegetable scramble" would overwrite the first variant's
         // bytes under every URL already handed out. For a name-only key this is byte-identical to
@@ -542,6 +558,7 @@ Deno.serve(async (req: Request) => {
           else console.log('Storage upload succeeded on retry')
         }
 
+        phase('upload') // including the one retry, when it ran
         if (!uploadErr) {
           const { data: urlData } = db.storage.from('meal-images').getPublicUrl(filename)
           // CACHE-BUST. `upload` uses `upsert`, so regenerating a dish overwrites the object at the
@@ -566,6 +583,7 @@ Deno.serve(async (req: Request) => {
             db.from('image_cache').upsert(bareRows, { onConflict: 'meal_key', ignoreDuplicates: !overwriteBare }),
           ].filter(Boolean)
           const results = await Promise.all(writes as Promise<{ error: { message: string } | null }>[])
+          phase('cacheWrite')
           const cacheErr = results.find(r => r?.error)?.error
           if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
           else console.log('Cached OK:', cacheKey)
@@ -576,6 +594,8 @@ Deno.serve(async (req: Request) => {
           // fork-and-knife placeholder for a meal whose photo already existed. That is the same
           // symptom 17905c0 was written to kill; it fixed the cache-hit path and left this one.
           await backfillTrendingImage(db, mealName, permanentUrl, isInternal, isInternal && replaceTrending)
+          phase('trending')
+          logTiming(cacheKey, 'OK')
           return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
         }
 
@@ -586,6 +606,7 @@ Deno.serve(async (req: Request) => {
         // is not a durable /storage/ one and this branch only ever holds a FAL URL. Dead code that
         // reads like a safety net is worse than none — it is why the missing call on the SUCCESS
         // path above went unnoticed.
+        logTiming(cacheKey, 'FAL-URL-ONLY')
         return new Response(JSON.stringify({ image: imageUrl }), { headers: jsonHeaders })
       } catch (e) {
         console.log(`Attempt ${attempt + 1} error:`, e)
@@ -593,6 +614,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    logTiming(cacheKey, 'FAILED')
     // All attempts failed — give the user's cap slot back so a failure they must retry
     // doesn't cost them quota.
     if (capConsumed) await refundScan(req, 'image_gen')
