@@ -1,7 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { rateLimit, rateLimitResponse } from '../_shared/rate-limit.ts'
 import { parseCookSettings, parseIngredientBlock, parseIngredientSections, parseMethodBlock, parseUnquantifiedExtras, truncatedAgainstSource } from '../_shared/ingredient-parse.ts'
-import { nonDishName, sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
+import { nonDishName, isDishList, quantifiedGhosts, sectionHeadingIngredient, countedIngredients, realIngredients, massBearingIngredients, nameIngredientGaps, looksUntranslated, isNonEnglishSource, hasFractionalIndivisible, recoverMergedIngredients } from '../_shared/recipe-integrity.ts'
 import { jsonSafe } from '../_shared/json-safe.ts'
 import { classifyDietTags } from '../_shared/diet-tags.ts'
 import { truncateSafe, stripEmojiFromSteps } from '../_shared/sanitize.ts'
@@ -10,7 +10,7 @@ import { mapLimit } from '../_shared/concurrency.ts'
 import { decideAttempt, pickProvider, countDelta, addCounts, nextAttemptOrder, chunkOrder, type Counts } from '../_shared/attempt-budget.ts'
 import { filterTitleRepeats, contentWords, nameContains, compilationTitle } from '../_shared/title-dedup.ts'
 import { TIME_RULES, PHASE_RULES, normaliseTimes, normalisePhases } from '../_shared/meal-times.ts'
-import { stepsLookUntranslated, translateSteps } from '../_shared/translate-steps.ts'
+import { stepsLookUntranslated, translateSteps, titleLooksNonEnglish, namesCopiedFromSource, translateIngredientNames } from '../_shared/translate-steps.ts'
 // Internal macro coherence. Distinct from verifyMacros, which this pipeline never called:
 // that one needs weighable ingredients and abstains often, this one is arithmetic on the four
 // numbers the model already returned and cannot abstain.
@@ -788,7 +788,16 @@ Deno.serve(async (req: Request) => {
     // candidates that were about to be discarded. Gating first means the 60 we keep are 60 usable
     // ones. Same cap, ~3.5x the usable pool.
     const beforeGate = uniqueVideos.length
-    uniqueVideos = uniqueVideos.filter(v => sourceIngredients(v.description || '').length >= 3)
+    // A list of DISHES is a compilation whose title did not say so ("5 Cheap High-Protein Foods"
+    // listed a shake, a bowl and a roti); out before the model, like the other compilations.
+    const dishListTitles: string[] = []
+    uniqueVideos = uniqueVideos.filter(v => {
+      const src = sourceIngredients(v.description || '')
+      if (src.length < 3) return false
+      if (isDishList(src)) { dishListTitles.push(v.title); return false }
+      return true
+    })
+    funnel.dishListTitles = dishListTitles.slice(0, 20).map(t => t.slice(0, 100))
     console.log(`[funnel] ingredient-list gate: ${uniqueVideos.length}/${beforeGate} videos have a readable list`)
     funnel.rawCandidates = allVideos.length
     funnel.afterDedup = dedupedByVideo.length
@@ -1349,8 +1358,8 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const seenIngredientSigs: Set<string>[] = []
     // Funnel counters — tally exactly why the LLM's raw output shrinks. Cumulative across attempts,
     // so the stored funnel describes the run, not its last call.
-    let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0, rejDupVideo = 0, rejNotADish = 0
-    const rejCounts = (): Counts => ({ noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup, dupVideo: rejDupVideo, notADish: rejNotADish,
+    let rejNoName = 0, rejNoMacros = 0, rejDupName = 0, rejNearDup = 0, rejFractional = 0, rejDropped = 0, rejDupIngredients = 0, rejNameGap = 0, rejUntranslated = 0, rejNoSrcList = 0, rejTruncated = 0, rejRoleName = 0, rejMacroIncoherent = 0, rejRecovered = 0, rejDupVideo = 0, rejNotADish = 0, rejDishList = 0, rejGhostCooked = 0
+    const rejCounts = (): Counts => ({ noName: rejNoName, noMacros: rejNoMacros, macroIncoherent: rejMacroIncoherent, ingredientsRecovered: rejRecovered, dupName: rejDupName, nearDup: rejNearDup, dupVideo: rejDupVideo, notADish: rejNotADish, dishList: rejDishList, ghostCooked: rejGhostCooked,
       fractional: rejFractional, dupIngredients: rejDupIngredients, dropped: rejDropped,
       nameGap: rejNameGap, untranslated: rejUntranslated, noSrcList: rejNoSrcList, truncated: rejTruncated, roleName: rejRoleName })
     const REJ_KEYS = Object.keys(rejCounts())
@@ -1544,6 +1553,12 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             }
             const counted = countedIngredients(r.ingredients)
             const got = counted.length
+            // The same test on the model's side: it echoes the creator's list, so a compilation the
+            // source gate missed (or a replay, which skips the gate) shows up here as dishes for
+            // ingredients. Terminal for the video — asking again cannot change what the video is.
+            if (isDishList(counted.map((i: any) => String(i?.name ?? i)))) {
+              rejDishList++; retire(); note('dishList', name, counted.slice(0, 4).map((i: any) => i?.name ?? i).join(' | ')); return false
+            }
             // Split from `dropped`, which conflated two unrelated failures. Every candidate cleared
             // the ingredient-list gate, so a missing source list here does NOT mean the description
             // had none — it means video_index pointed at the wrong video (or off the end), which is
@@ -1688,6 +1703,13 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
             // recompute above so it judges the numbers that will actually be stored.
             const incoherent = macroIncoherence(r)
             if (incoherent) { rejMacroIncoherent++; note('macroIncoherent', name, String(incoherent)); console.log(`[funnel] rejected "${name}" — ${incoherent}`); return false }
+            // The steps cook amounts of foods the list does not have: the creator published only
+            // the sauces and the model wrote the bowls from the video ("Cook 3lbs of beef",
+            // "Scramble 20 eggs" over a list of ranch, buffalo and honey mustard). The macros and
+            // the list disagree about what the dish is. Two or more, so a single "2 slices of
+            // toast" serving line cannot cost a recipe. Terminal: the description will not change.
+            const ghosts = quantifiedGhosts(r.steps, r.ingredients)
+            if (ghosts.length >= 2) { rejGhostCooked++; retire(); note('ghostCooked', name, `steps cook ${ghosts.join(', ')} — not in the list`); return false }
             seenNames.add(key)
             seenWordSets.push(candWords)
             seenWordSetNames.push(name)
@@ -1962,7 +1984,21 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const translatedNames: string[] = []
     const untranslatedDropped: string[] = []
     const readable: any[] = []
+    const ingredientNamesTranslated: string[] = []
     for (const r of recipes) {
+      // Ingredient NAMES copied untranslated from a source the title says is not English. The
+      // ingredient-list check alone missed this ("yogurt" reads as English in Italian too), and the
+      // language field was empty — see translate-steps.ts. Same net as the steps: translate in a
+      // separate call, verify, drop what cannot be translated.
+      const srcVideo = uniqueVideos[(r.video_index || 1) - 1]
+      const names = (r.ingredients || []).map((i: any) => String(i?.name ?? ''))
+      const foreign = isNonEnglishSource(srcVideo?.sourceLang) || titleLooksNonEnglish(srcVideo?.title ?? '')
+      if (foreign && namesCopiedFromSource(names, sourceIngredients(srcVideo?.description || '')) >= 2) {
+        const translated = await translateIngredientNames(names, completeWith).catch(() => null)
+        if (!translated) { untranslatedDropped.push(r.name); continue }
+        r.ingredients = (r.ingredients || []).map((i: any, k: number) => ({ ...i, name: translated[k] }))
+        ingredientNamesTranslated.push(r.name)
+      }
       if (!stepsLookUntranslated(r.steps)) { readable.push(r); continue }
       const steps = await translateSteps(r.steps, completeWith).catch(() => null)
       if (steps) { r.steps = steps; translatedNames.push(r.name); readable.push(r) }
@@ -1974,6 +2010,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     // Emoji out of every stored method (creators' 🙂👍🏼 were being copied into instructions).
     for (const r of readable) if (Array.isArray(r.steps)) r.steps = stripEmojiFromSteps(r.steps)
     funnel.stepsTranslated = translatedNames
+    funnel.ingredientNamesTranslated = ingredientNamesTranslated
     funnel.untranslatedDropped = untranslatedDropped
     recipes = readable
     funnel.stored = recipes.length

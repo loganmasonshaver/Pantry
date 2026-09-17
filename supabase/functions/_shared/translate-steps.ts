@@ -21,6 +21,64 @@ const MARKERS = new Set([
   'minut', 'dodaj', 'wymieszaj', 'piekarnika', 'łyżka', 'szklanka', 'jajka', 'oraz', 'następnie',
 ])
 
+// The TITLE as a language signal. YouTube's language field is usually absent, and on 2026-09-17
+// an Italian gelato sandwich shipped with "yogurt greco 0%, biscotti secchi, latte scremato" —
+// no language, and the ingredient-list check found "yogurt" and called it English. The title
+// ("Biscotto gelato proteico: per chi non sa cucinare") had said Italian all along. Tokens that
+// are also English or menu words (per, non, la, di, con, gelato) are left out on purpose.
+// Folded: lowercase with diacritics removed, on both sides. Turkish İ lowercases to i + a
+// combining dot in JS, so "PROTEİNLİ" would never equal "proteinli" without this.
+const fold = (s: string) => String(s ?? '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+const TITLE_MARKERS = new Set([...MARKERS,
+  'chi', 'che', 'senza', 'come', 'della', 'delle', 'dello', 'degli', 'gli', 'ricetta', 'ricette', 'cucina', 'cucinare',
+  'proteico', 'proteica', 'proteici', 'proteiche', 'minuti', 'veloce', 'facile', 'sano', 'sana', 'biscotto', 'biscotti',
+  'tarifi', 'tarif', 'için', 'yapımı', 'kolay', 'pratik', 'yüksek', 'proteinli',
+  'receita', 'receitas', 'sem', 'rápida', 'rápido', 'fácil', 'saudável', 'proteína',
+  'recette', 'sans', 'rapide', 'protéiné', 'protéinée', 'protéines',
+  'rezept', 'rezepte', 'proteinreich', 'proteinreiche', 'proteinreiches', 'schnell', 'schnelle', 'schnelles', 'schneller', 'einfach', 'einfache', 'einfaches', 'gesund', 'gesunde', 'gesundes', 'lecker', 'leckere', 'leckeres', 'auflauf', 'ohne', 'zucker', 'kalorien',
+  'receta', 'rápida', 'saludable', 'proteína', 'proteínas', 'fácil',
+].map(fold))
+export function titleLooksNonEnglish(title: string): boolean {
+  const words = fold(title).match(/\p{L}+/gu) ?? []
+  return new Set(words.filter(w => TITLE_MARKERS.has(w))).size >= 2
+}
+
+// Names the model copied from a source line unchanged: every word of the name (two or more) sits
+// in one source line. Word-based rather than an exact match because the source line carries the
+// quantity and a preposition the name does not ("150 g di yogurt greco 0%" → "yogurt greco 0%").
+// On its own this is nothing — "cottage cheese" copies "cottage cheese" from any English list —
+// so callers pair it with a language signal, exactly like looksUntranslated.
+const words = (s: string) => new Set(fold(s).replace(/\(.*?\)/g, ' ').match(/\p{L}+/gu) ?? [])
+export function namesCopiedFromSource(names: string[], srcLines: string[]): number {
+  const src = srcLines.map(words)
+  return names.filter(n => {
+    const w = words(n)
+    return w.size >= 2 && src.some(s => [...w].every(t => s.has(t)))
+  }).length
+}
+
+export const translateNamesPrompt = (names: string[]) => `Translate each ingredient name below into English.
+Keep the SAME number of entries in the same order. Translate the FOOD; keep brand names as they are. Do not add amounts, notes or anything else.
+
+Respond ONLY with a JSON array of ${names.length} strings, no markdown.
+
+${names.map((n, i) => `${i + 1}. ${n}`).join('\n')}`
+
+// Same contract as translateSteps: null when the answer is unusable, so the caller drops the
+// recipe rather than ship a list that is still Italian.
+export async function translateIngredientNames(names: string[], complete: (prompt: string) => Promise<string>): Promise<string[] | null> {
+  if (!Array.isArray(names) || names.length === 0) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(String(await complete(translateNamesPrompt(names))).replace(/```json|```/g, '').trim())
+  } catch {
+    return null
+  }
+  if (!Array.isArray(parsed) || parsed.length !== names.length) return null
+  if (parsed.some(t => typeof t !== 'string' || !t.trim())) return null
+  return parsed as string[]
+}
+
 type Step = string | { title?: string; detail?: string }
 
 export function stepDetails(steps: unknown): string[] {

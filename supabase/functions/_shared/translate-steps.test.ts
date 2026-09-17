@@ -51,3 +51,27 @@ test('an answer that is still German is refused', async () => {
 test('an unparseable answer is refused', async () => {
   assert.equal(await translateSteps(ovenEggs, async () => 'Sure! Here are your steps:'), null)
 })
+
+import { titleLooksNonEnglish, namesCopiedFromSource, translateIngredientNames } from './translate-steps.ts'
+
+test('titleLooksNonEnglish: two distinct foreign words; English titles with a menu word are not', () => {
+  assert.equal(titleLooksNonEnglish('Biscotto gelato proteico: per chi non sa cucinare #nutrizione #cucina'), true)
+  assert.equal(titleLooksNonEnglish('High Protein CANNELLONI AUFLAUF 🍝🔥 schnelles Rezept'), true)
+  assert.equal(titleLooksNonEnglish('YÜKSEK PROTEİNLİ PRATİK TİRAMİSU TOPLARI'), true)
+  assert.equal(titleLooksNonEnglish('Jalapeño Taco Mac | Easy 54g Protein Meal'), false)
+  assert.equal(titleLooksNonEnglish('Chicken Rice Cooker Sukiyaki'), false)
+  assert.equal(titleLooksNonEnglish('Protein Gelato Sandwich'), false)
+})
+
+test('namesCopiedFromSource: counts names identical to a source line minus its quantity', () => {
+  const src = ['150 g di yogurt greco 0%', '4 biscotti secchi', '50 ml di latte scremato', 'caffè espresso freddo q.b.', '10 g gocce di cioccolato fondente']
+  assert.equal(namesCopiedFromSource(['yogurt greco 0%', 'biscotti secchi', 'latte scremato', 'caffè espresso freddo', 'gocce di cioccolato fondente'], src), 5)
+  assert.equal(namesCopiedFromSource(['0% greek yogurt', 'dry biscuits', 'skim milk', 'cold espresso', 'dark chocolate chips'], src), 0)
+})
+
+test('translateIngredientNames: same count or null', async () => {
+  const ok = await translateIngredientNames(['latte scremato', 'biscotti secchi'], async () => '["skim milk", "dry biscuits"]')
+  assert.deepEqual(ok, ['skim milk', 'dry biscuits'])
+  assert.equal(await translateIngredientNames(['latte scremato', 'biscotti secchi'], async () => '["skim milk"]'), null)
+  assert.equal(await translateIngredientNames(['latte scremato'], async () => 'not json'), null)
+})

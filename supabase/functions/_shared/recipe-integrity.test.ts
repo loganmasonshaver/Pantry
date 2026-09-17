@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, nameTechniqueGaps, nonDishName, dryStapleOverload, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
+import { countedIngredients, hasFractionalIndivisible, isNonEnglishSource, isNonIngredientLine, looksUntranslated, massBearingIngredients, nameFormGaps, nameIngredientGaps, nameTechniqueGaps, nonDishName, isDishList, dishHeadedLine, quantifiedGhosts, dryStapleOverload, realIngredients, recoverMergedIngredients, sectionHeadingIngredient, ghostIngredients, unusedIngredients } from './recipe-integrity.ts'
 import { readFileSync, readdirSync } from 'node:fs'
 
 // ── junk lines ───────────────────────────────────────────────────────────────────────────────
@@ -867,4 +867,38 @@ test('nonDishName: a smoothie "without protein powder" is a dish; diet and budge
 
 test('nameIngredientGaps: palak is spinach', () => {
   assert.deepEqual(nameIngredientGaps('Spinach Egg Dosa', [{ name: 'green gram' }, { name: 'palak leaves' }, { name: 'egg' }]), [])
+})
+
+test('isDishList: a list of dishes is a compilation; real recipes with a form-word ingredient or two are not', () => {
+  assert.equal(isDishList(['🌾 Pure Desi Sattu Shake', '🥗 Sprouted Moong & Paneer Bowl', 'Overnight High-Protein Oats', '🌱 Crispy Roasted Soya Chunks', '🫓 Multigrain High-Fiber Roti']), true)
+  assert.equal(isDishList(['Miso banana chia pudding', 'Matcha strawberry chia pudding', 'Fig and hazelnut chia pudding', 'Cottage cheese pancakes']), true)
+  assert.equal(isDishList(['dry pasta', 'lauki pasta', 'low-fat paneer', 'onion', 'soaked cashews', 'schezwan sauce']), false)
+  assert.equal(isDishList(['Zero Sugar Cool Whip', 'chocolate protein powder', 'pudding mix', 'Oreo cookies']), false)
+  assert.equal(isDishList(['rolled oats', 'chocolate protein shake', 'rice cakes', 'banana', 'peanut butter', 'honey']), false)
+  assert.equal(isDishList(['cottage cheese', 'egg', 'mozzarella']), false)
+  assert.equal(dishHeadedLine('2 cups (480 ml) plant-based milk'), false)
+  assert.equal(dishHeadedLine('Banh Mi Pork Rice Bowl'), true)
+})
+
+test('isNonIngredientLine: link blocks, hashtags, -rich claims and trailing meal words are not ingredients', () => {
+  for (const l of ['anabolic cookbook', 'meal plans & online coaching', 'music', 'kitchen essentials', '#InstantHealthyBreakfast', 'QuickBreakfastRecipes', 'HealthyIndianBreakfast',
+    'fiber-rich & nutritious mix', 'Fiber rich breakfast', 'Indian vegetarian breakfast', 'Easy rice breakfast', 'healthy & protein rich', 'steamed non fried snack', 'light yet filling']) {
+    assert.equal(isNonIngredientLine(l), true, l)
+  }
+  for (const l of ['wheat flour and spinach dough', 'paneer masala stuffing', 'breakfast sausage links', 'Kraft parmesan', 'PB2 (powdered peanut butter)', 'Reese\'s peanut butter cups']) {
+    assert.equal(isNonIngredientLine(l), false, l)
+  }
+})
+
+test('nonDishName: a creator\'s essentials or cookbook video is not a dish', () => {
+  assert.equal(nonDishName('Remington James Meal Prep Essentials'), 'essentials')
+  assert.equal(nonDishName('Beef Pasta Meal Prep'), null)
+})
+
+test('quantifiedGhosts: steps that cook an AMOUNT of a food the list lacks; serving suggestions do not count', () => {
+  const sauces = [{ name: 'nonfat greek yogurt' }, { name: 'buffalo sauce' }, { name: 'light mayo' }, { name: 'honey' }]
+  const steps = [{ title: 'Beef', detail: 'Cook 3lbs of 96/4 beef seasoned with paprika.' }, { title: 'Bacon', detail: 'Chop 20 slices of beef bacon and cook until crisp.' }, { title: 'Eggs', detail: 'Scramble 20 eggs with all purpose seasoning.' }, { title: 'Potatoes', detail: 'Bake 4lbs of frozen potatoes at 400°F.' }]
+  assert.deepEqual(quantifiedGhosts(steps, sauces).sort(), ['bacon', 'beef', 'egg', 'potato'])
+  assert.deepEqual(quantifiedGhosts([{ title: 'Serve', detail: 'Top with chicken or salmon and serve on toast.' }], [{ name: 'rice paper' }, { name: 'eggs' }]), [])
+  assert.deepEqual(quantifiedGhosts(steps, [...sauces, { name: 'lean ground beef' }, { name: 'beef bacon' }, { name: 'eggs' }, { name: 'frozen potatoes' }]), [])
 })

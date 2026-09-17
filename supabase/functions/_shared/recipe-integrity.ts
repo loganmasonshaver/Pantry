@@ -65,9 +65,19 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   // retention contract then REQUIRED the model to echo each line with invented grams. Every
   // pattern is whole-line or a phrase no food name carries: "high protein greek yogurt" and
   // "gluten-free oats" survive, "High Protein" and "Gluten-Free" alone do not.
-  /^[^\p{L}\p{N}]*(?:(?:high|low)[- ](?:protein|fib(?:er|re)|carbs?|calories?|fat|sugar)|(?:gluten|dairy|sugar|egg|nut|oil|refined[- ]sugar)[- ]free|no \p{L}+(?:[ -]\p{L}+)?|(?:super |very )?(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple)(?:\s*(?:&|and|,)\s*(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple))*)[\s.!]*$/iu,
+  /^[^\p{L}\p{N}]*(?:(?:high|low)[- ](?:protein|fib(?:er|re)|carbs?|calories?|fat|sugar)|(?:gluten|dairy|sugar|egg|nut|oil|refined[- ]sugar)[- ]free|no \p{L}+(?:[ -]\p{L}+)?|(?:super |very )?(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple|light)(?:\s*(?:&|and|,|yet|but)\s*(?:healthy|filling|satisfying|tasty|delicious|nutritious|easy|quick|simple|light))*)[\s.!]*$/iu,
   /^[^\p{L}\p{N}]*(?:made with|loaded with|packed with|rich in|perfect for|great for|good for|ideal for|best for|thank you|thanks for|your feedback|save this|share (?:it|this)|don'?t forget|let me know)\b/iu,
   /\b(?:combination|for plant[- ]based protein|breakfast recipe|lunchbox|evening snack|weight loss|kids (?:&|and) adults)\b/iu,
+  // A creator's link block read as the list: "anabolic cookbook", "meal plans & online coaching",
+  // "music", "kitchen essentials" — a meal-prep vlog stored as a recipe on 2026-09-17.
+  /\b(?:cookbook|e-?book|coaching|meal plans?|merch|music|essentials|my links?|discount|promo code|website|podcast|newsletter|patreon|shop my|gear i use)\b/iu,
+  // Hashtags with or without the #: "#InstantHealthyBreakfast", "QuickBreakfastRecipes" — twelve of
+  // them were the "ingredients" of a stuffed paratha.
+  /^\s*#\S/u,
+  /^[A-Z][a-z]+(?:[A-Z][a-z]+){2,}$/u,
+  /\b(?:fib(?:er|re)|protein|nutrient|iron|calcium)[- ]rich\b|\bnutritious\b|\bnon[- ]fried\b/iu,
+  // A line ENDING in a meal word is a tag: "Fiber rich breakfast", "Indian vegetarian breakfast".
+  /\b(?:breakfast|lunch|dinner|dessert|snack|meal)s?\s*$/iu,
   // Video chapters read as ingredients. A 1M-view chia compilation's whole "list" was its timestamps:
   // "0:29 Miso banana chia pudding", "0:52 What's the best chia pudding ratio?" (stored 2026-09-17).
   /^[^\p{L}\p{N}]*\d{1,2}:\d{2}(?::\d{2})?\b/u,
@@ -210,6 +220,28 @@ export function isNonIngredientLine(text: string): boolean {
   if (TEMPERATURE.test(t)) return true
   if (letterWords(t) >= MAX_INGREDIENT_WORDS) return true
   return NON_INGREDIENT_PATTERNS.some(re => re.test(t))
+}
+
+// A list whose lines are DISHES is a compilation, not a recipe: "Pure Desi Sattu Shake / Sprouted
+// Moong & Paneer Bowl / Multigrain High-Fiber Roti" shipped on 2026-09-17 as the ingredients of
+// "Vegetarian Superfoods" (a "5 cheap high-protein foods" video), and no line rule can name it —
+// every line is real food. The head noun says it: an ingredient is a thing, a dish is a form.
+// Real ingredients can end in a form word too ("rolled oats", "protein shake", "rice cakes", "dry
+// pasta"), so ONE such line means nothing; measured over the 247-row pool on 2026-09-17, no real
+// recipe had more than 2 and both junk rows had 3+. Threshold: at least three, and at least half.
+const DISH_HEADS = new Set(['bowl','salad','dosa','paratha','roti','chapati','naan','pizza','wrap','burrito','taco','quesadilla',
+  'sandwich','toast','cake','cheesecake','brownie','cookie','muffin','pancake','waffle','crepe','pudding','parfait','smoothie',
+  'shake','oatmeal','porridge','bite','ball','bar','laddu','ladoo','kebab','tikka','curry','dal','khichdi','pulao','biryani',
+  'soup','stew','chili','pasta','noodle','lasagna','pocket','momo','idli','chilla','cutlet','fritter','patty','burger','nugget',
+  'casserole','bake','mousse','fluff','dip','spread','bark','cup','pot','jar','fare','omelette','omelet','scramble','frittata',
+  'tortilla','flatbread','bagel','bread','loaf','donut','truffle','popsicle','sundae'])
+export function dishHeadedLine(line: string): boolean {
+  const t = String(line ?? '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z\s]/g, ' ').trim().split(/\s+/).filter(Boolean)
+  return t.length > 0 && DISH_HEADS.has(singular(t[t.length - 1]))
+}
+export function isDishList(lines: string[]): boolean {
+  const n = (lines ?? []).filter(dishHeadedLine).length
+  return n >= 3 && n * 2 >= (lines ?? []).length
 }
 
 /** Ingredient entries with the junk removed. Accepts objects or bare strings. */
@@ -385,7 +417,7 @@ const SYNONYMS: Record<string, string[]> = {
 // "protein powder" as a NAME's tail is a staple recipe ("Homemade Desi Protein Powder"); as a title's
 // tail after without/no it is a smoothie. Diet vlogs and budget challenges ("Easy Diet", "$10 a Day")
 // list foods, so they clear the ingredient gate and reach the model as candidates.
-const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|(?<!without |no |sans )protein powders?\s*$|spice mix\s*$|seasoning blend\s*$|premix|(?:easy|full|my|weekly|daily|bodybuilding|cutting|bulking|weight[- ]loss)\s+diet\b|diet\s+(?:plan|for)\b|diet\s*$|\$\s?\d+\s+(?:a|per|this)\s+(?:day|week)|for\s+\$\s?\d+\b)/i
+const NOT_A_DISH_RE = /\b(meal plans?|diet plans?|what i eat in a day|full day of eating|day of eating|grocery|haul|hair health|skin health|for (?:hair|skin)|(?<!without |no |sans )protein powders?\s*$|spice mix\s*$|seasoning blend\s*$|premix|essentials|cookbook|(?:easy|full|my|weekly|daily|bodybuilding|cutting|bulking|weight[- ]loss)\s+diet\b|diet\s+(?:plan|for)\b|diet\s*$|\$\s?\d+\s+(?:a|per|this)\s+(?:day|week)|for\s+\$\s?\d+\b)/i
 export function nonDishName(name: string): string | null {
   const m = NOT_A_DISH_RE.exec((name ?? '').replace(/#\S+/g, ' '))
   return m ? m[1].toLowerCase() : null
@@ -940,6 +972,21 @@ const stepBlob = (steps: unknown): string =>
   (Array.isArray(steps) ? steps : [])
     .map(s => (typeof s === 'string' ? s : `${(s as any)?.title ?? ''} ${(s as any)?.detail ?? ''}`))
     .join(' ')
+
+// Ghost foods the steps QUANTIFY. ghostIngredients() on its own reads serving suggestions too —
+// "top with chicken or salmon", "serve on toast" — and 13 of 242 live rows carry one such ghost,
+// two carry two. A step that gives an AMOUNT is cooking an ingredient: "Cook 3lbs of 96/4 beef",
+// "Scramble 20 eggs", "Bake 4lbs of frozen potatoes", all four absent from a stored list that was
+// three sauces (2026-09-17: the creator's description listed only the sauces). In the pool, that
+// row alone has two or more.
+export function quantifiedGhosts(steps: unknown, ingredients: any[] | undefined): string[] {
+  const blob = stepBlob(steps).toLowerCase()
+  return ghostIngredients(steps, ingredients).filter(food => {
+    const stem = singular(food)
+    const re = new RegExp(`\\d[\\d.,/]*\\s*(?:g|kg|lbs?|pounds?|oz|ounces?|ml|cups?|tbsp|tsp|slices?|large|medium|small|whole|pieces?|cloves?|fillets?)?\\s*(?:of\\s+)?(?:[\\p{L}/%-]+\\s+){0,3}?${stem}`, 'iu')
+    return re.test(blob)
+  })
+}
 
 /** Foods the steps tell you to cook that appear nowhere in the ingredient list. */
 export function ghostIngredients(
