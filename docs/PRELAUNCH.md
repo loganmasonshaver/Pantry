@@ -830,6 +830,14 @@ pointed at one shared gate. It was not the one it looked like.
       (`npx expo run:ios --configuration Release`). If cold-start queries are ~100ms there, this is
       closed permanently. **Do NOT "optimise" the Supabase client for a number measured under
       Metro** — the same trap as reading absolute perfMark values instead of deltas.
+- [ ] **New data point 2026-09-16 23:53 — this time NOT bundle contention.** After a reload, ~18
+      authenticated requests on one fresh HTTP/3 connection (handshake 50 ms) all got their first byte
+      7.8 s after sending, released together at 23:53:40.7; the same connection then answered in
+      ~120 ms. The bundle had already loaded, and the phone log shows no large Metro transfer in the
+      window. The phone's internet path was CELLULAR (5G, link quality "moderate"), not wifi.
+      `pg_stat_statements` shows no app-table query over 2 s since March, so the time was not
+      query execution — either the cellular path or Supabase's API layer. Not settled. The same
+      release-build test settles it; run it once on wifi and once on cellular.
 - [ ] Note for the release-build pass: it also settles the OTHER dev-only number still open —
       whether Discover's remaining ~230ms tap-to-paint survives outside a dev bundle (see §6f).
 
@@ -2050,6 +2058,30 @@ claiming exact wording from the top apps is guessing.
           `generated_meals.created_at` row vs A's "generate-meals back") + the phone's gap to "photo
           requested" + the photo request's own trip and auth/cache/cap checks. Build it only if that
           sum is over ~2 s; the phone already asks for the photos the moment meals land.
+      - [ ] **Tapping Scan right after a launch waited ~3 s for the AI-consent check — FIXED 2026-09-16,
+        UNVERIFIED.** Logan: after a reload, the consent prompt took "a solid 3 seconds" to come up.
+        Measured (phone log + DB stamp): reload 23:53:32 → Scan tapped ~23:53:37 → `requestConsent`
+        waits for the `profiles.ai_consent_accepted_at` read → that read sat in the app's first request
+        burst, which answered at 23:53:40.7 → prompt → Continue stamped 23:53:46.5. Every AI entry point
+        (Pantry + Home scan, receipt, AI log) had this wait, including users who consented long ago:
+        for them the scan screen itself was what took 3 s. Fix: `AIConsentContext` keeps the answer
+        on the device per user; a cached "yes" answers at once and the server read still corrects it
+        (a revoke elsewhere applies on next launch). A FAILED read no longer counts as "never
+        accepted" — it used to re-prompt someone who had. The server never enforces consent, so
+        acting on the device copy is safe. **Tell:** reload, go straight to Pantry, tap Scan → the
+        camera opens with no pause. (The first launch after this change still waits once, to fill
+        the cache.)
+      - [ ] **FROZE ONCE, NOT REPRODUCED: Pantry tab unresponsive right after tapping Continue on the
+        consent prompt (2026-09-16 23:49, other tabs worked).** The repeat at 23:53 (phone log
+        recording, consent cleared first) worked. Suspect, unproven: the scan modal asks iOS to
+        present while the consent modal is still fading out; RN's `RCTModalHostViewComponentView`
+        sets `_isPresented = YES` BEFORE `presentViewController`, so a refused presentation is never
+        retried and React believes the modal is open. It does not obviously explain a frozen screen,
+        which is why nothing was changed. The run that froze had the prompt appear instantly at the
+        tap; the run that worked had it appear ~3 s later — timing is the only known difference.
+        **Tell if it recurs:** run `idevicesyslog -p Pantry` and grep for "Attempt to present" /
+        "already presenting". Fix if confirmed: resolve `requestConsent` from the consent Modal's
+        `onDismiss`, not on tap, on all four entry points.
       - [x] **MEASURED 2026-09-16 17:41 — see the item above (vision 39.5 s via gpt-5.4, no fallback).** Was: MEASURING — where a scan's ~2 minutes go, before any parallel-scan decision. scan-pantry
         (deployed) returns `_meta { ms, provider, primaryError, usage }` and the app logs
         `[perf] scan-pantry: vision Xms via …, tokens in/out (reasoning)` to Metro. Suspect, not proven:

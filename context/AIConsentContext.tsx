@@ -8,6 +8,7 @@ import {
   Linking,
   ActivityIndicator,
 } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { supabase } from '../lib/supabase'
 import { COLORS } from '../constants/colors'
 import { useAuth } from './AuthContext'
@@ -23,6 +24,12 @@ type AIConsentContextType = {
 }
 
 const AIConsentContext = createContext<AIConsentContextType>({} as AIConsentContextType)
+
+// The device's copy of the answer, per user. Every AI entry point awaits the consent read before it
+// opens, and after a cold start that read queued behind the app's first burst of requests — measured
+// at 7.8 s on device — so a tap on Scan sat silent for seconds. Consent is a disclosure gate the
+// server never enforces, so a known answer on this device is safe to act on at once.
+const consentCacheKey = (userId: string) => `ai_consent_accepted_at_${userId}`
 
 export function AIConsentProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
@@ -56,23 +63,38 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
       loadedRef.current = false
       return
     }
+    let cancelled = false
     setLoaded(false)
     loadedRef.current = false
-    supabase
-      .from('profiles')
-      .select('ai_consent_accepted_at')
-      .eq('id', user.id)
-      // maybeSingle returns null data (not an error) when the row doesn't exist yet
-      .maybeSingle()
-      .then(({ data }) => {
-        // Null timestamp means the user has never accepted; a truthy timestamp means they have
-        const ts = data?.ai_consent_accepted_at ?? null
-        setAcceptedAt(ts)
-        setHasConsent(!!ts)
-        hasConsentRef.current = !!ts
-        setLoaded(true)
-        loadedRef.current = true
-      })
+    const apply = (ts: string | null) => {
+      // Null timestamp means the user has never accepted; a truthy timestamp means they have
+      setAcceptedAt(ts)
+      setHasConsent(!!ts)
+      hasConsentRef.current = !!ts
+      setLoaded(true)
+      loadedRef.current = true
+    }
+    ;(async () => {
+      const cached = await AsyncStorage.getItem(consentCacheKey(user.id)).catch(() => null)
+      if (cancelled) return
+      if (cached) apply(cached) // settles waitForLoad now; the server read below still corrects it
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('ai_consent_accepted_at')
+        .eq('id', user.id)
+        // maybeSingle returns null data (not an error) when the row doesn't exist yet
+        .maybeSingle()
+      if (cancelled) return
+      // A failed read is not a "no": keep what the device knows instead of re-asking someone who
+      // accepted. With nothing cached this still prompts, as it always did.
+      if (error) { setLoaded(true); loadedRef.current = true; return }
+      const ts = data?.ai_consent_accepted_at ?? null
+      apply(ts)
+      // Server wins, so a revoke on another device reaches this one on its next launch.
+      if (ts) AsyncStorage.setItem(consentCacheKey(user.id), ts).catch(() => {})
+      else AsyncStorage.removeItem(consentCacheKey(user.id)).catch(() => {})
+    })()
+    return () => { cancelled = true }
   }, [user?.id])
 
   // Blocks until the profile fetch has completed, with a 5-second safety timeout so the app
@@ -109,6 +131,7 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
       .eq('id', user.id)
     setSaving(false)
     if (error) { handleCancel(); return }
+    AsyncStorage.setItem(consentCacheKey(user.id), now).catch(() => {})
     setAcceptedAt(now)
     setHasConsent(true)
     hasConsentRef.current = true
@@ -130,6 +153,7 @@ export function AIConsentProvider({ children }: { children: React.ReactNode }) {
     // Only flip local state if the server write succeeded — otherwise local and server
     // consent diverge (UI shows revoked while the DB still has consent).
     if (error) return
+    AsyncStorage.removeItem(consentCacheKey(user.id)).catch(() => {})
     setAcceptedAt(null)
     setHasConsent(false)
     hasConsentRef.current = false
