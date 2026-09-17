@@ -2205,6 +2205,32 @@ claiming exact wording from the top apps is guessing.
            (near-zero unchecks across users = remove); removed: scan-added items deleted from the
            pantry within 24 h, with their confidence (the phantom proxy). With volume, a Superwall/
            PostHog split: review vs none, on time-to-meals, 24 h deletions and D7 retention.
+      - [ ] **SPEC (Logan + Claude 2026-09-17), build order after the review decision: correcting a
+        phantom where it hurts, without leaving the reveal.**
+        1. **"Don't have it" on a meal's HAVE ingredient** — build whether or not the review stays
+           (users rubber-stamp it). A small explicit text button at the row's edge, never a row tap
+           (whole-row taps were removed for stray pantry writes). No alert; the row changes IN PLACE to
+           "Marked missing · Undo" (row-state-stays-in-place rule) and joins NEED on the next open.
+           Marks the pantry item(s) the matcher actually matched OUT OF STOCK (not deleted) — needs
+           `pantry-check` to return the matched rows, not a boolean. Meal → "Need: X" with + Grocery;
+           other meals using it flip too (Home via the bus). Logs `phantom_reported` — the direct
+           post-launch phantom metric.
+        2. **"N items added · Edit" on the reveal** (and on the capped / thin end screens) — only if the
+           review is removed. Sheet in the review's aisle cards: remove (NEW row → delete; RESTOCKED row
+           → back to its prior in_stock, so the save must record new vs restocked and prior state),
+           "Add something we missed", and "Something off? Tell us" (Cal AI's Fix Results: an LLM maps
+           the sentence to edits, shown for OK before applying).
+        3. **Swap a phantom meal in place, from generation's spares.** Cook Now asks for 10 candidates
+           and shows 3; ~5 pass every filter and are discarded today. generate-meals returns 2-3 spares
+           with the deck (cached with it). After an edit or "Don't have it", every shown meal that now
+           needs a removed item is replaced by the best spare that is fully cookable against the
+           corrected pantry (the same matcher — no AI call) and is a different dish form from the other
+           two; it crossfades into the same card slot, on the reveal and on Home. Spare photos start
+           when Edit is tapped (top 2), so a swap lands with its photo and users who never edit cost
+           nothing. No spare fits → the card keeps "Need: X" and offers "Get new meals" (uses a daily
+           generation). A swapped-in meal is written to `generated_meals` history by a small server call
+           at swap time — never at generation, or unseen spares would block future days.
+           **Blocked on** the generate-meals redeploy carrying `7f109c8` (other session's change).
       - [x] **DONE 2026-09-17 01:17: free nightly database backup (Free plan keeps none).**
         `scripts/backup-db.sh` → `~/Backups/pantry-db` (700 dir, 600 files, 14 days kept): roles,
         schema and data via the CLI's own `db dump --dry-run` script piped into Homebrew's pg_dump
