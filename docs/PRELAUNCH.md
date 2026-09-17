@@ -40,8 +40,8 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
 - [ ] **6. On the phone** — unchanged from the 17th's list (cap ≤ 4 cheesecakes / ≤ 10 pasta; the 40
   shelf moves; no thumbnails; NEW TODAY badges; Salads & bowls when it rotates in). Needs a build
   with `54c7fbc` + `fade012` + `f44eaef`; switch tabs and back after any DB change.
-- [ ] **7. Logan: the four junk rows from the 17th** (no real ingredient list to recover; the agent
-  does not hard-delete): `delete from trending_meals where generated_at = '2026-09-17' and name in ('Chia Breakfast Pots', 'Semolina Pizza Pockets', 'Vegetarian Superfoods', 'Tray-Bake Meal Prep');`
+- [x] **7. DELETED by Logan 2026-09-17** (verified: 0 remain; today's live rows 14, all clean) — the four junk rows
+  (no real ingredient list to recover; the agent does not hard-delete): `delete from trending_meals where generated_at = '2026-09-17' and name in ('Chia Breakfast Pots', 'Semolina Pizza Pockets', 'Vegetarian Superfoods', 'Tray-Bake Meal Prep');`
 - [ ] **8. Daily report email.** The 9:05 desktop task FAILED on the 17th ("Unable to connect to API:
   SSL certificate has expired" — the Mac's connection at that moment; the report row itself was
   built). Check the task's Runs pane on the 18th; two failures in a row = look at the Mac's clock /
