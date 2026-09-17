@@ -2130,7 +2130,22 @@ claiming exact wording from the top apps is guessing.
         the database runs them in milliseconds — and the API gateway logged the 49 restock PATCHes at
         origin_time p50 373 ms, max 3,403 ms. The latency is in front of Postgres (PostgREST / pooler),
         not in the queries. **Open, two follow-ups:** (1) find the API-layer latency — compute size and
-        pooler first; the same shape as the 7.8 s release-together burst in §2c; (2) generate-meal-image
+        pooler first; the same shape as the 7.8 s release-together burst in §2c. **INVESTIGATED
+        2026-09-17 01:00 CDT:** the org is on the **FREE plan = Nano compute (0.5 GB RAM, shared CPU)**.
+        CPU is not it (3.7 % now, 20 % weekly). Memory is: Observability → Database shows ~250 MB of
+        SWAP in use for the whole hour and "Memory commitment" 1.31 GB above its commit-limit line.
+        Burst test from the Mac (50 concurrent anon reads of trending_meals, no phone, no Metro):
+        after ~15 min quiet **median 3.70 s, slowest 4.25 s**; immediately again median 0.71 s; 5 s
+        later median 0.26 s. So the server is slow on the FIRST burst after a quiet spell, then fast —
+        the same release-together shape as the 7.8 s launch stall, now reproduced without the phone.
+        Leading explanation (not proven): idle service memory is swapped to disk on a 0.5 GB box and
+        paged back in on the next burst; a cold connection pool is the other candidate. **Tell:**
+        upgrade compute, rerun the same three bursts after 15 min quiet — if burst 1 is ~0.3 s, done.
+        Free plan is a launch problem anyway: no backups, pauses after a week inactive, 1 GB file
+        storage (photos already 351 MB) and 5 GB egress (every photo download). Pro is $25/mo with
+        $10 compute credit = Micro (1 GB); Small (2 GB) ~$15/mo compute, i.e. ~$5 over the credit
+        (supabase.com/pricing and compute docs, read 2026-09-17). Changing compute incurs downtime —
+        pre-launch, that costs nothing. **Logan's call.** (2) generate-meal-image
         could return the URL after the upload and finish the cache write with `EdgeRuntime.waitUntil`
         (-3.4 s per photo) — image pipeline, so only on Logan's go.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: the Add-all spinner sat 8.1 s on a 57-item save.** `8 new,
