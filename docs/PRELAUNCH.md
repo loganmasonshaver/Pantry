@@ -2277,16 +2277,29 @@ claiming exact wording from the top apps is guessing.
         models (gpt-5.4, fallback gemini-3.1-flash-lite) and vision models worth adding to
         `scripts/pantry-eval`; emails loganmasonshaver@gmail.com, including a "nothing new" email so a
         silent week is visible.
-      - [x] **DONE 2026-09-17 01:17: free nightly database backup (Free plan keeps none).**
+      - [ ] **Free nightly database backup (Free plan keeps none) — built 2026-09-17 01:17; the FIRST
+        SCHEDULED RUN FAILED; fixed 12:56, UNVERIFIED unattended.**
         `scripts/backup-db.sh` → `~/Backups/pantry-db` (700 dir, 600 files, 14 days kept): roles,
-        schema and data via the CLI's own `db dump --dry-run` script piped into Homebrew's pg_dump
+        schema and data via the CLI's own `db dump --dry-run` script run by Homebrew's pg_dump
         (the CLI's dump needs Docker, which this Mac lacks; the dry-run carries a ~5-minute temporary
-        login, piped and never printed). LaunchAgent `com.kobalabs.pantry-db-backup` at 04:30 local;
-        launchd runs a missed time on wake. **Verified:** a manual run and a launchd kickstart both
-        wrote 948 KB compressed / 7.0 MB of data, 55 tables including auth.users, profiles,
-        pantry_items, generated_meals, image_cache. **NOT verified: a restore** — needs a scratch
-        Postgres. Log: `~/Backups/pantry-db/backup.log`. If a Supabase CLI upgrade changes the
-        dry-run format, the log's size check fails the run loudly.
+        login, never printed). **Verified 01:16:** a manual run and a launchd kickstart both wrote
+        948 KB compressed / 7.0 MB of data, 55 tables including auth.users, profiles, pantry_items,
+        generated_meals, image_cache — but both ran with Logan at the Mac.
+        **04:30 failed silently:** the log reads `backup start` and nothing else, one 0-byte roles
+        file, launchd `last exit code = 1`. `pmset -g log`: the Mac had been asleep since 03:53 and
+        04:30 fell in a maintenance dark wake. The cause is unknown because the script threw the
+        CLI's stderr away and errexit quit without a word (the "fails loudly" claim held only for a
+        tiny data dump). Testing the failure path found a second defect: a failing CLI prints its
+        error as JSON on stdout, which the old pipe fed into bash as a command.
+        **Fix (12:56):** the dry-run script is captured and checked before bash runs it; a failed
+        step logs `backup FAILED: <step> (exit N)` plus the CLI's output (password lines filtered)
+        and deletes that run's files; the LaunchAgent fires hourly at :30 and the script no-ops
+        before 04:30 or once today has a good backup, so a dark-wake failure retries an hour later.
+        Tested: a bogus CLI token logs the 401 and leaves no files; `FORCE=1` real run wrote 964 KB
+        / 7.07 MB; the reloaded agent's kickstart exits 0 with nothing logged (today already done).
+        **Tell:** tomorrow's `backup.log` shows `backup ok` stamped 04:30 or later WITHOUT anyone
+        running it; if it shows `FAILED`, the `cli:` lines under it name the cause. **NOT verified: a
+        restore** — needs a scratch Postgres.
       - [ ] **FIXED 2026-09-17, UNVERIFIED: the Add-all spinner sat 8.1 s on a 57-item save.** `8 new,
         49 restocked in 6825ms` — one PATCH per restock, eight at a time, each ~370 ms at the API.
         Migration `20260917054742` adds `restock_pantry_items(text[])` (SECURITY INVOKER, auth.uid()
