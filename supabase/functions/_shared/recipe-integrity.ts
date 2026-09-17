@@ -80,7 +80,14 @@ const NON_INGREDIENT_PATTERNS: RegExp[] = [
   // Occasion tags: "Evening Snacks", "Kids School Tiffin", "office lunchbox". Tiffin is a lunchbox.
   /\b(?:evening|morning|midnight|school|office|kids?)\s+(?:snacks?|tiffin|lunch(?:box)?|breakfast)\b|\btiffin\b/iu,
   /\bfriendly\b/iu,
-  /\b(?:clean eating|weight management|post[- ]workout|pre[- ]workout|fat loss|weight loss|muscle growth|meal prep|(?:easy|quick|simple|instant) to (?:make|cook|prepare)|ready in minutes)\b/iu,
+  /\b(?:clean eating|weight management|post[- ]workout|pre[- ]workout|fat loss|weight loss|muscle growth|meal prep|(?:easy|quick|simple|instant) to (?:make|cook|prepare)|ready in minutes|high in (?:protein|fib(?:er|re)))\b/iu,
+  // A German method step inside the list: "20min bei 200Grad Heißluft in den Ofen". The English
+  // instruction rules and the °-based temperature rule do not read it.
+  /\b(?:bei\s*\d+\s*grad|\d+\s*grad\b|hei(?:ß|ss)luft|in den ofen|im ofen|backen|braten|anbraten|kochen|r[üu]hren|vermischen|mischen)\b/iu,
+  // Two claims on one line: "No refined sugar No ghee", "Vegan & Gluten-Free". "vegan chocolate
+  // chips" is food, so vegan alone is not a rule — only paired with a -free claim.
+  /^[^\p{L}]*no \p{L}+(?: \p{L}+)?(?:[ ,/&]+no \p{L}+(?: \p{L}+)?)+\s*$/iu,
+  /^[^\p{L}]*(?:vegan|vegetarian|keto|paleo)\s*(?:&|and|,)\s*(?:gluten|dairy|sugar|nut)[- ]free/iu,
   // A dish-name tag: a marketing word, then a dish word at the end ("homemade high protein ice
   // cream", "Indian style protein ice cream", "dark chocolate protein dessert"). Shakes and smoothies
   // are deliberately not in the tail — "chocolate protein shake" is a real ingredient of a McFlurry.

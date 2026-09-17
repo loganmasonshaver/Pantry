@@ -846,9 +846,9 @@ test('isNonIngredientLine: chapters, tag blocks, meal slots and arrow headings a
     'healthy breakfast ideas', 'Healthy ice cream alternatives', 'Post-workout snacks', 'Kids & family-friendly treats',
     'Weight management / clean eating', 'homemade high protein ice cream', 'Indian style protein ice cream',
     'dark chocolate protein dessert', 'Breakfast (2 portions)', 'Dinner', 'No Suji', 'Kid-Friendly', 'Easy & Budget Friendly',
-    '️ Mango Habanero Breakfast Bowls⬇️', 'Instant & Easy to Make', 'Diabetes Friendly Breakfast', 'Kids School Tiffin', 'Evening Snacks', 'Vegetarian High Protein Diet']
+    '️ Mango Habanero Breakfast Bowls⬇️', 'Instant & Easy to Make', 'Diabetes Friendly Breakfast', 'Kids School Tiffin', 'Evening Snacks', 'Vegetarian High Protein Diet', 'No refined sugar No ghee', 'High in protein (approximately 10g per bar)', 'Vegan & Gluten-Free', '20min bei 200Grad Heißluft in den Ofen', 'Alles gut vermischen']
   for (const l of junk) assert.equal(isNonIngredientLine(l), true, l)
-  for (const l of ['chocolate protein shake', 'Barebells protein bar', '2 cups oats', 'no salt added chickpeas', 'Makhana (Fox nuts / Lotus seeds)', 'breakfast sausage links', 'high protein greek yogurt', 'vanilla ice cream']) {
+  for (const l of ['chocolate protein shake', 'Barebells protein bar', '2 cups oats', 'no salt added chickpeas', 'Makhana (Fox nuts / Lotus seeds)', 'breakfast sausage links', 'high protein greek yogurt', 'vanilla ice cream', 'vegan chocolate chips', 'no-sugar-added ketchup', '300g Mais', '150g Thunfisch in eigenen Saft', 'Salz, Pfeffer', '1 EL Joghurt']) {
     assert.equal(isNonIngredientLine(l), false, l)
   }
 })

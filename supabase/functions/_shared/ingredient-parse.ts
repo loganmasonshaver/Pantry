@@ -24,7 +24,11 @@ import { isNonIngredientLine } from './recipe-integrity.ts'
 // bullets (creators use 🥦🥚🧄 as list markers) and stopping at the method AFTER stripping the
 // bullet — "🍳 Recipe Steps" is emoji-prefixed, so an unstripped ^ anchor never matched it and 21
 // step lines were being swallowed into one recipe's ingredient list.
-const BULLET_CHARS = "[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌🔸🔹🥚🥦🧄🧅🧀🍗🍚🥩🌶🫒🍋🥔🧈🍯🥜🍫🍓🍌🍳🥄🍽🥣🧊🔥]"
+// Pointing hands and check marks are bullets too, and a bullet may carry a skin-tone modifier
+// (U+1F3FB-FF) or a variation selector (U+FE0F) that the class alone does not consume — "👉🏼300g
+// Mais" kept its emoji, failed the quantity test, and a German creator's list counted a method
+// step ("👉🏼20min bei 200Grad ... in den Ofen") as an ingredient on two different days.
+const BULLET_CHARS = "(?:[•\\-\\*●▪‣▫○◦·–—▶►✅✔☑📌🔸🔹🥚🥦🧄🧅🧀🍗🍚🥩🌶🫒🍋🥔🧈🍯🥜🍫🍓🍌🍳🥄🍽🥣🧊🔥👉👈☝👆✨⭐🟢🟡🔴⚪⚫🟠]|👉🏻|👉🏼|👉🏽|👉🏾|👉🏿)[\\u{1F3FB}-\\u{1F3FF}\\uFE0F]*"
 // Where the ingredient block ends. The second group is load-bearing now that the parse window is
 // the whole description rather than 500 chars: creators close with a promo block of OTHER recipes,
 // and those are bulleted exactly like ingredients. Measured on a real-shaped description, a
@@ -141,7 +145,8 @@ function parseIngredientBlock(desc: string, maxLine: number = MAX_INGREDIENT_LIN
       console.log(`[parse] ingredient line dropped, ${line.length} chars >= ${maxLine}: ${line.slice(0, 120)}`)
       continue
     }
-    const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`).test(raw)
+    // 'u' is load-bearing here as in stripBullet: the class holds astral emoji and a \u{…} range.
+    const wasBulleted = new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`, 'u').test(raw)
     // A LONG bulleted line must still lead with a quantity. Bulleted lines were previously trusted
     // outright, and the 90-char cap was silently doing the job of keeping prose out: when a
     // description runs its numbered METHOD straight on from the ingredients with no "Instructions:"
@@ -338,7 +343,7 @@ export function parseIngredientSections(desc: string): { line: string; section: 
   if (lines.length === 0) return []
   const wanted = new Set(lines)
   const raws = (desc || '').split('\n')
-  const isBullet = (raw: string) => new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`).test(raw)
+  const isBullet = (raw: string) => new RegExp(`^\\s*(?:${BULLET_CHARS}|${NUMBERED_MARKER}|\\d+️⃣)`, 'u').test(raw)
 
   // Which shape is this description? When the ingredients are BULLETED, an unbulleted line between
   // them is a heading — that is already why parseIngredientBlock keeps only bulleted lines. When
