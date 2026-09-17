@@ -63,6 +63,7 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
 | 822 D | gpt-5.4-mini, shards | 38 / 26 / 37 / 38 | 11 | 11 | 90 s (116 of 139 had zero macros) |
 | 823 E | gpt-4o-mini outage fallback | 12 / 7 | 7 | 7 | 84 s — **fallback works** |
 | **824 F** | **deployed build (shards default + junk rules)** | 33 | 24 | 18 | **17.7 s** |
+| **826 G** | deployed build + `0000bd3` (👉 bullets, German steps, paired claims) | 29 / 7 | 20 | 18 | 25.5 s |
 - **Decision (rule set 2026-09-16, applied):** shards ON — every attempt returned more than its
   unsharded twin, a third of the time, no rate-limit errors. The stored count could not show it
   (both capped); kept-before-cap and time did. **Model stays Lite:** 3.8 Flash keeps the highest
@@ -82,6 +83,20 @@ and the parser/filter rules from that run's junk rows. Replay 824 on the deploye
   Dinner & Snack Recipes" (the & broke the word run), "TOP 3 Salads", "2-Day Meal Prep", "The
   high-protein breakfasts I prep". **Non-recipe misses:** "Easy Diet", "Bodybuilding Diet for
   $100", "$10 a Day", premix.
+- **What now stops a junk list (Logan: "did you do anything to prevent these next run?"):**
+  (1) title filters remove compilations, plans, hauls, diets and budget vlogs before the model;
+  (2) whole-line rules drop chapters (`0:29 …`), tag blocks (ends in recipe/ideas/alternatives/
+  diet, "friendly", tiffin, post-workout…), meal slots, benefit and paired claims, German method
+  steps, and arrow headings from BOTH the creator's list and the model's echo, so a list that was
+  all junk shrinks under 3 lines and is rejected as `noSrcList`; (3) the recipe's own name is
+  removed from its ingredients; (4) pointing-hand bullets with skin tones are read as bullets, so
+  the quantity test works on those lines. Verified: unit tests, a scan of all 247 stored rows
+  (flags exactly the 24 junk lines), and replays F/G on the deployed build (no junk names).
+  **Residual gap, known:** a compilation whose lines are dish NAMES with no marker word
+  ("Sprouted Moong & Paneer Bowl", "Multigrain High-Fiber Roti") passes the line rules; it is
+  caught only if its title trips the compilation filter. A "no quantities anywhere" rule was
+  measured and NOT shipped: 3 of the 5 such lists since Sep 13 are real recipes. So check 3's
+  read-by-eye stays in the list every morning until a week passes clean.
 - **Ops:** the Sep 16 assumption that `net._http_response` holds the cron's status is wrong past
   ~6 h (pg_net TTL) and the `api-keep-warm` job (another session, every 2 min, one REST hit) buries
   it within minutes anyway. `cron.job_run_details` + `pipeline_runs` are the record. YouTube quota
