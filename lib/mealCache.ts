@@ -92,3 +92,18 @@ export async function staleMealCache(mode: MealCacheMode): Promise<void> {
 export async function staleAllMealCaches(): Promise<void> {
   await Promise.all([staleMealCache('cookNow'), staleMealCache('mealPlan')])
 }
+
+/**
+ * DELETE both entries, for the one case back-dating cannot cover: the pantry going empty.
+ *
+ * A back-dated entry is still PAINTED — the reader treats a past date as "yesterday's meals, still
+ * cookable from the same pantry, labelled and replaced underneath". An empty pantry is exactly the
+ * premise that breaks, so the entry has to go rather than age: otherwise the next cold start still
+ * flashes meals built from food the user has just told us is gone, because Home paints from disk
+ * before its pantry read lands.
+ */
+export async function dropAllMealCaches(): Promise<void> {
+  await Promise.all((['cookNow', 'mealPlan'] as MealCacheMode[]).map(async mode => {
+    try { await AsyncStorage.removeItem(mealCacheKey(mode)) } catch {}
+  }))
+}

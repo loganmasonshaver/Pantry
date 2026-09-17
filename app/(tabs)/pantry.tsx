@@ -34,6 +34,7 @@ import { buildInsight, type FitnessGoal, type DietType, type LogStats } from '@/
 import { ageLabelLong, isPerishable, isStale } from '@/lib/pantryAge'
 import { groupPantryRows, type PantryRow } from '@/lib/pantryGroup'
 import { pantryMirrorKey as pantryCacheKey } from '@/lib/pantryMirror'
+import { dropAllMealCaches } from '@/lib/mealCache'
 import PantryScanModal from '@/components/PantryScanModal'
 import ReceiptScanModal from '@/components/ReceiptScanModal'
 import PressableScale from '@/components/PressableScale'
@@ -355,6 +356,18 @@ export default function PantryScreen() {
 
   // Either direction is a confirmation: "used up" and "back in stock" both mean the user looked at
   // the shelf today, so the age resets and the stale nudge lets the item go.
+  // Emptying the pantry invalidates the day's deck, and only DELETING the cache clears it: Home
+  // paints from disk before its pantry read lands (waiting on it was 2-3s of blank space), and a
+  // back-dated entry is still painted as a labelled carryover. Without this, the next cold start
+  // after "used up" on the last item flashes meals built from food that is gone, then swaps in the
+  // "Unlock recipes" card. Only at zero — with anything left Home keeps the deck and recomputes
+  // each card's missing list against the live pantry, which stays honest.
+  // `categories` is still the pre-change value here, so the row in flight is excluded by id.
+  const dropDeckIfPantryEmpty = async (changedId: string) => {
+    const left = categories.reduce((n, c) => n + c.ingredients.filter(i => i.inStock && i.id !== changedId).length, 0)
+    if (left === 0) await dropAllMealCaches()
+  }
+
   const setStock = async (categoryId: string, ingredientId: string, inStock: boolean) => {
     const now = new Date().toISOString()
     // selection: the lightest tick, for a two-state flip. Covers the row tap and the review sheet's
@@ -370,6 +383,7 @@ export default function PantryScreen() {
       )
     )
     await supabase.from('pantry_items').update({ in_stock: inStock, last_confirmed_at: now }).eq('id', ingredientId)
+    if (!inStock) await dropDeckIfPantryEmpty(ingredientId)
   }
   const toggleStock = (categoryId: string, ingredientId: string) => {
     const ing = categories.find(c => c.id === categoryId)?.ingredients.find(i => i.id === ingredientId)
@@ -401,6 +415,7 @@ export default function PantryScreen() {
         .filter(c => c.ingredients.length > 0)
     )
     await supabase.from('pantry_items').delete().eq('id', ingredientId)
+    await dropDeckIfPantryEmpty(ingredientId)
   }
 
   // Wipe the whole pantry. Confirmed because it's bulk + irreversible (the usual no-confirm
@@ -418,6 +433,7 @@ export default function PantryScreen() {
             setCategories([])
             const { error } = await supabase.from('pantry_items').delete().eq('user_id', user.id)
             if (error) { Alert.alert("Couldn't clear pantry", error.message); fetchItems() }
+            else await dropAllMealCaches()
           },
         },
       ],
