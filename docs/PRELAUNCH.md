@@ -2178,8 +2178,10 @@ claiming exact wording from the top apps is guessing.
         reload its schema — treated as an artifact of that, not re-measured.) **Recommendation from the
         result:** the cold wait is one shared delay, so fewer requests per screen will not shorten it —
         batch only where a screen makes many round trips in sequence (the restock RPC was that case).
-        Worth doing: return the photo link before the cache write (steady-state −3.4 s per photo, Logan's
-        go needed — image pipeline). Skip smaller photos until egress numbers exist. The real fix remains
+        **DONE 2026-09-17 on Logan's go: the photo link returns before the cache write** (generate-meal-
+        image, deployed; user requests only — the internal Discover pipeline still waits; `[timing]
+        REPLIED` then `OK` lines in the logs; cache-hit smoke 200 in 1.1 s). UNVERIFIED on a real
+        generation: **tell** — the next scan's "photo URL back in" marks drop by ~3 s. Skip smaller photos until egress numbers exist. The real fix remains
         POST-LAUNCH #1. **Tell:**
         upgrade compute, rerun the same three bursts after 15 min quiet — if burst 1 is ~0.3 s, done.
         Free plan is a launch problem anyway: no backups, pauses after a week inactive, 1 GB file
@@ -2262,13 +2264,12 @@ claiming exact wording from the top apps is guessing.
            names. **Tells:** after the next Cook Now generation, `meal_spares` holds up to 3 rows for Logan
            and the funnel row's `sparesOffered` names them; swap-meal is exercised once the swap UI exists.
            **Not built:** the Missing-something sheet, Edit sheet, Pantry-tab card, swap UI.
-      - [ ] **FOUND 2026-09-17, UNVERIFIED — photo meal logging may be calling a retired model.**
-        `estimate-meal-macros` uses `gpt-4o` as its PRIMARY model for photos, and `parse-receipt` uses it
-        as the fallback behind Gemini. `scripts/pantry-eval/README.md` records gpt-4o returning 404 from
-        OpenAI's API since 2026-02-16. If true, logging a meal from a photo fails every time, and a receipt
-        scan fails whenever Gemini errors. **Tell:** log one meal from a photo on device; or read
-        estimate-meal-macros' edge logs for a 404 from OpenAI. Fix, if confirmed: a current vision model,
-        checked with a few real meal photos.
+      - [ ] **POST-LAUNCH, before re-enabling Snap & Log: `gpt-4o` may be retired.** `estimate-meal-macros`
+        uses `gpt-4o` as its PRIMARY model for photos, and `scripts/pantry-eval/README.md` records gpt-4o
+        returning 404 from OpenAI's API since 2026-02-16 (unverified). NOT a live v1 bug: photo meal
+        logging is off (`ENABLE_AI_PHOTO_LOG = false` in app/(tabs)/index.tsx since 2026-05-15), and text
+        estimates use gpt-4o-mini. The one reachable use is `parse-receipt`'s fallback behind Gemini, so a
+        receipt scan fails only when Gemini errors. Switch both to a current model before Snap & Log returns.
       - [x] **Weekly vision model digest (2026-09-17):** scheduled task `weekly-ai-model-digest`, Mondays
         ~9:15 local, runs while the Claude desktop app is open. Scope, per Logan: only the pantry scan's
         models (gpt-5.4, fallback gemini-3.1-flash-lite) and vision models worth adding to

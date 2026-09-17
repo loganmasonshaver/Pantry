@@ -582,20 +582,35 @@ Deno.serve(async (req: Request) => {
             fpRows.length ? db.from('image_cache').upsert(fpRows, { onConflict: 'meal_key' }) : null,
             db.from('image_cache').upsert(bareRows, { onConflict: 'meal_key', ignoreDuplicates: !overwriteBare }),
           ].filter(Boolean)
-          const results = await Promise.all(writes as Promise<{ error: { message: string } | null }>[])
-          phase('cacheWrite')
-          const cacheErr = results.find(r => r?.error)?.error
-          if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
-          else console.log('Cached OK:', cacheKey)
-          // Write the fresh URL to trending_meals HERE. This call was missing entirely: a
-          // successful generation wrote image_cache and returned, so trending_meals only ever
-          // learned the URL on some LATER request via the cache-HIT branch. Until that second
-          // request happened, Discover — which reads trending_meals.image directly — showed the
-          // fork-and-knife placeholder for a meal whose photo already existed. That is the same
-          // symptom 17905c0 was written to kill; it fixed the cache-hit path and left this one.
-          await backfillTrendingImage(db, mealName, permanentUrl, isInternal, isInternal && replaceTrending)
-          phase('trending')
-          logTiming(cacheKey, 'OK')
+          // The phone needs only the link, which exists once the upload has landed. The cache rows (what
+          // lets the NEXT request for this dish reuse the photo) and the Discover backfill measured
+          // 3.3-3.5 s on the Free-plan API, so for a signed-in user they finish after the reply, kept
+          // alive by EdgeRuntime.waitUntil. Internal callers (the Discover pipeline) still wait: they
+          // read trending_meals right after, and no one is watching a spinner. The cost of a failed
+          // background write is one regenerated photo the next time someone gets this dish.
+          const persist = async () => {
+            const results = await Promise.all(writes as Promise<{ error: { message: string } | null }>[])
+            phase('cacheWrite')
+            const cacheErr = results.find(r => r?.error)?.error
+            if (cacheErr) console.log('Cache write FAILED:', cacheKey, cacheErr.message)
+            else console.log('Cached OK:', cacheKey)
+            // Write the fresh URL to trending_meals HERE. This call was missing entirely: a
+            // successful generation wrote image_cache and returned, so trending_meals only ever
+            // learned the URL on some LATER request via the cache-HIT branch. Until that second
+            // request happened, Discover — which reads trending_meals.image directly — showed the
+            // fork-and-knife placeholder for a meal whose photo already existed. That is the same
+            // symptom 17905c0 was written to kill; it fixed the cache-hit path and left this one.
+            await backfillTrendingImage(db, mealName, permanentUrl, isInternal, isInternal && replaceTrending)
+            phase('trending')
+            logTiming(cacheKey, 'OK')
+          }
+          const runtime = (globalThis as any).EdgeRuntime
+          if (!isInternal && runtime?.waitUntil) {
+            runtime.waitUntil(persist().catch((e: unknown) => console.log('Background cache write failed:', cacheKey, (e as Error)?.message)))
+            logTiming(cacheKey, 'REPLIED') // the phone's wait ends here; the OK line follows when the writes land
+          } else {
+            await persist()
+          }
           return new Response(JSON.stringify({ image: permanentUrl }), { headers: jsonHeaders })
         }
 
