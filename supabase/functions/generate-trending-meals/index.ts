@@ -1985,6 +1985,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     const untranslatedDropped: string[] = []
     const readable: any[] = []
     const ingredientNamesTranslated: string[] = []
+    const nameChecks: { name: string; lang: string | null; copied: number; of: number; sample: string[] }[] = []
     for (const r of recipes) {
       // Ingredient NAMES copied untranslated from a source the title says is not English. The
       // ingredient-list check alone missed this ("yogurt" reads as English in Italian too), and the
@@ -1993,7 +1994,11 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
       const srcVideo = uniqueVideos[(r.video_index || 1) - 1]
       const names = (r.ingredients || []).map((i: any) => String(i?.name ?? ''))
       const foreign = isNonEnglishSource(srcVideo?.sourceLang) || titleLooksNonEnglish(srcVideo?.title ?? '')
-      if (foreign && namesCopiedFromSource(names, sourceIngredients(srcVideo?.description || '')) >= 2) {
+      const copied = foreign ? namesCopiedFromSource(names, sourceIngredients(srcVideo?.description || '')) : 0
+      // Recorded for every foreign-source recipe, because a dry run shows no ingredient names and
+      // "did the model translate this itself or did the net miss it" is otherwise unanswerable.
+      if (foreign) nameChecks.push({ name: r.name, lang: srcVideo?.sourceLang ?? null, copied, of: names.length, sample: names.slice(0, 3) })
+      if (foreign && copied >= 2) {
         const translated = await translateIngredientNames(names, completeWith).catch(() => null)
         if (!translated) { untranslatedDropped.push(r.name); continue }
         r.ingredients = (r.ingredients || []).map((i: any, k: number) => ({ ...i, name: translated[k] }))
@@ -2011,6 +2016,7 @@ Respond ONLY with a JSON array, no markdown. Note how EVERY item mentioned in st
     for (const r of readable) if (Array.isArray(r.steps)) r.steps = stripEmojiFromSteps(r.steps)
     funnel.stepsTranslated = translatedNames
     funnel.ingredientNamesTranslated = ingredientNamesTranslated
+    funnel.nameTranslationChecks = nameChecks
     funnel.untranslatedDropped = untranslatedDropped
     recipes = readable
     funnel.stored = recipes.length
